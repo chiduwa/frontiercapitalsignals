@@ -1,26 +1,60 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+@theme {
+  --color-navy: #0a0f1e;
+  --color-navy-800: #0f172a;
+  --color-navy-700: #1e293b;
+  --color-navy-600: #334155;
+  --color-gold: #c9962a;
+  --color-gold-light: #e8b84b;
+  --color-gold-dim: #8b6914;
+  --color-emerald-fcs: #059669;
+  --color-red-fcs: #dc2626;
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root {
+  --background: #0a0f1e;
+  --foreground: #f1f5f9;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
+
+/* Gradient utilities */
+.gradient-gold {
+  background: linear-gradient(135deg, #c9962a, #e8b84b);
+}
+
+.gradient-navy {
+  background: linear-gradient(180deg, #0a0f1e 0%, #0f172a 100%);
+}
+
+.text-gradient-gold {
+  background: linear-gradient(135deg, #c9962a, #e8b84b);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #0f172a; }
+::-webkit-scrollbar-thumb { background: #c9962a; border-radius: 3px; }
+
+/* Prose for post content */
+.prose-investment h1,
+.prose-investment h2,
+.prose-investment h3 {
+  color: #f1f5f9;
+  font-weight: 700;
+}
+.prose-investment p { color: #cbd5e1; line-height: 1.75; margin-bottom: 1rem; }
+.prose-investment a { color: #e8b84b; text-decoration: underline; }
+.prose-investment strong { color: #f1f5f9; }
+.prose-investment ul { list-style: disc; padding-left: 1.5rem; color: #cbd5e1; }
+.prose-investment li { margin-bottom: 0.5rem; }
