@@ -27,10 +27,10 @@ export default function IntelligenceFilters({ posts }: { posts: Post[] }) {
               <button
                 key={c}
                 onClick={() => setCountry(c)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                   country === c
-                    ? "gradient-gold text-navy"
-                    : "bg-navy-800 border border-navy-600 text-slate-400 hover:text-white hover:border-gold/40"
+                    ? "bg-navy text-white"
+                    : "bg-white border border-gray-200 text-slate-600 hover:border-navy hover:text-navy"
                 }`}
               >
                 {c}
@@ -45,10 +45,10 @@ export default function IntelligenceFilters({ posts }: { posts: Post[] }) {
               <button
                 key={c}
                 onClick={() => setCategory(c)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                   category === c
-                    ? "gradient-gold text-navy"
-                    : "bg-navy-800 border border-navy-600 text-slate-400 hover:text-white hover:border-gold/40"
+                    ? "gradient-gold text-white"
+                    : "bg-white border border-gray-200 text-slate-600 hover:border-gold hover:text-gold"
                 }`}
               >
                 {c}
@@ -58,20 +58,18 @@ export default function IntelligenceFilters({ posts }: { posts: Post[] }) {
         </div>
       </div>
 
-      {/* Results count */}
+      {/* Count */}
       <p className="text-slate-500 text-sm mb-6">
-        Showing <span className="text-white font-semibold">{filtered.length}</span> intelligence reports
+        Showing <span className="text-ink font-semibold">{filtered.length}</span> reports
       </p>
 
       {filtered.length === 0 ? (
-        <div className="text-center py-16 text-slate-500">
-          No reports match the selected filters. Try broadening your criteria.
+        <div className="text-center py-16 text-slate-400">
+          No reports match the selected filters.
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filtered.map((post) => (
-            <PostCard key={post.slug} post={post} />
-          ))}
+          {filtered.map((post) => <PostCard key={post.slug} post={post} />)}
         </div>
       )}
     </>

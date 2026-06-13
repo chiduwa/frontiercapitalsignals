@@ -3,29 +3,23 @@ import Image from "next/image";
 import { Post } from "@/lib/posts";
 
 const countryFlag: Record<string, string> = {
-  Ghana: "🇬🇭",
-  Nigeria: "🇳🇬",
-  Kenya: "🇰🇪",
-  Malawi: "🇲🇼",
-  Uganda: "🇺🇬",
-  Africa: "🌍",
+  Ghana: "🇬🇭", Nigeria: "🇳🇬", Kenya: "🇰🇪", Malawi: "🇲🇼", Uganda: "🇺🇬", Africa: "🌍",
 };
 
 const categoryColor: Record<string, string> = {
-  Energy: "bg-amber-500/20 text-amber-400",
-  Infrastructure: "bg-blue-500/20 text-blue-400",
-  Mining: "bg-orange-500/20 text-orange-400",
-  Agriculture: "bg-green-500/20 text-green-400",
-  Tech: "bg-purple-500/20 text-purple-400",
-  Finance: "bg-emerald-fcs/20 text-emerald-400",
-  Regulatory: "bg-red-500/20 text-red-400",
-  Startup: "bg-pink-500/20 text-pink-400",
-  General: "bg-navy-600/60 text-slate-400",
+  Energy: "bg-amber-100 text-amber-700",
+  Infrastructure: "bg-blue-100 text-blue-700",
+  Mining: "bg-orange-100 text-orange-700",
+  Agriculture: "bg-green-100 text-green-700",
+  Tech: "bg-purple-100 text-purple-700",
+  Finance: "bg-emerald-100 text-emerald-700",
+  Regulatory: "bg-red-100 text-red-700",
+  Startup: "bg-pink-100 text-pink-700",
+  General: "bg-gray-100 text-gray-600",
 };
 
 function unsplashUrl(query: string, w = 600, h = 340) {
-  const encoded = encodeURIComponent(query + " Africa");
-  return `https://source.unsplash.com/featured/${w}x${h}?${encoded}`;
+  return `https://source.unsplash.com/featured/${w}x${h}?${encodeURIComponent(query + " Africa")}`;
 }
 
 export default function PostCard({ post }: { post: Post }) {
@@ -33,9 +27,9 @@ export default function PostCard({ post }: { post: Post }) {
   const catStyle = categoryColor[post.category] ?? categoryColor.General;
 
   return (
-    <Link href={`/intelligence/${post.slug}`} className="group block">
-      <article className="bg-navy-800 border border-navy-600 rounded-xl overflow-hidden hover:border-gold/50 transition-all duration-300 hover:shadow-lg hover:shadow-gold/5 h-full flex flex-col">
-        <div className="relative h-44 overflow-hidden">
+    <Link href={`/intelligence/${post.slug}`} className="group block h-full">
+      <article className="bg-white border border-gray-200 rounded-xl overflow-hidden hover:border-gold/60 hover:shadow-lg hover:shadow-gray-200 transition-all duration-300 h-full flex flex-col">
+        <div className="relative h-44 overflow-hidden bg-gray-100">
           <Image
             src={unsplashUrl(post.imageQuery)}
             alt={post.title}
@@ -43,22 +37,22 @@ export default function PostCard({ post }: { post: Post }) {
             className="object-cover group-hover:scale-105 transition-transform duration-500"
             unoptimized
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-navy-800/80 to-transparent" />
-          <div className="absolute top-3 left-3 flex gap-2">
-            <span className={`text-xs font-semibold px-2 py-0.5 rounded ${catStyle}`}>{post.category}</span>
+          <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
+          <div className="absolute top-3 left-3">
+            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${catStyle}`}>{post.category}</span>
           </div>
-          <div className="absolute top-3 right-3 text-lg">{flag}</div>
+          <div className="absolute top-3 right-3 text-xl">{flag}</div>
         </div>
-        <div className="p-4 flex-1 flex flex-col">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-gold text-xs font-medium">{post.country}</span>
-            <time className="text-slate-500 text-xs">{post.date}</time>
+        <div className="p-5 flex-1 flex flex-col">
+          <div className="flex items-center justify-between mb-2.5">
+            <span className="text-gold text-xs font-semibold">{post.country}</span>
+            <time className="text-slate-400 text-xs">{post.date}</time>
           </div>
-          <h3 className="text-white font-semibold text-sm leading-snug mb-2 group-hover:text-gold-light transition-colors line-clamp-2">
+          <h3 className="text-ink font-bold text-sm leading-snug mb-2 group-hover:text-gold transition-colors line-clamp-2">
             {post.title}
           </h3>
-          <p className="text-slate-400 text-xs leading-relaxed line-clamp-3 flex-1">{post.summary}</p>
-          <div className="mt-3 text-gold text-xs font-semibold flex items-center gap-1">
+          <p className="text-slate-500 text-xs leading-relaxed line-clamp-3 flex-1">{post.summary}</p>
+          <div className="mt-4 text-gold text-xs font-semibold flex items-center gap-1">
             Read analysis
             <svg className="w-3 h-3 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />

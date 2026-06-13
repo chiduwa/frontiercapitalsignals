@@ -4,7 +4,6 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 
 const links = [
-  { href: "/", label: "Home" },
   { href: "/intelligence", label: "Intelligence" },
   { href: "/services", label: "Services" },
   { href: "/resources", label: "Resources" },
@@ -16,30 +15,30 @@ export default function Navbar() {
   const [open, setOpen] = useState(false);
 
   return (
-    <nav className="sticky top-0 z-50 border-b border-navy-600 bg-navy-800/95 backdrop-blur-sm">
+    <nav className="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 shrink-0">
-            <div className="w-8 h-8 rounded-sm gradient-gold flex items-center justify-center">
-              <span className="text-navy font-black text-sm">FC</span>
+          <Link href="/" className="flex items-center gap-3 shrink-0">
+            <div className="w-8 h-8 rounded bg-navy flex items-center justify-center">
+              <span className="text-white font-black text-xs tracking-tight">FCS</span>
             </div>
-            <div className="hidden sm:block">
-              <span className="font-bold text-white text-sm leading-none">Frontier Capital</span>
-              <span className="block text-gold text-xs font-semibold tracking-widest uppercase">Signals</span>
+            <div className="hidden sm:block leading-none">
+              <span className="font-bold text-ink text-[15px] tracking-tight">Frontier Capital</span>
+              <span className="block text-gold text-[10px] font-semibold tracking-widest uppercase mt-0.5">Signals</span>
             </div>
           </Link>
 
           {/* Desktop nav */}
-          <div className="hidden md:flex items-center gap-1">
+          <div className="hidden md:flex items-center gap-0.5">
             {links.map(({ href, label }) => (
               <Link
                 key={href}
                 href={href}
                 className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-                  pathname === href
-                    ? "text-gold bg-gold-dim/20"
-                    : "text-slate-300 hover:text-white hover:bg-navy-700"
+                  pathname === href || pathname.startsWith(href + "/")
+                    ? "text-gold bg-amber-50"
+                    : "text-slate-600 hover:text-ink hover:bg-gray-50"
                 }`}
               >
                 {label}
@@ -50,15 +49,15 @@ export default function Navbar() {
           <div className="hidden md:flex items-center gap-3">
             <Link
               href="/contact"
-              className="px-4 py-2 text-sm font-semibold rounded border border-gold text-gold hover:bg-gold hover:text-navy transition-colors"
+              className="px-4 py-2 text-sm font-semibold rounded-lg bg-navy text-white hover:bg-navy-700 transition-colors"
             >
               Get in Touch
             </Link>
           </div>
 
-          {/* Mobile menu button */}
+          {/* Mobile toggle */}
           <button
-            className="md:hidden p-2 rounded text-slate-300 hover:text-white"
+            className="md:hidden p-2 rounded text-slate-500 hover:text-ink hover:bg-gray-50"
             onClick={() => setOpen(!open)}
             aria-label="Toggle menu"
           >
@@ -77,14 +76,14 @@ export default function Navbar() {
 
       {/* Mobile menu */}
       {open && (
-        <div className="md:hidden border-t border-navy-600 bg-navy-800 px-4 py-3 space-y-1">
+        <div className="md:hidden border-t border-gray-100 bg-white px-4 py-3 space-y-1">
           {links.map(({ href, label }) => (
             <Link
               key={href}
               href={href}
               onClick={() => setOpen(false)}
               className={`block px-3 py-2 rounded text-sm font-medium ${
-                pathname === href ? "text-gold bg-gold-dim/20" : "text-slate-300 hover:text-white"
+                pathname === href ? "text-gold bg-amber-50" : "text-slate-600 hover:text-ink hover:bg-gray-50"
               }`}
             >
               {label}
@@ -93,7 +92,7 @@ export default function Navbar() {
           <Link
             href="/contact"
             onClick={() => setOpen(false)}
-            className="block mt-2 px-3 py-2 rounded border border-gold text-gold text-sm font-semibold text-center"
+            className="block mt-2 px-3 py-2.5 rounded-lg bg-navy text-white text-sm font-semibold text-center"
           >
             Get in Touch
           </Link>
