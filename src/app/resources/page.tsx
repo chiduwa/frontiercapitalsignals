@@ -4,7 +4,10 @@ import { GDPChart, FDIChart, BusinessEnvironmentChart, SectorRadarChart } from "
 
 export const metadata: Metadata = {
   title: "Investor Resources",
-  description: "Country-by-country investor resource guides for Ghana, Nigeria, Kenya, Malawi, and Uganda. Official government portals, investment agencies, regulatory bodies.",
+  description: "Country-by-country investor resource guides for Ghana, Nigeria, Kenya, Malawi, and Uganda. Official government portals, investment agencies, regulatory bodies, and market data charts.",
+  alternates: { canonical: "https://frontiercapitalsignals.com/resources" },
+  keywords: ["how to invest in Ghana", "how to invest in Nigeria", "how to invest in Kenya", "how to invest in Malawi", "how to invest in Uganda", "Africa business registration", "GIPC Ghana", "NIPC Nigeria", "KenInvest Kenya", "MITC Malawi", "Uganda Investment Authority", "Africa GDP data", "Africa FDI statistics"],
+  openGraph: { url: "https://frontiercapitalsignals.com/resources", type: "website" },
 };
 
 const countries = [

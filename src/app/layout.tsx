@@ -3,6 +3,7 @@ import { Geist } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+import JsonLd, { organizationSchema, websiteSchema } from "@/components/JsonLd";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
 
@@ -20,13 +21,21 @@ export const metadata: Metadata = {
     "Ghana investment opportunities",
     "Nigeria business intelligence",
     "Kenya FDI",
+    "Malawi investment",
+    "Uganda investment",
     "African market analysis",
     "frontier market investing",
     "Africa due diligence",
     "sub-Saharan Africa investment",
     "African startup ecosystem",
     "infrastructure investment Africa",
+    "Africa PPP opportunities",
+    "African private equity",
+    "emerging Africa markets 2025",
+    "invest in Africa",
+    "Africa business intelligence",
   ],
+  alternates: { canonical: "https://frontiercapitalsignals.com" },
   authors: [{ name: "Frontier Capital Signals" }],
   creator: "Frontier Capital Signals",
   openGraph: {
@@ -50,12 +59,22 @@ export const metadata: Metadata = {
     follow: true,
     googleBot: { index: true, follow: true, "max-image-preview": "large" },
   },
+  other: {
+    "geo.region": "GH, NG, KE, MW, UG",
+    "geo.placename": "Ghana, Nigeria, Kenya, Malawi, Uganda",
+    "ICBM": "7.9465, -1.0232",
+    "DC.language": "en",
+    "DC.coverage": "Ghana, Nigeria, Kenya, Malawi, Uganda, Sub-Saharan Africa",
+    "DC.subject": "Investment Intelligence, Emerging Markets, Africa Finance",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${geist.variable} h-full`}>
       <body className="min-h-full flex flex-col bg-white text-ink antialiased">
+        <JsonLd data={organizationSchema} />
+        <JsonLd data={websiteSchema} />
         <Navbar />
         <main className="flex-1">{children}</main>
         <Footer />

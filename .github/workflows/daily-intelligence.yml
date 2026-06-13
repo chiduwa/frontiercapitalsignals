@@ -2,10 +2,8 @@ name: Daily Intelligence Generation
 
 on:
   schedule:
-    # 7:00 AM UTC daily (adjust to your preferred time)
-    - cron: "0 7 * * *"
+    - cron: "0 7 * * *"   # 7:00 AM UTC daily
   workflow_dispatch:
-    # Allow manual trigger from GitHub Actions tab
 
 jobs:
   generate:
@@ -31,10 +29,19 @@ jobs:
           GOOGLE_AI_API_KEY: ${{ secrets.GOOGLE_AI_API_KEY }}
         run: node scripts/generate-intelligence.mjs
 
-      - name: Commit new intelligence posts
+      - name: Commit new posts
         run: |
           git config --global user.name "FCS Intelligence Bot"
           git config --global user.email "bot@frontiercapitalsignals.com"
           git add content/intelligence/
           git diff --staged --quiet || git commit -m "chore: daily intelligence update $(date +%Y-%m-%d)"
           git push
+
+      - name: Trigger Netlify rebuild
+        run: |
+          if [ -n "${{ secrets.NETLIFY_BUILD_HOOK }}" ]; then
+            curl -s -X POST "${{ secrets.NETLIFY_BUILD_HOOK }}"
+            echo "Netlify rebuild triggered"
+          else
+            echo "No NETLIFY_BUILD_HOOK set — skipping rebuild trigger"
+          fi

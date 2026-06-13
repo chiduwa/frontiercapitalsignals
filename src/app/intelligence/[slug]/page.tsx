@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { getPostBySlug, getAllPosts } from "@/lib/posts";
+import JsonLd, { articleSchema } from "@/components/JsonLd";
 
 export async function generateStaticParams() {
   return getAllPosts().map((p) => ({ slug: p.slug }));
@@ -12,10 +13,36 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   const post = await getPostBySlug(slug);
   if (!post) return {};
+  const canonical = `https://frontiercapitalsignals.com/intelligence/${slug}`;
+  const ogImage = `https://source.unsplash.com/featured/1200x630?${encodeURIComponent(post.imageQuery + " Africa")}`;
   return {
     title: post.title,
     description: post.summary,
-    openGraph: { title: post.title, description: post.summary, type: "article", publishedTime: post.date },
+    keywords: [
+      post.country,
+      post.category,
+      `${post.country} investment`,
+      `Africa ${post.category.toLowerCase()}`,
+      "frontier markets",
+      "Africa investment intelligence",
+      "emerging markets Africa",
+    ],
+    alternates: { canonical },
+    openGraph: {
+      title: post.title,
+      description: post.summary,
+      type: "article",
+      publishedTime: post.date,
+      url: canonical,
+      images: [{ url: ogImage, width: 1200, height: 630 }],
+      siteName: "Frontier Capital Signals",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: post.title,
+      description: post.summary,
+      images: [ogImage],
+    },
   };
 }
 
@@ -45,6 +72,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
 
   return (
     <article className="bg-white min-h-screen">
+      <JsonLd data={articleSchema({ title: post.title, summary: post.summary, date: post.date, slug, country: post.country, category: post.category })} />
       {/* Hero image */}
       <div className="relative h-64 sm:h-80 w-full overflow-hidden bg-gray-100">
         <Image src={imageUrl} alt={post.title} fill className="object-cover" unoptimized priority />

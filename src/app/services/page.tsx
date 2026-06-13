@@ -4,6 +4,9 @@ import Link from "next/link";
 export const metadata: Metadata = {
   title: "Services",
   description: "AI-powered investment intelligence, due diligence, market entry strategy, field research, and process optimization for investors in Ghana, Nigeria, Kenya, Malawi, and Uganda.",
+  alternates: { canonical: "https://frontiercapitalsignals.com/services" },
+  keywords: ["Africa investment services", "Africa due diligence", "market entry Africa", "Africa deal origination", "frontier market consulting", "Africa field research", "Ghana Nigeria Kenya investment advisory"],
+  openGraph: { url: "https://frontiercapitalsignals.com/services", type: "website" },
 };
 
 const services = [

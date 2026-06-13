@@ -3,7 +3,10 @@ import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "About Us",
-  description: "Frontier Capital Signals provides AI-powered investment intelligence for Ghana, Nigeria, Kenya, Malawi, and Uganda.",
+  description: "Frontier Capital Signals provides AI-powered investment intelligence for Ghana, Nigeria, Kenya, Malawi, and Uganda. On-ground networks meet cutting-edge AI for frontier market investors.",
+  alternates: { canonical: "https://frontiercapitalsignals.com/about" },
+  keywords: ["Africa investment firm", "frontier market intelligence company", "Africa research firm", "emerging market advisory Africa", "invest in Africa company"],
+  openGraph: { url: "https://frontiercapitalsignals.com/about", type: "website" },
 };
 
 const values = [

@@ -3,7 +3,10 @@ import ContactForm from "@/components/ContactForm";
 
 export const metadata: Metadata = {
   title: "Contact Us",
-  description: "Get in touch with Frontier Capital Signals. Request a market briefing, discuss your investment mandate, or inquire about our services.",
+  description: "Get in touch with Frontier Capital Signals. Request a market briefing, discuss your investment mandate, or book an Africa market consultation.",
+  alternates: { canonical: "https://frontiercapitalsignals.com/contact" },
+  keywords: ["Africa market briefing", "invest in Africa consultation", "Africa investment advisor contact", "frontier market research request"],
+  openGraph: { url: "https://frontiercapitalsignals.com/contact", type: "website" },
 };
 
 const inquiryTypes = [

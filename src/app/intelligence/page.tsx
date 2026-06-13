@@ -4,7 +4,10 @@ import IntelligenceFilters from "@/components/IntelligenceFilters";
 
 export const metadata: Metadata = {
   title: "Intelligence Feed",
-  description: "Daily AI-curated investment intelligence for Ghana, Nigeria, Kenya, Malawi, and Uganda.",
+  description: "Daily AI-curated investment intelligence for Ghana, Nigeria, Kenya, Malawi, and Uganda. Government projects, infrastructure tenders, energy deals, regulatory changes.",
+  alternates: { canonical: "https://frontiercapitalsignals.com/intelligence" },
+  keywords: ["Africa investment news", "Ghana investment opportunities 2025", "Nigeria business intelligence", "Kenya infrastructure deals", "Malawi mining", "Uganda oil investment", "Africa emerging market signals", "frontier market intelligence daily"],
+  openGraph: { url: "https://frontiercapitalsignals.com/intelligence", type: "website" },
 };
 
 export default function IntelligencePage() {

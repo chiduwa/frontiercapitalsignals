@@ -1,0 +1,56 @@
+name: Weekly SEO Maintenance
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"   # Every Monday 8:00 AM UTC
+  workflow_dispatch:
+
+jobs:
+  seo:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Ping Google sitemap
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://www.google.com/ping?sitemap=https%3A%2F%2Ffrontiercapitalsignals.com%2Fsitemap.xml")
+          echo "Google sitemap ping: $STATUS"
+
+      - name: Ping Bing via IndexNow
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://www.bing.com/indexnow?url=https%3A%2F%2Ffrontiercapitalsignals.com%2Fsitemap.xml&key=fcs3902425740540825")
+          echo "Bing IndexNow ping: $STATUS"
+
+      - name: Submit full site URL list to IndexNow
+        run: |
+          curl -s -X POST "https://api.indexnow.org/indexnow" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d '{
+              "host": "frontiercapitalsignals.com",
+              "key": "fcs3902425740540825",
+              "keyLocation": "https://frontiercapitalsignals.com/fcs3902425740540825.txt",
+              "urlList": [
+                "https://frontiercapitalsignals.com",
+                "https://frontiercapitalsignals.com/intelligence",
+                "https://frontiercapitalsignals.com/services",
+                "https://frontiercapitalsignals.com/resources",
+                "https://frontiercapitalsignals.com/about",
+                "https://frontiercapitalsignals.com/contact"
+              ]
+            }' | echo "IndexNow full-site submission complete"
+
+      - name: Check Core Web Vitals via PageSpeed API
+        run: |
+          if [ -n "${{ secrets.PAGESPEED_API_KEY }}" ]; then
+            curl -s "https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=https%3A%2F%2Ffrontiercapitalsignals.com&strategy=mobile&key=${{ secrets.PAGESPEED_API_KEY }}" \
+              | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          cats = d.get('lighthouseResult', {}).get('categories', {})
+          for k, v in cats.items():
+              print(f\"  {k}: {round(v['score']*100)}\")
+          "
+          else
+            echo "PAGESPEED_API_KEY not set — skipping Core Web Vitals check"
+          fi
