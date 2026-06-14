@@ -3,6 +3,7 @@ import { Geist } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+import MarketTicker from "@/components/MarketTicker";
 import JsonLd, { organizationSchema, websiteSchema } from "@/components/JsonLd";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
@@ -77,12 +78,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* eslint-disable-next-line @next/next/no-sync-scripts */}
         <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3902425740540825" crossOrigin="anonymous" />
       </head>
-      <body className="min-h-full flex flex-col bg-white text-ink antialiased">
+      <body className="min-h-full flex flex-col bg-white text-ink antialiased pb-11">
         <JsonLd data={organizationSchema} />
         <JsonLd data={websiteSchema} />
         <Navbar />
         <main className="flex-1">{children}</main>
         <Footer />
+        <MarketTicker />
       </body>
     </html>
   );
