@@ -5,7 +5,7 @@ summary: "Ghana's Energy Commission has opened bids for 200MW of solar capacity 
 country: "Ghana"
 category: "Energy"
 imageQuery: "solar panels Africa"
-image: "https://picsum.photos/seed/2026-06-10-ghana-renewable-energy-tender-6b2f4a1c/1200/630"
+image: "https://images.unsplash.com/photo-1675244626487-c88c6af20232?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w5NzY4MDd8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODE0MTExNzh8&ixlib=rb-4.1.0&q=80&w=1080"
 ---
 
 Ghana's Energy Commission has issued a formal request for proposals covering 200MW of solar photovoltaic capacity combined with 50MWh of battery storage infrastructure. The tender, supported by a $450 million World Bank facility, targets sites in the Northern and Volta regions where grid connectivity gaps remain most acute. Bid submission closes in 90 days, with preferred bidder selection expected by Q4 2026.

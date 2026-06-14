@@ -5,7 +5,7 @@ summary: "The Central Bank of Nigeria has launched a streamlined 60-day approval
 country: "Nigeria"
 category: "Regulatory"
 imageQuery: "Nigeria mobile banking fintech"
-image: "https://picsum.photos/seed/2026-06-10-nigeria-fintech-licensing-reform-a1d9c3e7/1200/630"
+image: "https://images.unsplash.com/photo-1738860283720-baaf8c8418b8?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w5NzY4MDd8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODE0MTExNTR8&ixlib=rb-4.1.0&q=80&w=1080"
 ---
 
 The Central Bank of Nigeria has released new guidelines establishing a dedicated fintech sandbox licensing pathway, reducing the approval timeline from 18 months to 60 business days for qualifying payment service operators. The framework targets startups with annual transaction volumes under $50 million and mandates local data residency alongside minimum capitalization of 250 million naira. Full operational licenses convert automatically after 12 months of compliant sandbox operations.

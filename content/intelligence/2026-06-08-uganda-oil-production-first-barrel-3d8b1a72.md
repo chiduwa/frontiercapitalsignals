@@ -5,7 +5,7 @@ summary: "TotalEnergies has initiated first oil from Uganda's Tilenga project, u
 country: "Uganda"
 category: "Energy"
 imageQuery: "Uganda oil energy infrastructure"
-image: "https://picsum.photos/seed/2026-06-08-uganda-oil-production-first-barrel-3d8b1a72/1200/630"
+image: "https://images.unsplash.com/photo-1735837893073-fef13dedc842?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w5NzY4MDd8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODE0MTExNTl8&ixlib=rb-4.1.0&q=80&w=1080"
 ---
 
 TotalEnergies has achieved first commercial oil production from the Tilenga project in Uganda's Albertine Graben, a milestone over a decade in the making. Initial plateau production of 100,000 barrels per day is targeted by late 2027 via the East African Crude Oil Pipeline, a 1,443-kilometer heated pipeline running to Tanzania's Tanga port. The Ugandan government estimates total in-country revenue of $2.5 billion annually at peak production, transforming the fiscal position of one of East Africa's fastest-growing economies.
