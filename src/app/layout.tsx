@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist } from "next/font/google";
-import Script from "next/script";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
@@ -73,13 +72,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${geist.variable} h-full`}>
+      <head>
+        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+        <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3902425740540825" crossOrigin="anonymous" />
+      </head>
       <body className="min-h-full flex flex-col bg-white text-ink antialiased">
-        <Script
-          async
-          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3902425740540825"
-          crossOrigin="anonymous"
-          strategy="afterInteractive"
-        />
         <JsonLd data={organizationSchema} />
         <JsonLd data={websiteSchema} />
         <Navbar />
