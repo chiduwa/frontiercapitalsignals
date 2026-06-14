@@ -60,6 +60,7 @@ export const metadata: Metadata = {
     googleBot: { index: true, follow: true, "max-image-preview": "large" },
   },
   other: {
+    "google-adsense-account": "ca-pub-3902425740540825",
     "geo.region": "GH, NG, KE, MW, UG",
     "geo.placename": "Ghana, Nigeria, Kenya, Malawi, Uganda",
     "ICBM": "7.9465, -1.0232",
