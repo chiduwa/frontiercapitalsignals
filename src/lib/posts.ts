@@ -14,6 +14,7 @@ export interface Post {
   country: string;
   category: string;
   imageQuery: string;
+  image?: string;   // stored URL from generation; components fall back to Picsum if absent
   content?: string;
 }
 
@@ -36,6 +37,7 @@ export function getAllPosts(): Post[] {
       country: data.country || "Africa",
       category: data.category || "General",
       imageQuery: data.imageQuery || "Africa business",
+      image: data.image || undefined,
     } as Post;
   });
   return posts.sort((a, b) => (a.date < b.date ? 1 : -1));
@@ -56,6 +58,7 @@ export async function getPostBySlug(slug: string): Promise<Post | null> {
     country: data.country || "Africa",
     category: data.category || "General",
     imageQuery: data.imageQuery || "Africa business",
+    image: data.image || undefined,
     content: processed.toString(),
   };
 }

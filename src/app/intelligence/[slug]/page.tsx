@@ -14,7 +14,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const post = await getPostBySlug(slug);
   if (!post) return {};
   const canonical = `https://frontiercapitalsignals.com/intelligence/${slug}`;
-  const ogImage = `https://source.unsplash.com/featured/1200x630?${encodeURIComponent(post.imageQuery + " Africa")}`;
+  const ogImage = post.image ?? `https://picsum.photos/seed/${encodeURIComponent(slug)}/1200/630`;
   return {
     title: post.title,
     description: post.summary,
@@ -67,7 +67,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
   const post = await getPostBySlug(slug);
   if (!post) notFound();
 
-  const imageUrl = `https://source.unsplash.com/featured/1200x500?${encodeURIComponent(post.imageQuery + " Africa")}`;
+  const imageUrl = post.image ?? `https://picsum.photos/seed/${encodeURIComponent(slug)}/1200/500`;
   const catStyle = categoryColor[post.category] ?? categoryColor.General;
 
   return (

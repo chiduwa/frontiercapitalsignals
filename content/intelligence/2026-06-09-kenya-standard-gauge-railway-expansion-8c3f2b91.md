@@ -5,6 +5,7 @@ summary: "Kenya's transport ministry is finalizing a public-private partnership 
 country: "Kenya"
 category: "Infrastructure"
 imageQuery: "Kenya railway infrastructure"
+image: "https://picsum.photos/seed/2026-06-09-kenya-standard-gauge-railway-expansion-8c3f2b91/1200/630"
 ---
 
 Kenya's Ministry of Transport has confirmed that a transaction advisor has been appointed to structure the $2.1 billion SGR Phase 3 extension from Naivasha to Malaba on the Uganda border, covering 361 kilometers. The government is targeting a hybrid PPP model, blending concessional finance from multilateral development banks with private equity and infrastructure debt. A formal tender is anticipated in Q3 2026, with financial close targeted for mid-2027.

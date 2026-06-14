@@ -102,10 +102,38 @@ async function processItem(item, countryHint) {
   }
 }
 
-function savePost(data) {
+// Fetch a relevant photo from Unsplash API (free, 50 req/hour).
+// Requires UNSPLASH_ACCESS_KEY env var. Falls back to Picsum if unavailable.
+async function fetchImageUrl(query, slug) {
+  const key = process.env.UNSPLASH_ACCESS_KEY;
+  if (key) {
+    try {
+      const url = `https://api.unsplash.com/photos/random?query=${encodeURIComponent(query + " Africa")}&orientation=landscape&client_id=${key}`;
+      const res = await fetch(url, { headers: { "Accept-Version": "v1" } });
+      if (res.ok) {
+        const data = await res.json();
+        // Use "regular" size (~1080px wide) — good quality, modest file size
+        if (data.urls?.regular) {
+          console.log(`  Image: ${data.urls.regular.split("?")[0]} (Unsplash)`);
+          return data.urls.regular;
+        }
+      }
+    } catch {
+      // fall through to Picsum
+    }
+  }
+  // Picsum: seeded by slug so the same article always shows the same image
+  const picsum = `https://picsum.photos/seed/${encodeURIComponent(slug)}/1200/630`;
+  console.log(`  Image: Picsum (${key ? "Unsplash failed" : "no UNSPLASH_ACCESS_KEY"})`);
+  return picsum;
+}
+
+async function savePost(data) {
   const slug = `${today()}-${slugify(data.title)}-${hashTitle(data.title)}`;
   const filePath = path.join(CONTENT_DIR, `${slug}.md`);
   if (fs.existsSync(filePath)) return null;
+
+  const imageUrl = await fetchImageUrl(data.imageQuery, slug);
 
   const content = `---
 title: "${data.title.replace(/"/g, "'")}"
@@ -114,6 +142,7 @@ summary: "${data.summary.replace(/"/g, "'")}"
 country: "${data.country}"
 category: "${data.category}"
 imageQuery: "${data.imageQuery}"
+image: "${imageUrl}"
 ---
 
 ${data.body}
@@ -175,7 +204,7 @@ async function run() {
       for (const item of items) {
         const data = await processItem(item, source.country);
         if (data) {
-          const slug = savePost(data);
+          const slug = await savePost(data);
           if (slug) newSlugs.push(slug);
           await new Promise((r) => setTimeout(r, 1200));
         }

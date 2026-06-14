@@ -5,6 +5,7 @@ summary: "Malawi's Department of Mines has launched the first competitive tender
 country: "Malawi"
 category: "Mining"
 imageQuery: "lithium mining minerals Africa"
+image: "https://picsum.photos/seed/2026-06-09-malawi-lithium-mining-concession-5e1a7f44/1200/630"
 ---
 
 Malawi's Department of Mines and Minerals Development has opened a first round of competitive licensing for lithium exploration rights covering six target zones, including the Salima and Kasungu deposits where geological surveys have identified indicated resources of approximately 2.3 million tonnes of lithium carbonate equivalent. Applications close in 120 days. License terms include a 5-year exploration period, a minimum work commitment of $4 million, and a government carried interest of 15% at the development stage.

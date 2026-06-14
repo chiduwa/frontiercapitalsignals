@@ -18,8 +18,9 @@ const categoryColor: Record<string, string> = {
   General: "bg-gray-100 text-gray-600",
 };
 
-function unsplashUrl(query: string, w = 600, h = 340) {
-  return `https://source.unsplash.com/featured/${w}x${h}?${encodeURIComponent(query + " Africa")}`;
+function cardImageUrl(post: Post) {
+  // Use the stored URL from generation; fall back to Picsum seeded by slug (free, consistent)
+  return post.image ?? `https://picsum.photos/seed/${encodeURIComponent(post.slug)}/600/340`;
 }
 
 export default function PostCard({ post }: { post: Post }) {
@@ -31,7 +32,7 @@ export default function PostCard({ post }: { post: Post }) {
       <article className="bg-white border border-gray-200 rounded-xl overflow-hidden hover:border-gold/60 hover:shadow-lg hover:shadow-gray-200 transition-all duration-300 h-full flex flex-col">
         <div className="relative h-44 overflow-hidden bg-gray-100">
           <Image
-            src={unsplashUrl(post.imageQuery)}
+            src={cardImageUrl(post)}
             alt={post.title}
             fill
             className="object-cover group-hover:scale-105 transition-transform duration-500"

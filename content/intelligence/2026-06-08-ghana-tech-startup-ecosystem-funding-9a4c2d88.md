@@ -5,6 +5,7 @@ summary: "Ghana's startup ecosystem has attracted $180 million in venture capita
 country: "Ghana"
 category: "Startup"
 imageQuery: "Accra Ghana technology startup office"
+image: "https://picsum.photos/seed/2026-06-08-ghana-tech-startup-ecosystem-funding-9a4c2d88/1200/630"
 ---
 
 Ghana's startup ecosystem has recorded $180 million in disclosed venture capital transactions in the first six months of 2026, representing a 40% increase over the same period last year. The largest deals include a $45 million Series B for an agricultural input financing platform and a $32 million round for a digital health benefits manager serving corporate clients across West Africa. Early-stage deal count has also accelerated, with seed rounds averaging $1.2 million, up from $800,000 in 2024.
