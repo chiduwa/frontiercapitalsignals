@@ -42,3 +42,7 @@ next-env.d.ts
 
 # Local Netlify folder
 .netlify
+
+# Cloudflare / OpenNext build output
+.open-next/
+.wrangler/
