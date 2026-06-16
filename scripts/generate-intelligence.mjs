@@ -211,8 +211,9 @@ async function run() {
         if (data) {
           const slug = await savePost(data);
           if (slug) newSlugs.push(slug);
-          await new Promise((r) => setTimeout(r, 1200));
         }
+        // Always delay between items — Gemini free tier allows 15 req/min (4s gap)
+        await new Promise((r) => setTimeout(r, 4500));
       }
     } catch (err) {
       console.error(`  Failed to fetch ${source.url}: ${err.message}`);
