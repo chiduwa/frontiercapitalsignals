@@ -8,14 +8,9 @@ on:
 jobs:
   seo:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
-      - name: Ping Google sitemap
-        run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://www.google.com/ping?sitemap=https%3A%2F%2Ffrontiercapitalsignals.com%2Fsitemap.xml")
-          echo "Google sitemap ping: $STATUS"
-
       - name: Ping Bing via IndexNow
         run: |
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \

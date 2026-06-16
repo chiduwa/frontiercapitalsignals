@@ -39,11 +39,11 @@ const sectorRadar = [
 ];
 
 const COLORS = {
-  Ghana: "#b8860b",
-  Nigeria: "#16a34a",
-  Kenya: "#2563eb",
-  Malawi: "#9333ea",
-  Uganda: "#ea580c",
+  Ghana: "#f59e0b",   // amber-gold
+  Nigeria: "#22c55e", // emerald green
+  Kenya: "#ef4444",   // red (Kenya flag)
+  Malawi: "#8b5cf6",  // violet
+  Uganda: "#06b6d4",  // cyan
 };
 
 const tooltip = {
