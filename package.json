@@ -7,8 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "deploy": "opennextjs-cloudflare build && wrangler deploy",
-    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview"
+    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare populateCache local && wrangler deploy",
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare populateCache local && opennextjs-cloudflare preview"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

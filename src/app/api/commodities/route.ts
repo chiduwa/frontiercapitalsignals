@@ -1,5 +1,3 @@
-export const runtime = "edge";
-
 import { NextResponse } from "next/server";
 
 async function yahooQuote(symbol: string): Promise<number | null> {
