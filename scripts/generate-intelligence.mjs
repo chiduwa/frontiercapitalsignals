@@ -18,6 +18,11 @@ const CONTENT_DIR = path.join(__dirname, "../content/intelligence");
 
 if (!fs.existsSync(CONTENT_DIR)) fs.mkdirSync(CONTENT_DIR, { recursive: true });
 
+if (!process.env.GOOGLE_AI_API_KEY) {
+  console.error("Error: GOOGLE_AI_API_KEY is not set. Exiting.");
+  process.exit(1);
+}
+
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 const parser = new RSSParser({ timeout: 10000 });
@@ -28,13 +33,13 @@ const INDEXNOW_KEY = "fcs3902425740540825";
 const SOURCES = [
   { url: "https://www.theafricareport.com/feed/", country: "Africa" },
   { url: "https://businessday.ng/feed/", country: "Nigeria" },
-  { url: "https://www.ghanabusinessnews.com/feed/", country: "Ghana" },
-  { url: "https://www.businessdailyafrica.com/bd/feeds/-/539634/feed/xml", country: "Kenya" },
-  { url: "https://www.theeastafrican.co.ke/tea/business/-/2560/feed/xml", country: "Kenya" },
-  { url: "https://www.malawitimes.com/feed/", country: "Malawi" },
-  { url: "https://www.newvision.co.ug/category/business/feed/", country: "Uganda" },
-  { url: "https://africabusinesscommunities.com/feed/", country: "Africa" },
+  { url: "https://www.premiumtimesng.com/feed", country: "Nigeria" },
+  { url: "https://citibusinessnews.com/feed/", country: "Ghana" },
+  { url: "https://thebftonline.com/feed/", country: "Ghana" },
+  { url: "https://www.nyasatimes.com/feed/", country: "Malawi" },
+  { url: "https://malawi24.com/feed/", country: "Malawi" },
   { url: "https://www.itnewsafrica.com/feed/", country: "Africa" },
+  { url: "https://africabriefing.com/feed/", country: "Africa" },
 ];
 
 const INVESTMENT_KEYWORDS = [
@@ -175,11 +180,11 @@ async function submitToIndexNow(slugs) {
 
 async function pingSitemaps() {
   const sitemap = encodeURIComponent(`${SITE}/sitemap.xml`);
+  // Google deprecated their ping endpoint; Bing + IndexNow is sufficient
   const endpoints = [
-    `https://www.google.com/ping?sitemap=${sitemap}`,
     `https://www.bing.com/indexnow?url=${sitemap}&key=${INDEXNOW_KEY}`,
   ];
-  console.log("\nPinging search engine sitemaps...");
+  console.log("\nPinging Bing sitemap...");
   for (const url of endpoints) {
     try {
       const res = await fetch(url, { method: "GET" });
@@ -223,4 +228,4 @@ async function run() {
   await pingSitemaps();
 }
 
-run().catch(console.error);
+run().catch(console.error).finally(() => process.exit(0));
