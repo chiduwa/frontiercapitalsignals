@@ -87,8 +87,10 @@ export default function ContactForm({ inquiryTypes }: { inquiryTypes: string[] }
           placeholder="Describe your mandate, question, or what you're looking for..."
           className={`${inputClass} resize-none`} />
       </div>
+      {/* Honeypot — hidden from humans, bots fill it in; Formspree discards the submission */}
+      <input type="text" name="_gotcha" tabIndex={-1} autoComplete="off" aria-hidden="true" style={{ display: "none" }} />
       {status === "error" && (
-        <p className="text-red-600 text-sm">Submission failed — please email us directly at <a href="mailto:ko.owusuansah@gmail.com" className="underline">ko.owusuansah@gmail.com</a> or try again.</p>
+        <p className="text-red-600 text-sm">Submission failed — please try again in a moment.</p>
       )}
       <button type="submit" disabled={status === "sending"}
         className="w-full py-3.5 rounded-lg bg-navy text-white font-bold text-sm hover:bg-navy-700 transition-colors disabled:opacity-50">
