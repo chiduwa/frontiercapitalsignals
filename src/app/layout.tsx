@@ -47,11 +47,20 @@ export const metadata: Metadata = {
     title: "Frontier Capital Signals | AI-Powered African Market Intelligence",
     description:
       "Daily AI-curated investment intelligence for Ghana, Nigeria, Kenya, Malawi, and Uganda. Unlock opportunities invisible to global investors.",
+    images: [
+      {
+        url: "https://frontiercapitalsignals.com/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Frontier Capital Signals — AI-Powered African Market Intelligence",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "Frontier Capital Signals",
     description: "AI-powered emerging market investment intelligence for Africa.",
+    images: ["https://frontiercapitalsignals.com/og-image.png"],
   },
   robots: {
     index: true,

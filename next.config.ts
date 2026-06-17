@@ -7,6 +7,15 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "picsum.photos", pathname: "/**" },
     ],
   },
+  async redirects() {
+    return [
+      {
+        source: "/og-image.png",
+        destination: "/opengraph-image",
+        permanent: false,
+      },
+    ];
+  },
   async headers() {
     return [
       {
@@ -46,6 +55,21 @@ const nextConfig: NextConfig = {
       {
         source: "/fonts/(.*)",
         headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+      },
+      {
+        // OG image must be loadable cross-origin by link-preview scrapers (Handshake, LinkedIn, Twitter, etc.)
+        source: "/opengraph-image",
+        headers: [
+          { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
+          { key: "Cache-Control", value: "public, max-age=604800, stale-while-revalidate=86400" },
+        ],
+      },
+      {
+        source: "/og-image.png",
+        headers: [
+          { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
+          { key: "Cache-Control", value: "public, max-age=604800, stale-while-revalidate=86400" },
+        ],
       },
       {
         source: "/(.*)\\.png",
