@@ -24,11 +24,20 @@ if (!process.env.GOOGLE_AI_API_KEY) {
 }
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+
+// gemini-2.5-flash has its own free-tier quota bucket separate from gemini-2.0-flash
+const PRIMARY_MODEL = "gemini-2.5-flash";
+const FALLBACK_MODEL = "gemini-2.0-flash-lite";
+
 const parser = new RSSParser({ timeout: 10000 });
 
 const SITE = "https://frontiercapitalsignals.com";
 const INDEXNOW_KEY = "fcs3902425740540825";
+
+// Minimum posts to generate before calling the run successful
+const MIN_NEW_POSTS = 3;
+// Skip generation if today already has this many posts (prevents quota waste on re-runs)
+const SKIP_IF_TODAY_HAS = 5;
 
 const SOURCES = [
   { url: "https://www.theafricareport.com/feed/", country: "Africa" },
@@ -67,6 +76,42 @@ function hashTitle(title) {
   return createHash("md5").update(title).digest("hex").slice(0, 8);
 }
 
+// Parse the suggested retry delay (seconds) from a Google API 429 error message.
+function parseRetryDelay(errorMessage) {
+  const match = errorMessage?.match(/Please retry in (\d+(?:\.\d+)?)s/);
+  return match ? parseFloat(match[1]) * 1000 : null;
+}
+
+// Returns true if the error is a per-day quota exhaustion (not a per-minute rate limit).
+function isDailyQuotaExhausted(errorMessage) {
+  return (
+    errorMessage?.includes("GenerateRequestsPerDayPerProjectPerModel") ||
+    errorMessage?.includes("GenerateContentInputTokensPerDay")
+  );
+}
+
+// Retry a Gemini call up to maxRetries times, respecting the API's suggested retry delay.
+// Per-minute rate limits are retried. Per-day quota exhaustion is surfaced immediately.
+async function callWithRetry(modelName, prompt, maxRetries = 2) {
+  const model = genAI.getGenerativeModel({ model: modelName });
+  let attempt = 0;
+  while (true) {
+    try {
+      const result = await model.generateContent(prompt);
+      return result.response.text().trim();
+    } catch (err) {
+      const msg = err.message ?? "";
+      if (!msg.includes("429")) throw err;
+      if (isDailyQuotaExhausted(msg)) throw err; // no point retrying same-day
+      if (attempt >= maxRetries) throw err;
+      const waitMs = parseRetryDelay(msg) ?? Math.min(30000 * (attempt + 1), 90000);
+      console.log(`    Rate limited (${modelName}). Waiting ${Math.round(waitMs / 1000)}s (attempt ${attempt + 1}/${maxRetries})...`);
+      await new Promise((r) => setTimeout(r, waitMs));
+      attempt++;
+    }
+  }
+}
+
 async function rewrite(item, countryHint) {
   const prompt = `You are a financial intelligence analyst writing for Frontier Capital Signals, a platform helping international investors discover opportunities in Ghana, Nigeria, Kenya, Malawi, and Uganda.
 
@@ -90,25 +135,45 @@ Write a concise investment intelligence brief. Rules:
   "imageQuery": "3-4 descriptive words for an Unsplash photo that represents this topic"
 }`;
 
-  const result = await model.generateContent(prompt);
-  const text = result.response.text().trim();
+  // Try primary model first, fall back to lite model if it fails with quota issues
+  let text;
+  try {
+    text = await callWithRetry(PRIMARY_MODEL, prompt);
+  } catch (primaryErr) {
+    const msg = primaryErr.message ?? "";
+    if (msg.includes("429")) {
+      if (isDailyQuotaExhausted(msg)) {
+        console.log(`  Daily quota exhausted on ${PRIMARY_MODEL}, trying ${FALLBACK_MODEL}...`);
+        text = await callWithRetry(FALLBACK_MODEL, prompt);
+      } else {
+        throw primaryErr;
+      }
+    } else {
+      throw primaryErr;
+    }
+  }
+
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error("No JSON in response");
   return JSON.parse(jsonMatch[0]);
 }
 
-async function processItem(item, countryHint) {
+async function processItem(item, countryHint, quotaState) {
   if (!isRelevant(item)) return null;
   try {
     return await rewrite(item, countryHint);
   } catch (err) {
-    console.error(`  Skipped "${item.title}": ${err.message}`);
+    const msg = err.message ?? "";
+    if (msg.includes("429") && isDailyQuotaExhausted(msg)) {
+      quotaState.exhausted = true;
+      console.error(`  DAILY QUOTA EXHAUSTED on both models. No further generation possible today.`);
+    } else {
+      console.error(`  Skipped "${item.title}": ${err.message}`);
+    }
     return null;
   }
 }
 
-// Fetch a relevant photo from Unsplash API (free, 50 req/hour).
-// Requires UNSPLASH_ACCESS_KEY env var. Falls back to Picsum if unavailable.
 async function fetchImageUrl(query, slug) {
   const key = process.env.UNSPLASH_ACCESS_KEY;
   if (key) {
@@ -117,7 +182,6 @@ async function fetchImageUrl(query, slug) {
       const res = await fetch(url, { headers: { "Accept-Version": "v1" } });
       if (res.ok) {
         const data = await res.json();
-        // Use "regular" size (~1080px wide) — good quality, modest file size
         if (data.urls?.regular) {
           console.log(`  Image: ${data.urls.regular.split("?")[0]} (Unsplash)`);
           return data.urls.regular;
@@ -127,7 +191,6 @@ async function fetchImageUrl(query, slug) {
       // fall through to Picsum
     }
   }
-  // Picsum: seeded by slug so the same article always shows the same image
   const picsum = `https://picsum.photos/seed/${encodeURIComponent(slug)}/1200/630`;
   console.log(`  Image: Picsum (${key ? "Unsplash failed" : "no UNSPLASH_ACCESS_KEY"})`);
   return picsum;
@@ -180,7 +243,6 @@ async function submitToIndexNow(slugs) {
 
 async function pingSitemaps() {
   const sitemap = encodeURIComponent(`${SITE}/sitemap.xml`);
-  // Google deprecated their ping endpoint; Bing + IndexNow is sufficient
   const endpoints = [
     `https://www.bing.com/indexnow?url=${sitemap}&key=${INDEXNOW_KEY}`,
   ];
@@ -197,36 +259,75 @@ async function pingSitemaps() {
 
 async function run() {
   console.log(`\nFrontier Capital Signals — Daily Intelligence Generation`);
-  console.log(`Date: ${today()}\n`);
+  console.log(`Date: ${today()}`);
+  console.log(`Model: ${PRIMARY_MODEL} (fallback: ${FALLBACK_MODEL})\n`);
+
+  // Skip if today already has enough posts (prevents quota waste on manual re-runs)
+  const existingToday = fs.readdirSync(CONTENT_DIR).filter((f) => f.startsWith(today()));
+  if (existingToday.length >= SKIP_IF_TODAY_HAS) {
+    console.log(`Already have ${existingToday.length} posts for today — skipping generation.`);
+    return;
+  }
+  if (existingToday.length > 0) {
+    console.log(`Found ${existingToday.length} existing posts for today — continuing to generate more.`);
+  }
 
   const newSlugs = [];
+  // Shared state to detect when daily quota is fully exhausted across both models
+  const quotaState = { exhausted: false };
 
   for (const source of SOURCES) {
+    if (quotaState.exhausted) {
+      console.log(`\nSkipping remaining sources — daily API quota is exhausted.`);
+      break;
+    }
     console.log(`Fetching: ${source.url}`);
     try {
       const feed = await parser.parseURL(source.url);
       const items = feed.items.slice(0, 5);
       for (const item of items) {
-        const data = await processItem(item, source.country);
+        if (quotaState.exhausted) break;
+        const data = await processItem(item, source.country, quotaState);
         if (data) {
           const slug = await savePost(data);
           if (slug) newSlugs.push(slug);
         }
-        // Always delay between items — Gemini free tier allows 15 req/min (4s gap)
-        await new Promise((r) => setTimeout(r, 4500));
+        // Gemini free tier: 10 RPM to stay safely under the 15 RPM limit
+        await new Promise((r) => setTimeout(r, 6000));
       }
     } catch (err) {
       console.error(`  Failed to fetch ${source.url}: ${err.message}`);
     }
   }
 
-  console.log(`\nGeneration complete. ${newSlugs.length} new posts.`);
+  const totalToday = existingToday.length + newSlugs.length;
+  console.log(`\nGeneration complete. ${newSlugs.length} new posts (${totalToday} total for today).`);
 
   if (newSlugs.length > 0) {
     await submitToIndexNow(newSlugs);
   }
 
   await pingSitemaps();
+
+  // Fail visibly if quota exhausted and not enough posts — prevents silent "success" with 0 content
+  if (quotaState.exhausted && totalToday < MIN_NEW_POSTS) {
+    console.error(
+      `\nERROR: Daily Gemini API quota exhausted on both ${PRIMARY_MODEL} and ${FALLBACK_MODEL}.`
+    );
+    console.error(
+      `Only ${totalToday} posts exist for today (need ${MIN_NEW_POSTS}).`
+    );
+    console.error(
+      `Fix: Go to https://aistudio.google.com/ and enable billing on your Google AI project,`
+    );
+    console.error(
+      `or wait until UTC midnight for the free tier quota to reset.`
+    );
+    process.exit(1);
+  }
 }
 
-run().catch(console.error).finally(() => process.exit(0));
+run().catch((err) => {
+  console.error("Fatal error:", err);
+  process.exit(1);
+});
