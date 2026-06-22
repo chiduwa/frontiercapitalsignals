@@ -32,26 +32,18 @@ async function yahooQuote(symbol: string, signal: AbortSignal): Promise<number |
   }
 }
 
-async function getMetals(signal: AbortSignal): Promise<Record<string, number>> {
-  try {
-    const res = await fetch("https://api.metals.live/v1/spot", { signal });
-    if (!res.ok) return {};
-    const arr: Record<string, number>[] = await res.json();
-    return arr.reduce((acc, obj) => ({ ...acc, ...obj }), {});
-  } catch {
-    return {};
-  }
-}
-
 export async function GET(request: Request) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
 
   try {
     const { signal } = controller;
-    const [metals, brent, wti, natgas, cocoa, coffeeRaw, copper, cottonRaw, sugarRaw] =
+    const [gold, silver, platinum, palladium, brent, wti, natgas, cocoa, coffeeRaw, copper, cottonRaw, sugarRaw] =
       await Promise.all([
-        getMetals(signal),
+        yahooQuote("GC=F", signal),   // Gold, USD/oz
+        yahooQuote("SI=F", signal),   // Silver, USD/oz
+        yahooQuote("PL=F", signal),   // Platinum, USD/oz
+        yahooQuote("PA=F", signal),   // Palladium, USD/oz
         yahooQuote("BZ=F", signal),   // Brent Crude, USD/bbl
         yahooQuote("CL=F", signal),   // WTI Crude, USD/bbl
         yahooQuote("NG=F", signal),   // Natural Gas, USD/MMBtu
@@ -64,12 +56,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json(
       {
-        precious_metals: {
-          gold: metals.gold ?? null,
-          silver: metals.silver ?? null,
-          platinum: metals.platinum ?? null,
-          palladium: metals.palladium ?? null,
-        },
+        precious_metals: { gold, silver, platinum, palladium },
         base_metals: { copper },
         energy: { brent_crude: brent, wti_crude: wti, natural_gas: natgas },
         agricultural: {
