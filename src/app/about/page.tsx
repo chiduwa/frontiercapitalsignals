@@ -67,6 +67,23 @@ export default function AboutPage() {
         </div>
       </section>
 
+      {/* Trust / Why Partner With Us */}
+      <section className="py-24 bg-navy relative overflow-hidden">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-gold/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="max-w-3xl mx-auto text-center mb-10">
+            <p className="text-gold text-xs font-semibold tracking-widest uppercase mb-4">Why Partner With Us</p>
+            <h2 className="text-4xl sm:text-5xl font-black text-white tracking-tight leading-tight">We&apos;ve Felt the Sting of a Bad Partner Too</h2>
+          </div>
+          <div className="max-w-3xl mx-auto space-y-5 text-white/70 text-lg leading-relaxed">
+            <p>A lot of investors have already tried Africa once. They sent the capital, signed with a local partner who sounded right, and then watched it unravel: a management team that couldn&apos;t manage, a plan built on optimism instead of facts, people who turned out not to be who they claimed. We&apos;ve seen it happen up close, and in some cases, we&apos;ve lived it ourselves.</p>
+            <p>That&apos;s exactly why due diligence isn&apos;t a checkbox for us, it&apos;s the starting point. Before we ever bring you a deal, a partner, or a path into a new market, we&apos;ve already verified who&apos;s involved, stress tested the plan against what actually happens on the ground, and confirmed the numbers still hold up once the slide deck is closed.</p>
+            <p>Once your capital is committed, we don&apos;t step back. We stay close through execution, catching the small issues before they turn into expensive ones, and pushing for the kind of discipline that keeps a project on time and on budget. We treat every investment the way we&apos;d want our own treated.</p>
+            <p>And we measure success on two sides of the same ledger: the return our partners see, and the value it creates for the country and community where it lands. Investments that work for both tend to be the ones that last.</p>
+          </div>
+        </div>
+      </section>
+
       {/* Values */}
       <section className="py-20 bg-sand">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
