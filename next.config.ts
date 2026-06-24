@@ -38,7 +38,7 @@ const nextConfig: NextConfig = {
               "font-src 'self' https://fonts.gstatic.com data:",
               "img-src 'self' data: https://images.unsplash.com https://picsum.photos https://pagead2.googlesyndication.com https://tpc.googlesyndication.com https://googleads.g.doubleclick.net https://www.google.com https://www.gstatic.com https://www.google-analytics.com",
               "connect-src 'self' https://frontiercapitalsignals.com https://open.er-api.com https://api.metals.live https://query1.finance.yahoo.com https://formspree.io https://vitals.vercel-insights.com https://www.googletagmanager.com https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com",
-              "frame-src https://googleads.g.doubleclick.net https://tpc.googlesyndication.com",
+              "frame-src https://googleads.g.doubleclick.net https://tpc.googlesyndication.com https://www.googletagmanager.com",
               "object-src 'none'",
               "base-uri 'self'",
               "form-action 'self' https://formspree.io",
