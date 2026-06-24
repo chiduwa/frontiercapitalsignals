@@ -84,6 +84,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         {/* eslint-disable-next-line @next/next/no-sync-scripts */}
         <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3902425740540825" crossOrigin="anonymous" />
+        {/* Google tag (gtag.js) */}
+        <script async src="https://www.googletagmanager.com/gtag/js?id=G-VT7WHK310R" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', 'G-VT7WHK310R');`,
+          }}
+        />
       </head>
       <body className="min-h-full flex flex-col bg-white text-ink antialiased pb-11">
         <JsonLd data={organizationSchema} />

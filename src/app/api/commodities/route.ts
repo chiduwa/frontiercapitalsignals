@@ -11,25 +11,43 @@ export async function OPTIONS(request: Request) {
   return new Response(null, { status: 204, headers: corsHeaders(request.headers.get("origin")) });
 }
 
+// Module-scope cache: Cloudflare Workers reuse isolates across requests, and a
+// pooled connection to Yahoo can get stuck failing (e.g. rate-limited) for the
+// life of the isolate. Falling back to the last good price avoids showing a
+// blank value for an entire isolate's lifetime when that happens.
+const lastGood = new Map<string, number>();
+
+async function fetchYahooQuote(symbol: string, signal: AbortSignal): Promise<number | null> {
+  const res = await fetch(
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1d`,
+    {
+      signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        Accept: "application/json",
+      },
+    }
+  );
+  if (!res.ok) return null;
+  const json: unknown = await res.json();
+  const price = (json as { chart?: { result?: { meta?: { regularMarketPrice?: unknown } }[] } })?.chart
+    ?.result?.[0]?.meta?.regularMarketPrice;
+  return typeof price === "number" ? price : null;
+}
+
 async function yahooQuote(symbol: string, signal: AbortSignal): Promise<number | null> {
-  try {
-    const res = await fetch(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1d`,
-      {
-        signal,
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-          Accept: "application/json",
-        },
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const price = await fetchYahooQuote(symbol, signal);
+      if (price != null) {
+        lastGood.set(symbol, price);
+        return price;
       }
-    );
-    if (!res.ok) return null;
-    const json = await res.json();
-    const price = json?.chart?.result?.[0]?.meta?.regularMarketPrice;
-    return typeof price === "number" ? price : null;
-  } catch {
-    return null;
+    } catch {
+      // retry below
+    }
   }
+  return lastGood.get(symbol) ?? null;
 }
 
 export async function GET(request: Request) {
