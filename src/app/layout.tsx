@@ -121,16 +121,8 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
         {/* End Google Tag Manager */}
         {/* eslint-disable-next-line @next/next/no-sync-scripts */}
         <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3902425740540825" crossOrigin="anonymous" />
-        {/* Google tag (gtag.js) */}
-        <script async src="https://www.googletagmanager.com/gtag/js?id=G-VT7WHK310R" />
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `window.dataLayer = window.dataLayer || [];
-function gtag(){dataLayer.push(arguments);}
-gtag('js', new Date());
-gtag('config', 'G-VT7WHK310R');`,
-          }}
-        />
+        {/* GA4 (G-VT7WHK310R) is configured via the GTM container's "GA4 Configuration"
+            tag, not loaded directly here — avoids double-counting pageviews. */}
       </head>
       <body className="min-h-full flex flex-col bg-white text-ink antialiased pb-11">
         {/* Google Tag Manager (noscript) */}
