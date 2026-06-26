@@ -1,4 +1,5 @@
 import Link from "next/link";
+import CookieSettingsButton from "@/components/CookieSettingsButton";
 
 const countries = ["Ghana", "Nigeria", "Kenya", "Malawi", "Uganda"];
 const services = [
@@ -93,9 +94,12 @@ export default function Footer() {
           <p className="text-slate-500 text-xs">
             &copy; {new Date().getFullYear()} Frontier Capital Signals. All rights reserved.
           </p>
-          <p className="text-slate-600 text-xs text-center">
-            For informational purposes only. Not financial advice.
-          </p>
+          <div className="flex items-center gap-4">
+            <p className="text-slate-600 text-xs text-center">
+              For informational purposes only. Not financial advice.
+            </p>
+            <CookieSettingsButton />
+          </div>
         </div>
       </div>
     </footer>

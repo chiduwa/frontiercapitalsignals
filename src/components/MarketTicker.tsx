@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
+import { pushDataLayerEvent } from "@/lib/analytics";
 
 // ── Priority ordering ──────────────────────────────────────────────────────────
 // These appear at the top of every list and are the only currencies in the ticker strip
@@ -271,6 +272,10 @@ export default function MarketTicker() {
     const id = setInterval(fetchAll, 5 * 60 * 1000);
     return () => clearInterval(id);
   }, [fetchAll]);
+
+  useEffect(() => {
+    if (expanded) pushDataLayerEvent("ticker_panel_view", { panel });
+  }, [expanded, panel]);
 
   // ── Build sorted currency list from all API rates ────────────────────────────
 

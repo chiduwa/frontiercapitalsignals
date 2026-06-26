@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { pushDataLayerEvent } from "@/lib/analytics";
 
 export default function ContactForm({ inquiryTypes }: { inquiryTypes: string[] }) {
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
@@ -20,6 +21,7 @@ export default function ContactForm({ inquiryTypes }: { inquiryTypes: string[] }
       });
       if (res.ok) {
         setStatus("sent");
+        pushDataLayerEvent("contact_form_submit", { inquiry_type: form.type, country_of_interest: form.country });
         setForm({ name: "", email: "", organization: "", type: "", country: "", message: "" });
       } else {
         const data = await res.json().catch(() => ({}));

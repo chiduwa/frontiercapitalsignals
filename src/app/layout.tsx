@@ -5,6 +5,7 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import MarketTicker from "@/components/MarketTicker";
 import JsonLd, { organizationSchema, websiteSchema } from "@/components/JsonLd";
+import ConsentBanner from "@/components/ConsentBanner";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
 
@@ -82,6 +83,31 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${geist.variable} h-full`}>
       <head>
+        {/* Consent Mode v2 defaults — must run before GTM/gtag/AdSense load.
+            Everyone defaults to denied until ConsentBanner resolves: either the
+            visitor's own prior choice (localStorage), or an automatic grant for
+            visitors outside the EEA/UK/CH (see /api/region + ConsentBanner.tsx). */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){
+window.dataLayer=window.dataLayer||[];
+function gtag(){dataLayer.push(arguments);}
+window.gtag=window.gtag||gtag;
+var stored=null;
+try{stored=JSON.parse(localStorage.getItem('fcs_consent_v1'));}catch(e){}
+if(stored){
+gtag('consent','default',{
+ad_storage:stored.advertising?'granted':'denied',
+ad_user_data:stored.advertising?'granted':'denied',
+ad_personalization:stored.advertising?'granted':'denied',
+analytics_storage:stored.analytics?'granted':'denied'
+});
+}else{
+gtag('consent','default',{ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied',analytics_storage:'denied',wait_for_update:500});
+}
+})();`,
+          }}
+        />
         {/* Google Tag Manager */}
         <script
           dangerouslySetInnerHTML={{
@@ -123,6 +149,7 @@ gtag('config', 'G-VT7WHK310R');`,
         <main className="flex-1">{children}</main>
         <Footer />
         <MarketTicker />
+        <ConsentBanner />
       </body>
     </html>
   );

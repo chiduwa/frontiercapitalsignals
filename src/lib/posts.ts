@@ -19,7 +19,13 @@ export interface Post {
 }
 
 function ensureDir() {
-  if (!fs.existsSync(CONTENT_DIR)) fs.mkdirSync(CONTENT_DIR, { recursive: true });
+  try {
+    if (!fs.existsSync(CONTENT_DIR)) fs.mkdirSync(CONTENT_DIR, { recursive: true });
+  } catch {
+    // Read-only runtimes (e.g. Cloudflare Workers) can't mkdir — the content
+    // directory is already populated from the repo at build time, so this is
+    // only a convenience for fresh local checkouts and safe to skip elsewhere.
+  }
 }
 
 export function getAllPosts(): Post[] {
