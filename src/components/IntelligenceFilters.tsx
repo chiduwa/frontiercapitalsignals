@@ -21,7 +21,7 @@ export default function IntelligenceFilters({ posts }: { posts: Post[] }) {
       {/* Filters */}
       <div className="mb-8 space-y-4">
         <div>
-          <p className="text-slate-500 text-xs font-semibold tracking-widest uppercase mb-2">Country</p>
+          <p className="text-slate-600 text-xs font-semibold tracking-widest uppercase mb-2">Country</p>
           <div className="flex flex-wrap gap-2">
             {COUNTRIES.map((c) => (
               <button
@@ -39,7 +39,7 @@ export default function IntelligenceFilters({ posts }: { posts: Post[] }) {
           </div>
         </div>
         <div>
-          <p className="text-slate-500 text-xs font-semibold tracking-widest uppercase mb-2">Sector</p>
+          <p className="text-slate-600 text-xs font-semibold tracking-widest uppercase mb-2">Sector</p>
           <div className="flex flex-wrap gap-2">
             {CATEGORIES.map((c) => (
               <button
@@ -48,7 +48,7 @@ export default function IntelligenceFilters({ posts }: { posts: Post[] }) {
                 className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                   category === c
                     ? "gradient-gold text-white"
-                    : "bg-white border border-gray-200 text-slate-600 hover:border-gold hover:text-gold"
+                    : "bg-white border border-gray-200 text-slate-600 hover:border-gold hover:text-gold-dim"
                 }`}
               >
                 {c}
@@ -59,12 +59,12 @@ export default function IntelligenceFilters({ posts }: { posts: Post[] }) {
       </div>
 
       {/* Count */}
-      <p className="text-slate-500 text-sm mb-6">
+      <p className="text-slate-600 text-sm mb-6">
         Showing <span className="text-ink font-semibold">{filtered.length}</span> reports
       </p>
 
       {filtered.length === 0 ? (
-        <div className="text-center py-16 text-slate-400">
+        <div className="text-center py-16 text-slate-600">
           No reports match the selected filters.
         </div>
       ) : (

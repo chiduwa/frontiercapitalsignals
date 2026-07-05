@@ -89,7 +89,7 @@ export default function HomePage() {
               <div key={label} className="py-8 px-6 first:pl-0 last:pr-0">
                 <p className="text-3xl font-black text-gradient-gold">{value}</p>
                 <p className="text-ink text-sm font-semibold mt-1">{label}</p>
-                <p className="text-slate-500 text-xs mt-0.5">{note}</p>
+                <p className="text-slate-600 text-xs mt-0.5">{note}</p>
               </div>
             ))}
           </div>
@@ -100,7 +100,7 @@ export default function HomePage() {
       <section className="py-24 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="max-w-2xl mb-14">
-            <p className="text-gold text-xs font-semibold tracking-widest uppercase mb-3">What We Do</p>
+            <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-3">What We Do</p>
             <h2 className="text-4xl font-black text-ink mb-4 tracking-tight">Intelligence You Can Act On</h2>
             <p className="text-slate-500 text-lg leading-relaxed">
               From daily AI-curated signals to full-scale market entry support, we provide the intelligence layer that turns African markets from opaque to legible.
@@ -110,13 +110,13 @@ export default function HomePage() {
             {services.map(({ icon, title, desc }) => (
               <div key={title} className="bg-white border border-gray-200 rounded-xl p-6 hover:border-gold/50 hover:shadow-md transition-all group">
                 <div className="text-3xl mb-4">{icon}</div>
-                <h3 className="text-ink font-bold mb-2 group-hover:text-gold transition-colors">{title}</h3>
+                <h3 className="text-ink font-bold mb-2 group-hover:text-gold-dim transition-colors">{title}</h3>
                 <p className="text-slate-500 text-sm leading-relaxed">{desc}</p>
               </div>
             ))}
           </div>
           <div className="mt-10">
-            <Link href="/services" className="inline-flex items-center gap-2 text-gold font-semibold hover:text-gold-light transition-colors text-sm">
+            <Link href="/services" className="inline-flex items-center gap-2 text-gold-dim font-semibold hover:text-gold-light transition-colors text-sm">
               View all services
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -131,9 +131,9 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
             <div>
-              <p className="text-gold text-xs font-semibold tracking-widest uppercase mb-3">Opportunity Radar</p>
+              <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-3">Opportunity Radar</p>
               <h2 className="text-4xl font-black text-ink mb-5 tracking-tight">Where Capital Is Flowing</h2>
-              <p className="text-slate-500 leading-relaxed mb-8">
+              <p className="text-slate-600 leading-relaxed mb-8">
                 Our AI analyzes government procurement portals, tender notices, policy announcements, and on-ground reports to score opportunity intensity across key sectors. Updated weekly.
               </p>
               <Link href="/intelligence" className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-navy text-white font-semibold text-sm hover:bg-navy-700 transition-colors">
@@ -146,9 +146,9 @@ export default function HomePage() {
                   <div className="flex items-center justify-between mb-2.5">
                     <div>
                       <span className="text-ink font-semibold text-sm">{name}</span>
-                      <span className="ml-2 text-slate-400 text-xs">{countries}</span>
+                      <span className="ml-2 text-slate-600 text-xs">{countries}</span>
                     </div>
-                    <span className="text-gold font-bold text-sm tabular-nums">{score}</span>
+                    <span className="text-gold-dim font-bold text-sm tabular-nums">{score}</span>
                   </div>
                   <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
                     <div className="h-full gradient-gold rounded-full transition-all" style={{ width: `${score}%` }} />
@@ -166,7 +166,7 @@ export default function HomePage() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-end justify-between mb-12">
               <div>
-                <p className="text-gold text-xs font-semibold tracking-widest uppercase mb-3">Latest Intelligence</p>
+                <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-3">Latest Intelligence</p>
                 <h2 className="text-4xl font-black text-ink tracking-tight">Today&apos;s Market Signals</h2>
               </div>
               <Link href="/intelligence" className="text-gold text-sm font-semibold hover:text-gold-light hidden sm:flex items-center gap-1 transition-colors">

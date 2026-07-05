@@ -165,7 +165,7 @@ export default function MarketsHub() {
                       key={t}
                       onClick={() => setRateTab(t)}
                       className={`px-3 py-1.5 rounded text-xs font-semibold transition-colors capitalize ${
-                        rateTab === t ? "bg-navy text-white" : "bg-gray-100 text-slate-500 hover:text-ink"
+                        rateTab === t ? "bg-navy text-white" : "bg-gray-100 text-slate-600 hover:text-ink"
                       }`}
                     >
                       {t === "african" ? "African Currencies" : "Global Currencies"}
@@ -173,7 +173,7 @@ export default function MarketsHub() {
                   ))}
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-400">Base:</span>
+                  <span className="text-xs text-slate-600">Base:</span>
                   <select
                     value={base}
                     onChange={e => setBase(e.target.value)}
@@ -190,9 +190,9 @@ export default function MarketsHub() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-sand border-b border-gray-200">
-                      <th className="text-left py-3 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">Currency</th>
-                      <th className="text-right py-3 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wide">1 {base} =</th>
-                      <th className="text-right py-3 px-4 text-xs font-semibold text-slate-500 uppercase tracking-wide hidden sm:table-cell">Code</th>
+                      <th className="text-left py-3 px-4 text-xs font-semibold text-slate-600 uppercase tracking-wide">Currency</th>
+                      <th className="text-right py-3 px-4 text-xs font-semibold text-slate-600 uppercase tracking-wide">1 {base} =</th>
+                      <th className="text-right py-3 px-4 text-xs font-semibold text-slate-600 uppercase tracking-wide hidden sm:table-cell">Code</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -218,7 +218,7 @@ export default function MarketsHub() {
                                 {rate != null ? fmtRate(rate) : <span className="text-slate-300">—</span>}
                               </td>
                               <td className="py-3 px-4 text-right hidden sm:table-cell">
-                                <span className="inline-block px-2 py-0.5 rounded bg-gray-100 text-slate-500 text-xs font-semibold">{code}</span>
+                                <span className="inline-block px-2 py-0.5 rounded bg-gray-100 text-slate-600 text-xs font-semibold">{code}</span>
                               </td>
                             </tr>
                           );
@@ -227,9 +227,9 @@ export default function MarketsHub() {
                 </table>
               </div>
               {lastUpdated && (
-                <p className="text-xs text-slate-400 mt-2">
+                <p className="text-xs text-slate-600 mt-2">
                   Rates updated {lastUpdated} &mdash;{" "}
-                  <button onClick={fetchAll} className="text-gold hover:underline">Refresh</button>
+                  <button onClick={fetchAll} className="text-gold-dim hover:underline">Refresh</button>
                 </p>
               )}
             </div>
@@ -241,7 +241,7 @@ export default function MarketsHub() {
 
                 {/* Amount + From */}
                 <div>
-                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">From</label>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5 block">From</label>
                   <div className="flex gap-2">
                     <input
                       type="number"
@@ -267,7 +267,7 @@ export default function MarketsHub() {
                   <div className="flex-1 h-px bg-gray-200" />
                   <button
                     onClick={() => { setFromCcy(toCcy); setToCcy(fromCcy); }}
-                    className="w-9 h-9 rounded-full border border-gray-200 bg-white flex items-center justify-center hover:border-gold hover:text-gold transition-colors text-slate-400 shrink-0"
+                    className="w-9 h-9 rounded-full border border-gray-200 bg-white flex items-center justify-center hover:border-gold hover:text-gold-dim transition-colors text-slate-600 shrink-0"
                     title="Swap currencies"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -279,7 +279,7 @@ export default function MarketsHub() {
 
                 {/* To */}
                 <div>
-                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5 block">To</label>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5 block">To</label>
                   <select
                     value={toCcy}
                     onChange={e => setToCcy(e.target.value)}
@@ -297,23 +297,23 @@ export default function MarketsHub() {
                     <div className="h-8 bg-gray-100 rounded animate-pulse w-3/4" />
                   ) : rates?.rates ? (
                     <>
-                      <p className="text-xs text-slate-400 mb-1">
+                      <p className="text-xs text-slate-600 mb-1">
                         {numAmount.toLocaleString()} {fromInfo?.flag} {fromCcy} =
                       </p>
                       <p className="text-2xl font-black text-ink tabular-nums">
-                        <span className="text-gold">{toInfo?.symbol} </span>
+                        <span className="text-gold-dim">{toInfo?.symbol} </span>
                         {fmtResult(converted)}
                       </p>
-                      <p className="text-xs text-slate-400 mt-1">{toInfo?.flag} {toCcy}</p>
+                      <p className="text-xs text-slate-600 mt-1">{toInfo?.flag} {toCcy}</p>
                       <hr className="my-3 border-gray-100" />
-                      <p className="text-xs text-slate-400">
+                      <p className="text-xs text-slate-600">
                         1 {fromCcy} = {toInfo?.symbol}{fmtResult(convert(1, fromCcy, toCcy))} {toCcy}
                         <span className="ml-2 text-slate-300">|</span>
                         <span className="ml-2">1 {toCcy} = {fromInfo?.symbol}{fmtResult(convert(1, toCcy, fromCcy))} {fromCcy}</span>
                       </p>
                     </>
                   ) : (
-                    <p className="text-slate-400 text-sm">Unable to load rates</p>
+                    <p className="text-slate-600 text-sm">Unable to load rates</p>
                   )}
                 </div>
               </div>
@@ -327,9 +327,9 @@ export default function MarketsHub() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-end justify-between flex-wrap gap-4 mb-8">
             <div>
-              <p className="text-gold text-xs font-semibold tracking-widest uppercase mb-2">Live Prices</p>
+              <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-2">Live Prices</p>
               <h2 className="text-3xl font-black text-ink tracking-tight">Commodities</h2>
-              <p className="text-slate-500 text-sm mt-1">Key exports across our five focus markets</p>
+              <p className="text-slate-600 text-sm mt-1">Key exports across our five focus markets</p>
             </div>
             <div className="flex gap-1">
               {COMMODITY_GROUPS.map((g, i) => (
@@ -337,7 +337,7 @@ export default function MarketsHub() {
                   key={g.id}
                   onClick={() => setCommTab(i)}
                   className={`px-3 py-1.5 rounded text-xs font-semibold transition-colors ${
-                    commTab === i ? "bg-navy text-white" : "bg-white border border-gray-200 text-slate-500 hover:text-ink"
+                    commTab === i ? "bg-navy text-white" : "bg-white border border-gray-200 text-slate-600 hover:text-ink"
                   }`}
                 >
                   {g.label}
@@ -353,8 +353,8 @@ export default function MarketsHub() {
                 <div key={key} className="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-sm transition-shadow">
                   <div className="flex items-start justify-between mb-3">
                     <div>
-                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">{label}</p>
-                      <p className="text-xs text-slate-400 mt-0.5">{unit}</p>
+                      <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{label}</p>
+                      <p className="text-xs text-slate-600 mt-0.5">{unit}</p>
                     </div>
                     {countries && (
                       <div className="flex gap-0.5 text-base leading-none">
@@ -366,7 +366,7 @@ export default function MarketsHub() {
                     <div className="h-8 bg-gray-100 rounded animate-pulse w-2/3" />
                   ) : price != null ? (
                     <p className="text-2xl font-black text-ink tabular-nums">
-                      <span className="text-base font-semibold text-slate-400">$</span>
+                      <span className="text-base font-semibold text-slate-600">$</span>
                       {fmtPrice(price)}
                     </p>
                   ) : (
@@ -378,7 +378,7 @@ export default function MarketsHub() {
           </div>
 
           {lastUpdated && (
-            <p className="text-xs text-slate-400 mt-5">
+            <p className="text-xs text-slate-600 mt-5">
               Commodity prices delayed 15–20 min &mdash; last fetched {lastUpdated}
             </p>
           )}

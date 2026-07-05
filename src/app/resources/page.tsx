@@ -84,7 +84,7 @@ export default function ResourcesPage() {
       <section className="bg-sand border-b border-gray-200 py-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="max-w-2xl">
-            <p className="text-gold text-xs font-semibold tracking-widest uppercase mb-3">Investor Resources</p>
+            <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-3">Investor Resources</p>
             <h1 className="text-5xl font-black text-ink mb-4 tracking-tight">Your African Market Toolkit</h1>
             <p className="text-slate-500 text-lg">
               Official government portals, investment agencies, and key contacts for each of our five focus markets. Verified and curated for international investors.
@@ -97,7 +97,7 @@ export default function ResourcesPage() {
       <section className="py-16 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="mb-10">
-            <p className="text-gold text-xs font-semibold tracking-widest uppercase mb-3">Market Data</p>
+            <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-3">Market Data</p>
             <h2 className="text-3xl font-black text-ink tracking-tight">The Numbers That Matter</h2>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -109,7 +109,7 @@ export default function ResourcesPage() {
             ].map(({ title, note, Chart }) => (
               <div key={title} className="bg-white border border-gray-200 rounded-2xl p-6 hover:shadow-sm transition-shadow">
                 <h3 className="text-ink font-bold mb-1 text-sm">{title}</h3>
-                <p className="text-slate-400 text-xs mb-5">{note}</p>
+                <p className="text-slate-600 text-xs mb-5">{note}</p>
                 <Chart />
               </div>
             ))}
@@ -121,7 +121,7 @@ export default function ResourcesPage() {
       <section className="py-16 bg-sand">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="mb-10">
-            <p className="text-gold text-xs font-semibold tracking-widest uppercase mb-3">By Country</p>
+            <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-3">By Country</p>
             <h2 className="text-3xl font-black text-ink tracking-tight">Official Investment Resources</h2>
           </div>
 
@@ -141,7 +141,7 @@ export default function ResourcesPage() {
                   <span className="text-4xl">{flag}</span>
                   <div>
                     <h2 className="text-2xl font-black text-ink">{name}</h2>
-                    <p className="text-gold text-sm font-semibold">{tagline}</p>
+                    <p className="text-gold-dim text-sm font-semibold">{tagline}</p>
                   </div>
                 </div>
                 <p className="text-slate-500 text-sm mb-6 max-w-3xl leading-relaxed">{highlight}</p>
@@ -150,12 +150,12 @@ export default function ResourcesPage() {
                     <a key={url} href={url} target="_blank" rel="noopener noreferrer"
                       className="bg-white border border-gray-200 rounded-xl p-4 hover:border-gold/50 hover:shadow-md transition-all group">
                       <div className="flex items-start justify-between gap-2 mb-2">
-                        <h3 className="text-ink text-sm font-semibold group-hover:text-gold transition-colors leading-snug">{label}</h3>
+                        <h3 className="text-ink text-sm font-semibold group-hover:text-gold-dim transition-colors leading-snug">{label}</h3>
                         <svg className="w-4 h-4 text-gray-300 group-hover:text-gold shrink-0 mt-0.5 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                         </svg>
                       </div>
-                      <p className="text-slate-400 text-xs leading-relaxed">{desc}</p>
+                      <p className="text-slate-600 text-xs leading-relaxed">{desc}</p>
                     </a>
                   ))}
                 </div>

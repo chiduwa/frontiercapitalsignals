@@ -26,7 +26,7 @@ export default function ContactPage() {
       <section className="bg-sand border-b border-gray-200 py-14">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="max-w-2xl">
-            <p className="text-gold text-xs font-semibold tracking-widest uppercase mb-3">Get in Touch</p>
+            <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-3">Get in Touch</p>
             <h1 className="text-5xl font-black text-ink mb-4 tracking-tight">Start the Conversation</h1>
             <p className="text-slate-500 text-lg">
               Whether you&apos;re an institutional investor, a family office, or a company exploring African markets — tell us what you&apos;re looking for.

@@ -26,7 +26,7 @@ export default function Navbar() {
             </div>
             <div className="hidden sm:block leading-none">
               <span className="font-bold text-ink text-[15px] tracking-tight">Frontier Capital</span>
-              <span className="block text-gold text-[10px] font-semibold tracking-widest uppercase mt-0.5">Signals</span>
+              <span className="block text-gold-dim text-[10px] font-semibold tracking-widest uppercase mt-0.5">Signals</span>
             </div>
           </Link>
 
@@ -38,7 +38,7 @@ export default function Navbar() {
                 href={href}
                 className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
                   pathname === href || pathname.startsWith(href + "/")
-                    ? "text-gold bg-amber-50"
+                    ? "text-gold-dim bg-amber-50"
                     : "text-slate-600 hover:text-ink hover:bg-gray-50"
                 }`}
               >
@@ -58,7 +58,7 @@ export default function Navbar() {
 
           {/* Mobile toggle */}
           <button
-            className="md:hidden p-2 rounded text-slate-500 hover:text-ink hover:bg-gray-50"
+            className="md:hidden p-2 rounded text-slate-600 hover:text-ink hover:bg-gray-50"
             onClick={() => setOpen(!open)}
             aria-label="Toggle menu"
           >
@@ -84,7 +84,7 @@ export default function Navbar() {
               href={href}
               onClick={() => setOpen(false)}
               className={`block px-3 py-2 rounded text-sm font-medium ${
-                pathname === href ? "text-gold bg-amber-50" : "text-slate-600 hover:text-ink hover:bg-gray-50"
+                pathname === href ? "text-gold-dim bg-amber-50" : "text-slate-600 hover:text-ink hover:bg-gray-50"
               }`}
             >
               {label}

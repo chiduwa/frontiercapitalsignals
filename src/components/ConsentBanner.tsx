@@ -87,7 +87,7 @@ export default function ConsentBanner() {
     <div className="fixed bottom-11 left-0 right-0 z-[60] px-4 pb-3 sm:px-6">
       <div className="max-w-3xl mx-auto bg-white border border-gray-200 rounded-2xl shadow-2xl shadow-black/20 p-5">
         <p className="text-ink text-sm font-bold mb-1">We value your privacy</p>
-        <p className="text-slate-500 text-xs leading-relaxed mb-4">
+        <p className="text-slate-600 text-xs leading-relaxed mb-4">
           We use cookies for analytics and advertising. Choose what you&apos;re comfortable with — you can change this anytime via &ldquo;Cookie Settings&rdquo; in the footer.
         </p>
 
@@ -95,7 +95,7 @@ export default function ConsentBanner() {
           <div className="space-y-3 mb-4 border-t border-gray-100 pt-4">
             <label className="flex items-center justify-between gap-3 text-sm cursor-pointer">
               <span className="text-ink font-medium">
-                Analytics <span className="text-slate-400 font-normal">— helps us understand site usage</span>
+                Analytics <span className="text-slate-600 font-normal">— helps us understand site usage</span>
               </span>
               <input
                 type="checkbox"
@@ -106,7 +106,7 @@ export default function ConsentBanner() {
             </label>
             <label className="flex items-center justify-between gap-3 text-sm cursor-pointer">
               <span className="text-ink font-medium">
-                Advertising <span className="text-slate-400 font-normal">— personalized ads via AdSense</span>
+                Advertising <span className="text-slate-600 font-normal">— personalized ads via AdSense</span>
               </span>
               <input
                 type="checkbox"
@@ -134,14 +134,14 @@ export default function ConsentBanner() {
           {customizing ? (
             <button
               onClick={() => choose(draftAnalytics, draftAdvertising)}
-              className="px-4 py-2 rounded-lg border border-gold text-gold text-xs font-bold hover:bg-gold hover:text-navy transition-colors"
+              className="px-4 py-2 rounded-lg border border-gold text-gold-dim text-xs font-bold hover:bg-gold hover:text-navy transition-colors"
             >
               Save Preferences
             </button>
           ) : (
             <button
               onClick={startCustomizing}
-              className="px-4 py-2 rounded-lg text-slate-500 text-xs font-bold hover:text-ink transition-colors"
+              className="px-4 py-2 rounded-lg text-slate-600 text-xs font-bold hover:text-ink transition-colors"
             >
               Customize
             </button>

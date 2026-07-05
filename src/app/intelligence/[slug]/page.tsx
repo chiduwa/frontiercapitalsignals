@@ -84,18 +84,18 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
         {/* Meta */}
         <div className="flex flex-wrap items-center gap-3 mb-5">
           <span className="text-2xl">{countryFlag[post.country] ?? "🌍"}</span>
-          <span className="text-gold font-semibold text-sm">{post.country}</span>
+          <span className="text-gold-dim font-semibold text-sm">{post.country}</span>
           <span className="text-gray-300">·</span>
           <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${catStyle}`}>{post.category}</span>
           <span className="text-gray-300">·</span>
-          <time className="text-slate-400 text-sm">{post.date}</time>
+          <time className="text-slate-600 text-sm">{post.date}</time>
         </div>
 
         <h1 className="text-3xl sm:text-4xl font-black text-ink leading-tight mb-6 tracking-tight">{post.title}</h1>
 
         {/* Summary callout */}
         <div className="bg-amber-50 border-l-4 border-gold rounded-r-xl px-6 py-4 mb-10">
-          <p className="text-gold text-xs font-semibold tracking-widest uppercase mb-2">Intelligence Summary</p>
+          <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-2">Intelligence Summary</p>
           <p className="text-slate-700 leading-relaxed text-sm">{post.summary}</p>
         </div>
 
@@ -104,7 +104,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
 
         {/* Disclaimer */}
         <div className="mt-12 pt-8 border-t border-gray-100">
-          <p className="text-slate-400 text-xs leading-relaxed">
+          <p className="text-slate-600 text-xs leading-relaxed">
             This intelligence report is provided for informational purposes only and does not constitute investment advice. Frontier Capital Signals makes no representations as to the accuracy, completeness, or timeliness of this information. Always conduct independent due diligence before making investment decisions.
           </p>
         </div>

@@ -23,7 +23,7 @@ export default function AboutPage() {
       <section className="bg-sand border-b border-gray-200 py-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="max-w-2xl">
-            <p className="text-gold text-xs font-semibold tracking-widest uppercase mb-3">About Us</p>
+            <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-3">About Us</p>
             <h1 className="text-5xl font-black text-ink mb-5 tracking-tight">Built for Investors Who Take Africa Seriously</h1>
             <p className="text-slate-500 text-lg leading-relaxed">
               Frontier Capital Signals was founded on a simple observation: billions of dollars of investable capital never reach Africa&apos;s most dynamic economies — not because of a lack of opportunity, but because of a lack of reliable intelligence.
@@ -37,7 +37,7 @@ export default function AboutPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-start">
             <div>
-              <p className="text-gold text-xs font-semibold tracking-widest uppercase mb-3">Our Mission</p>
+              <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-3">Our Mission</p>
               <h2 className="text-4xl font-black text-ink mb-6 tracking-tight">Close the Intelligence Gap</h2>
               <div className="space-y-4 text-slate-500 leading-relaxed text-sm">
                 <p>Ghana, Nigeria, Kenya, Malawi, and Uganda are home to some of the world&apos;s fastest-growing economies, youngest populations, and most undercapitalized sectors. Yet most global investors lack the tools to act on these markets with confidence.</p>
@@ -57,7 +57,7 @@ export default function AboutPage() {
                     <div className="text-3xl font-black text-gradient-gold min-w-[70px] tabular-nums">{value}</div>
                     <div>
                       <p className="text-ink font-semibold text-sm">{label}</p>
-                      <p className="text-slate-400 text-xs mt-0.5">{note}</p>
+                      <p className="text-slate-600 text-xs mt-0.5">{note}</p>
                     </div>
                   </div>
                 ))}
@@ -88,7 +88,7 @@ export default function AboutPage() {
       <section className="py-20 bg-sand">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12">
-            <p className="text-gold text-xs font-semibold tracking-widest uppercase mb-3">What Drives Us</p>
+            <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-3">What Drives Us</p>
             <h2 className="text-4xl font-black text-ink tracking-tight">Our Principles</h2>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -107,7 +107,7 @@ export default function AboutPage() {
       <section className="py-20 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12">
-            <p className="text-gold text-xs font-semibold tracking-widest uppercase mb-3">Our Capabilities</p>
+            <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-3">Our Capabilities</p>
             <h2 className="text-4xl font-black text-ink tracking-tight">How We Deliver Intelligence</h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

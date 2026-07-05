@@ -44,7 +44,7 @@ export default function ContactForm({ inquiryTypes }: { inquiryTypes: string[] }
           </svg>
         </div>
         <h3 className="text-ink font-black text-xl mb-2">Message Received</h3>
-        <p className="text-slate-500 text-sm">We&apos;ll respond within one business day.</p>
+        <p className="text-slate-600 text-sm">We&apos;ll respond within one business day.</p>
       </div>
     );
   }
@@ -98,7 +98,7 @@ export default function ContactForm({ inquiryTypes }: { inquiryTypes: string[] }
         className="w-full py-3.5 rounded-lg bg-navy text-white font-bold text-sm hover:bg-navy-700 transition-colors disabled:opacity-50">
         {status === "sending" ? "Sending…" : "Send Message"}
       </button>
-      <p className="text-slate-400 text-xs text-center">No spam, ever. We&apos;ll only respond to your inquiry.</p>
+      <p className="text-slate-600 text-xs text-center">No spam, ever. We&apos;ll only respond to your inquiry.</p>
     </form>
   );
 }

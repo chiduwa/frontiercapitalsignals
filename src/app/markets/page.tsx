@@ -31,7 +31,7 @@ export default function MarketsPage() {
           <div className="max-w-2xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gold/10 border border-gold/30 mb-4">
               <span className="w-1.5 h-1.5 rounded-full bg-gold animate-pulse" />
-              <span className="text-gold text-xs font-semibold tracking-widest uppercase">Live Data</span>
+              <span className="text-gold-dim text-xs font-semibold tracking-widest uppercase">Live Data</span>
             </div>
             <h1 className="text-5xl font-black text-ink mb-4 tracking-tight">Markets</h1>
             <p className="text-slate-500 text-lg leading-relaxed">

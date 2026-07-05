@@ -29,7 +29,7 @@ export default function Footer() {
             <p className="text-slate-400 text-sm leading-relaxed">
               AI-powered investment intelligence for Africa&apos;s most dynamic emerging markets.
             </p>
-            <p className="text-slate-600 text-xs mt-4 font-medium tracking-wide">
+            <p className="text-slate-400 text-xs mt-4 font-medium tracking-wide">
               GH &middot; NG &middot; KE &middot; MWI &middot; UG
             </p>
           </div>
@@ -91,11 +91,11 @@ export default function Footer() {
         </div>
 
         <div className="border-t border-white/10 mt-10 pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="text-slate-500 text-xs">
+          <p className="text-slate-400 text-xs">
             &copy; {new Date().getFullYear()} Frontier Capital Signals. All rights reserved.
           </p>
           <div className="flex items-center gap-4">
-            <p className="text-slate-600 text-xs text-center">
+            <p className="text-slate-400 text-xs text-center">
               For informational purposes only. Not financial advice.
             </p>
             <CookieSettingsButton />

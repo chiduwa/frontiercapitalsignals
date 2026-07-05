@@ -46,14 +46,14 @@ export default function PostCard({ post }: { post: Post }) {
         </div>
         <div className="p-5 flex-1 flex flex-col">
           <div className="flex items-center justify-between mb-2.5">
-            <span className="text-gold text-xs font-semibold">{post.country}</span>
-            <time className="text-slate-400 text-xs">{post.date}</time>
+            <span className="text-gold-dim text-xs font-semibold">{post.country}</span>
+            <time className="text-slate-600 text-xs">{post.date}</time>
           </div>
-          <h3 className="text-ink font-bold text-sm leading-snug mb-2 group-hover:text-gold transition-colors line-clamp-2">
+          <h3 className="text-ink font-bold text-sm leading-snug mb-2 group-hover:text-gold-dim transition-colors line-clamp-2">
             {post.title}
           </h3>
-          <p className="text-slate-500 text-xs leading-relaxed line-clamp-3 flex-1">{post.summary}</p>
-          <div className="mt-4 text-gold text-xs font-semibold flex items-center gap-1">
+          <p className="text-slate-600 text-xs leading-relaxed line-clamp-3 flex-1">{post.summary}</p>
+          <div className="mt-4 text-gold-dim text-xs font-semibold flex items-center gap-1">
             Read analysis
             <svg className="w-3 h-3 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />

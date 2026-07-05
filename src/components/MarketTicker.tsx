@@ -354,10 +354,10 @@ export default function MarketTicker() {
               ))}
             </div>
             <div className="flex items-center gap-3">
-              {tick && <span className="text-xs text-slate-400 hidden sm:block">Updated {tick}</span>}
-              <button onClick={fetchAll} className="text-xs text-gold hover:underline hidden sm:block">Refresh</button>
-              <Link href="/markets" className="text-xs font-semibold text-gold hover:underline">Full view →</Link>
-              <button onClick={() => setExpanded(false)} className="p-1 rounded text-slate-400 hover:text-ink hover:bg-gray-100">
+              {tick && <span className="text-xs text-slate-600 hidden sm:block">Updated {tick}</span>}
+              <button onClick={fetchAll} className="text-xs text-gold-dim hover:underline hidden sm:block">Refresh</button>
+              <Link href="/markets" className="text-xs font-semibold text-gold-dim hover:underline">Full view →</Link>
+              <button onClick={() => setExpanded(false)} className="p-1 rounded text-slate-600 hover:text-ink hover:bg-gray-100">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
@@ -385,7 +385,7 @@ export default function MarketTicker() {
                   /* Search results */
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-px bg-gray-100">
                     {filteredCurrencies.length === 0 ? (
-                      <div className="col-span-full py-8 text-center text-slate-400 text-sm bg-white">No currencies match &ldquo;{search}&rdquo;</div>
+                      <div className="col-span-full py-8 text-center text-slate-600 text-sm bg-white">No currencies match &ldquo;{search}&rdquo;</div>
                     ) : filteredCurrencies.map(c => (
                       <CurrencyCell key={c.code} code={c.code} name={c.name} flag={c.flag} rate={c.rate} isPriority={c.isPriority} />
                     ))}
@@ -395,7 +395,7 @@ export default function MarketTicker() {
                   <>
                     {/* Focus markets */}
                     <div className="px-4 pt-3 pb-1">
-                      <p className="text-[10px] font-black text-gold tracking-widest uppercase">Focus Markets</p>
+                      <p className="text-[10px] font-black text-gold-dim tracking-widest uppercase">Focus Markets</p>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-px bg-gray-100 mx-0">
                       {focusCurrencies.map(c => (
@@ -405,7 +405,7 @@ export default function MarketTicker() {
 
                     {/* Major global */}
                     <div className="px-4 pt-3 pb-1 border-t border-gray-100">
-                      <p className="text-[10px] font-black text-slate-400 tracking-widest uppercase">Major Global Currencies</p>
+                      <p className="text-[10px] font-black text-slate-600 tracking-widest uppercase">Major Global Currencies</p>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-px bg-gray-100">
                       {globalCurrencies.map(c => (
@@ -415,7 +415,7 @@ export default function MarketTicker() {
 
                     {/* All others */}
                     <div className="px-4 pt-3 pb-1 border-t border-gray-100">
-                      <p className="text-[10px] font-black text-slate-400 tracking-widest uppercase">All Currencies</p>
+                      <p className="text-[10px] font-black text-slate-600 tracking-widest uppercase">All Currencies</p>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-px bg-gray-100">
                       {otherCurrencies.map(c => (
@@ -441,7 +441,7 @@ export default function MarketTicker() {
                       <p className="font-mono font-bold text-ink text-sm tabular-nums leading-none">
                         {price != null ? `$${fmtPrice(price)}` : <span className="text-slate-200">—</span>}
                       </p>
-                      <p className="text-[10px] text-slate-400 mt-1">USD{c.unit}</p>
+                      <p className="text-[10px] text-slate-600 mt-1">USD{c.unit}</p>
                     </div>
                   );
                 })}
@@ -479,7 +479,7 @@ export default function MarketTicker() {
 
                   <button
                     onClick={() => { setFromCcy(toCcy); setToCcy(fromCcy); }}
-                    className="self-center w-9 h-9 rounded-full border border-gray-200 bg-white flex items-center justify-center hover:border-gold hover:text-gold transition-colors text-slate-400 shrink-0 mx-auto sm:mx-0"
+                    className="self-center w-9 h-9 rounded-full border border-gray-200 bg-white flex items-center justify-center hover:border-gold hover:text-gold-dim transition-colors text-slate-600 shrink-0 mx-auto sm:mx-0"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
@@ -509,22 +509,22 @@ export default function MarketTicker() {
                   {rates?.rates ? (
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                       <div>
-                        <p className="text-xs text-slate-400 mb-0.5">
+                        <p className="text-xs text-slate-600 mb-0.5">
                           {fromMeta.flag} {numAmount.toLocaleString()} {fromCcy} =
                         </p>
                         <p className="text-2xl font-black text-ink tabular-nums">
-                          <span className="text-gold">{toMeta.symbol} </span>
+                          <span className="text-gold-dim">{toMeta.symbol} </span>
                           {fmtConverted(converted)}
-                          <span className="text-sm font-medium text-slate-400 ml-1">{toCcy}</span>
+                          <span className="text-sm font-medium text-slate-600 ml-1">{toCcy}</span>
                         </p>
                       </div>
-                      <div className="text-xs text-slate-400 sm:text-right shrink-0">
+                      <div className="text-xs text-slate-600 sm:text-right shrink-0">
                         <p>1 {fromCcy} = {toMeta.symbol}{fmtConverted(xrate(rates.rates, 1, fromCcy, toCcy))} {toCcy}</p>
                         <p className="mt-0.5">1 {toCcy} = {fromMeta.symbol}{fmtConverted(xrate(rates.rates, 1, toCcy, fromCcy))} {fromCcy}</p>
                       </div>
                     </div>
                   ) : (
-                    <p className="text-sm text-slate-400">Loading live rates…</p>
+                    <p className="text-sm text-slate-600">Loading live rates…</p>
                   )}
                 </div>
               </div>
@@ -533,7 +533,7 @@ export default function MarketTicker() {
 
           {/* Footer */}
           <div className="px-4 py-2 border-t border-gray-100 bg-sand/50 flex items-center justify-between">
-            <p className="text-[10px] text-slate-400">
+            <p className="text-[10px] text-slate-600">
               FX via open.er-api.com · Commodities 15–20 min delayed · Not financial advice
             </p>
           </div>
@@ -546,6 +546,7 @@ export default function MarketTicker() {
         {/* Brand */}
         <button
           onClick={() => setExpanded(e => !e)}
+          aria-label={expanded ? "Collapse" : "Expand markets panel"}
           className="shrink-0 h-full flex items-center gap-2 px-3 border-r border-white/10 hover:bg-white/5 transition-colors"
         >
           <div className="w-5 h-5 rounded bg-gold/20 flex items-center justify-center shrink-0">
@@ -585,7 +586,7 @@ export default function MarketTicker() {
                   {item.flag && <span className="text-sm leading-none">{item.flag}</span>}
                   <span className="text-white/50 text-[10px] font-semibold tracking-wide group-hover:text-white/80 transition-colors">{item.label}</span>
                   <span className="text-white font-mono text-xs font-bold tabular-nums">{item.value}</span>
-                  <span className="text-white/25 text-[9px]">{item.sub}</span>
+                  <span className="text-white/50 text-[9px]">{item.sub}</span>
                 </button>
               ))}
             </div>
@@ -654,12 +655,12 @@ function CurrencyCell({
     <div className={`px-4 py-3 hover:bg-sand/60 transition-colors ${highlight ? "bg-gold/5" : "bg-white"}`}>
       <div className="flex items-center gap-1.5 mb-1.5">
         <span className="text-lg leading-none">{flag}</span>
-        <span className={`text-[11px] font-bold tracking-wide ${isPriority ? "text-ink" : "text-slate-400"}`}>{code}</span>
+        <span className={`text-[11px] font-bold tracking-wide ${isPriority ? "text-ink" : "text-slate-600"}`}>{code}</span>
       </div>
       <p className="font-mono font-bold text-ink text-sm tabular-nums leading-none">
         {rate != null ? fmtRate(rate) : <span className="text-slate-200">—</span>}
       </p>
-      <p className="text-[10px] text-slate-400 mt-0.5 truncate" title={name}>{name}</p>
+      <p className="text-[10px] text-slate-600 mt-0.5 truncate" title={name}>{name}</p>
     </div>
   );
 }

@@ -65,7 +65,7 @@ export default function ServicesPage() {
       <section className="bg-sand border-b border-gray-200 py-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="max-w-2xl">
-            <p className="text-gold text-xs font-semibold tracking-widest uppercase mb-3">Our Services</p>
+            <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-3">Our Services</p>
             <h1 className="text-5xl font-black text-ink mb-5 tracking-tight">The Full Intelligence Stack for African Markets</h1>
             <p className="text-slate-500 text-lg">
               Whether you&apos;re scanning for opportunities, entering a new market, deploying capital, or already operational, we have a service designed for your stage.
@@ -90,13 +90,13 @@ export default function ServicesPage() {
                           <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full gradient-gold text-white">{badge}</span>
                         )}
                       </div>
-                      <p className="text-gold text-sm font-semibold">{tagline}</p>
+                      <p className="text-gold-dim text-sm font-semibold">{tagline}</p>
                     </div>
                   </div>
                   <p className="text-slate-500 leading-relaxed text-sm">{desc}</p>
                 </div>
                 <div>
-                  <p className="text-slate-400 text-xs font-semibold tracking-widest uppercase mb-3">Deliverables</p>
+                  <p className="text-slate-600 text-xs font-semibold tracking-widest uppercase mb-3">Deliverables</p>
                   <ul className="space-y-2">
                     {deliverables.map((d) => (
                       <li key={d} className="flex items-start gap-2 text-sm text-slate-600">

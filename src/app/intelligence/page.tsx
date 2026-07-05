@@ -21,14 +21,14 @@ export default function IntelligencePage() {
             <div>
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gold/10 border border-gold/30 mb-4">
                 <span className="w-1.5 h-1.5 rounded-full bg-gold animate-pulse" />
-                <span className="text-gold text-xs font-semibold tracking-widest uppercase">Updated Daily</span>
+                <span className="text-gold-dim text-xs font-semibold tracking-widest uppercase">Updated Daily</span>
               </div>
               <h1 className="text-4xl font-black text-ink tracking-tight">Market Intelligence</h1>
               <p className="text-slate-500 mt-2 max-w-xl text-sm leading-relaxed">
                 AI-analyzed signals from government portals, tender databases, energy registries, and on-ground sources across Ghana, Nigeria, Kenya, Malawi, and Uganda.
               </p>
             </div>
-            <div className="text-sm text-slate-400 text-right shrink-0">
+            <div className="text-sm text-slate-600 text-right shrink-0">
               <span className="text-ink font-bold text-2xl">{posts.length}</span>
               <span className="ml-1">signals published</span>
             </div>
@@ -42,7 +42,7 @@ export default function IntelligencePage() {
             <div className="text-center py-24">
               <div className="text-5xl mb-4">📡</div>
               <h2 className="text-xl font-bold text-ink mb-2">Intelligence loading...</h2>
-              <p className="text-slate-400 text-sm">Run the content generation script or check back tomorrow.</p>
+              <p className="text-slate-600 text-sm">Run the content generation script or check back tomorrow.</p>
             </div>
           ) : (
             <IntelligenceFilters posts={posts} />
