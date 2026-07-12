@@ -17,6 +17,32 @@ const MAX_BYTES = 3_000_000;
 const USER_AGENT = "FCS-AIVisibilityScanner/1.0 (+https://frontiercapitalsignals.com/audit)";
 const AI_CRAWLERS = ["GPTBot", "Google-Extended", "PerplexityBot", "ClaudeBot", "anthropic-ai", "CCBot", "Applebot-Extended"];
 
+// Isolate-scoped rate limit: this is a public, unauthenticated endpoint that makes
+// up to 3 outbound fetches per call, so it's both a cost-abuse and an
+// SSRF/fetch-relay-abuse vector without some cap. Cloudflare Workers reuse an
+// isolate across many requests from the same edge colo, so a plain in-memory
+// map (same pattern already used in api/commodities) meaningfully throttles a
+// single abusive client even though it isn't a global/durable limit across
+// every isolate. A KV- or Durable-Object-backed limiter would be sturdier if
+// abuse is observed in practice.
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = 6;
+const rateLimitHits = new Map<string, number[]>();
+
+function isRateLimited(clientId: string): boolean {
+  const now = Date.now();
+  const hits = (rateLimitHits.get(clientId) ?? []).filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+  hits.push(now);
+  rateLimitHits.set(clientId, hits);
+  // Opportunistic cleanup so the map doesn't grow unbounded within a long-lived isolate.
+  if (rateLimitHits.size > 5000) {
+    for (const [key, times] of rateLimitHits) {
+      if (times.every((t) => now - t >= RATE_LIMIT_WINDOW_MS)) rateLimitHits.delete(key);
+    }
+  }
+  return hits.length > RATE_LIMIT_MAX;
+}
+
 function normalizeUrl(input: string): URL | null {
   let candidate = input.trim();
   if (!candidate) return null;
@@ -28,20 +54,55 @@ function normalizeUrl(input: string): URL | null {
   }
 }
 
+function isUnsafeIpv4(a: number, b: number): boolean {
+  if (a === 127 || a === 10 || a === 0) return true; // loopback / this-network
+  if (a === 172 && b >= 16 && b <= 31) return true; // private
+  if (a === 192 && b === 168) return true; // private
+  if (a === 169 && b === 254) return true; // link-local / cloud metadata
+  if (a === 100 && b >= 64 && b <= 127) return true; // carrier-grade NAT
+  return false;
+}
+
 function isSafeHostname(hostname: string): boolean {
-  const host = hostname.toLowerCase();
+  // WHATWG URL keeps brackets on IPv6 literals (e.g. "[::1]") — strip them
+  // before comparing, otherwise every IPv6-literal check below silently no-ops.
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) return false;
-  if (host === "0.0.0.0" || host === "::1") return false;
-  // IPv4 literal checks — loopback, private, link-local
+  if (host === "0.0.0.0") return false;
+
   const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (ipv4) {
-    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
-    if (a === 127 || a === 10 || a === 0) return false;
-    if (a === 172 && b >= 16 && b <= 31) return false;
-    if (a === 192 && b === 168) return false;
-    if (a === 169 && b === 254) return false;
+    return !isUnsafeIpv4(Number(ipv4[1]), Number(ipv4[2]));
+  }
+
+  if (host.includes(":")) {
+    // IPv6 literal.
+    if (host === "::1" || host === "::" || host === "0:0:0:0:0:0:0:1" || host === "0:0:0:0:0:0:0:0") {
+      return false;
+    }
+    // IPv4-mapped/compatible addresses (::ffff:127.0.0.1 or ::ffff:7f00:1) — pull
+    // out the embedded IPv4 and re-check it so mapped metadata/loopback addresses
+    // don't sneak past the IPv4 branch above.
+    const mappedDotted = host.match(/^::ffff:(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/);
+    if (mappedDotted) {
+      return !isUnsafeIpv4(Number(mappedDotted[1]), Number(mappedDotted[2]));
+    }
+    const mappedHex = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (mappedHex) {
+      const a = parseInt(mappedHex[1].padStart(4, "0").slice(0, 2), 16);
+      const b = parseInt(mappedHex[1].padStart(4, "0").slice(2, 4), 16);
+      return !isUnsafeIpv4(a, b);
+    }
+    // Link-local (fe80::/10) and unique local (fc00::/7) — reject by first hextet.
+    const firstGroup = host.split(":").find((g) => g.length > 0) ?? "";
+    if (/^[0-9a-f]{1,4}$/.test(firstGroup)) {
+      const groupNum = parseInt(firstGroup.padStart(4, "0"), 16);
+      if ((groupNum & 0xffc0) === 0xfe80) return false; // fe80::/10 link-local
+      if ((groupNum & 0xfe00) === 0xfc00) return false; // fc00::/7 unique local
+    }
     return true;
   }
+
   return true;
 }
 
@@ -72,6 +133,14 @@ function addCheck(checks: Check[], check: Check) {
 }
 
 export async function POST(req: NextRequest) {
+  const clientId = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  if (isRateLimited(clientId)) {
+    return NextResponse.json(
+      { error: "Too many scans from this connection. Try again in a minute." },
+      { status: 429, headers: { "Retry-After": "60" } },
+    );
+  }
+
   let body: { url?: string };
   try {
     body = await req.json();

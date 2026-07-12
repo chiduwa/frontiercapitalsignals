@@ -1,0 +1,38 @@
+# Frontier Capital Signals
+
+> AI-powered investment intelligence for African markets — daily signals, due diligence support, and on-ground intelligence for investors in Ghana, Nigeria, Kenya, Malawi, and Uganda.
+
+Frontier Capital Signals publishes daily market intelligence briefs covering government procurement, tenders, energy and mining projects, regulatory changes, and investment signals across five African markets. It also offers due diligence, market-entry strategy, deal origination, and an AI Visibility Audit service for small business websites.
+
+## Key pages
+
+- [Home](https://frontiercapitalsignals.com/): Overview and daily intelligence highlights
+- [Intelligence](https://frontiercapitalsignals.com/intelligence): Full archive of daily market intelligence articles
+- [Services](https://frontiercapitalsignals.com/services): Due diligence, market entry, deal origination, and intelligence subscriptions
+- [Markets](https://frontiercapitalsignals.com/markets): Coverage by country
+- [About](https://frontiercapitalsignals.com/about): Company background
+- [AI Visibility Audit](https://frontiercapitalsignals.com/audit): Fixed-price analytics and AI-search-visibility audit service for small business websites
+- [Free AI Visibility Scan](https://frontiercapitalsignals.com/scan): Free automated scan of a website's analytics, structured data, and AI-crawler readiness
+- [Contact](https://frontiercapitalsignals.com/contact)
+
+## Recent intelligence (latest 15)
+
+- [Smart Hearing Tech: A Quiet Revolution for African Investors](https://frontiercapitalsignals.com/intelligence/2026-07-11-smart-hearing-tech-a-quiet-revolution-for-african-investors-93f52b53): Advanced AI-powered hearing devices are poised for growth, presenting investment opportunities in African healthcare tech and distribution.
+- [Senegal Court Upholds Presidential Powers, Signaling Stability](https://frontiercapitalsignals.com/intelligence/2026-07-11-senegal-court-upholds-presidential-powers-signaling-stability-c508264a): Senegal's Constitutional Council rejected a bill to reduce presidential powers, signaling consolidated authority and potential policy predictability for investors.
+- [SADC Governments Target Smarter Spending, Better Projects](https://frontiercapitalsignals.com/intelligence/2026-07-11-sadc-governments-target-smarter-spending-better-projects-48eff6be): SADC nations are prioritizing evidence-based spending decisions to optimize limited public resources amid rising debt and climate pressures.
+- [Nigeria Remittances Streamlined: Flutterwave-Xoom Deal Signals Growth](https://frontiercapitalsignals.com/intelligence/2026-07-11-nigeria-remittances-streamlined-flutterwave-xoom-deal-signals-growth-06b7d593): Xoom's partnership with Flutterwave significantly improves Nigeria's remittance inflows, enhancing financial infrastructure and signaling robust growth for African fintech.
+- [Nigeria: APC VP Pick Solidifies Ticket, Signals Campaign Confidence](https://frontiercapitalsignals.com/intelligence/2026-07-11-nigeria-apc-vp-pick-solidifies-ticket-signals-campaign-confidence-5ffc31c1): The APC's selection of Shettima as Tinubu's running mate, accompanied by confident victory projections, offers an early read on Nigeria's political risk outlook.
+- [Malawi VP's G100 Appointment Signals Governance, ESG Progress](https://frontiercapitalsignals.com/intelligence/2026-07-11-malawi-vp-s-g100-appointment-signals-governance-esg-progress-d44f324f): Malawi VP Jane Ansah's G100 appointment signals international recognition, potentially bolstering governance and ESG frameworks for investors in Malawi.
+- [Malawi VP Global Appointment Signals Enhanced Investment Platform](https://frontiercapitalsignals.com/intelligence/2026-07-11-malawi-vp-global-appointment-signals-enhanced-investment-platform-51310b2a): Malawi's Vice President joining a global leadership council boosts the nation's international standing, potentially attracting increased foreign investment and collaboration.
+- [Malawi: Tuition Protests Signal Rising Social Risk](https://frontiercapitalsignals.com/intelligence/2026-07-11-malawi-tuition-protests-signal-rising-social-risk-3f9f119c): Malawi faces potential social unrest and political risk as a university fee hike draws protest threats, with the government unwilling to reverse its decision.
+- [Malawi Tanker Crash Signals Logistics Risk Exposure](https://frontiercapitalsignals.com/intelligence/2026-07-11-malawi-tanker-crash-signals-logistics-risk-exposure-6f1e558d): A fatal fuel tanker crash in Malawi underscores persistent road safety and logistics vulnerabilities affecting supply chain reliability and operational costs.
+- [Malawi's Million-Desk Deficit: An Infrastructure Opportunity](https://frontiercapitalsignals.com/intelligence/2026-07-11-malawi-s-million-desk-deficit-an-infrastructure-opportunity-f32e5c43): Malawi's severe school desk shortage signals significant investment opportunities in educational infrastructure and local manufacturing, driven by sustained demand.
+- [Malawi Opposition Leader's Recognition: Political Capital & Stability Signal](https://frontiercapitalsignals.com/intelligence/2026-07-11-malawi-opposition-leader-s-recognition-political-capital-stability-sig-727843e0): Malawi's opposition leader, Simplex Chithyola Banda, receiving a humanitarian award indicates rising political capital and social engagement, relevant for assessing governance stability.
+- [Malawi: Mhalaunda Health Centre Dispute Ends, New Opportunities Emerge](https://frontiercapitalsignals.com/intelligence/2026-07-11-malawi-mhalaunda-health-centre-dispute-ends-new-opportunities-emerge-e3327880): Malawi's Mhalaunda Health Centre dispute resolution improves operational clarity, presenting potential new private sector opportunities in healthcare infrastructure.
+- [Malawi: First Lady Allegation Points to Deepening Political Rift](https://frontiercapitalsignals.com/intelligence/2026-07-11-malawi-first-lady-allegation-points-to-deepening-political-rift-b7579f7a): Allegations of a presidential family-induced rift with the VP signal heightened political uncertainty in Malawi, impacting investor confidence.
+- [Malawi Clergy to Drive Financial Literacy, Broaden Investor Base](https://frontiercapitalsignals.com/intelligence/2026-07-11-malawi-clergy-to-drive-financial-literacy-broaden-investor-base-972a0fd7): A new financial literacy program targeting Malawian clergy is set to significantly expand the domestic investor base and boost local capital market engagement.
+- [Malawi: Blantyre Commercial Real Estate Expansion Underway](https://frontiercapitalsignals.com/intelligence/2026-07-11-malawi-blantyre-commercial-real-estate-expansion-underway-bd82e3c6): Press Properties' five-storey TNM Office Park signals significant commercial real estate growth and urban development in Blantyre, anchoring long-term investment prospects.
+
+## Notes
+
+This file is regenerated weekly. It does not grant any permission beyond what robots.txt allows — see robots.txt for crawler access rules.

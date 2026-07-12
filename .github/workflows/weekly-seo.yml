@@ -9,8 +9,29 @@ jobs:
   seo:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Regenerate llms.txt
+        run: node scripts/generate-llms-txt.mjs
+
+      - name: Commit llms.txt if changed
+        run: |
+          git config --global user.name "FCS Intelligence Bot"
+          git config --global user.email "bot@frontiercapitalsignals.com"
+          git add public/llms.txt
+          git diff --staged --quiet || git commit -m "chore: refresh llms.txt $(date +%Y-%m-%d)"
+          git diff --staged --quiet || git push
+
       - name: Ping Bing via IndexNow
         run: |
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
