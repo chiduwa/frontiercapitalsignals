@@ -26,6 +26,10 @@ jobs:
         run: npm ci
 
       - name: Generate daily intelligence
+        # A quota/RSS hiccup here should never block deploys of unrelated code
+        # changes — deploy now lives in its own push-triggered workflow
+        # (deploy.yml) that doesn't depend on this step succeeding.
+        continue-on-error: true
         env:
           GOOGLE_AI_API_KEY: ${{ secrets.GOOGLE_AI_API_KEY }}
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
@@ -38,10 +42,3 @@ jobs:
           git add content/intelligence/
           git diff --staged --quiet || git commit -m "chore: daily intelligence update $(date +%Y-%m-%d)"
           git push
-
-      - name: Deploy to Cloudflare Workers
-        run: npx opennextjs-cloudflare build && npx opennextjs-cloudflare populateCache local && npx wrangler deploy
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          GOOGLE_AI_API_KEY: ${{ secrets.GOOGLE_AI_API_KEY }}
