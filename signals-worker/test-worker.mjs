@@ -120,6 +120,9 @@ const page = await worker.fetch(new Request('https://x.com/signals/'), emptyEnv,
 const pageText = await page.text();
 check('dashboard served', page.headers.get('content-type').includes('text/html') && pageText.includes('Frontier Capital'));
 check('dashboard sends CSP + hardening headers', !!page.headers.get('content-security-policy') && page.headers.get('x-content-type-options') === 'nosniff' && page.headers.get('x-frame-options') === 'DENY');
+check('CSP allows GTM/GA4 domains (script-src + connect-src)', page.headers.get('content-security-policy').includes('googletagmanager.com') && page.headers.get('content-security-policy').includes('google-analytics.com'));
+check('GTM container + consent-mode snippet present in the page', pageText.includes('GTM-5Q7JC6JX') && pageText.includes('fcs_consent_v1') && pageText.includes("gtag('consent','default'"));
+check('custom event pushes present (data-loaded, error, methodology-open)', pageText.includes('signals_data_loaded') && pageText.includes('signals_feed_error') && pageText.includes('signals_methodology_open'));
 
 console.log('\n== api: empty KV (before first Action run) ==');
 const empty = await worker.fetch(new Request('https://x.com/signals/api/signals'), emptyEnv, ctx);

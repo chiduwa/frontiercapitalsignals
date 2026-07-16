@@ -1123,6 +1123,34 @@ const PAGE_HTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Frontier Capital Signals — Hourly confluence screens</title>
 <meta name="description" content="Hourly confluence screens across the top 100 cryptos and 60 US equities. Up to 14 techniques per asset must agree before a signal ranks.">
+<!-- Consent Mode v2 defaults, same scheme as the main site (fcs_consent_v1 in
+     localStorage, shared across the whole origin since localStorage is
+     origin- not path-scoped): respects a prior choice made on the main site,
+     or auto-grants for visitors outside the EEA/UK/CH via the same
+     /api/region endpoint. Visitors who land directly on /signals inside the
+     EEA without ever visiting the main site stay denied — this page has no
+     consent banner of its own, so that's the safe default, not a bug. -->
+<script>(function(){
+window.dataLayer=window.dataLayer||[];
+function gtag(){dataLayer.push(arguments);}
+window.gtag=window.gtag||gtag;
+var stored=null;
+try{stored=JSON.parse(localStorage.getItem('fcs_consent_v1'));}catch(e){}
+if(stored){
+gtag('consent','default',{
+ad_storage:stored.advertising?'granted':'denied',
+ad_user_data:stored.advertising?'granted':'denied',
+ad_personalization:stored.advertising?'granted':'denied',
+analytics_storage:stored.analytics?'granted':'denied'
+});
+}else{
+gtag('consent','default',{ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied',analytics_storage:'denied',wait_for_update:500});
+fetch('/api/region').then(function(r){return r.json();}).then(function(d){
+if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_data:'granted',ad_personalization:'granted',analytics_storage:'granted'});}
+}).catch(function(){});
+}
+})();</script>
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','GTM-5Q7JC6JX');</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230A101D'/%3E%3Crect x='6' y='18' width='4' height='8' fill='%23FFB224'/%3E%3Crect x='13' y='12' width='4' height='14' fill='%23FFB224'/%3E%3Crect x='20' y='6' width='4' height='20' fill='%23FFB224'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1434,20 +1462,43 @@ const PAGE_HTML = `<!DOCTYPE html>
       +'<span style="color:var(--dim)">Detail: '+esc(msg)+'</span></div>';
   }
 
+  var firstLoadTracked=false;
+  function pushEvent(name,params){
+    window.dataLayer=window.dataLayer||[];
+    window.dataLayer.push(Object.assign({event:name},params||{}));
+  }
+
   function load(){
+    var cacheState=null;
     fetch(DATA_URL,{cache:'no-store'})
-      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(r){ cacheState=r.headers.get('x-fcs-cache'); if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(d){
         state.data=d; state.error=null;
         renderStatus(d); renderOverview(d.overview); renderBoards(d);
+        if(!firstLoadTracked){
+          firstLoadTracked=true;
+          pushEvent('signals_data_loaded',{
+            cache_state: cacheState||'unknown',
+            data_age_minutes: Math.round((Date.now()-new Date(d.generated_at).getTime())/60000),
+            crypto_universe: d.crypto.universe||0,
+            stocks_universe: d.stocks.universe||0
+          });
+        }
       })
       .catch(function(e){
         state.error=e;
-        if(!state.data) renderError(e.message||String(e));
+        if(!state.data){
+          renderError(e.message||String(e));
+          pushEvent('signals_feed_error',{error_detail:String(e.message||e).slice(0,100)});
+        }
       })
       .finally(function(){ nextCheckAt = Date.now()+REFETCH_MS; });
   }
   load();
+  var methodologyEl=document.querySelector('details');
+  if(methodologyEl) methodologyEl.addEventListener('toggle',function(){
+    if(methodologyEl.open) pushEvent('signals_methodology_open',{});
+  });
   setInterval(load, REFETCH_MS);
 })();
 </script>
@@ -1462,11 +1513,11 @@ const SECURITY_HEADERS = {
 
 const PAGE_CSP = [
   "default-src 'none'",
-  "script-src 'self' 'unsafe-inline'",
+  "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src https://fonts.gstatic.com",
-  "img-src 'self' data:",
-  "connect-src 'self'",
+  "img-src 'self' data: https://www.google-analytics.com",
+  "connect-src 'self' https://www.googletagmanager.com https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com",
   "frame-ancestors 'none'",
   "base-uri 'none'"
 ].join('; ');
