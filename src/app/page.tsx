@@ -138,7 +138,7 @@ export default function HomePage() {
               </div>
               <h2 className="text-4xl font-black text-white mb-5 tracking-tight">Frontier Capital Signals</h2>
               <p className="text-white/70 text-lg leading-relaxed mb-4 max-w-xl">
-                Hourly confluence screens across the top 100 cryptocurrencies and 60 US equities. Up to 13 independent technical and valuation techniques, from RSI and MACD to Wall Street price targets, must agree before a setup ranks.
+                Hourly confluence screens across the top 100 cryptocurrencies and 60 US equities. Up to 14 independent technical and valuation techniques, from RSI and MACD to Wall Street price targets and overbought/oversold reversal detection, must agree before a setup ranks.
               </p>
               <p className="text-white/40 text-sm mb-8 max-w-xl">
                 Mechanical technical analysis, not investment advice. Markets carry real risk of loss.
@@ -156,7 +156,7 @@ export default function HomePage() {
             <div className="grid grid-cols-2 gap-3">
               {[
                 { label: "Assets Screened", value: "160" },
-                { label: "Techniques", value: "13" },
+                { label: "Techniques", value: "14" },
                 { label: "Refresh Rate", value: "Hourly" },
                 { label: "Coverage", value: "Crypto + US Equities" },
               ].map(({ label, value }) => (

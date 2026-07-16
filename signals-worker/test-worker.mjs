@@ -176,7 +176,7 @@ const { payload: built, log } = await mod.buildPayload({ TREFIS_OVERRIDES: '{"AA
 check('crypto boards populated', built.crypto.breakout.length > 0 && built.crypto.universe >= 3);
 check('stablecoin filtered from universe', built.crypto.universe === 4, `universe=${built.crypto.universe}`);
 check('stocks boards populated', built.stocks.breakout.length > 0);
-check('confluence agreement present', built.crypto.breakout[0].conf && built.crypto.breakout[0].conf.total >= 10 && built.crypto.breakout[0].conf.total <= 13);
+check('confluence agreement present', built.crypto.breakout[0].conf && built.crypto.breakout[0].conf.total >= 10 && built.crypto.breakout[0].conf.total <= 14);
 check('rangePos stays in [0,1]', built.crypto.breakout.every(r => r.rangePos == null || (r.rangePos >= 0 && r.rangePos <= 1)));
 check('valuation flowed in', built.stocks.breakout.concat(built.stocks.breakdown).some(r => r.val));
 check('trefis override applied', built.health.trefis_overrides === 1);
@@ -198,6 +198,43 @@ check('reliability multiplier changes the score vs baseline (enough samples)', b
 check('below MIN_RELIABILITY_SAMPLES, weighting stays at baseline (no overfit to small samples)', belowThreshold.long === baseline.long && belowThreshold.short === baseline.short);
 check('reliabilityMultiplier clamps to [0.5, 1.5]', mod.reliabilityMultiplier({ 'X|y': { accuracy: 5, total: 50 } }, 'X', 'y') === 1.5 && mod.reliabilityMultiplier({ 'X|y': { accuracy: -5, total: 50 } }, 'X', 'y') === 0.5);
 check('reliabilityMultiplier is neutral (1) with no reliability data', mod.reliabilityMultiplier(undefined, 'X', 'y') === 1 && mod.reliabilityMultiplier({}, 'X', 'y') === 1);
+
+console.log('\n== rsiSeries / rsiRecentRange ==');
+check('rsiSeries final value matches the scalar rsi()', mod.rsiSeries(dailyClose)[mod.rsiSeries(dailyClose).length - 1] === mod.rsi(dailyClose));
+const decline = Array.from({ length: 20 }, (_, i) => 100 - i);
+const dipThenRecover = [...decline, ...Array.from({ length: 10 }, (_, i) => decline[decline.length - 1] + (i + 1) * 2)]; // declines to 81, then recovers
+const dipRange = mod.rsiRecentRange(dipThenRecover, 15);
+check('rsiRecentRange finds a real min/max spanning the trough and the recovery, not just the tail', dipRange.min === 0 && dipRange.max > 60, `min=${dipRange.min} max=${dipRange.max}`);
+
+console.log('\n== reversal technique: only fires with an actual trough/peak + independent confirmation ==');
+const findTech = (T, id) => T.find(t => t.id === id);
+const baseMetric = (overrides) => ({ symbol: 'TESTASSET', chg24h: 1, chg7d: 2, ...overrides });
+
+const bottomNoConfirm = baseMetric({ rsi: 35, rsiPrev: 28, rsiRecentMin: 25, rsiRecentMax: 60 }); // troughed+turning, but no stoch/bb/structure/divergence/obv confirmation
+const bottomWithConfirm = baseMetric({ rsi: 35, rsiPrev: 28, rsiRecentMin: 25, rsiRecentMax: 60, structure: 1 });
+const stillFalling = baseMetric({ rsi: 32, rsiPrev: 34, rsiRecentMin: 20, rsiRecentMax: 60, structure: 1 }); // recovered enough off the min (32 > 20+5) but rsi < rsiPrev: still falling, hasn't turned yet
+const topWithConfirm = baseMetric({ rsi: 60, rsiPrev: 66, rsiRecentMin: 40, rsiRecentMax: 75, structure: -1 });
+
+const rNoConfirm = findTech(mod.evaluateTechniques(bottomNoConfirm, 'crypto'), 'reversal');
+const rWithConfirm = findTech(mod.evaluateTechniques(bottomWithConfirm, 'crypto'), 'reversal');
+const rStillFalling = findTech(mod.evaluateTechniques(stillFalling, 'crypto'), 'reversal');
+const rTop = findTech(mod.evaluateTechniques(topWithConfirm, 'crypto'), 'reversal');
+
+check('RSI troughed+turning but NO independent confirmation: stays neutral, not a bullish call', rNoConfirm.dir === 0, `dir=${rNoConfirm.dir}`);
+check('RSI troughed+turning WITH structure confirmation: fires bullish', rWithConfirm.dir === 1, `dir=${rWithConfirm.dir}`);
+check('RSI merely low but still falling (not turned yet): does not fire, even with a confirmation present', rStillFalling.dir !== 1, `dir=${rStillFalling.dir}`);
+check('mirror case: RSI peaked+turning down WITH confirmation fires bearish', rTop.dir === -1, `dir=${rTop.dir}`);
+
+const rNoSentiment = findTech(mod.evaluateTechniques(bottomWithConfirm, 'crypto', undefined, {}), 'reversal');
+const rExtremeFear = findTech(mod.evaluateTechniques(bottomWithConfirm, 'crypto', undefined, { fearGreed: 15 }), 'reversal');
+const rExtremeGreedIrrelevantToBottom = findTech(mod.evaluateTechniques(bottomWithConfirm, 'crypto', undefined, { fearGreed: 90 }), 'reversal');
+check('crypto: extreme fear boosts weight on a bottom call', rExtremeFear.w > rNoSentiment.w, `boosted=${rExtremeFear.w} base=${rNoSentiment.w}`);
+check('crypto: extreme greed (misaligned) leaves weight at base for a bottom call', rExtremeGreedIrrelevantToBottom.w === rNoSentiment.w);
+
+const stockBottom = baseMetric({ rsi: 35, rsiPrev: 28, rsiRecentMin: 25, rsiRecentMax: 60, structure: 1 });
+const rStockNoVix = findTech(mod.evaluateTechniques(stockBottom, 'stock', undefined, {}), 'reversal');
+const rStockHighVix = findTech(mod.evaluateTechniques(stockBottom, 'stock', undefined, { vixRangePos: 0.85 }), 'reversal');
+check('stock: elevated VIX boosts weight on a bottom call', rStockHighVix.w > rStockNoVix.w, `boosted=${rStockHighVix.w} base=${rStockNoVix.w}`);
 
 console.log('\n== api: KV populated by the "Action" (mirrors what build-signals.mjs writes) ==');
 const warmEnv = { FCS_CACHE: new MockKV() };

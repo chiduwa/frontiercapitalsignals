@@ -1,12 +1,12 @@
 # Frontier Capital Signals — Cloudflare Worker
 
-Hourly confluence screens across the top 100 cryptos (by market cap) and 60 US equities. Up to 13 independent techniques per asset vote bullish, bearish, or neutral; assets rank by weighted directional agreement, and every row shows the raw agreement count (for example 9/13). Each technique's weight for a given asset adapts over time based on how reliably it has actually called that asset's direction (see "Adaptive reliability weighting" below).
+Hourly confluence screens across the top 100 cryptos (by market cap) and 60 US equities. Up to 14 independent techniques per asset vote bullish, bearish, or neutral; assets rank by weighted directional agreement, and every row shows the raw agreement count (for example 9/14). Each technique's weight for a given asset adapts over time based on how reliably it has actually called that asset's direction (see "Adaptive reliability weighting" below).
 
 Lives at `frontiercapitalsignals.com/signals`, as a Worker bound only to that path — the rest of the domain (the Next.js app, deployed separately via `deploy.yml`) is untouched, and it's linked from the main site's nav, footer, and homepage.
 
 ## Architecture: the engine runs outside the Worker
 
-The confluence engine (`buildPayload()` in `worker.js`) makes roughly 230 outbound fetches per build (60 stock quotes, 60 analyst-valuation lookups, ~100 per-coin crypto daily-history calls, a handful of index/global calls) and does real CPU work computing 13 indicators across ~160 assets. That's too much for Cloudflare Workers' **Free plan** limits (50 subrequests, ~10ms CPU per invocation) — it would get hard-killed mid-build every time.
+The confluence engine (`buildPayload()` in `worker.js`) makes roughly 230 outbound fetches per build (60 stock quotes, 60 analyst-valuation lookups, ~100 per-coin crypto daily-history calls, a handful of index/global calls) and does real CPU work computing 14 indicators across ~160 assets. That's too much for Cloudflare Workers' **Free plan** limits (50 subrequests, ~10ms CPU per invocation) — it would get hard-killed mid-build every time.
 
 So the work is split:
 
@@ -62,11 +62,17 @@ Then run the schema in `scripts/schema.sql` against it (`npx wrangler d1 execute
 
 Then trigger the workflow once manually (Actions tab → Signals Refresh → Run workflow) to populate KV immediately instead of waiting for the next hour. Visit `https://frontiercapitalsignals.com/signals`.
 
-## The 13 techniques
+## The 14 techniques
 
-Multi-horizon momentum alignment; RSI(14) regime and direction; MACD(12/26/9) histogram; moving-average stack (SMA20/50/200, from real daily bars for both equities and crypto); Bollinger %B with squeeze detection; stochastic (14,3) crosses; Donchian 20-bar breakout/breakdown; volume vs baseline; OBV trend; swing structure of higher-highs/higher-lows; momentum divergence proxy; volatility regime (coiled vs climactic); and a valuation-or-positioning layer. Techniques without data abstain rather than guess, so the agreement denominator varies from about 11 to 13.
+Multi-horizon momentum alignment; RSI(14) regime and direction; MACD(12/26/9) histogram; moving-average stack (SMA20/50/200, from real daily bars for both equities and crypto); Bollinger %B with squeeze detection; stochastic (14,3) crosses; Donchian 20-bar breakout/breakdown; volume vs baseline; OBV trend; swing structure of higher-highs/higher-lows; momentum divergence proxy; volatility regime (coiled vs climactic); reversal-pattern detection (below); and a valuation-or-positioning layer. Techniques without data abstain rather than guess, so the agreement denominator varies from about 11 to 14.
 
 Crypto gets a real per-coin daily-history fetch (`getCryptoDailyHistory`, CoinGecko `/coins/{id}/market_chart`, ~210 daily bars) instead of relying only on the 7-day hourly sparkline. This matters beyond just "more data": RSI/MACD/etc. computed off 14 *hourly* points (the old approach) is a materially different, noisier number than the conventional daily-bar RSI(14) everyone means by that term. When a coin's history fetch fails for a given run, that coin falls back to the old sparkline-only behavior for that hour rather than dropping out of the universe.
+
+## Reversal detection (overbought/oversold turning points)
+
+`evaluateTechniques`' "reversal" technique specifically targets *found-the-bottom* and *found-the-top* patterns, not a static "RSI < 30" level: it uses `rsiRecentRange()` (built on the new `rsiSeries()`, which exposes RSI's full history instead of just the latest value) to check whether RSI actually troughed below ~32 or peaked above ~68 in the last ~10 bars *and* has since turned back. That alone never fires a vote — it also requires at least one independent confirming signal (a stochastic cross, a Bollinger band extreme, swing structure, on-balance volume, or the divergence proxy), so this never trades on RSI in isolation.
+
+On top of that, market-wide sentiment — the Fear & Greed index for crypto, and where VIX sits in its own recent 1-month range for equities (both already fetched for the overview tiles, previously unused in any per-asset scoring) — adds extra weight when it agrees: an oversold bottom during broad market-wide extreme fear, or an overbought top during broad extreme greed, is a more reliable read than the same per-asset pattern in isolation. Sentiment data missing or not aligned just means the technique scores at its base weight, not a penalty.
 
 ## Adaptive reliability weighting
 

@@ -102,7 +102,11 @@ export function ema(values, period) {
   return out;
 }
 
-export function rsi(closes, period = 14) {
+// Full RSI history, not just the latest value — same Wilder's-smoothing
+// math as before, just keeping every intermediate value instead of
+// discarding all but the last. Lets the reversal technique below ask "what
+// was RSI's recent low/high" rather than only "what is RSI right now."
+export function rsiSeries(closes, period = 14) {
   if (!closes || closes.length < period + 1) return null;
   let g = 0, l = 0;
   for (let i = 1; i <= period; i++) {
@@ -110,13 +114,28 @@ export function rsi(closes, period = 14) {
     if (d >= 0) g += d; else l -= d;
   }
   let ag = g / period, al = l / period;
+  const out = [al === 0 ? 100 : 100 - 100 / (1 + ag / al)];
   for (let i = period + 1; i < closes.length; i++) {
     const d = closes[i] - closes[i - 1];
     ag = (ag * (period - 1) + Math.max(d, 0)) / period;
     al = (al * (period - 1) + Math.max(-d, 0)) / period;
+    out.push(al === 0 ? 100 : 100 - 100 / (1 + ag / al));
   }
-  if (al === 0) return 100;
-  return 100 - 100 / (1 + ag / al);
+  return out;
+}
+
+export function rsi(closes, period = 14) {
+  const series = rsiSeries(closes, period);
+  return series ? series[series.length - 1] : null;
+}
+
+// Min/max RSI over the trailing `lookback` bars — "did this asset actually
+// bottom/top and turn," not just "is RSI currently below/above a line."
+export function rsiRecentRange(closes, lookback = 10, period = 14) {
+  const series = rsiSeries(closes, period);
+  if (!series || !series.length) return { min: null, max: null };
+  const window = series.slice(-lookback);
+  return { min: Math.min(...window), max: Math.max(...window) };
 }
 
 export function macd(closes, fast = 12, slow = 26, signalP = 9) {
@@ -280,7 +299,7 @@ export function reliabilityMultiplier(reliability, symbol, techniqueId) {
   return clamp(0.5 + rec.accuracy, 0.5, 1.5);
 }
 
-export function evaluateTechniques(m, kind, reliability) {
+export function evaluateTechniques(m, kind, reliability, marketContext) {
   const T = [];
   const push = (id, w, dir, note) => T.push({ id, w: w * reliabilityMultiplier(reliability, m.symbol, id), dir, note });
   const cS = m.chgShort, c24 = m.chg24h, c7 = m.chg7d, c30 = m.chg30d;
@@ -418,11 +437,59 @@ export function evaluateTechniques(m, kind, reliability) {
     }
   }
 
+  // T14 reversal: not a static RSI level ("RSI < 30") but a genuine
+  // trough-and-turn or peak-and-turn pattern — RSI actually bottomed or
+  // topped over the recent window and has started reversing back — and it
+  // never fires on RSI alone. At least one independent signal (stochastic
+  // cross, a Bollinger band extreme, swing structure, OBV, or the
+  // divergence proxy) has to agree before this votes. Market-wide
+  // sentiment (Fear & Greed for crypto, where VIX sits in its own recent
+  // range for equities — both fetched already but otherwise unused in any
+  // per-asset scoring) doesn't create the signal, it just adds weight when
+  // it lines up: an asset-level bottom during broad capitulation is a more
+  // reliable read than the same pattern in isolation.
+  const troughedAndTurning = m.rsiRecentMin != null && m.rsi != null && m.rsiPrev != null
+    && m.rsiRecentMin < 32 && m.rsi > m.rsiRecentMin + 5 && m.rsi > m.rsiPrev;
+  const peakedAndTurning = m.rsiRecentMax != null && m.rsi != null && m.rsiPrev != null
+    && m.rsiRecentMax > 68 && m.rsi < m.rsiRecentMax - 5 && m.rsi < m.rsiPrev;
+  const bullConfirm = (m.stoch && m.stoch.crossUp)
+    || (m.bb && m.bb.pctB < 0.1)
+    || m.structure === 1
+    || m.divergence === 1
+    || (m.obv != null && m.obv > 0);
+  const bearConfirm = (m.stoch && m.stoch.crossDown)
+    || (m.bb && m.bb.pctB > 0.9)
+    || m.structure === -1
+    || m.divergence === -1
+    || (m.obv != null && m.obv < 0);
+
+  if (troughedAndTurning && bullConfirm) {
+    let w = 1.1, note = `RSI bottomed near ${m.rsiRecentMin.toFixed(0)}, turning up`;
+    if (kind === 'crypto' && marketContext && marketContext.fearGreed != null && marketContext.fearGreed <= 25) {
+      w += 0.3; note = 'oversold bottom + market-wide extreme fear';
+    } else if (kind === 'stock' && marketContext && marketContext.vixRangePos != null && marketContext.vixRangePos >= 0.7) {
+      w += 0.3; note = 'oversold bottom + VIX spiking';
+    }
+    push('reversal', w, 1, note);
+  } else if (peakedAndTurning && bearConfirm) {
+    let w = 1.1, note = `RSI topped near ${m.rsiRecentMax.toFixed(0)}, turning down`;
+    if (kind === 'crypto' && marketContext && marketContext.fearGreed != null && marketContext.fearGreed >= 75) {
+      w += 0.3; note = 'overbought top + market-wide extreme greed';
+    } else if (kind === 'stock' && marketContext && marketContext.vixRangePos != null && marketContext.vixRangePos <= 0.3) {
+      w += 0.3; note = 'overbought top + VIX complacent';
+    }
+    push('reversal', w, -1, note);
+  } else if (m.rsiRecentMin != null && m.rsiRecentMax != null) {
+    push('reversal', 1.1, 0, null);
+  } else {
+    push('reversal', 1.1, null, null);
+  }
+
   return T;
 }
 
-export function confluence(m, kind, reliability) {
-  const T = evaluateTechniques(m, kind, reliability);
+export function confluence(m, kind, reliability, marketContext) {
+  const T = evaluateTechniques(m, kind, reliability, marketContext);
   const applicable = T.filter(t => t.dir !== null);
   const totalW = applicable.reduce((a, t) => a + t.w, 0) || 1;
   let bullW = 0, bearW = 0, bullN = 0, bearN = 0;
@@ -737,6 +804,7 @@ export function buildCryptoMetrics(item, extras = {}) {
   const mean7d = spark.reduce((a, b) => a + b, 0) / spark.length;
   const md = macd(closes);
   const rNow = rsi(closes);
+  const rRange = rsiRecentRange(closes, haveDaily ? 10 : 24);
 
   return {
     symbol,
@@ -751,6 +819,8 @@ export function buildCryptoMetrics(item, extras = {}) {
     chg30d: item.price_change_percentage_30d_in_currency,
     rsi: rNow,
     rsiPrev: rsi(closes.slice(0, -3)),
+    rsiRecentMin: rRange.min,
+    rsiRecentMax: rRange.max,
     rangePos: rangePos(closes.slice(-252), price),
     mean7d,
     stretch: mean7d ? ((price / mean7d) - 1) * 100 : null,
@@ -786,6 +856,7 @@ export function buildStockMetrics(row, valuation, override) {
   const avgVol20 = sma(volumes, 20);
   const md = macd(closes);
   const rNow = rsi(closes);
+  const rRange = rsiRecentRange(closes, 10);
   const hi52 = Math.max(...closes);
 
   let val = null;
@@ -812,6 +883,8 @@ export function buildStockMetrics(row, valuation, override) {
     chg30d: pct(21),
     rsi: rNow,
     rsiPrev: rsi(closes.slice(0, -3)),
+    rsiRecentMin: rRange.min,
+    rsiRecentMax: rRange.max,
     rangePos: rangePos(closes.slice(-252), price),
     stretch: s20 ? ((price / s20) - 1) * 100 : null,
     slope: slopePct(closes, 15),
@@ -835,8 +908,8 @@ export function buildStockMetrics(row, valuation, override) {
   };
 }
 
-function rankBoards(metrics, kind, reliability) {
-  const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability) }));
+function rankBoards(metrics, kind, reliability, marketContext) {
+  const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, marketContext) }));
   // Full-universe vote log (not just the top-10 shown on each board) so the
   // reliability learning loop sees every asset, not only that hour's winners.
   const votesLog = [];
@@ -899,6 +972,31 @@ export async function buildPayload(env, reliability) {
   const trending = trendR.status === 'fulfilled' ? trendR.value : new Set();
   const funding = fundR.status === 'fulfilled' ? fundR.value : {};
 
+  // Market-wide context, computed once and handed to every asset's
+  // scoring (see the "reversal" technique): Fear & Greed for crypto, and
+  // where VIX sits in its own recent range for equities (a fixed VIX level
+  // means different things in calm vs turbulent years, so "elevated
+  // relative to its own last month" is the meaningful read, not an
+  // absolute threshold). Computed from data already being fetched for the
+  // overview tiles — no extra calls.
+  const idx = {};
+  if (overviewR.status === 'fulfilled') {
+    for (const r of overviewR.value) {
+      if (r && !r._error && r.closes && r.closes.length >= 2) {
+        const prev = r.closes[r.closes.length - 2];
+        idx[r.symbol] = {
+          price: r.price,
+          chg24h: prev ? ((r.price / prev) - 1) * 100 : null,
+          rangePos: rangePos(r.closes, r.price)
+        };
+      }
+    }
+  }
+  const marketContext = {
+    fearGreed: fngR.status === 'fulfilled' && fngR.value ? fngR.value.value : null,
+    vixRangePos: idx['^VIX'] ? idx['^VIX'].rangePos : null
+  };
+
   let cryptoBoards = { breakout: [], breakdown: [], universe: 0 };
   let btc = null, eth = null;
   let cryptoDailyOk = 0, cryptoDailyTotal = 0;
@@ -927,7 +1025,7 @@ export async function buildPayload(env, reliability) {
         return buildCryptoMetrics(c, { funding: funding[sym], trending: trending.has(sym), daily });
       })
       .filter(Boolean);
-    cryptoBoards = rankBoards(metrics, 'crypto', reliability);
+    cryptoBoards = rankBoards(metrics, 'crypto', reliability, marketContext);
   }
 
   let stockBoards = { breakout: [], breakdown: [], universe: 0 };
@@ -941,17 +1039,7 @@ export async function buildPayload(env, reliability) {
         if (m) metrics.push(m);
       } else stockFailures.push(r && r._item);
     }
-    stockBoards = rankBoards(metrics, 'stock', reliability);
-  }
-
-  const idx = {};
-  if (overviewR.status === 'fulfilled') {
-    for (const r of overviewR.value) {
-      if (r && !r._error && r.closes && r.closes.length >= 2) {
-        const prev = r.closes[r.closes.length - 2];
-        idx[r.symbol] = { price: r.price, chg24h: prev ? ((r.price / prev) - 1) * 100 : null };
-      }
-    }
+    stockBoards = rankBoards(metrics, 'stock', reliability, marketContext);
   }
 
   // If both primary sources yielded nothing, this is a real outage: throw so
@@ -976,7 +1064,7 @@ export async function buildPayload(env, reliability) {
     generated_at: log.generated_at,
     cache_seconds: CACHE_SECONDS,
     build_ms: Date.now() - started,
-    model: 'confluence-v2 (13 techniques, directional agreement)',
+    model: 'confluence-v3 (14 techniques, directional agreement)',
     health: {
       coingecko: cryptoR.status === 'fulfilled',
       global: globalR.status === 'fulfilled' && !!globalR.value,
@@ -1034,7 +1122,7 @@ const PAGE_HTML = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Frontier Capital Signals — Hourly confluence screens</title>
-<meta name="description" content="Hourly confluence screens across the top 200 cryptos and 60 US equities. Up to 13 techniques per asset must agree before a signal ranks.">
+<meta name="description" content="Hourly confluence screens across the top 100 cryptos and 60 US equities. Up to 14 techniques per asset must agree before a signal ranks.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230A101D'/%3E%3Crect x='6' y='18' width='4' height='8' fill='%23FFB224'/%3E%3Crect x='13' y='12' width='4' height='14' fill='%23FFB224'/%3E%3Crect x='20' y='6' width='4' height='20' fill='%23FFB224'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1165,12 +1253,12 @@ const PAGE_HTML = `<!DOCTYPE html>
     <div class="mast-grid">
       <div>
         <h1>Frontier Capital<br><span class="amber">Signals</span></h1>
-        <p class="dek">Confluence screens across the <b>top 200 cryptos</b> and <b>60 US equities</b>. Up to <b>13 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to volume, funding rates and Wall Street price targets, must point the <b>same direction</b> before a signal ranks. <b>Synced hourly.</b></p>
+        <p class="dek">Confluence screens across the <b>top 100 cryptos</b> and <b>60 US equities</b>. Up to <b>14 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to volume, funding rates, Wall Street price targets and reversal-pattern detection, must point the <b>same direction</b> before a signal ranks. <b>Synced hourly.</b></p>
       </div>
       <div class="mast-meta">
         DATA REFRESH <b>HOURLY</b><br>
         UNIVERSE <b id="metaUniverse">—</b><br>
-        TECHNIQUES PER ASSET <b>UP TO 13</b>
+        TECHNIQUES PER ASSET <b>UP TO 14</b>
       </div>
     </div>
     <div class="mast-rule"></div>
@@ -1187,8 +1275,9 @@ const PAGE_HTML = `<!DOCTYPE html>
   <details>
     <summary>Methodology and data</summary>
     <div class="method">
-      <p><b>The confluence model.</b> Every asset is evaluated by up to 13 independent techniques. Each one votes bullish, bearish, or neutral. The breakout score measures how much weighted evidence points up net of evidence pointing down; the breakdown score mirrors it. The small fraction under each score (for example 9/13) is the raw count of techniques agreeing with that direction out of those that had enough data to vote. High score plus high agreement is the strongest read.</p>
-      <p><b>The 13 techniques.</b> Multi-horizon momentum alignment; Wilder RSI(14) regime and direction; MACD(12/26/9) histogram level and direction; moving-average stack (SMA20/50/200, computed from real daily bars for both equities and crypto); Bollinger %B with squeeze-and-expansion detection; stochastic (14,3) crosses; Donchian 20-bar breakout or breakdown proximity; volume confirmation versus baseline; on-balance volume trend; swing structure of higher-highs and higher-lows; a momentum divergence proxy that flags new price extremes without RSI support; a volatility regime read separating coiled compression from climactic expansion; and a valuation-or-positioning layer.</p>
+      <p><b>The confluence model.</b> Every asset is evaluated by up to 14 independent techniques. Each one votes bullish, bearish, or neutral. The breakout score measures how much weighted evidence points up net of evidence pointing down; the breakdown score mirrors it. The small fraction under each score (for example 9/14) is the raw count of techniques agreeing with that direction out of those that had enough data to vote. High score plus high agreement is the strongest read.</p>
+      <p><b>The 14 techniques.</b> Multi-horizon momentum alignment; Wilder RSI(14) regime and direction; MACD(12/26/9) histogram level and direction; moving-average stack (SMA20/50/200, computed from real daily bars for both equities and crypto); Bollinger %B with squeeze-and-expansion detection; stochastic (14,3) crosses; Donchian 20-bar breakout or breakdown proximity; volume confirmation versus baseline; on-balance volume trend; swing structure of higher-highs and higher-lows; a momentum divergence proxy that flags new price extremes without RSI support; a volatility regime read separating coiled compression from climactic expansion; a reversal-pattern read (below); and a valuation-or-positioning layer.</p>
+      <p><b>Reversal detection.</b> A separate read from plain RSI level: it looks for RSI having actually bottomed or topped over the last ~10 bars and turned back, confirmed by at least one independent signal (a stochastic cross, a Bollinger band extreme, swing structure, on-balance volume, or the divergence proxy) — it never fires on RSI alone. Market-wide sentiment adds confidence on top when it lines up: extreme fear on the Fear &amp; Greed index for a crypto bottom, or VIX sitting high in its own recent range for an equity bottom (and the mirror image — extreme greed or a complacent VIX — for tops).</p>
       <p><b>The valuation layer.</b> For equities, Wall Street consensus mean price targets and recommendation ratings: trading well below a buy-rated consensus target votes bullish, trading above the consensus target votes bearish. Trefis does not publish a public API, so consensus targets stand in for model-based estimates; site operators can supply Trefis or other model values through a server-side override, in which case the payload labels the source. For crypto, the layer uses perpetual futures funding rates (crowded positive funding on a parabolic move votes bearish, skeptical funding during an uptrend votes bullish) and trending-list crowding.</p>
       <p><b>Adaptive weighting.</b> Every hour's directional calls are logged and checked back against what the asset's price actually did 24 hours and 7 days later. Once a technique has enough scored history for a specific asset, its weight for that asset going forward is nudged up if it has been reliably right and down if it has been reliably wrong, capped at plus or minus 50%. A technique that is only a coin flip for a given asset keeps its plain baseline weight.</p>
       <p><b>Data.</b> CoinGecko free API for the top 100 coins by market cap with real daily price and volume history per coin, plus global stats and trending (stablecoins and wrappers excluded), alternative.me Fear &amp; Greed, Bybit linear perp funding rates, Yahoo Finance daily OHLCV with Stooq CSV fallback, and Yahoo analyst estimates. Free feeds can lag or drop symbols; the feeds counter in the status bar shows current coverage, and any technique without data simply abstains rather than guessing.</p>
