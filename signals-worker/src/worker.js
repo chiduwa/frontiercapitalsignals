@@ -808,6 +808,7 @@ export function buildCryptoMetrics(item, extras = {}) {
 
   return {
     symbol,
+    id: item.id,
     name: item.name,
     price,
     mcap,
@@ -932,7 +933,8 @@ function rankBoards(metrics, kind, reliability, marketContext) {
     ...(x.m.val ? { val: { target: x.m.val.target, upside: x.m.val.upside, recKey: x.m.val.recKey, source: x.m.val.source } } : {}),
     ...(x.m.funding != null ? { funding: x.m.funding } : {}),
     ...(x.m.distHigh52w != null ? { distHigh52w: x.m.distHigh52w } : {}),
-    ...(x.m.rank != null ? { mcapRank: x.m.rank } : {})
+    ...(x.m.rank != null ? { mcapRank: x.m.rank } : {}),
+    ...(x.m.id ? { id: x.m.id } : {}) // CoinGecko coin id (crypto only) — lets the dashboard link out to a real coin page
   });
   const sortSide = (side) => scored
     .slice()
@@ -1213,6 +1215,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12.5px}
   thead th{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);font-weight:500;text-align:right;padding:8px 10px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);white-space:nowrap}
   thead th:nth-child(1),thead th:nth-child(2){text-align:left}
+  th.sortable{cursor:pointer;user-select:none}
+  th.sortable:hover{color:var(--paper)}
+  th.sortable.active{color:var(--amber)}
   tbody td{padding:10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap;vertical-align:top}
   tbody td:nth-child(1),tbody td:nth-child(2){text-align:left}
   tbody tr:last-child td{border-bottom:none}
@@ -1221,6 +1226,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .asset .sym{font-weight:600;color:var(--paper);font-size:13px}
   .asset .nm{color:var(--muted);font-size:10.5px;margin-left:7px;font-family:var(--disp)}
   .asset .why{display:block;color:var(--dim);font-size:10.5px;margin-top:3px;font-family:var(--disp);white-space:normal;max-width:280px;line-height:1.45}
+  a.sym-link{text-decoration:none}
+  a.sym-link:hover .sym{color:var(--amber);text-decoration:underline}
   .rsi-hi{color:var(--down)} .rsi-lo{color:var(--up)}
 
   .sigcell{display:flex;flex-direction:column;align-items:flex-end;gap:3px}
@@ -1330,7 +1337,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   'use strict';
   var REFETCH_MS = 10*60*1000;
   var nextCheckAt = Date.now() + REFETCH_MS;
-  var state = { data:null, error:null };
+  var state = { data:null, error:null, sort:{} };
 
   // Base-path aware so the page works at / on the origin and at /signals/
   // when mounted behind the Cloudflare proxy worker.
@@ -1398,19 +1405,60 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   }
   function rsiCls(v){ if(v==null) return ''; if(v>=70) return 'rsi-hi'; if(v<=30) return 'rsi-lo'; return ''; }
 
-  function boardHtml(cfg, rows, universe){
+  function assetUrl(assetClass,r){
+    if(assetClass==='stock') return 'https://finance.yahoo.com/quote/'+encodeURIComponent(r.symbol);
+    if(assetClass==='crypto'&&r.id) return 'https://www.coingecko.com/en/coins/'+encodeURIComponent(r.id);
+    return null;
+  }
+
+  var SORT_COLS = [
+    {key:'symbol', label:'Asset', dir:1},
+    {key:'price', label:'Price', dir:-1},
+    {key:'chg24h', label:'24h', dir:-1},
+    {key:'chg7d', label:'7d', dir:-1},
+    {key:'rsi', label:'RSI', dir:-1},
+    {key:'score', label:'Signal', dir:-1}
+  ];
+  function sortRows(rows, spec){
+    if(!spec||!rows) return rows;
+    var key=spec.key, dir=spec.dir;
+    return rows.slice().sort(function(a,b){
+      var av=a[key], bv=b[key];
+      if(av==null&&bv==null) return 0;
+      if(av==null) return 1;
+      if(bv==null) return -1;
+      if(av<bv) return -dir;
+      if(av>bv) return dir;
+      return 0;
+    });
+  }
+
+  function boardHtml(cfg, rowsIn, universe){
+    var spec = state.sort[cfg.boardId];
+    var rows = spec ? sortRows(rowsIn, spec) : rowsIn;
     var h='<section class="board '+cfg.side+'" aria-label="'+cfg.title+'">';
     h+='<div class="board-head"><div><div class="eyebrow">'+cfg.eyebrow+'</div><div class="board-title">'+cfg.title+'</div></div>';
     h+='<div class="board-count">TOP '+(rows?rows.length:0)+' / '+(universe||0)+' SCREENED</div></div>';
-    h+='<div class="tbl-wrap"><table><thead><tr><th>#</th><th>Asset</th><th>Price</th><th>24h</th><th>7d</th><th>RSI</th><th>Signal</th></tr></thead><tbody>';
+    h+='<div class="tbl-wrap"><table><thead><tr>';
+    h+='<th>#</th>';
+    SORT_COLS.forEach(function(c){
+      var active = spec&&spec.key===c.key;
+      var arrow = active ? (spec.dir===1?' ▲':' ▼') : '';
+      h+='<th class="sortable'+(active?' active':'')+'" data-board="'+cfg.boardId+'" data-key="'+c.key+'" data-dir="'+(active?spec.dir:c.dir)+'">'+c.label+arrow+'</th>';
+    });
+    h+='</tr></thead><tbody>';
     if(rows&&rows.length){
       rows.forEach(function(r,i){
+        var url = assetUrl(cfg.assetClass, r);
+        var symHtml = url
+          ? '<a class="sym-link" target="_blank" rel="noopener noreferrer" href="'+url+'" data-symbol="'+esc(r.symbol)+'" data-class="'+cfg.assetClass+'" data-side="'+cfg.side+'" data-rank="'+(i+1)+'" data-score="'+r.score+'"><span class="sym">'+esc(r.symbol)+'</span></a>'
+          : '<span class="sym">'+esc(r.symbol)+'</span>';
         var name = r.name && r.name!==r.symbol ? '<span class="nm">'+esc(r.name)+'</span>' : '';
         var why = (r.drivers&&r.drivers.length)?'<span class="why">'+esc(r.drivers.join(' · '))+'</span>':'';
         var conf = r.conf ? '<span class="conf">'+r.conf.agree+'/'+r.conf.total+' aligned</span>' : '';
         h+='<tr class="in" style="animation-delay:'+(i*30)+'ms">'
           +'<td class="rk">'+(i+1)+'</td>'
-          +'<td class="asset"><span class="sym">'+esc(r.symbol)+'</span>'+name+why+'</td>'
+          +'<td class="asset">'+symHtml+name+why+'</td>'
           +'<td>'+fmtPrice(r.price)+'</td>'
           +'<td class="'+pctCls(r.chg24h)+'">'+fmtPct(r.chg24h)+'</td>'
           +'<td class="'+pctCls(r.chg7d)+'">'+fmtPct(r.chg7d)+'</td>'
@@ -1427,12 +1475,38 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
 
   function renderBoards(d){
     var b='';
-    b+=boardHtml({side:'long', eyebrow:'CRYPTO · <b>LONG SIDE</b>', title:'Breakout watch'}, d.crypto.breakout, d.crypto.universe);
-    b+=boardHtml({side:'short', eyebrow:'CRYPTO · <b>RISK SIDE</b>', title:'Breakdown risk'}, d.crypto.breakdown, d.crypto.universe);
-    b+=boardHtml({side:'long', eyebrow:'US EQUITIES · <b>LONG SIDE</b>', title:'Breakout watch'}, d.stocks.breakout, d.stocks.universe);
-    b+=boardHtml({side:'short', eyebrow:'US EQUITIES · <b>RISK SIDE</b>', title:'Breakdown risk'}, d.stocks.breakdown, d.stocks.universe);
+    b+=boardHtml({side:'long', assetClass:'crypto', boardId:'crypto-long', eyebrow:'CRYPTO · <b>LONG SIDE</b>', title:'Breakout watch'}, d.crypto.breakout, d.crypto.universe);
+    b+=boardHtml({side:'short', assetClass:'crypto', boardId:'crypto-short', eyebrow:'CRYPTO · <b>RISK SIDE</b>', title:'Breakdown risk'}, d.crypto.breakdown, d.crypto.universe);
+    b+=boardHtml({side:'long', assetClass:'stock', boardId:'stock-long', eyebrow:'US EQUITIES · <b>LONG SIDE</b>', title:'Breakout watch'}, d.stocks.breakout, d.stocks.universe);
+    b+=boardHtml({side:'short', assetClass:'stock', boardId:'stock-short', eyebrow:'US EQUITIES · <b>RISK SIDE</b>', title:'Breakdown risk'}, d.stocks.breakdown, d.stocks.universe);
     $('boards').innerHTML=b;
   }
+
+  // Delegated so re-renders (refresh, sort change) never need re-binding.
+  $('boards').addEventListener('click', function(e){
+    var link = e.target.closest('.sym-link');
+    if(link){
+      pushEvent('signals_asset_click',{
+        symbol: link.getAttribute('data-symbol'),
+        asset_class: link.getAttribute('data-class'),
+        side: link.getAttribute('data-side'),
+        rank: Number(link.getAttribute('data-rank')),
+        score: Number(link.getAttribute('data-score'))
+      });
+      return;
+    }
+    var th = e.target.closest('th.sortable');
+    if(th && state.data){
+      var board = th.getAttribute('data-board'), key = th.getAttribute('data-key');
+      var dir = Number(th.getAttribute('data-dir'));
+      var prev = state.sort[board];
+      // Same column clicked again: flip direction. Otherwise use the column's sensible default.
+      var newDir = (prev && prev.key===key) ? -prev.dir : dir;
+      state.sort[board] = {key:key, dir:newDir};
+      pushEvent('signals_sort_change',{board:board, sort_key:key, sort_dir:newDir===1?'asc':'desc'});
+      renderBoards(state.data);
+    }
+  });
 
   function renderStatus(d){
     var t=new Date(d.generated_at);

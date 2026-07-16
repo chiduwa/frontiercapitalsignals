@@ -123,6 +123,7 @@ check('dashboard sends CSP + hardening headers', !!page.headers.get('content-sec
 check('CSP allows GTM/GA4 domains (script-src + connect-src)', page.headers.get('content-security-policy').includes('googletagmanager.com') && page.headers.get('content-security-policy').includes('google-analytics.com'));
 check('GTM container + consent-mode snippet present in the page', pageText.includes('GTM-5Q7JC6JX') && pageText.includes('fcs_consent_v1') && pageText.includes("gtag('consent','default'"));
 check('custom event pushes present (data-loaded, error, methodology-open)', pageText.includes('signals_data_loaded') && pageText.includes('signals_feed_error') && pageText.includes('signals_methodology_open'));
+check('clickable-row + sortable-header tracking present', pageText.includes('signals_asset_click') && pageText.includes('signals_sort_change') && pageText.includes('sym-link') && pageText.includes('sortable'));
 
 console.log('\n== api: empty KV (before first Action run) ==');
 const empty = await worker.fetch(new Request('https://x.com/signals/api/signals'), emptyEnv, ctx);
@@ -190,6 +191,8 @@ check('votesLog/priceLog not leaked into the public payload', built.crypto.votes
 check('log has directional votes for both asset classes', log.votes.some(v => v.asset_class === 'crypto') && log.votes.some(v => v.asset_class === 'stock'));
 check('log votes are directional only (no 0/null dir)', log.votes.every(v => v.dir === 1 || v.dir === -1));
 check('log has a price row per universe asset, both classes', log.prices.length === built.crypto.universe + built.stocks.universe);
+check('crypto entries carry a CoinGecko id (for the dashboard\'s outbound link)', built.crypto.breakout.concat(built.crypto.breakdown).every(r => typeof r.id === 'string' && r.id.length > 0));
+check('stock entries have no id field (not applicable, uses symbol for the Yahoo link instead)', built.stocks.breakout.every(r => r.id === undefined));
 
 console.log('\n== reliability weighting: confluence() with a synthetic reliability map ==');
 const btcMetrics = mod.buildCryptoMetrics(btcCoin, { daily: btcDaily });
