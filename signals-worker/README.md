@@ -1,16 +1,16 @@
 # Frontier Capital Signals — Cloudflare Worker
 
-Hourly confluence screens across the top 200 cryptos and 60 US equities. Up to 13 independent techniques per asset vote bullish, bearish, or neutral; assets rank by weighted directional agreement, and every row shows the raw agreement count (for example 9/13).
+Hourly confluence screens across the top 100 cryptos (by market cap) and 60 US equities. Up to 13 independent techniques per asset vote bullish, bearish, or neutral; assets rank by weighted directional agreement, and every row shows the raw agreement count (for example 9/13). Each technique's weight for a given asset adapts over time based on how reliably it has actually called that asset's direction (see "Adaptive reliability weighting" below).
 
-Lives at `frontiercapitalsignals.com/signals`, as a Worker bound only to that path — the rest of the domain (the Next.js app, deployed separately via `deploy.yml`) is untouched.
+Lives at `frontiercapitalsignals.com/signals`, as a Worker bound only to that path — the rest of the domain (the Next.js app, deployed separately via `deploy.yml`) is untouched, and it's linked from the main site's nav, footer, and homepage.
 
 ## Architecture: the engine runs outside the Worker
 
-The confluence engine (`buildPayload()` in `worker.js`) makes roughly 130 outbound fetches per build (60 stock quotes, 60 analyst-valuation lookups, a handful of crypto/index calls) and does real CPU work computing 13 indicators across ~260 assets. That's too much for Cloudflare Workers' **Free plan** limits (50 subrequests, ~10ms CPU per invocation) — it would get hard-killed mid-build every time.
+The confluence engine (`buildPayload()` in `worker.js`) makes roughly 230 outbound fetches per build (60 stock quotes, 60 analyst-valuation lookups, ~100 per-coin crypto daily-history calls, a handful of index/global calls) and does real CPU work computing 13 indicators across ~160 assets. That's too much for Cloudflare Workers' **Free plan** limits (50 subrequests, ~10ms CPU per invocation) — it would get hard-killed mid-build every time.
 
 So the work is split:
 
-- **`.github/workflows/signals-refresh.yml`** (repo root) runs `scripts/build-signals.mjs` on an hourly cron via GitHub Actions — a plain Node process with no such limits — and writes the resulting JSON straight into the Worker's KV namespace over the Cloudflare API.
+- **`.github/workflows/signals-refresh.yml`** (repo root) runs `scripts/build-signals.mjs` on an hourly cron via GitHub Actions — a plain Node process with no such limits — and writes the resulting JSON straight into the Worker's KV namespace over the Cloudflare API. It also drives the reliability-learning loop against D1 (see below).
 - **`worker.js`** does only two things at request time: serve the static dashboard, and read that one KV key. No outbound fetches, negligible CPU — comfortably inside Workers Free plan.
 
 If a build fails (upstream outage, etc.), `build-signals.mjs` exits non-zero without touching KV, so the Worker just keeps serving the last good payload rather than an empty one.
@@ -19,15 +19,16 @@ If a build fails (upstream outage, etc.), `build-signals.mjs` exits non-zero wit
 
 ```
 signals-worker/
-├── worker.js            The Worker: dashboard + KV-read-only API (paste-ready, self-contained)
-├── src/worker.js         Same file, for the wrangler CLI path
-├── wrangler.toml         KV binding + route template
-├── scripts/build-signals.mjs   Runs the engine, pushes the result to KV (called by the GitHub Action)
-├── test-worker.mjs       Integration harness: routing, KV serving, and the engine itself
+├── worker.js                    The Worker: dashboard + KV-read-only API, plus the engine itself
+├── src/worker.js                 Same file, for the wrangler CLI path (keep byte-identical, no build step)
+├── wrangler.toml                 KV binding + route template
+├── scripts/build-signals.mjs     Runs the engine, pushes the result to KV (called by the GitHub Action)
+├── scripts/reliability.mjs       D1-backed reliability learning loop (load weights, log votes, score outcomes)
+├── test-worker.mjs               Integration harness: routing, KV serving, engine, and reliability weighting
 └── README.md
 ```
 
-The engine (indicator math, confluence scoring) is the same code verified by 52 offline math/scoring checks; `test-worker.mjs` adds routing, caching, and end-to-end engine checks on top. All green — run `node test-worker.mjs` (no network, everything stubbed) after any edit.
+`worker.js` is the single source of truth for the engine — `build-signals.mjs` imports `buildPayload` from it directly, and `reliability.mjs` imports the weighting constants from it too, so there's no separate copy of the scoring logic to keep in sync. Run `node test-worker.mjs` (no network, everything stubbed) after any edit.
 
 ## One-time setup
 
@@ -41,20 +42,39 @@ npx wrangler deploy
 
 Then in the Cloudflare dashboard: Worker → Settings → Domains & Routes → confirm the `frontiercapitalsignals.com/signals*` route is bound (also templated in `wrangler.toml`).
 
-**2. GitHub repo secrets/variables** (repo → Settings → Secrets and variables → Actions), used by `signals-refresh.yml`:
+**2. Cloudflare D1 database** (for reliability weighting — optional, but the point of the whole learning loop):
+
+```
+npx wrangler d1 create frontier-capital-signals-reliability
+```
+
+Then run the schema in `scripts/schema.sql` against it (`npx wrangler d1 execute frontier-capital-signals-reliability --file=scripts/schema.sql --remote`).
+
+**3. GitHub repo secrets/variables** (repo → Settings → Secrets and variables → Actions), used by `signals-refresh.yml`:
 
 | Name | Type | Value |
 |---|---|---|
-| `CLOUDFLARE_API_TOKEN` | secret | Same token used by `deploy.yml`, as long as it also has "Workers KV Storage: Edit" — otherwise re-issue it via the "Edit Cloudflare Workers" template. |
+| `CLOUDFLARE_API_TOKEN` | secret | Needs Workers KV Storage:Edit **and** D1:Edit. The "Edit Cloudflare Workers" dashboard template does not include D1 — add the D1 permission group to the token (or issue a second scoped token) or the reliability loop will log a warning and skip itself every run. |
 | `CLOUDFLARE_ACCOUNT_ID` | secret | Same as `deploy.yml`. |
 | `FCS_KV_NAMESPACE_ID` | variable | The id returned by `wrangler kv namespace create` above. Not secret, just an identifier. |
+| `FCS_D1_DATABASE_ID` | variable | The uuid returned by `wrangler d1 create` above. Leave unset to run without reliability weighting (baseline weights only, no error). |
 | `TREFIS_OVERRIDES` | variable, optional | e.g. `{"AAPL":275.0,"NFLX":88.0}` — your own model price targets, if any. |
 
 Then trigger the workflow once manually (Actions tab → Signals Refresh → Run workflow) to populate KV immediately instead of waiting for the next hour. Visit `https://frontiercapitalsignals.com/signals`.
 
 ## The 13 techniques
 
-Multi-horizon momentum alignment; RSI(14) regime and direction; MACD(12/26/9) histogram; moving-average stack (SMA20/50/200 for equities, 7-day mean and slope for crypto); Bollinger %B with squeeze detection; stochastic (14,3) crosses; Donchian 20-bar breakout/breakdown; volume vs baseline; OBV trend (equities); swing structure of higher-highs/higher-lows; momentum divergence proxy; volatility regime (coiled vs climactic); and a valuation-or-positioning layer. Techniques without data abstain rather than guess, so the agreement denominator varies from about 11 to 13.
+Multi-horizon momentum alignment; RSI(14) regime and direction; MACD(12/26/9) histogram; moving-average stack (SMA20/50/200, from real daily bars for both equities and crypto); Bollinger %B with squeeze detection; stochastic (14,3) crosses; Donchian 20-bar breakout/breakdown; volume vs baseline; OBV trend; swing structure of higher-highs/higher-lows; momentum divergence proxy; volatility regime (coiled vs climactic); and a valuation-or-positioning layer. Techniques without data abstain rather than guess, so the agreement denominator varies from about 11 to 13.
+
+Crypto gets a real per-coin daily-history fetch (`getCryptoDailyHistory`, CoinGecko `/coins/{id}/market_chart`, ~210 daily bars) instead of relying only on the 7-day hourly sparkline. This matters beyond just "more data": RSI/MACD/etc. computed off 14 *hourly* points (the old approach) is a materially different, noisier number than the conventional daily-bar RSI(14) everyone means by that term. When a coin's history fetch fails for a given run, that coin falls back to the old sparkline-only behavior for that hour rather than dropping out of the universe.
+
+## Adaptive reliability weighting
+
+Every build logs each technique's directional call (bullish/bearish, not neutral/abstain) per asset, plus that asset's price, into D1 (`scripts/reliability.mjs`). Once a call is 24 hours or 7 days old, it gets checked against what the price actually did (a move smaller than 0.5% counts as flat, not a win for either side) and folded into a running accuracy count per `(asset, technique, horizon)`.
+
+Before scoring the next hour, `build-signals.mjs` loads each technique's blended accuracy for each specific asset and feeds it into `evaluateTechniques()` as a weight multiplier: `clamp(0.5 + accuracy, 0.5, 1.5)`. A technique that's been right 80% of the time on a given asset gets 1.3x its normal weight *for that asset specifically*; one that's been wrong 80% of the time gets 0.5x. A technique needs at least `MIN_RELIABILITY_SAMPLES` (20, in `worker.js`) matured outcomes for a given asset before its weight moves off the 1x baseline, so a handful of early results can't overfit the score.
+
+This is additive, not load-bearing: if D1 isn't configured (`FCS_D1_DATABASE_ID` unset) or a D1 call fails, `build-signals.mjs` logs a warning and falls back to baseline (unweighted) scoring — the KV write and dashboard are never blocked on it. Tables are pruned automatically (evaluated rows past ~200 hours old, everything past 30 days regardless of evaluated status, so an asset that drops out of the universe can't leave orphaned rows growing forever).
 
 ## Valuation layer and Trefis
 
@@ -62,16 +82,16 @@ Equities use Wall Street consensus mean price targets and recommendation ratings
 
 ## Data sources
 
-CoinGecko (markets, global, trending), alternative.me Fear & Greed, Bybit linear perp funding, Yahoo Finance daily OHLCV with Stooq fallback, Yahoo analyst estimates. All fetched concurrently in `build-signals.mjs`, all optional-degrade. The status bar shows live coverage (CG, EQ n/60, VAL n). Yahoo endpoints are unofficial; `getStock` and `getValuation` (inside `worker.js`) are the only functions to swap if you move to Finnhub or Polygon.
+CoinGecko (top 100 by market cap, plus per-coin daily history, global stats, trending), alternative.me Fear & Greed, Bybit linear perp funding, Yahoo Finance daily OHLCV with Stooq fallback, Yahoo analyst estimates. All fetched concurrently in `build-signals.mjs` (crypto history calls are paced, not fully concurrent, to stay well under CoinGecko's free-tier rate limits), all optional-degrade. The status bar shows live coverage (CG, EQ n/60, VAL n). Yahoo endpoints are unofficial; `getStock` and `getValuation` (inside `worker.js`) are the only functions to swap if you move to Finnhub or Polygon.
 
 ## Security
 
-The dashboard sends `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy` headers. All data rendered into the page goes through the client-side `esc()` helper before hitting `innerHTML`, including fields (asset names, symbols) that ultimately originate from third-party feeds. The JSON API is public/read-only with no auth and `Access-Control-Allow-Origin: *` by design — it carries no secrets and no user-specific data, only market data that's already public.
+The dashboard sends `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy` headers. All data rendered into the page goes through the client-side `esc()` helper before hitting `innerHTML`, including fields (asset names, symbols) that ultimately originate from third-party feeds. The JSON API is public/read-only with no auth and `Access-Control-Allow-Origin: *` by design — it carries no secrets and no user-specific data, only market data that's already public. The reliability D1 database holds only prices and directional vote history, no PII, and is never exposed to the Worker or the public API.
 
 ## Editing later
 
-Change the watchlist, universe size, and filters in the config constants near the top of `worker.js`; tune technique weights in `evaluateTechniques`; adjust the embedded dashboard in the `PAGE_HTML` template near the bottom. `worker.js` is the single source of truth — `build-signals.mjs` imports `buildPayload` from it directly, so there's no separate copy of the engine to keep in sync. After any edit, copy the file to `src/worker.js` too (`cp worker.js src/worker.js`) and run `node test-worker.mjs` before redeploying.
+Change the watchlist, universe size, and filters in the config constants near the top of `worker.js`; tune technique weights in `evaluateTechniques`; adjust the embedded dashboard in the `PAGE_HTML` template near the bottom. After any edit, copy the file to `src/worker.js` too (`cp worker.js src/worker.js`) and run `node test-worker.mjs` before redeploying.
 
 ## Honest notes
 
-A score of 70 with 10/13 agreement is a strong mechanical setup, not a probability. The model has no knowledge of token unlocks, earnings dates, lawsuits, or macro events; those remain the human layer. The footer marks the page as informational, not advice. If you ever charge for access, review investment adviser rules first.
+A score of 70 with 10/13 agreement is a strong mechanical setup, not a probability. The model has no knowledge of token unlocks, earnings dates, lawsuits, or macro events; those remain the human layer. Reliability weighting reflects each technique's own recent track record per asset, not a guarantee it'll keep working — markets change regimes. The footer marks the page as informational, not advice. If you ever charge for access, review investment adviser rules first.

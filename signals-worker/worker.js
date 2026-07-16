@@ -33,9 +33,16 @@ export const CACHE_KEY = 'signals:latest';
 // ----------------------------- CONFIG ---------------------------------------
 
 export const CACHE_SECONDS = 3600;
-export const CRYPTO_UNIVERSE = 200;
+// Top 100 by market cap, not 200: a smaller, higher-liquidity universe reads
+// cleaner technically, and the saved request budget instead goes toward a
+// real per-coin daily-history fetch (see getCryptoDailyHistory) rather than
+// relying only on the 7-day hourly sparkline for every technique.
+export const CRYPTO_UNIVERSE = 100;
 export const CRYPTO_MIN_MCAP = 30_000_000;
 export const CRYPTO_MIN_VOLUME = 2_000_000;
+export const CRYPTO_HISTORY_DAYS = 210;
+const CRYPTO_HISTORY_BATCH = 5;
+const CRYPTO_HISTORY_DELAY_MS = 1200;
 
 export const CRYPTO_BLOCKLIST = new Set([
   'usdt','usdc','usds','usde','dai','fdusd','pyusd','tusd','usdp','gusd','frax',
@@ -141,7 +148,10 @@ export function rangePos(values, price) {
   if (!values || !values.length) return null;
   const hi = Math.max(...values), lo = Math.min(...values);
   if (hi === lo) return 0.5;
-  return (price - lo) / (hi - lo);
+  // Clamped: price and values can now come from two different API calls for
+  // crypto (live current_price vs. daily-history closes), so a live price
+  // can legitimately sit just outside the historical window (e.g. mid-breakout).
+  return clamp((price - lo) / (hi - lo), 0, 1);
 }
 
 // Bollinger bands with squeeze detection (bandwidth now vs 10 bars ago).
@@ -247,9 +257,26 @@ export function volRegime(closes, shortN = 20, longN = 100) {
 // Each technique votes dir: +1 bull, -1 bear, 0 neutral, null = no data.
 // Weight expresses how much independent information the technique carries.
 
-export function evaluateTechniques(m, kind) {
+// Below this many matured (symbol, technique, horizon) outcomes, a
+// technique's measured accuracy is too noisy to act on — it keeps the
+// static baseline weight (multiplier 1) until enough history accumulates.
+export const MIN_RELIABILITY_SAMPLES = 20;
+
+// reliability: optional flat map built by scripts/reliability.mjs from D1,
+// `${symbol}|${techniqueId}` -> { accuracy, total } (accuracy already
+// blended across the 24h/168h horizons there). accuracy 1.0 (always right
+// for this asset) -> 1.5x weight; accuracy 0.0 (always wrong) -> 0.5x;
+// accuracy 0.5 (coin flip, no information) -> 1x, unchanged from today.
+export function reliabilityMultiplier(reliability, symbol, techniqueId) {
+  if (!reliability) return 1;
+  const rec = reliability[`${symbol}|${techniqueId}`];
+  if (!rec || rec.total < MIN_RELIABILITY_SAMPLES) return 1;
+  return clamp(0.5 + rec.accuracy, 0.5, 1.5);
+}
+
+export function evaluateTechniques(m, kind, reliability) {
   const T = [];
-  const push = (id, w, dir, note) => T.push({ id, w, dir, note });
+  const push = (id, w, dir, note) => T.push({ id, w: w * reliabilityMultiplier(reliability, m.symbol, id), dir, note });
   const cS = m.chgShort, c24 = m.chg24h, c7 = m.chg7d, c30 = m.chg30d;
 
   // T1 multi-horizon momentum
@@ -279,8 +306,10 @@ export function evaluateTechniques(m, kind) {
     else push('macd', 1.0, 0, null);
   } else push('macd', 1.0, null, null);
 
-  // T4 moving-average structure
-  if (kind === 'stock' && m.sma20 != null && m.sma50 != null) {
+  // T4 moving-average structure. Crypto gets the real SMA20/50/200 stack
+  // too now, when getCryptoDailyHistory succeeded for that coin (same
+  // branch as stocks); falls back to the coarser 7-day-mean check otherwise.
+  if ((kind === 'stock' || kind === 'crypto') && m.sma20 != null && m.sma50 != null) {
     const above200 = m.sma200 != null ? m.price > m.sma200 : true;
     if (m.price > m.sma20 && m.sma20 > m.sma50 && above200) push('ma', 1.0, 1, 'price > SMA20 > SMA50 stack');
     else if (m.price < m.sma20 && m.sma20 < m.sma50) push('ma', 1.0, -1, 'below falling MA stack');
@@ -326,15 +355,16 @@ export function evaluateTechniques(m, kind) {
     else push('volume', 1.0, 0, null);
   } else push('volume', 1.0, null, null);
 
-  // T9 OBV (stocks only)
-  if (kind === 'stock') {
-    if (m.obv != null) {
-      if (m.obv > 0.5 && (c7 ?? 0) > 0) push('obv', 0.8, 1, 'OBV confirming');
-      else if (m.obv < -0.5 && (c7 ?? 0) > 2) push('obv', 0.8, -1, 'OBV diverging from price');
-      else if (m.obv < -0.5 && (c7 ?? 0) < 0) push('obv', 0.8, -1, 'distribution in volume');
-      else push('obv', 0.8, 0, null);
-    } else push('obv', 0.8, null, null);
-  }
+  // T9 OBV. Stocks always have per-bar volume; crypto only has it when
+  // getCryptoDailyHistory succeeded (m.obv is null otherwise, so this
+  // abstains cleanly on the sparkline-fallback path, same as any other
+  // technique with insufficient data).
+  if (m.obv != null) {
+    if (m.obv > 0.5 && (c7 ?? 0) > 0) push('obv', 0.8, 1, 'OBV confirming');
+    else if (m.obv < -0.5 && (c7 ?? 0) > 2) push('obv', 0.8, -1, 'OBV diverging from price');
+    else if (m.obv < -0.5 && (c7 ?? 0) < 0) push('obv', 0.8, -1, 'distribution in volume');
+    else push('obv', 0.8, 0, null);
+  } else push('obv', 0.8, null, null);
 
   // T10 swing structure
   if (m.structure != null) {
@@ -385,8 +415,8 @@ export function evaluateTechniques(m, kind) {
   return T;
 }
 
-export function confluence(m, kind) {
-  const T = evaluateTechniques(m, kind);
+export function confluence(m, kind, reliability) {
+  const T = evaluateTechniques(m, kind, reliability);
   const applicable = T.filter(t => t.dir !== null);
   const totalW = applicable.reduce((a, t) => a + t.w, 0) || 1;
   let bullW = 0, bearW = 0, bullN = 0, bearN = 0;
@@ -415,7 +445,12 @@ export function confluence(m, kind) {
     bear: bearN,
     total: applicable.length,
     longNotes: notes(1),
-    shortNotes: notes(-1)
+    shortNotes: notes(-1),
+    // Directional-only (dir 0/null are not falsifiable predictions), for
+    // scripts/reliability.mjs to log and later score against actual outcomes.
+    // Not part of the served payload — rankBoards/buildPayload strip this
+    // into a separate log structure before the payload goes to KV.
+    votes: applicable.filter(t => t.dir === 1 || t.dir === -1).map(t => ({ id: t.id, dir: t.dir }))
   };
 }
 
@@ -461,6 +496,24 @@ export async function pool(items, n, fn) {
   return out;
 }
 
+// Batched-with-pauses pool, distinct from pool() above: CoinGecko's free
+// public tier has no documented per-minute rate limit, and issuing ~100
+// per-coin history calls at plain concurrency risks silent 429s. This trades
+// a slower build (still fine under GitHub Actions, no wall-clock pressure
+// like a Worker request has) for staying well under any plausible limit.
+export async function poolPaced(items, batchSize, delayMs, fn) {
+  const out = new Array(items.length);
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const results = await Promise.all(batch.map((item) =>
+      fn(item).catch((e) => ({ _error: String((e && e.message) || e), _item: item }))
+    ));
+    for (let j = 0; j < results.length; j++) out[i + j] = results[j];
+    if (i + batchSize < items.length) await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return out;
+}
+
 // ----------------------------- DATA SOURCES ---------------------------------
 
 async function getCryptoMarkets() {
@@ -468,6 +521,21 @@ async function getCryptoMarkets() {
     + `?vs_currency=usd&order=market_cap_desc&per_page=${CRYPTO_UNIVERSE}&page=1`
     + '&sparkline=true&price_change_percentage=1h,24h,7d,30d';
   return fetchJson(url);
+}
+
+// Real daily bars (close + volume) per coin, so crypto's indicators mean the
+// same thing they do for equities — "RSI(14)" computed off 14 hourly points
+// (the old sparkline-only approach) is a materially different, noisier
+// number than the conventional daily RSI(14). Free tier auto-returns daily
+// granularity for days > 90; https://docs.coingecko.com/reference/coins-id-market-chart.
+export async function getCryptoDailyHistory(id, days = CRYPTO_HISTORY_DAYS) {
+  const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}/market_chart`
+    + `?vs_currency=usd&days=${days}&interval=daily`;
+  const j = await fetchJson(url);
+  const closes = ((j && j.prices) || []).map((p) => p[1]).filter((v) => v != null);
+  const vols = ((j && j.total_volumes) || []).map((v) => v[1]).filter((v) => v != null);
+  if (closes.length < 60) throw new Error(`thin daily history for ${id}`);
+  return { closes, volumes: vols.length === closes.length ? vols : null };
 }
 
 async function getGlobal() {
@@ -628,13 +696,23 @@ export function buildCryptoMetrics(item, extras = {}) {
     : [];
   if (spark.length < 60) return null;
 
+  // Prefer real daily bars (getCryptoDailyHistory) over the 7-day hourly
+  // sparkline: daily closes are what "RSI(14)", "MACD(12/26/9)" etc.
+  // conventionally mean, and only daily bars are long enough for SMA200 and
+  // 20-daily-bar Donchian. Fall back to the sparkline (old behavior) if the
+  // per-coin history fetch failed for this asset this run.
+  const daily = extras.daily && extras.daily.closes && extras.daily.closes.length >= 60 ? extras.daily : null;
+  const closes = daily ? daily.closes : spark;
+  const volumes = daily ? daily.volumes : null;
+  const haveDaily = !!daily;
+
   const price = item.current_price;
   const mcap = item.market_cap || 0;
   const vol = item.total_volume || 0;
   const symbol = (item.symbol || '').toUpperCase();
   const mean7d = spark.reduce((a, b) => a + b, 0) / spark.length;
-  const md = macd(spark);
-  const rNow = rsi(spark);
+  const md = macd(closes);
+  const rNow = rsi(closes);
 
   return {
     symbol,
@@ -648,21 +726,25 @@ export function buildCryptoMetrics(item, extras = {}) {
     chg7d: item.price_change_percentage_7d_in_currency,
     chg30d: item.price_change_percentage_30d_in_currency,
     rsi: rNow,
-    rsiPrev: rsi(spark.slice(0, -3)),
-    rangePos: rangePos(spark, price),
+    rsiPrev: rsi(closes.slice(0, -3)),
+    rangePos: rangePos(closes.slice(-252), price),
     mean7d,
     stretch: mean7d ? ((price / mean7d) - 1) * 100 : null,
-    slope: slopePct(spark, 72),
+    slope: slopePct(closes, haveDaily ? 15 : 72),
+    sma20: haveDaily ? sma(closes, 20) : null,
+    sma50: haveDaily ? sma(closes, 50) : null,
+    sma200: haveDaily && closes.length >= 200 ? sma(closes, 200) : null,
     volRatio: mcap > 0 ? (vol / mcap) / 0.08 : null,   // 1.0 ~= typical 8% daily turnover
     macdHist: md && md.hist,
     macdPrevHist: md && md.prevHist,
-    bb: bollinger(spark),
-    stoch: stochastic(spark),                           // close-only variant
-    donchianHi: spark.length > 21 ? Math.max(...spark.slice(-21, -1)) : null,
-    donchianLo: spark.length > 21 ? Math.min(...spark.slice(-21, -1)) : null,
-    structure: swingStructure(spark, 48),
-    divergence: divergenceProxy(spark, rNow, 36),
-    volReg: volRegime(spark, 24, 120),
+    bb: bollinger(closes),
+    stoch: stochastic(closes),                           // close-only variant, no crypto highs/lows either way
+    donchianHi: closes.length > 21 ? Math.max(...closes.slice(-21, -1)) : null,
+    donchianLo: closes.length > 21 ? Math.min(...closes.slice(-21, -1)) : null,
+    obv: haveDaily && volumes ? obvSlope(closes, volumes, 15) : null,
+    structure: swingStructure(closes, haveDaily ? 40 : 48),
+    divergence: divergenceProxy(closes, rNow, haveDaily ? 25 : 36),
+    volReg: volRegime(closes, haveDaily ? 20 : 24, haveDaily ? 100 : 120),
     funding: extras.funding != null ? extras.funding : null,
     trending: !!extras.trending
   };
@@ -729,8 +811,15 @@ export function buildStockMetrics(row, valuation, override) {
   };
 }
 
-function rankBoards(metrics, kind) {
-  const scored = metrics.map(m => ({ m, c: confluence(m, kind) }));
+function rankBoards(metrics, kind, reliability) {
+  const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability) }));
+  // Full-universe vote log (not just the top-10 shown on each board) so the
+  // reliability learning loop sees every asset, not only that hour's winners.
+  const votesLog = [];
+  for (const { m, c } of scored) {
+    for (const v of c.votes) votesLog.push({ asset_class: kind, symbol: m.symbol, technique_id: v.id, dir: v.dir });
+  }
+  const priceLog = scored.map(({ m }) => ({ asset_class: kind, symbol: m.symbol, price: m.price }));
   const entry = (x, side) => ({
     symbol: x.m.symbol,
     name: x.m.name,
@@ -754,7 +843,7 @@ function rankBoards(metrics, kind) {
       || (side === 'long' ? b.c.bull - a.c.bull : b.c.bear - a.c.bear))
     .slice(0, 10)
     .map(x => entry(x, side));
-  return { breakout: sortSide('long'), breakdown: sortSide('short'), universe: metrics.length };
+  return { breakout: sortSide('long'), breakdown: sortSide('short'), universe: metrics.length, votesLog, priceLog };
 }
 
 // ----------------------------- HANDLER --------------------------------------
@@ -765,7 +854,10 @@ function rankBoards(metrics, kind) {
 // not from the Worker) can import this exact implementation rather than a
 // hand-copied duplicate that could drift from it.
 
-export async function buildPayload(env) {
+// Returns { payload, log }: `payload` is the servable JSON (what goes to KV
+// and the dashboard); `log` is the per-asset vote/price data reliability.mjs
+// needs to score past forecasts and isn't meant to be public.
+export async function buildPayload(env, reliability) {
   const started = Date.now();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
 
@@ -791,15 +883,24 @@ export async function buildPayload(env) {
       if (c.id === 'bitcoin') btc = { price: c.current_price, chg24h: c.price_change_percentage_24h };
       if (c.id === 'ethereum') eth = { price: c.current_price, chg24h: c.price_change_percentage_24h };
     }
-    const metrics = raw
+    const qualifying = raw
       .filter(c => !CRYPTO_BLOCKLIST.has((c.symbol || '').toLowerCase()))
-      .filter(c => (c.market_cap || 0) >= CRYPTO_MIN_MCAP && (c.total_volume || 0) >= CRYPTO_MIN_VOLUME)
-      .map(c => {
+      .filter(c => (c.market_cap || 0) >= CRYPTO_MIN_MCAP && (c.total_volume || 0) >= CRYPTO_MIN_VOLUME);
+
+    // Paced, not pooled at full concurrency: ~100 per-coin calls against
+    // CoinGecko's free tier, one call per qualifying coin (no batched
+    // multi-coin history endpoint exists on that tier).
+    const histories = await poolPaced(qualifying, CRYPTO_HISTORY_BATCH, CRYPTO_HISTORY_DELAY_MS, (c) => getCryptoDailyHistory(c.id));
+
+    const metrics = qualifying
+      .map((c, i) => {
         const sym = (c.symbol || '').toUpperCase();
-        return buildCryptoMetrics(c, { funding: funding[sym], trending: trending.has(sym) });
+        const h = histories[i];
+        const daily = h && !h._error ? h : null;
+        return buildCryptoMetrics(c, { funding: funding[sym], trending: trending.has(sym), daily });
       })
       .filter(Boolean);
-    cryptoBoards = rankBoards(metrics, 'crypto');
+    cryptoBoards = rankBoards(metrics, 'crypto', reliability);
   }
 
   let stockBoards = { breakout: [], breakdown: [], universe: 0 };
@@ -813,7 +914,7 @@ export async function buildPayload(env) {
         if (m) metrics.push(m);
       } else stockFailures.push(r && r._item);
     }
-    stockBoards = rankBoards(metrics, 'stock');
+    stockBoards = rankBoards(metrics, 'stock', reliability);
   }
 
   const idx = {};
@@ -833,8 +934,19 @@ export async function buildPayload(env) {
     throw new Error('all primary data sources failed');
   }
 
-  return {
+  // Pull the reliability-learning log out before the boards go into the
+  // public payload — votesLog/priceLog are internal bookkeeping, not
+  // something the dashboard or API consumer needs to see.
+  const { votesLog: cryptoVotes, priceLog: cryptoPrices, ...cryptoPublic } = cryptoBoards;
+  const { votesLog: stockVotes, priceLog: stockPrices, ...stockPublic } = stockBoards;
+  const log = {
     generated_at: new Date().toISOString(),
+    votes: [...(cryptoVotes || []), ...(stockVotes || [])],
+    prices: [...(cryptoPrices || []), ...(stockPrices || [])]
+  };
+
+  const payload = {
+    generated_at: log.generated_at,
     cache_seconds: CACHE_SECONDS,
     build_ms: Date.now() - started,
     model: 'confluence-v2 (13 techniques, directional agreement)',
@@ -857,10 +969,10 @@ export async function buildPayload(env) {
       qqq: idx['QQQ'] || null,
       vix: idx['^VIX'] || null
     },
-    crypto: cryptoBoards,
-    stocks: stockBoards,
+    crypto: cryptoPublic,
+    stocks: stockPublic,
     sources: {
-      crypto: 'CoinGecko (top 200, 7d hourly sparklines) + trending list',
+      crypto: 'CoinGecko (top 100 by market cap, daily history per coin) + trending list',
       derivatives: 'Bybit linear perp funding rates',
       sentiment: 'alternative.me Fear & Greed',
       equities: 'Yahoo Finance daily OHLCV, Stooq fallback',
@@ -868,6 +980,8 @@ export async function buildPayload(env) {
       note: 'Mechanical confluence composites. Not investment advice.'
     }
   };
+
+  return { payload, log };
 }
 
 // ----------------------------- KV CACHE -------------------------------------
@@ -1045,10 +1159,11 @@ const PAGE_HTML = `<!DOCTYPE html>
     <summary>Methodology and data</summary>
     <div class="method">
       <p><b>The confluence model.</b> Every asset is evaluated by up to 13 independent techniques. Each one votes bullish, bearish, or neutral. The breakout score measures how much weighted evidence points up net of evidence pointing down; the breakdown score mirrors it. The small fraction under each score (for example 9/13) is the raw count of techniques agreeing with that direction out of those that had enough data to vote. High score plus high agreement is the strongest read.</p>
-      <p><b>The 13 techniques.</b> Multi-horizon momentum alignment; Wilder RSI(14) regime and direction; MACD(12/26/9) histogram level and direction; moving-average stack (SMA20/50/200 for equities, 7-day mean and slope for crypto); Bollinger %B with squeeze-and-expansion detection; stochastic (14,3) crosses; Donchian 20-bar breakout or breakdown proximity; volume confirmation versus baseline; on-balance volume trend (equities); swing structure of higher-highs and higher-lows; a momentum divergence proxy that flags new price extremes without RSI support; a volatility regime read separating coiled compression from climactic expansion; and a valuation-or-positioning layer.</p>
+      <p><b>The 13 techniques.</b> Multi-horizon momentum alignment; Wilder RSI(14) regime and direction; MACD(12/26/9) histogram level and direction; moving-average stack (SMA20/50/200, computed from real daily bars for both equities and crypto); Bollinger %B with squeeze-and-expansion detection; stochastic (14,3) crosses; Donchian 20-bar breakout or breakdown proximity; volume confirmation versus baseline; on-balance volume trend; swing structure of higher-highs and higher-lows; a momentum divergence proxy that flags new price extremes without RSI support; a volatility regime read separating coiled compression from climactic expansion; and a valuation-or-positioning layer.</p>
       <p><b>The valuation layer.</b> For equities, Wall Street consensus mean price targets and recommendation ratings: trading well below a buy-rated consensus target votes bullish, trading above the consensus target votes bearish. Trefis does not publish a public API, so consensus targets stand in for model-based estimates; site operators can supply Trefis or other model values through a server-side override, in which case the payload labels the source. For crypto, the layer uses perpetual futures funding rates (crowded positive funding on a parabolic move votes bearish, skeptical funding during an uptrend votes bullish) and trending-list crowding.</p>
-      <p><b>Data.</b> CoinGecko free API for the top 200 coins with 7-day hourly sparklines plus global stats and trending (stablecoins and wrappers excluded), alternative.me Fear &amp; Greed, Bybit linear perp funding rates, Yahoo Finance daily OHLCV with Stooq CSV fallback, and Yahoo analyst estimates. Free feeds can lag or drop symbols; the feeds counter in the status bar shows current coverage, and any technique without data simply abstains rather than guessing.</p>
-      <p><b>Refresh mechanics.</b> The engine result is cached at the edge for 60 minutes; the first request after expiry rebuilds everything. This page also re-checks every 10 minutes so a new hour's data appears without a reload.</p>
+      <p><b>Adaptive weighting.</b> Every hour's directional calls are logged and checked back against what the asset's price actually did 24 hours and 7 days later. Once a technique has enough scored history for a specific asset, its weight for that asset going forward is nudged up if it has been reliably right and down if it has been reliably wrong, capped at plus or minus 50%. A technique that is only a coin flip for a given asset keeps its plain baseline weight.</p>
+      <p><b>Data.</b> CoinGecko free API for the top 100 coins by market cap with real daily price and volume history per coin, plus global stats and trending (stablecoins and wrappers excluded), alternative.me Fear &amp; Greed, Bybit linear perp funding rates, Yahoo Finance daily OHLCV with Stooq CSV fallback, and Yahoo analyst estimates. Free feeds can lag or drop symbols; the feeds counter in the status bar shows current coverage, and any technique without data simply abstains rather than guessing.</p>
+      <p><b>Refresh mechanics.</b> A scheduled job rebuilds the full payload hourly and writes it to this page's cache; every visit reads that cache, so the page itself never runs the engine. This page also re-checks every 10 minutes so a new hour's data appears without a reload.</p>
       <p><b>What the scores are not.</b> A score of 70 with 10/13 agreement is a strong mechanical setup, not a 70% probability. The model has no knowledge of token unlocks, earnings dates, lawsuits, or macro events.</p>
     </div>
   </details>

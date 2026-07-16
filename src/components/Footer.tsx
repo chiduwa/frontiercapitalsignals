@@ -78,6 +78,12 @@ export default function Footer() {
                   </Link>
                 </li>
               ))}
+              <li>
+                {/* /signals is a separate Cloudflare Worker, not a Next.js route */}
+                <a href="/signals" className="text-slate-400 hover:text-white text-sm transition-colors">
+                  Live Signals
+                </a>
+              </li>
             </ul>
             <div className="mt-6">
               <Link
@@ -95,8 +101,8 @@ export default function Footer() {
             &copy; {new Date().getFullYear()} Frontier Capital Signals. All rights reserved.
           </p>
           <div className="flex items-center gap-4">
-            <p className="text-slate-400 text-xs text-center">
-              For informational purposes only. Not financial advice.
+            <p className="text-slate-400 text-xs text-center max-w-md">
+              For informational purposes only. Not financial or investment advice. Signals scores are mechanical indicator composites, not recommendations to buy or sell.
             </p>
             <CookieSettingsButton />
           </div>

@@ -126,6 +126,50 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* Signals teaser — navy, links out to the separate Cloudflare Worker at /signals */}
+      <section className="py-24 bg-navy relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-[500px] h-[300px] bg-gold/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+            <div>
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 mb-5">
+                <span className="w-1.5 h-1.5 rounded-full bg-gold animate-pulse" />
+                <span className="text-white/80 text-xs font-semibold tracking-widest uppercase">New · Quantitative Tool</span>
+              </div>
+              <h2 className="text-4xl font-black text-white mb-5 tracking-tight">Frontier Capital Signals</h2>
+              <p className="text-white/70 text-lg leading-relaxed mb-4 max-w-xl">
+                Hourly confluence screens across the top 100 cryptocurrencies and 60 US equities. Up to 13 independent technical and valuation techniques, from RSI and MACD to Wall Street price targets, must agree before a setup ranks.
+              </p>
+              <p className="text-white/40 text-sm mb-8 max-w-xl">
+                Mechanical technical analysis, not investment advice. Markets carry real risk of loss.
+              </p>
+              <a
+                href="/signals"
+                className="inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-lg gradient-gold text-white font-bold text-sm hover:opacity-90 transition-opacity shadow-lg shadow-gold/20"
+              >
+                View Live Signals
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </a>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: "Assets Screened", value: "160" },
+                { label: "Techniques", value: "13" },
+                { label: "Refresh Rate", value: "Hourly" },
+                { label: "Coverage", value: "Crypto + US Equities" },
+              ].map(({ label, value }) => (
+                <div key={label} className="bg-white/5 border border-white/10 rounded-xl p-5">
+                  <p className="text-2xl font-black text-gradient-gold">{value}</p>
+                  <p className="text-white/60 text-xs font-semibold mt-1">{label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Opportunity scores — sand */}
       <section className="py-24 bg-sand">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

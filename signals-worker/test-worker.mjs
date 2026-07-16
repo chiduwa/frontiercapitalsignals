@@ -23,6 +23,12 @@ const check = (name, cond, detail = '') => {
 const spark = Array.from({ length: 168 }, (_, i) => 100 + i * 0.05 + Math.sin(i / 6));
 const dailyTs = Array.from({ length: 260 }, (_, i) => 1600000000 + i * 86400);
 const dailyClose = Array.from({ length: 260 }, (_, i) => 100 + i * 0.2 + 3 * Math.sin(i / 9));
+// getCryptoDailyHistory fixture: 210 daily bars, distinct curve from the
+// stock one above. 'solana' deliberately has no stub below (falls through
+// to the 404 catch-all) to exercise the sparkline-fallback path.
+const cryptoDailyClose = Array.from({ length: 210 }, (_, i) => 50 + i * 0.15 + 2 * Math.sin(i / 11));
+const cryptoDailyVol = cryptoDailyClose.map(() => 5e7);
+const CRYPTO_DAILY_HISTORY_COINS = new Set(['bitcoin', 'ethereum', 'chainlink']);
 
 function mkCoin(id, sym, name, price, mcap) {
   // Real feeds report current_price consistent with the sparkline tail; mirror
@@ -56,6 +62,16 @@ function stubbedFetch(url) {
     headers: { get: () => null, getSetCookie: () => ['A=1; Path=/'] }
   });
   if (u.includes('/coins/markets')) return ok(coins);
+  if (u.includes('/market_chart')) {
+    const id = u.split('/coins/')[1].split('/market_chart')[0];
+    if (!CRYPTO_DAILY_HISTORY_COINS.has(decodeURIComponent(id))) {
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}), text: async () => '' });
+    }
+    return ok({
+      prices: cryptoDailyClose.map((c, i) => [1600000000000 + i * 86400000, c]),
+      total_volumes: cryptoDailyVol.map((v, i) => [1600000000000 + i * 86400000, v])
+    });
+  }
   if (u.includes('/global')) return ok({ data: { total_market_cap: { usd: 2.3e12 }, market_cap_change_percentage_24h_usd: 1.5, market_cap_percentage: { btc: 52.1 } } });
   if (u.includes('alternative.me/fng')) return ok({ data: [{ value: '38', value_classification: 'Fear' }] });
   if (u.includes('search/trending')) return ok({ coins: [{ item: { symbol: 'SOL' } }] });
@@ -113,8 +129,20 @@ check('empty marked "empty"', empty.headers.get('x-fcs-cache') === 'empty', empt
 check('empty payload carries an error message', typeof emptyBody.error === 'string');
 check('empty response carries hardening headers too', empty.headers.get('x-content-type-options') === 'nosniff');
 
+console.log('\n== buildCryptoMetrics: real daily bars vs sparkline fallback ==');
+const btcCoin = coins.find(c => c.id === 'bitcoin');
+const solCoin = coins.find(c => c.id === 'solana');
+const btcDaily = { closes: cryptoDailyClose, volumes: cryptoDailyVol };
+const withDaily = mod.buildCryptoMetrics(btcCoin, { daily: btcDaily });
+const withoutDaily = mod.buildCryptoMetrics(solCoin, { daily: null });
+check('daily bars give a real SMA20/50/200 stack', withDaily.sma20 != null && withDaily.sma50 != null && withDaily.sma200 != null);
+check('daily bars give OBV (crypto had none before)', withDaily.obv != null);
+check('sparkline fallback has no SMA stack (falls back to mean7d/slope MA branch)', withoutDaily.sma20 == null && withoutDaily.sma200 == null);
+check('sparkline fallback has no OBV (7d sparkline carries no per-bar volume)', withoutDaily.obv == null);
+check('sparkline fallback still produces a usable rsi/macd/bollinger', withoutDaily.rsi != null && withoutDaily.bb != null);
+
 console.log('\n== engine: buildPayload() called directly, as build-signals.mjs will ==');
-const built = await mod.buildPayload({ TREFIS_OVERRIDES: '{"AAPL": 999}' });
+const { payload: built, log } = await mod.buildPayload({ TREFIS_OVERRIDES: '{"AAPL": 999}' });
 check('crypto boards populated', built.crypto.breakout.length > 0 && built.crypto.universe >= 3);
 check('stablecoin filtered from universe', built.crypto.universe === 4, `universe=${built.crypto.universe}`);
 check('stocks boards populated', built.stocks.breakout.length > 0);
@@ -124,6 +152,21 @@ check('valuation flowed in', built.stocks.breakout.concat(built.stocks.breakdown
 check('trefis override applied', built.health.trefis_overrides === 1);
 check('funding fed to crypto', built.crypto.breakout.concat(built.crypto.breakdown).some(r => r.funding != null));
 check('health counts sane', built.health.stocks_ok === built.health.stocks_total && built.health.valuation_ok > 0);
+check('votesLog/priceLog not leaked into the public payload', built.crypto.votesLog === undefined && built.crypto.priceLog === undefined && built.stocks.votesLog === undefined);
+check('log has directional votes for both asset classes', log.votes.some(v => v.asset_class === 'crypto') && log.votes.some(v => v.asset_class === 'stock'));
+check('log votes are directional only (no 0/null dir)', log.votes.every(v => v.dir === 1 || v.dir === -1));
+check('log has a price row per universe asset, both classes', log.prices.length === built.crypto.universe + built.stocks.universe);
+
+console.log('\n== reliability weighting: confluence() with a synthetic reliability map ==');
+const btcMetrics = mod.buildCryptoMetrics(btcCoin, { daily: btcDaily });
+const baseline = mod.confluence(btcMetrics, 'crypto');
+const boosted = mod.confluence(btcMetrics, 'crypto', { [`${btcMetrics.symbol}|rsi`]: { accuracy: 1.0, total: 50 } });
+const nerfed = mod.confluence(btcMetrics, 'crypto', { [`${btcMetrics.symbol}|rsi`]: { accuracy: 0.0, total: 50 } });
+const belowThreshold = mod.confluence(btcMetrics, 'crypto', { [`${btcMetrics.symbol}|rsi`]: { accuracy: 1.0, total: 3 } });
+check('reliability multiplier changes the score vs baseline (enough samples)', boosted.long !== baseline.long || boosted.short !== baseline.short || nerfed.long !== baseline.long || nerfed.short !== baseline.short);
+check('below MIN_RELIABILITY_SAMPLES, weighting stays at baseline (no overfit to small samples)', belowThreshold.long === baseline.long && belowThreshold.short === baseline.short);
+check('reliabilityMultiplier clamps to [0.5, 1.5]', mod.reliabilityMultiplier({ 'X|y': { accuracy: 5, total: 50 } }, 'X', 'y') === 1.5 && mod.reliabilityMultiplier({ 'X|y': { accuracy: -5, total: 50 } }, 'X', 'y') === 0.5);
+check('reliabilityMultiplier is neutral (1) with no reliability data', mod.reliabilityMultiplier(undefined, 'X', 'y') === 1 && mod.reliabilityMultiplier({}, 'X', 'y') === 1);
 
 console.log('\n== api: KV populated by the "Action" (mirrors what build-signals.mjs writes) ==');
 const warmEnv = { FCS_CACHE: new MockKV() };

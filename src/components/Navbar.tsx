@@ -11,6 +11,10 @@ const links = [
   { href: "/about", label: "About" },
 ];
 
+// /signals is served by a separate Cloudflare Worker, not a route in this
+// Next.js app, so it needs a plain full-navigation <a>, not next/link.
+const signalsLink = { href: "/signals", label: "Signals" };
+
 export default function Navbar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -45,6 +49,12 @@ export default function Navbar() {
                 {label}
               </Link>
             ))}
+            <a
+              href={signalsLink.href}
+              className="px-4 py-2 rounded text-sm font-medium transition-colors text-slate-600 hover:text-ink hover:bg-gray-50"
+            >
+              {signalsLink.label}
+            </a>
           </div>
 
           <div className="hidden md:flex items-center gap-3">
@@ -90,6 +100,12 @@ export default function Navbar() {
               {label}
             </Link>
           ))}
+          <a
+            href={signalsLink.href}
+            className="block px-3 py-2 rounded text-sm font-medium text-slate-600 hover:text-ink hover:bg-gray-50"
+          >
+            {signalsLink.label}
+          </a>
           <Link
             href="/contact"
             onClick={() => setOpen(false)}
