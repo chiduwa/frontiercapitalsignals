@@ -48,7 +48,7 @@ export const CRYPTO_HISTORY_DAYS = 210;
 // real gap between them is slower but reliable — there's no CPU/wall-clock
 // pressure here like there would be inside a Worker request.
 const CRYPTO_HISTORY_BATCH = 1;
-const CRYPTO_HISTORY_DELAY_MS = 2000;
+const CRYPTO_HISTORY_DELAY_MS = 3000;
 
 export const CRYPTO_BLOCKLIST = new Set([
   'usdt','usdc','usds','usde','dai','fdusd','pyusd','tusd','usdp','gusd','frax',
@@ -901,6 +901,7 @@ export async function buildPayload(env, reliability) {
 
   let cryptoBoards = { breakout: [], breakdown: [], universe: 0 };
   let btc = null, eth = null;
+  let cryptoDailyOk = 0, cryptoDailyTotal = 0;
   if (cryptoR.status === 'fulfilled' && Array.isArray(cryptoR.value)) {
     const raw = cryptoR.value;
     for (const c of raw) {
@@ -915,6 +916,8 @@ export async function buildPayload(env, reliability) {
     // CoinGecko's free tier, one call per qualifying coin (no batched
     // multi-coin history endpoint exists on that tier).
     const histories = await poolPaced(qualifying, CRYPTO_HISTORY_BATCH, CRYPTO_HISTORY_DELAY_MS, (c) => getCryptoDailyHistory(c.id));
+    cryptoDailyTotal = histories.length;
+    cryptoDailyOk = histories.filter(h => h && !h._error).length;
 
     const metrics = qualifying
       .map((c, i) => {
@@ -983,6 +986,8 @@ export async function buildPayload(env, reliability) {
       valuation_ok: valR.status === 'fulfilled' ? valR.value.ok : 0,
       stocks_ok: STOCK_WATCHLIST.length - stockFailures.length,
       stocks_total: STOCK_WATCHLIST.length,
+      crypto_daily_ok: cryptoDailyOk,
+      crypto_daily_total: cryptoDailyTotal,
       trefis_overrides: Object.keys(overrides).length
     },
     overview: {
@@ -1319,7 +1324,8 @@ const PAGE_HTML = `<!DOCTYPE html>
     var eq=d.health.stocks_ok+'/'+d.health.stocks_total;
     var cg=d.health.coingecko?'CG OK':'CG DOWN';
     var val='VAL '+(d.health.valuation_ok||0);
-    hs.innerHTML='FEEDS <b>'+cg+' · EQ '+eq+' · '+val+'</b>';
+    var cd='CG-D '+(d.health.crypto_daily_ok||0)+'/'+(d.health.crypto_daily_total||0);
+    hs.innerHTML='FEEDS <b>'+cg+' · '+cd+' · EQ '+eq+' · '+val+'</b>';
     hs.className='stat'+((!d.health.coingecko||d.health.stocks_ok<d.health.stocks_total*0.8)?' warn':'');
     var ageH=(Date.now()-t.getTime())/36e5;
     $('sysState').textContent = ageH>2 ? 'STALE' : 'LIVE';
