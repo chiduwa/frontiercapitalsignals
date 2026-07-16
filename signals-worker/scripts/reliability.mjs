@@ -11,9 +11,15 @@ const EVAL_COLUMN = { 24: 'evaluated_24', 168: 'evaluated_168' };
 // either directional call — mirrors the deadband idea already used
 // elsewhere in the engine (e.g. Donchian's 3% proximity bands).
 const OUTCOME_DEADBAND_PCT = 0.5;
-// Rows per multi-row statement: keeps bound params well under SQLite's
-// classic ~999-per-statement ceiling (100 rows x 5 cols = 500).
-const CHUNK = 100;
+// Rows per multi-row statement. D1's actual limit is 100 bound parameters
+// per query (not SQLite's classic ~999) — confirmed live after a real run
+// hit "too many SQL variables" at CHUNK=100 (100 rows x 5 cols = 500
+// params on the technique_votes insert). 15 rows x 5 cols = 75 keeps a
+// comfortable margin under the ceiling for the widest table (votes);
+// narrower queries here (IN()-clause selects/updates at 1 param/item) stay
+// well under it too, at the cost of a few more round trips, which D1's
+// free tier has plenty of headroom for.
+const CHUNK = 15;
 // A bit past the longer 168h horizon, for the price-log join plus buffer.
 const RETENTION_HOURS = 200;
 // Hard cap regardless of evaluated status, so a symbol that drops out of
