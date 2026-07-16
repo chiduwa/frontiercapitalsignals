@@ -129,6 +129,36 @@ check('empty marked "empty"', empty.headers.get('x-fcs-cache') === 'empty', empt
 check('empty payload carries an error message', typeof emptyBody.error === 'string');
 check('empty response carries hardening headers too', empty.headers.get('x-content-type-options') === 'nosniff');
 
+console.log('\n== getCryptoDailyHistory: retries on 429, gives up on persistent 429 ==');
+let call429Count = 0;
+global.fetch = async (url) => {
+  const u = String(url);
+  if (u.includes('/market_chart')) {
+    call429Count++;
+    if (u.includes('recovers-after-one-429') && call429Count > 1) {
+      return {
+        ok: true, status: 200,
+        json: async () => ({
+          prices: cryptoDailyClose.map((c, i) => [1600000000000 + i * 86400000, c]),
+          total_volumes: cryptoDailyVol.map((v, i) => [1600000000000 + i * 86400000, v])
+        }),
+        headers: { get: () => null }
+      };
+    }
+    return { ok: false, status: 429, json: async () => ({}), text: async () => 'rate limited', headers: { get: () => null } };
+  }
+  return stubbedFetch(url);
+};
+const recovered = await mod.getCryptoDailyHistory('recovers-after-one-429');
+check('recovers after one 429 (retried, second attempt succeeded)', recovered.closes.length > 60 && call429Count === 2, `calls=${call429Count}`);
+
+call429Count = 0;
+let threw = false;
+try { await mod.getCryptoDailyHistory('always-429'); }
+catch { threw = true; }
+check('gives up after exhausting retries on persistent 429', threw && call429Count === 3, `calls=${call429Count}`);
+global.fetch = stubbedFetch;
+
 console.log('\n== buildCryptoMetrics: real daily bars vs sparkline fallback ==');
 const btcCoin = coins.find(c => c.id === 'bitcoin');
 const solCoin = coins.find(c => c.id === 'solana');

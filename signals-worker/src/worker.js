@@ -41,8 +41,14 @@ export const CRYPTO_UNIVERSE = 100;
 export const CRYPTO_MIN_MCAP = 30_000_000;
 export const CRYPTO_MIN_VOLUME = 2_000_000;
 export const CRYPTO_HISTORY_DAYS = 210;
-const CRYPTO_HISTORY_BATCH = 5;
-const CRYPTO_HISTORY_DELAY_MS = 1200;
+// Sequential, not concurrent: a live run showed ~100% of per-coin history
+// calls failing when fired in bursts of 5 from a GitHub Actions runner
+// (shared CI IP ranges are more rate-limit-prone against CoinGecko's free
+// tier than an arbitrary residential IP). One request at a time with a
+// real gap between them is slower but reliable — there's no CPU/wall-clock
+// pressure here like there would be inside a Worker request.
+const CRYPTO_HISTORY_BATCH = 1;
+const CRYPTO_HISTORY_DELAY_MS = 2000;
 
 export const CRYPTO_BLOCKLIST = new Set([
   'usdt','usdc','usds','usde','dai','fdusd','pyusd','tusd','usdp','gusd','frax',
@@ -528,14 +534,32 @@ async function getCryptoMarkets() {
 // (the old sparkline-only approach) is a materially different, noisier
 // number than the conventional daily RSI(14). Free tier auto-returns daily
 // granularity for days > 90; https://docs.coingecko.com/reference/coins-id-market-chart.
+//
+// Retries on 429 specifically (with backoff): CI runners share IP ranges
+// that are already heavily used against CoinGecko's free tier, so a burst
+// of ~100 per-coin calls is more likely to get rate-limited here than the
+// same calls from an arbitrary residential IP — worth one or two retries
+// before giving up and falling back to the 7-day sparkline for that coin.
 export async function getCryptoDailyHistory(id, days = CRYPTO_HISTORY_DAYS) {
   const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}/market_chart`
     + `?vs_currency=usd&days=${days}&interval=daily`;
-  const j = await fetchJson(url);
-  const closes = ((j && j.prices) || []).map((p) => p[1]).filter((v) => v != null);
-  const vols = ((j && j.total_volumes) || []).map((v) => v[1]).filter((v) => v != null);
-  if (closes.length < 60) throw new Error(`thin daily history for ${id}`);
-  return { closes, volumes: vols.length === closes.length ? vols : null };
+  const backoffsMs = [3000, 6000];
+  let lastErr;
+  for (let attempt = 0; attempt <= backoffsMs.length; attempt++) {
+    try {
+      const j = await fetchJson(url);
+      const closes = ((j && j.prices) || []).map((p) => p[1]).filter((v) => v != null);
+      const vols = ((j && j.total_volumes) || []).map((v) => v[1]).filter((v) => v != null);
+      if (closes.length < 60) throw new Error(`thin daily history for ${id}`);
+      return { closes, volumes: vols.length === closes.length ? vols : null };
+    } catch (e) {
+      lastErr = e;
+      const is429 = /^HTTP 429/.test(String(e && e.message));
+      if (!is429 || attempt === backoffsMs.length) break;
+      await new Promise((r) => setTimeout(r, backoffsMs[attempt]));
+    }
+  }
+  throw lastErr;
 }
 
 async function getGlobal() {
