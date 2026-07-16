@@ -1,0 +1,32 @@
+name: Signals Refresh
+
+# Runs the Frontier Capital Signals engine (signals-worker/) hourly and
+# writes the result into the signals-worker Cloudflare Worker's KV cache.
+# Kept separate from deploy.yml (which ships the Next.js app) since this
+# job runs on every hour regardless of whether any code changed.
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Build signals payload and push to KV
+        working-directory: signals-worker
+        run: node scripts/build-signals.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_KV_NAMESPACE_ID: ${{ vars.FCS_KV_NAMESPACE_ID }}
+          TREFIS_OVERRIDES: ${{ vars.TREFIS_OVERRIDES }}

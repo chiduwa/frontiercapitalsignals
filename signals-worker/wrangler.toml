@@ -1,0 +1,27 @@
+name = "frontier-capital-signals"
+main = "src/worker.js"
+compatibility_date = "2024-11-01"
+
+# Bind the KV namespace that stores the hourly payload.
+# Create it once:  npx wrangler kv namespace create FCS_CACHE
+# then paste the returned id below.
+[[kv_namespaces]]
+binding = "FCS_CACHE"
+id = "9dd922a242fc4fa58853b954693b9eee"
+
+# No [triggers] cron here: the engine is too heavy for Workers Free plan's
+# 10ms CPU / 50-subrequest caps (~130 fetches + indicator math across ~260
+# assets). It instead runs hourly via a GitHub Actions workflow
+# (.github/workflows/signals-refresh.yml in the repo root), which calls
+# scripts/build-signals.mjs and writes straight into this KV namespace. This
+# Worker only ever reads that cache, so it stays well inside Free plan limits.
+
+# Serve only on the /signals path of the existing zone; the rest of the site
+# on Cloudflare (the Next.js app) is untouched.
+[[routes]]
+pattern = "frontiercapitalsignals.com/signals*"
+zone_name = "frontiercapitalsignals.com"
+
+# Optional: model-based valuation overrides (Trefis or your own targets)
+# [vars]
+# TREFIS_OVERRIDES = "{\"AAPL\":275.0,\"NFLX\":88.0}"
