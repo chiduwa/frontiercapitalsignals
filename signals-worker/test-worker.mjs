@@ -280,6 +280,21 @@ const belowSampleThreshold = {
 const historicalTooFewSamples = mod.confluence(bottomWithConfirm, 'crypto', undefined, undefined, belowSampleThreshold);
 check('below MIN_RELIABILITY_SAMPLES at both horizons: still falls back to methodology, not overfit', historicalTooFewSamples.longHorizon.basis === 'methodology', JSON.stringify(historicalTooFewSamples.longHorizon));
 
+// Regression test for a real bug found live: several techniques voting on
+// the same asset in the same hour are correlated (marked right/wrong
+// together, off the same underlying price move) — summing their
+// individually-thin counts must NOT be allowed to masquerade as one
+// confident sample. Reproduces the exact shape seen in production (3
+// active techniques at 13 matured outcomes each, well under the 20
+// threshold individually, summing past it).
+check('at least 2 active techniques exist to make this regression test meaningful', activeBullIds.length >= 2, `activeBullIds=${JSON.stringify(activeBullIds)}`);
+const correlatedThinSamples = {
+  24: Object.fromEntries(activeBullIds.map(id => [`${symbol}|${id}`, { correct: 5, total: 13 }])), // 13 < 20 each, but sums past 20 with 2+ techniques
+  168: {}
+};
+const notFooledByCorrelatedSamples = mod.confluence(bottomWithConfirm, 'crypto', undefined, undefined, correlatedThinSamples);
+check('several techniques each below threshold: does not sum to false confidence, stays methodology', notFooledByCorrelatedSamples.longHorizon.basis === 'methodology', JSON.stringify(notFooledByCorrelatedSamples.longHorizon));
+
 check('horizonEstimate returns null when nothing voted that direction', mod.horizonEstimate([{ id: 'rsi', w: 1, dir: 1 }], -1, 'X', undefined) === null);
 
 console.log('\n== api: KV populated by the "Action" (mirrors what build-signals.mjs writes) ==');

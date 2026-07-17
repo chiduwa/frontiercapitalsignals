@@ -353,12 +353,20 @@ export function horizonEstimate(applicable, dir, symbol, reliabilityByHorizon) {
     for (const t of active) {
       const r24 = reliabilityByHorizon[24] && reliabilityByHorizon[24][`${symbol}|${t.id}`];
       const r168 = reliabilityByHorizon[168] && reliabilityByHorizon[168][`${symbol}|${t.id}`];
-      if (r24) { acc24.correct += r24.correct; acc24.total += r24.total; }
-      if (r168) { acc168.correct += r168.correct; acc168.total += r168.total; }
+      // Only folds a technique's own numbers in once IT individually has
+      // matured enough outcomes — several techniques voting on the same
+      // asset in the same hour are correlated (they're marked right or
+      // wrong together, off the same underlying price move), so summing
+      // their thin counts together would let that correlation masquerade
+      // as independent confidence. Same bar as reliabilityMultiplier uses,
+      // deliberately, so "enough history to trust" means the same thing
+      // in both places.
+      if (r24 && r24.total >= MIN_RELIABILITY_SAMPLES) { acc24.correct += r24.correct; acc24.total += r24.total; }
+      if (r168 && r168.total >= MIN_RELIABILITY_SAMPLES) { acc168.correct += r168.correct; acc168.total += r168.total; }
     }
-    if (acc24.total >= MIN_RELIABILITY_SAMPLES || acc168.total >= MIN_RELIABILITY_SAMPLES) {
-      const a24 = acc24.total >= MIN_RELIABILITY_SAMPLES ? acc24.correct / acc24.total : null;
-      const a168 = acc168.total >= MIN_RELIABILITY_SAMPLES ? acc168.correct / acc168.total : null;
+    if (acc24.total > 0 || acc168.total > 0) {
+      const a24 = acc24.total > 0 ? acc24.correct / acc24.total : null;
+      const a168 = acc168.total > 0 ? acc168.correct / acc168.total : null;
       if (a24 != null && (a168 == null || a24 >= a168)) return { label: horizonLabel(1), basis: 'historical' };
       if (a168 != null) return { label: horizonLabel(7), basis: 'historical' };
     }
