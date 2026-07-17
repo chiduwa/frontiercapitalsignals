@@ -82,6 +82,17 @@ Before scoring the next hour, `build-signals.mjs` loads each technique's blended
 
 This is additive, not load-bearing: if D1 isn't configured (`FCS_D1_DATABASE_ID` unset) or a D1 call fails, `build-signals.mjs` logs a warning and falls back to baseline (unweighted) scoring — the KV write and dashboard are never blocked on it. Tables are pruned automatically (evaluated rows past ~200 hours old, everything past 30 days regardless of evaluated status, so an asset that drops out of the universe can't leave orphaned rows growing forever).
 
+## Leading vs. lagging, and the expected timeframe
+
+Every technique in `worker.js` is classified in `TECHNIQUE_META` as **leading** (tries to anticipate a move before it's confirmed — RSI, Bollinger squeeze, stochastic, OBV, divergence, volatility regime, reversal detection, valuation/positioning) or **lagging/confirming** (describes a move already underway — momentum alignment, MACD, the moving-average stack, Donchian proximity, volume confirmation, swing structure), each with a typical resolution horizon in days.
+
+`confluence()`'s `horizonEstimate()` uses this to show a timeframe next to every score (`built.crypto.breakout[0].horizon`, e.g. `{ label: '1-3 days', basis: 'methodology' }`), answering "how soon should this resolve," not just "how strong is it":
+
+- **Historical** (`basis: 'historical'`, shown in amber on the dashboard with a check mark): once an asset has at least `MIN_RELIABILITY_SAMPLES` matured outcomes at the 24h or 168h mark for the techniques currently voting on it, the estimate uses *that asset's own measured accuracy* at each horizon — the same D1 data the adaptive weighting above draws on, just answering a different question.
+- **Methodology** (`basis: 'methodology'`, shown in gray): the fallback before there's enough of that asset's own history — a weight-averaged blend of the active techniques' typical horizons from `TECHNIQUE_META`. An informed estimate, not a measurement, and the dashboard says so via the chip's tooltip.
+
+This reuses `reliability.mjs`'s existing D1 data rather than adding a new store: `loadReliability()` now returns `{ blended, byHorizon }` — `blended` (sums correct/total across horizons) is what `evaluateTechniques()` uses to weight votes; `byHorizon` (keeps 24h and 168h separate) is what `horizonEstimate()` uses to compare which horizon has actually been more accurate for a specific asset.
+
 ## Valuation layer and Trefis
 
 Equities use Wall Street consensus mean price targets and recommendation ratings (Yahoo quoteSummary via a crumb handshake): trading well below a buy-rated target votes bullish, trading above it votes bearish. Trefis publishes no public API, so consensus stands in by default. Supply your own model targets via the `TREFIS_OVERRIDES` variable and those win, labeled `source: "override"` in the payload. Crypto uses Bybit perpetual funding rates and CoinGecko trending-list crowding as its positioning layer.

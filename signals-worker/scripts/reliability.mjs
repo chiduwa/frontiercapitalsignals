@@ -50,24 +50,30 @@ function chunk(arr, n) {
   return out;
 }
 
-// Blended across horizons: sums raw correct/total (equivalent to a
-// total-weighted average of each horizon's accuracy) rather than averaging
-// the two accuracy percentages directly, so a horizon with more matured
-// samples gets proportionally more say.
+// Returns { blended, byHorizon }. `blended` sums raw correct/total across
+// horizons (equivalent to a total-weighted average of each horizon's
+// accuracy, so a horizon with more matured samples gets proportionally
+// more say) — this is what evaluateTechniques() uses to weight a
+// technique's vote. `byHorizon` keeps 24h and 168h separate — this is what
+// confluence()'s horizonEstimate() uses to answer "at which horizon has
+// this asset's own history actually been more accurate," which a blended
+// number can't answer.
 export async function loadReliability(env) {
-  const rows = await d1(env, 'SELECT symbol, technique_id, correct, total FROM technique_reliability WHERE total > 0');
+  const rows = await d1(env, 'SELECT symbol, technique_id, horizon_hours, correct, total FROM technique_reliability WHERE total > 0');
   const acc = {};
+  const byHorizon = { 24: {}, 168: {} };
   for (const r of rows) {
     const key = `${r.symbol}|${r.technique_id}`;
     if (!acc[key]) acc[key] = { correct: 0, total: 0 };
     acc[key].correct += r.correct;
     acc[key].total += r.total;
+    if (byHorizon[r.horizon_hours]) byHorizon[r.horizon_hours][key] = { correct: r.correct, total: r.total };
   }
-  const out = {};
+  const blended = {};
   for (const [key, v] of Object.entries(acc)) {
-    out[key] = { accuracy: v.total ? v.correct / v.total : 0.5, total: v.total };
+    blended[key] = { accuracy: v.total ? v.correct / v.total : 0.5, total: v.total };
   }
-  return out;
+  return { blended, byHorizon };
 }
 
 // Persists this run's per-asset price and per-technique directional votes,

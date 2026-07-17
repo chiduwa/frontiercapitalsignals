@@ -23,12 +23,15 @@ const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID };
 
 // The reliability loop is additive, not load-bearing: if D1 isn't
 // configured yet, or a D1 call fails, the core dashboard build must still
-// succeed with today's baseline (unweighted) scoring rather than blocking
-// the hourly KV refresh on a secondary subsystem.
-let reliability;
+// succeed with today's baseline (unweighted, methodology-only-horizon)
+// scoring rather than blocking the hourly KV refresh on a secondary
+// subsystem.
+let reliability, reliabilityByHorizon;
 if (FCS_D1_DATABASE_ID) {
   try {
-    reliability = await loadReliability(env);
+    const rel = await loadReliability(env);
+    reliability = rel.blended;
+    reliabilityByHorizon = rel.byHorizon;
     console.log(`loaded reliability stats for ${Object.keys(reliability).length} (symbol, technique) pairs`);
   } catch (e) {
     console.error('loadReliability failed, continuing with baseline weights:', e.message || e);
@@ -38,7 +41,7 @@ if (FCS_D1_DATABASE_ID) {
 }
 
 const started = Date.now();
-const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability);
+const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon);
 console.log(`built payload in ${Date.now() - started}ms — crypto ${payload.crypto.universe} assets, stocks ${payload.stocks.universe} assets`);
 console.log('health:', JSON.stringify(payload.health));
 

@@ -299,6 +299,82 @@ export function reliabilityMultiplier(reliability, symbol, techniqueId) {
   return clamp(0.5 + rec.accuracy, 0.5, 1.5);
 }
 
+// Classifies each technique as leading (anticipates a move before it's
+// confirmed) or lagging/confirming (describes a move already underway),
+// plus a typical resolution horizon in days — the fallback estimate below
+// uses this when there isn't yet enough of this asset's own history to
+// answer the question directly. This is a judgment call, documented here
+// and in the dashboard's methodology section, not a physical law: moving
+// averages and swing structure are textbook lagging/descriptive reads;
+// divergence, squeeze detection, reversal patterns, OBV, and crowding
+// (funding/positioning) are textbook leading reads; valuation is "leading"
+// only on a much longer mean-reversion clock.
+export const TECHNIQUE_META = {
+  momentum:    { leading: false, horizonDays: 5 },
+  rsi:         { leading: true,  horizonDays: 3 },
+  macd:        { leading: false, horizonDays: 5 },
+  ma:          { leading: false, horizonDays: 10 },
+  bollinger:   { leading: true,  horizonDays: 2 },
+  stoch:       { leading: true,  horizonDays: 2 },
+  range:       { leading: false, horizonDays: 5 },
+  volume:      { leading: false, horizonDays: 2 },
+  obv:         { leading: true,  horizonDays: 5 },
+  structure:   { leading: false, horizonDays: 7 },
+  divergence:  { leading: true,  horizonDays: 3 },
+  volatility:  { leading: true,  horizonDays: 4 },
+  reversal:    { leading: true,  horizonDays: 2 },
+  valuation:   { leading: true,  horizonDays: 30 },
+  positioning: { leading: true,  horizonDays: 3 },
+  attention:   { leading: true,  horizonDays: 2 }
+};
+
+export function horizonLabel(days) {
+  if (days <= 1.5) return '~1 day';
+  if (days <= 3.5) return '1-3 days';
+  if (days <= 6) return '3-6 days';
+  if (days <= 10) return '~1 week';
+  if (days <= 20) return '1-3 weeks';
+  return '3+ weeks';
+}
+
+// Estimates the window this specific call is expected to resolve in.
+// Prefers a data-driven answer — this asset's own measured accuracy at the
+// 24h vs 168h horizon, restricted to the techniques currently voting this
+// direction — over the static methodology table, once there's enough of
+// that asset's own history to trust (same MIN_RELIABILITY_SAMPLES gate as
+// the weighting itself). Returns null only when nothing applicable voted.
+export function horizonEstimate(applicable, dir, symbol, reliabilityByHorizon) {
+  const active = applicable.filter(t => t.dir === dir);
+  if (!active.length) return null;
+
+  if (reliabilityByHorizon) {
+    const acc24 = { correct: 0, total: 0 };
+    const acc168 = { correct: 0, total: 0 };
+    for (const t of active) {
+      const r24 = reliabilityByHorizon[24] && reliabilityByHorizon[24][`${symbol}|${t.id}`];
+      const r168 = reliabilityByHorizon[168] && reliabilityByHorizon[168][`${symbol}|${t.id}`];
+      if (r24) { acc24.correct += r24.correct; acc24.total += r24.total; }
+      if (r168) { acc168.correct += r168.correct; acc168.total += r168.total; }
+    }
+    if (acc24.total >= MIN_RELIABILITY_SAMPLES || acc168.total >= MIN_RELIABILITY_SAMPLES) {
+      const a24 = acc24.total >= MIN_RELIABILITY_SAMPLES ? acc24.correct / acc24.total : null;
+      const a168 = acc168.total >= MIN_RELIABILITY_SAMPLES ? acc168.correct / acc168.total : null;
+      if (a24 != null && (a168 == null || a24 >= a168)) return { label: horizonLabel(1), basis: 'historical' };
+      if (a168 != null) return { label: horizonLabel(7), basis: 'historical' };
+    }
+  }
+
+  let wSum = 0, hSum = 0;
+  for (const t of active) {
+    const meta = TECHNIQUE_META[t.id];
+    if (!meta) continue;
+    wSum += t.w; hSum += t.w * meta.horizonDays;
+  }
+  if (!wSum) return null;
+  const days = hSum / wSum;
+  return { label: horizonLabel(days), basis: 'methodology' };
+}
+
 export function evaluateTechniques(m, kind, reliability, marketContext) {
   const T = [];
   const push = (id, w, dir, note) => T.push({ id, w: w * reliabilityMultiplier(reliability, m.symbol, id), dir, note });
@@ -488,7 +564,7 @@ export function evaluateTechniques(m, kind, reliability, marketContext) {
   return T;
 }
 
-export function confluence(m, kind, reliability, marketContext) {
+export function confluence(m, kind, reliability, marketContext, reliabilityByHorizon) {
   const T = evaluateTechniques(m, kind, reliability, marketContext);
   const applicable = T.filter(t => t.dir !== null);
   const totalW = applicable.reduce((a, t) => a + t.w, 0) || 1;
@@ -519,6 +595,8 @@ export function confluence(m, kind, reliability, marketContext) {
     total: applicable.length,
     longNotes: notes(1),
     shortNotes: notes(-1),
+    longHorizon: horizonEstimate(applicable, 1, m.symbol, reliabilityByHorizon),
+    shortHorizon: horizonEstimate(applicable, -1, m.symbol, reliabilityByHorizon),
     // Directional-only (dir 0/null are not falsifiable predictions), for
     // scripts/reliability.mjs to log and later score against actual outcomes.
     // Not part of the served payload — rankBoards/buildPayload strip this
@@ -909,8 +987,8 @@ export function buildStockMetrics(row, valuation, override) {
   };
 }
 
-function rankBoards(metrics, kind, reliability, marketContext) {
-  const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, marketContext) }));
+function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHorizon) {
+  const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, marketContext, reliabilityByHorizon) }));
   // Full-universe vote log (not just the top-10 shown on each board) so the
   // reliability learning loop sees every asset, not only that hour's winners.
   const votesLog = [];
@@ -930,6 +1008,7 @@ function rankBoards(metrics, kind, reliability, marketContext) {
     score: side === 'long' ? x.c.long : x.c.short,
     conf: { agree: side === 'long' ? x.c.bull : x.c.bear, total: x.c.total },
     drivers: side === 'long' ? x.c.longNotes : x.c.shortNotes,
+    horizon: side === 'long' ? x.c.longHorizon : x.c.shortHorizon,
     ...(x.m.val ? { val: { target: x.m.val.target, upside: x.m.val.upside, recKey: x.m.val.recKey, source: x.m.val.source } } : {}),
     ...(x.m.funding != null ? { funding: x.m.funding } : {}),
     ...(x.m.distHigh52w != null ? { distHigh52w: x.m.distHigh52w } : {}),
@@ -956,7 +1035,7 @@ function rankBoards(metrics, kind, reliability, marketContext) {
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability) {
+export async function buildPayload(env, reliability, reliabilityByHorizon) {
   const started = Date.now();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
 
@@ -1027,7 +1106,7 @@ export async function buildPayload(env, reliability) {
         return buildCryptoMetrics(c, { funding: funding[sym], trending: trending.has(sym), daily });
       })
       .filter(Boolean);
-    cryptoBoards = rankBoards(metrics, 'crypto', reliability, marketContext);
+    cryptoBoards = rankBoards(metrics, 'crypto', reliability, marketContext, reliabilityByHorizon);
   }
 
   let stockBoards = { breakout: [], breakdown: [], universe: 0 };
@@ -1041,7 +1120,7 @@ export async function buildPayload(env, reliability) {
         if (m) metrics.push(m);
       } else stockFailures.push(r && r._item);
     }
-    stockBoards = rankBoards(metrics, 'stock', reliability, marketContext);
+    stockBoards = rankBoards(metrics, 'stock', reliability, marketContext, reliabilityByHorizon);
   }
 
   // If both primary sources yielded nothing, this is a real outage: throw so
@@ -1238,6 +1317,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .board.short .meter i.on{background:var(--down);box-shadow:0 0 5px rgba(255,122,133,.4)}
   .score{font-weight:600;min-width:24px;color:var(--paper)}
   .conf{font-size:9.5px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
+  .horizon{font-size:9.5px;letter-spacing:.06em;padding:1px 6px;border-radius:3px;border:1px solid var(--line);cursor:help}
+  .horizon.hz-hist{color:var(--amber);border-color:rgba(255,178,36,.35)}
+  .horizon.hz-meth{color:var(--dim)}
 
   @keyframes rise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
   tbody tr.in{animation:rise .35s ease both}
@@ -1288,7 +1370,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     <div class="mast-grid">
       <div>
         <h1>Frontier Capital<br><span class="amber">Signals</span></h1>
-        <p class="dek">Confluence screens across the <b>top 100 cryptos</b> and <b>60 US equities</b>. Up to <b>14 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to volume, funding rates, Wall Street price targets and reversal-pattern detection, must point the <b>same direction</b> before a signal ranks. <b>Synced hourly.</b></p>
+        <p class="dek">Confluence screens across the <b>top 100 cryptos</b> and <b>60 US equities</b>. Up to <b>14 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to volume, funding rates, Wall Street price targets and reversal-pattern detection, must point the <b>same direction</b> before a signal ranks — each with an <b>expected timeframe</b> learned from its own track record. <b>Synced hourly.</b></p>
       </div>
       <div class="mast-meta">
         DATA REFRESH <b>HOURLY</b><br>
@@ -1315,9 +1397,10 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       <p><b>Reversal detection.</b> A separate read from plain RSI level: it looks for RSI having actually bottomed or topped over the last ~10 bars and turned back, confirmed by at least one independent signal (a stochastic cross, a Bollinger band extreme, swing structure, on-balance volume, or the divergence proxy) — it never fires on RSI alone. Market-wide sentiment adds confidence on top when it lines up: extreme fear on the Fear &amp; Greed index for a crypto bottom, or VIX sitting high in its own recent range for an equity bottom (and the mirror image — extreme greed or a complacent VIX — for tops).</p>
       <p><b>The valuation layer.</b> For equities, Wall Street consensus mean price targets and recommendation ratings: trading well below a buy-rated consensus target votes bullish, trading above the consensus target votes bearish. Trefis does not publish a public API, so consensus targets stand in for model-based estimates; site operators can supply Trefis or other model values through a server-side override, in which case the payload labels the source. For crypto, the layer uses perpetual futures funding rates (crowded positive funding on a parabolic move votes bearish, skeptical funding during an uptrend votes bullish) and trending-list crowding.</p>
       <p><b>Adaptive weighting.</b> Every hour's directional calls are logged and checked back against what the asset's price actually did 24 hours and 7 days later. Once a technique has enough scored history for a specific asset, its weight for that asset going forward is nudged up if it has been reliably right and down if it has been reliably wrong, capped at plus or minus 50%. A technique that is only a coin flip for a given asset keeps its plain baseline weight.</p>
+      <p><b>Leading vs. lagging, and the expected timeframe.</b> Techniques are split into two kinds. Leading techniques try to anticipate a move before it's confirmed: RSI, Bollinger squeeze, stochastic crosses, OBV, the divergence proxy, the volatility regime read, reversal-pattern detection, and the valuation/positioning layer. Lagging techniques describe a move already underway: momentum alignment, MACD, the moving-average stack, Donchian breakout proximity, volume confirmation, and swing structure. The small window shown next to each score (for example <b>1-3 days</b>) is this engine's estimate of when that specific call is expected to resolve, built from whichever techniques are actually voting on that asset right now. Where an asset has enough of its own scored history, the window uses that asset's real measured accuracy at the 24-hour versus 7-day mark (marked with a check and shown in amber) instead of a generic estimate — the same historical record the adaptive weighting above draws on, just answering "how soon" instead of "how much weight." Without enough history yet, it falls back to a weighted average of the active techniques' typical horizons (shown in gray) — an informed estimate, not a measurement.</p>
       <p><b>Data.</b> CoinGecko free API for the top 100 coins by market cap with real daily price and volume history per coin, plus global stats and trending (stablecoins and wrappers excluded), alternative.me Fear &amp; Greed, Bybit linear perp funding rates, Yahoo Finance daily OHLCV with Stooq CSV fallback, and Yahoo analyst estimates. Free feeds can lag or drop symbols; the feeds counter in the status bar shows current coverage, and any technique without data simply abstains rather than guessing.</p>
       <p><b>Refresh mechanics.</b> A scheduled job rebuilds the full payload hourly and writes it to this page's cache; every visit reads that cache, so the page itself never runs the engine. This page also re-checks every 10 minutes so a new hour's data appears without a reload.</p>
-      <p><b>What the scores are not.</b> A score of 70 with 10/13 agreement is a strong mechanical setup, not a 70% probability. The model has no knowledge of token unlocks, earnings dates, lawsuits, or macro events.</p>
+      <p><b>What the scores are not.</b> A score of 70 with 10/14 agreement is a strong mechanical setup, not a 70% probability, and the timeframe next to it is an estimate of when the setup should resolve, not a guarantee it will. The model has no knowledge of token unlocks, earnings dates, lawsuits, or macro events.</p>
     </div>
   </details>
 
@@ -1456,6 +1539,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var name = r.name && r.name!==r.symbol ? '<span class="nm">'+esc(r.name)+'</span>' : '';
         var why = (r.drivers&&r.drivers.length)?'<span class="why">'+esc(r.drivers.join(' · '))+'</span>':'';
         var conf = r.conf ? '<span class="conf">'+r.conf.agree+'/'+r.conf.total+' aligned</span>' : '';
+        var horizon = r.horizon ? '<span class="horizon '+(r.horizon.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+(r.horizon.basis==='historical'?"Based on this asset's own historical accuracy by horizon":"Methodology estimate, not yet enough of this asset's own history to say")+'">'+esc(r.horizon.label)+(r.horizon.basis==='historical'?' ✓':'')+'</span>' : '';
         h+='<tr class="in" style="animation-delay:'+(i*30)+'ms">'
           +'<td class="rk">'+(i+1)+'</td>'
           +'<td class="asset">'+symHtml+name+why+'</td>'
@@ -1463,7 +1547,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           +'<td class="'+pctCls(r.chg24h)+'">'+fmtPct(r.chg24h)+'</td>'
           +'<td class="'+pctCls(r.chg7d)+'">'+fmtPct(r.chg7d)+'</td>'
           +'<td class="'+rsiCls(r.rsi)+'">'+(r.rsi!=null?r.rsi.toFixed(0):'—')+'</td>'
-          +'<td><span class="sigcell"><span class="sigrow">'+meter(r.score)+'<span class="score">'+r.score+'</span></span>'+conf+'</span></td>'
+          +'<td><span class="sigcell"><span class="sigrow">'+meter(r.score)+'<span class="score">'+r.score+'</span></span>'+conf+horizon+'</span></td>'
           +'</tr>';
       });
     } else {

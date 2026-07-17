@@ -124,6 +124,7 @@ check('CSP allows GTM/GA4 domains (script-src + connect-src)', page.headers.get(
 check('GTM container + consent-mode snippet present in the page', pageText.includes('GTM-5Q7JC6JX') && pageText.includes('fcs_consent_v1') && pageText.includes("gtag('consent','default'"));
 check('custom event pushes present (data-loaded, error, methodology-open)', pageText.includes('signals_data_loaded') && pageText.includes('signals_feed_error') && pageText.includes('signals_methodology_open'));
 check('clickable-row + sortable-header tracking present', pageText.includes('signals_asset_click') && pageText.includes('signals_sort_change') && pageText.includes('sym-link') && pageText.includes('sortable'));
+check('horizon chip markup + methodology copy present', pageText.includes('class="horizon') && pageText.includes('hz-hist') && pageText.includes('hz-meth') && pageText.includes('Leading vs. lagging'));
 
 console.log('\n== api: empty KV (before first Action run) ==');
 const empty = await worker.fetch(new Request('https://x.com/signals/api/signals'), emptyEnv, ctx);
@@ -193,6 +194,7 @@ check('log votes are directional only (no 0/null dir)', log.votes.every(v => v.d
 check('log has a price row per universe asset, both classes', log.prices.length === built.crypto.universe + built.stocks.universe);
 check('crypto entries carry a CoinGecko id (for the dashboard\'s outbound link)', built.crypto.breakout.concat(built.crypto.breakdown).every(r => typeof r.id === 'string' && r.id.length > 0));
 check('stock entries have no id field (not applicable, uses symbol for the Yahoo link instead)', built.stocks.breakout.every(r => r.id === undefined));
+check('every ranked row carries a horizon estimate end-to-end through buildPayload', built.crypto.breakout.concat(built.crypto.breakdown, built.stocks.breakout, built.stocks.breakdown).every(r => r.horizon && typeof r.horizon.label === 'string' && (r.horizon.basis === 'methodology' || r.horizon.basis === 'historical')));
 
 console.log('\n== reliability weighting: confluence() with a synthetic reliability map ==');
 const btcMetrics = mod.buildCryptoMetrics(btcCoin, { daily: btcDaily });
@@ -241,6 +243,44 @@ const stockBottom = baseMetric({ rsi: 35, rsiPrev: 28, rsiRecentMin: 25, rsiRece
 const rStockNoVix = findTech(mod.evaluateTechniques(stockBottom, 'stock', undefined, {}), 'reversal');
 const rStockHighVix = findTech(mod.evaluateTechniques(stockBottom, 'stock', undefined, { vixRangePos: 0.85 }), 'reversal');
 check('stock: elevated VIX boosts weight on a bottom call', rStockHighVix.w > rStockNoVix.w, `boosted=${rStockHighVix.w} base=${rStockNoVix.w}`);
+
+console.log('\n== expected timeframe: leading/lagging classification + horizon estimation ==');
+const allTechniqueIds = new Set([
+  ...mod.evaluateTechniques(baseMetric({ trending: true }), 'crypto').map(t => t.id),
+  ...mod.evaluateTechniques(baseMetric({}), 'stock').map(t => t.id)
+]);
+const missingMeta = [...allTechniqueIds].filter(id => !mod.TECHNIQUE_META[id] || typeof mod.TECHNIQUE_META[id].leading !== 'boolean' || typeof mod.TECHNIQUE_META[id].horizonDays !== 'number');
+check('every technique evaluateTechniques() can emit has a complete TECHNIQUE_META entry', missingMeta.length === 0, `missing=${JSON.stringify(missingMeta)}`);
+
+check('horizonLabel buckets: 1 day / few days / a week / weeks', mod.horizonLabel(1) === '~1 day' && mod.horizonLabel(2.5) === '1-3 days' && mod.horizonLabel(5) === '3-6 days' && mod.horizonLabel(8) === '~1 week' && mod.horizonLabel(15) === '1-3 weeks' && mod.horizonLabel(25) === '3+ weeks');
+
+const noHorizonData = mod.confluence(bottomWithConfirm, 'crypto');
+check('no reliability-by-horizon data: falls back to a methodology-based estimate', noHorizonData.longHorizon && noHorizonData.longHorizon.basis === 'methodology', JSON.stringify(noHorizonData.longHorizon));
+
+const symbol = bottomWithConfirm.symbol;
+const activeBullIds = mod.evaluateTechniques(bottomWithConfirm, 'crypto').filter(t => t.dir === 1).map(t => t.id);
+const strongAt24h = {
+  24: Object.fromEntries(activeBullIds.map(id => [`${symbol}|${id}`, { correct: 25, total: 25 }])),
+  168: {}
+};
+const historicalShort = mod.confluence(bottomWithConfirm, 'crypto', undefined, undefined, strongAt24h);
+check('this asset\'s own 24h accuracy is strong and 168h has no data: picks the historical 1-day window', historicalShort.longHorizon.basis === 'historical' && historicalShort.longHorizon.label === mod.horizonLabel(1), JSON.stringify(historicalShort.longHorizon));
+
+const strongAt168h = {
+  24: {},
+  168: Object.fromEntries(activeBullIds.map(id => [`${symbol}|${id}`, { correct: 25, total: 25 }]))
+};
+const historicalLong = mod.confluence(bottomWithConfirm, 'crypto', undefined, undefined, strongAt168h);
+check('this asset\'s own 7d accuracy is strong and 24h has no data: picks the historical ~1-week window', historicalLong.longHorizon.basis === 'historical' && historicalLong.longHorizon.label === mod.horizonLabel(7), JSON.stringify(historicalLong.longHorizon));
+
+const belowSampleThreshold = {
+  24: Object.fromEntries(activeBullIds.map(id => [`${symbol}|${id}`, { correct: 4, total: 5 }])),
+  168: {}
+};
+const historicalTooFewSamples = mod.confluence(bottomWithConfirm, 'crypto', undefined, undefined, belowSampleThreshold);
+check('below MIN_RELIABILITY_SAMPLES at both horizons: still falls back to methodology, not overfit', historicalTooFewSamples.longHorizon.basis === 'methodology', JSON.stringify(historicalTooFewSamples.longHorizon));
+
+check('horizonEstimate returns null when nothing voted that direction', mod.horizonEstimate([{ id: 'rsi', w: 1, dir: 1 }], -1, 'X', undefined) === null);
 
 console.log('\n== api: KV populated by the "Action" (mirrors what build-signals.mjs writes) ==');
 const warmEnv = { FCS_CACHE: new MockKV() };
