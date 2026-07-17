@@ -5,9 +5,23 @@ name: Signals Refresh
 # Kept separate from deploy.yml (which ships the Next.js app) since this
 # job runs on every hour regardless of whether any code changed.
 on:
+  # :13 past the hour, not :00 — GitHub's own docs warn that exactly-on-the-
+  # hour schedules queue heavily since every repo on GitHub with a similar
+  # cron fires at that same instant. Confirmed live: over the first ~41h,
+  # this ran only 28 times instead of the ~41 hourly firings intended (gaps
+  # up to 3h+), which directly slowed the reliability-learning accumulation
+  # rate — no run actually failed, every single one succeeded, so this was
+  # pure scheduling contention, not a bug in the job itself.
   schedule:
-    - cron: "0 * * * *"
+    - cron: "13 * * * *"
   workflow_dispatch:
+
+concurrency:
+  # This run touches shared state (D1, KV) and now takes ~10-11 minutes;
+  # if a delayed firing ever overlaps the next hour's, queue rather than
+  # run both at once against the same tables/cache.
+  group: signals-refresh
+  cancel-in-progress: false
 
 jobs:
   build-and-push:
