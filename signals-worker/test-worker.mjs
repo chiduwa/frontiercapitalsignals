@@ -297,6 +297,53 @@ check('several techniques each below threshold: does not sum to false confidence
 
 check('horizonEstimate returns null when nothing voted that direction', mod.horizonEstimate([{ id: 'rsi', w: 1, dir: 1 }], -1, 'X', undefined) === null);
 
+console.log('\n== realizedVolPct: real volatility from real price history ==');
+check('too short a series: returns null rather than a noisy number', mod.realizedVolPct([100, 101, 99]) === null);
+const flatline = Array.from({ length: 40 }, () => 100);
+check('a flat (zero-volatility) series returns ~0, not null or NaN', mod.realizedVolPct(flatline) === 0);
+const stepSeries = Array.from({ length: 40 }, (_, i) => i % 2 === 0 ? 100 : 102); // alternates +2%/-1.96%, a known, checkable volatility
+const stepVol = mod.realizedVolPct(stepSeries);
+check('an alternating series returns a real, sane volatility (not null, roughly a couple percent)', stepVol != null && stepVol > 1 && stepVol < 3, `vol=${stepVol}`);
+
+console.log('\n== topIndicator: which specific indicator this asset leans on ==');
+check('no reliability data: null, not a guess', mod.topIndicator(undefined, 'BTC') === null);
+const multiTechReliability = {
+  'BTC|rsi': { accuracy: 0.55, total: 30 },
+  'BTC|divergence': { accuracy: 0.71, total: 25 },
+  'BTC|macd': { accuracy: 0.9, total: 5 } // high accuracy but below MIN_RELIABILITY_SAMPLES — must not win
+};
+const best = mod.topIndicator(multiTechReliability, 'BTC');
+check('picks the highest-accuracy technique among those with enough of their own samples', best && best.id === 'divergence', JSON.stringify(best));
+check('a technique above the threshold-accuracy but below sample threshold is correctly excluded', best.id !== 'macd');
+
+console.log('\n== predictedRange: a band from real volatility, never a point figure ==');
+check('missing price/horizon/direction: returns null', mod.predictedRange(null, 3, 60, 1, undefined, 'X', 2) === null && mod.predictedRange(100, null, 60, 1, undefined, 'X', 2) === null && mod.predictedRange(100, 3, 60, 0, undefined, 'X', 2) === null);
+check('no volatility data available at all (no learned stats, no fallback): returns null rather than fabricating a range', mod.predictedRange(100, 3, 60, 1, undefined, 'X', null) === null);
+
+const weakScoreRange = mod.predictedRange(100, 3, 50, 1, undefined, 'BTC', 2);
+check('score at/below 50 (no real conviction): band is symmetric around price, no directional assumption', weakScoreRange && Math.abs((100 - weakScoreRange.low) - (weakScoreRange.high - 100)) < 1e-9, JSON.stringify(weakScoreRange));
+
+const strongScoreRangeUp = mod.predictedRange(100, 3, 95, 1, undefined, 'BTC', 2);
+check('strong bullish score: band center shifts up, but low stays below price and high stays above (still a band, not a point)', strongScoreRangeUp.low < 100 && strongScoreRangeUp.high > 100 && (strongScoreRangeUp.high - 100) > (100 - strongScoreRangeUp.low), JSON.stringify(strongScoreRangeUp));
+
+const strongScoreRangeDown = mod.predictedRange(100, 3, 95, -1, undefined, 'BTC', 2);
+check('mirror case, strong bearish score: band center shifts down', strongScoreRangeDown.low < 100 && strongScoreRangeDown.high > 100 && (100 - strongScoreRangeDown.low) > (strongScoreRangeDown.high - 100), JSON.stringify(strongScoreRangeDown));
+
+const methodologyRange = mod.predictedRange(100, 3, 60, 1, undefined, 'BTC', 2);
+check('no learned move stats: falls back to methodology (volatility-derived) basis', methodologyRange.basis === 'methodology');
+
+const learnedMoveStats = { 'BTC|24': { meanPct: 1, stdevPct: 5, n: 30 } };
+const historicalRange = mod.predictedRange(100, 3, 60, 1, learnedMoveStats, 'BTC', 2);
+check('enough of this asset\'s own realized-move history: uses the learned (historical) stdev instead of the generic fallback', historicalRange.basis === 'historical' && Math.abs((historicalRange.high - historicalRange.low) - 2 * 5) < 1e-6, JSON.stringify(historicalRange));
+
+const thinMoveStats = { 'BTC|24': { meanPct: 1, stdevPct: 5, n: 4 } }; // below MIN_RELIABILITY_SAMPLES
+const stillMethodology = mod.predictedRange(100, 3, 60, 1, thinMoveStats, 'BTC', 2);
+check('learned move stats below sample threshold: still falls back to methodology, not overfit', stillMethodology.basis === 'methodology', JSON.stringify(stillMethodology));
+
+console.log('\n== range + topIndicator flow through buildPayload end-to-end ==');
+check('every ranked row carries a range field (object or null, never a crash)', built.crypto.breakout.concat(built.crypto.breakdown, built.stocks.breakout, built.stocks.breakdown).every(r => 'range' in r));
+check('every ranked row carries a topIndicator field (object or null)', built.crypto.breakout.concat(built.crypto.breakdown, built.stocks.breakout, built.stocks.breakdown).every(r => 'topIndicator' in r));
+
 console.log('\n== api: KV populated by the "Action" (mirrors what build-signals.mjs writes) ==');
 const warmEnv = { FCS_CACHE: new MockKV() };
 await warmEnv.FCS_CACHE.put(mod.CACHE_KEY, JSON.stringify(built));

@@ -12,7 +12,7 @@
 // Optional env: TREFIS_OVERRIDES
 // Optional (enables reliability weighting when set): FCS_D1_DATABASE_ID
 import { buildPayload, CACHE_KEY } from '../worker.js';
-import { loadReliability, logRun, evaluateMatured } from './reliability.mjs';
+import { loadReliability, loadMoveStats, logRun, evaluateMatured } from './reliability.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID })) {
@@ -23,25 +23,27 @@ const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID };
 
 // The reliability loop is additive, not load-bearing: if D1 isn't
 // configured yet, or a D1 call fails, the core dashboard build must still
-// succeed with today's baseline (unweighted, methodology-only-horizon)
-// scoring rather than blocking the hourly KV refresh on a secondary
-// subsystem.
-let reliability, reliabilityByHorizon;
+// succeed with today's baseline (unweighted, methodology-only-horizon,
+// volatility-only-range) scoring rather than blocking the hourly KV
+// refresh on a secondary subsystem.
+let reliability, reliabilityByHorizon, moveStats;
 if (FCS_D1_DATABASE_ID) {
   try {
     const rel = await loadReliability(env);
     reliability = rel.blended;
     reliabilityByHorizon = rel.byHorizon;
     console.log(`loaded reliability stats for ${Object.keys(reliability).length} (symbol, technique) pairs`);
+    moveStats = await loadMoveStats(env);
+    console.log(`loaded realized-move stats for ${Object.keys(moveStats).length} (symbol, horizon) pairs`);
   } catch (e) {
-    console.error('loadReliability failed, continuing with baseline weights:', e.message || e);
+    console.error('loadReliability/loadMoveStats failed, continuing with baseline weights:', e.message || e);
   }
 } else {
   console.log('FCS_D1_DATABASE_ID not set — reliability weighting disabled, using baseline weights');
 }
 
 const started = Date.now();
-const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon);
+const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon, moveStats);
 console.log(`built payload in ${Date.now() - started}ms — crypto ${payload.crypto.universe} assets, stocks ${payload.stocks.universe} assets`);
 console.log('health:', JSON.stringify(payload.health));
 

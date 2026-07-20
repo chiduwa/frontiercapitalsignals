@@ -91,11 +91,34 @@ export async function logRun(env, runAt, log) {
   }
 }
 
+// Per-asset realized move size at each horizon, learned continuously —
+// { blended, byHorizon } from loadReliability answers "which technique is
+// reliable"; this answers "how big does this asset's move actually tend
+// to be," which predictedRange() uses once there's enough of an asset's
+// own history to trust over the generic realized-volatility fallback.
+// Keyed by "symbol|horizon_hours" -> { meanPct, stdevPct, n }, computed
+// from running sum/sum-of-squares (Welford-lite, fine at this volume).
+export async function loadMoveStats(env) {
+  const rows = await d1(env, 'SELECT symbol, horizon_hours, n, sum_pct, sum_pct_sq FROM asset_move_stats WHERE n > 0');
+  const out = {};
+  for (const r of rows) {
+    const mean = r.sum_pct / r.n;
+    const variance = Math.max(0, r.sum_pct_sq / r.n - mean * mean);
+    out[`${r.symbol}|${r.horizon_hours}`] = { meanPct: mean, stdevPct: Math.sqrt(variance), n: r.n };
+  }
+  return out;
+}
+
 // Finds technique_votes rows old enough to have matured for each horizon
 // and not yet scored for it, compares that run's logged price against the
 // most recent price on record for the same symbol, and folds the
-// correct/incorrect outcome into technique_reliability. Returns how many
-// (symbol, technique, horizon) outcomes were scored this call.
+// correct/incorrect outcome into technique_reliability. Also folds the
+// *realized move size* into asset_move_stats — once per (symbol, run_at,
+// horizon), not once per technique-vote row, since several techniques
+// voting on the same asset in the same hour all describe the exact same
+// underlying price move, not independent observations of it (the same
+// correlation trap fixed in horizonEstimate's confidence gate). Returns
+// how many (symbol, technique, horizon) outcomes were scored this call.
 export async function evaluateMatured(env, nowIso) {
   const now = new Date(nowIso).getTime();
   let evaluatedCount = 0;
@@ -128,6 +151,8 @@ export async function evaluateMatured(env, nowIso) {
     }
 
     const deltas = {}; // "symbol|technique_id" -> { correct, total, asset_class }
+    const moveDeltas = {}; // "symbol" -> { n, sumPct, sumPctSq } — one realized move per (symbol, run_at), deduped across techniques
+    const seenMoves = new Set();
     const evaluatedSymbolsByRunAt = {}; // only mark rows we could actually score
     for (const r of due) {
       const before = priceBefore[`${r.run_at}|${r.symbol}`];
@@ -140,6 +165,15 @@ export async function evaluateMatured(env, nowIso) {
       deltas[key].total += 1;
       if (r.dir === actualDir) deltas[key].correct += 1;
       (evaluatedSymbolsByRunAt[r.run_at] ??= new Set()).add(r.symbol);
+
+      const moveKey = `${r.run_at}|${r.symbol}`;
+      if (!seenMoves.has(moveKey)) {
+        seenMoves.add(moveKey);
+        if (!moveDeltas[r.symbol]) moveDeltas[r.symbol] = { n: 0, sumPct: 0, sumPctSq: 0 };
+        moveDeltas[r.symbol].n += 1;
+        moveDeltas[r.symbol].sumPct += pct;
+        moveDeltas[r.symbol].sumPctSq += pct * pct;
+      }
     }
 
     for (const [key, d] of Object.entries(deltas)) {
@@ -154,6 +188,18 @@ export async function evaluateMatured(env, nowIso) {
           updated_at = excluded.updated_at
       `, [d.asset_class, symbol, techniqueId, h, d.correct, d.total, d.total ? d.correct / d.total : 0, nowIso]);
       evaluatedCount += d.total;
+    }
+
+    for (const [symbol, d] of Object.entries(moveDeltas)) {
+      await d1(env, `
+        INSERT INTO asset_move_stats (symbol, horizon_hours, n, sum_pct, sum_pct_sq, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (symbol, horizon_hours) DO UPDATE SET
+          n = asset_move_stats.n + excluded.n,
+          sum_pct = asset_move_stats.sum_pct + excluded.sum_pct,
+          sum_pct_sq = asset_move_stats.sum_pct_sq + excluded.sum_pct_sq,
+          updated_at = excluded.updated_at
+      `, [symbol, h, d.n, d.sumPct, d.sumPctSq, nowIso]);
     }
 
     for (const [runAt, symSet] of Object.entries(evaluatedSymbolsByRunAt)) {

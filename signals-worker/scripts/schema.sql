@@ -34,3 +34,16 @@ CREATE TABLE IF NOT EXISTS technique_reliability (
 );
 
 CREATE INDEX IF NOT EXISTS idx_technique_votes_run_at ON technique_votes(run_at);
+
+-- Realized move size per asset per horizon (mean/stdev via running sum and
+-- sum-of-squares), independent of any technique — a fixed aggregate keyed
+-- by (symbol, horizon), not append-only, so it doesn't need pruning.
+CREATE TABLE IF NOT EXISTS asset_move_stats (
+  symbol TEXT NOT NULL,
+  horizon_hours INTEGER NOT NULL,
+  n INTEGER NOT NULL DEFAULT 0,
+  sum_pct REAL NOT NULL DEFAULT 0,
+  sum_pct_sq REAL NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (symbol, horizon_hours)
+);

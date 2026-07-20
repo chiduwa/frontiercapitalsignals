@@ -367,8 +367,8 @@ export function horizonEstimate(applicable, dir, symbol, reliabilityByHorizon) {
     if (acc24.total > 0 || acc168.total > 0) {
       const a24 = acc24.total > 0 ? acc24.correct / acc24.total : null;
       const a168 = acc168.total > 0 ? acc168.correct / acc168.total : null;
-      if (a24 != null && (a168 == null || a24 >= a168)) return { label: horizonLabel(1), basis: 'historical' };
-      if (a168 != null) return { label: horizonLabel(7), basis: 'historical' };
+      if (a24 != null && (a168 == null || a24 >= a168)) return { label: horizonLabel(1), days: 1, basis: 'historical' };
+      if (a168 != null) return { label: horizonLabel(7), days: 7, basis: 'historical' };
     }
   }
 
@@ -380,7 +380,76 @@ export function horizonEstimate(applicable, dir, symbol, reliabilityByHorizon) {
   }
   if (!wSum) return null;
   const days = hSum / wSum;
-  return { label: horizonLabel(days), basis: 'methodology' };
+  return { label: horizonLabel(days), days, basis: 'methodology' };
+}
+
+// Realized daily volatility (stdev of daily pct returns, over the trailing
+// `lookback` days), expressed as a percentage. Purely a statistical
+// property of the asset's own price history already being fetched — no
+// new data source, and not subject to the cross-technique correlation
+// problem since it never touches technique votes at all.
+export function realizedVolPct(closes, lookback = 30) {
+  if (!closes || closes.length < 10) return null;
+  const window = closes.slice(-(lookback + 1));
+  const rets = [];
+  for (let i = 1; i < window.length; i++) {
+    if (window[i - 1]) rets.push((window[i] / window[i - 1] - 1) * 100);
+  }
+  if (rets.length < 5) return null;
+  const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+  const variance = rets.reduce((a, b) => a + (b - mean) ** 2, 0) / rets.length;
+  return Math.sqrt(variance);
+}
+
+// Surfaces "this asset leans on certain indicators more than others" —
+// the best individually-proven technique for this specific asset, once
+// one exists with enough of its own matured history to trust (same bar as
+// reliabilityMultiplier/horizonEstimate). Returns null, not a guess, until
+// then.
+export function topIndicator(reliability, symbol) {
+  if (!reliability) return null;
+  let best = null;
+  for (const id of Object.keys(TECHNIQUE_META)) {
+    const rec = reliability[`${symbol}|${id}`];
+    if (rec && rec.total >= MIN_RELIABILITY_SAMPLES && (!best || rec.accuracy > best.accuracy)) {
+      best = { id, accuracy: rec.accuracy, total: rec.total };
+    }
+  }
+  return best;
+}
+
+// Expected price range for the horizon estimate above — a band, never a
+// point figure, and its width comes from real volatility (this asset's own
+// historical realized move size at this horizon once there's enough of
+// its own history logged via evaluateMatured, falling back to its recent
+// realized daily volatility scaled by the square root of time, the
+// standard random-walk approximation, until then). The band's center
+// shifts modestly toward the called direction only once the score shows
+// real conviction (score <= 50 gives a symmetric band with no directional
+// assumption at all), and the shift is capped well inside the band so it
+// never collapses into a false point prediction.
+export function predictedRange(price, horizonDays, score, dir, moveStats, symbol, fallbackVolPct) {
+  if (price == null || horizonDays == null || !dir) return null;
+  const bucket = horizonDays <= 4 ? 24 : 168;
+  const learned = moveStats && moveStats[`${symbol}|${bucket}`];
+  let movePct, basis;
+  if (learned && learned.n >= MIN_RELIABILITY_SAMPLES && learned.stdevPct > 0) {
+    movePct = learned.stdevPct;
+    basis = 'historical';
+  } else if (fallbackVolPct != null) {
+    movePct = fallbackVolPct * Math.sqrt(Math.max(horizonDays, 0.5));
+    basis = 'methodology';
+  } else {
+    return null;
+  }
+  if (!(movePct > 0)) return null;
+  const conviction = clamp((score - 50) / 50, 0, 1) * 0.5; // 0 at score<=50, up to 0.5x the band width at score=100
+  const driftPct = dir * conviction * movePct;
+  return {
+    low: price * (1 + (driftPct - movePct) / 100),
+    high: price * (1 + (driftPct + movePct) / 100),
+    basis
+  };
 }
 
 export function evaluateTechniques(m, kind, reliability, marketContext) {
@@ -891,11 +960,15 @@ export function buildCryptoMetrics(item, extras = {}) {
   const md = macd(closes);
   const rNow = rsi(closes);
   const rRange = rsiRecentRange(closes, haveDaily ? 10 : 24);
+  // Only from real daily bars — an hourly-sparkline-derived "daily" vol on
+  // the fallback path would be a materially different, wrong number.
+  const volPct = haveDaily ? realizedVolPct(closes) : null;
 
   return {
     symbol,
     id: item.id,
     name: item.name,
+    volPct,
     price,
     mcap,
     volume: vol,
@@ -944,6 +1017,7 @@ export function buildStockMetrics(row, valuation, override) {
   const md = macd(closes);
   const rNow = rsi(closes);
   const rRange = rsiRecentRange(closes, 10);
+  const volPct = realizedVolPct(closes);
   const hi52 = Math.max(...closes);
 
   let val = null;
@@ -964,6 +1038,7 @@ export function buildStockMetrics(row, valuation, override) {
     symbol,
     name: symbol,
     price,
+    volPct,
     chgShort: pct(1),
     chg24h: pct(1),
     chg7d: pct(5),
@@ -995,7 +1070,7 @@ export function buildStockMetrics(row, valuation, override) {
   };
 }
 
-function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHorizon) {
+function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHorizon, moveStats) {
   const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, marketContext, reliabilityByHorizon) }));
   // Full-universe vote log (not just the top-10 shown on each board) so the
   // reliability learning loop sees every asset, not only that hour's winners.
@@ -1004,25 +1079,32 @@ function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHori
     for (const v of c.votes) votesLog.push({ asset_class: kind, symbol: m.symbol, technique_id: v.id, dir: v.dir });
   }
   const priceLog = scored.map(({ m }) => ({ asset_class: kind, symbol: m.symbol, price: m.price }));
-  const entry = (x, side) => ({
-    symbol: x.m.symbol,
-    name: x.m.name,
-    price: x.m.price,
-    chg24h: x.m.chg24h,
-    chg7d: x.m.chg7d,
-    rsi: x.m.rsi,
-    volRatio: x.m.volRatio,
-    rangePos: x.m.rangePos,
-    score: side === 'long' ? x.c.long : x.c.short,
-    conf: { agree: side === 'long' ? x.c.bull : x.c.bear, total: x.c.total },
-    drivers: side === 'long' ? x.c.longNotes : x.c.shortNotes,
-    horizon: side === 'long' ? x.c.longHorizon : x.c.shortHorizon,
-    ...(x.m.val ? { val: { target: x.m.val.target, upside: x.m.val.upside, recKey: x.m.val.recKey, source: x.m.val.source } } : {}),
-    ...(x.m.funding != null ? { funding: x.m.funding } : {}),
-    ...(x.m.distHigh52w != null ? { distHigh52w: x.m.distHigh52w } : {}),
-    ...(x.m.rank != null ? { mcapRank: x.m.rank } : {}),
-    ...(x.m.id ? { id: x.m.id } : {}) // CoinGecko coin id (crypto only) — lets the dashboard link out to a real coin page
-  });
+  const entry = (x, side) => {
+    const dir = side === 'long' ? 1 : -1;
+    const score = side === 'long' ? x.c.long : x.c.short;
+    const horizon = side === 'long' ? x.c.longHorizon : x.c.shortHorizon;
+    return {
+      symbol: x.m.symbol,
+      name: x.m.name,
+      price: x.m.price,
+      chg24h: x.m.chg24h,
+      chg7d: x.m.chg7d,
+      rsi: x.m.rsi,
+      volRatio: x.m.volRatio,
+      rangePos: x.m.rangePos,
+      score,
+      conf: { agree: side === 'long' ? x.c.bull : x.c.bear, total: x.c.total },
+      drivers: side === 'long' ? x.c.longNotes : x.c.shortNotes,
+      horizon,
+      range: horizon ? predictedRange(x.m.price, horizon.days, score, dir, moveStats, x.m.symbol, x.m.volPct) : null,
+      topIndicator: topIndicator(reliability, x.m.symbol),
+      ...(x.m.val ? { val: { target: x.m.val.target, upside: x.m.val.upside, recKey: x.m.val.recKey, source: x.m.val.source } } : {}),
+      ...(x.m.funding != null ? { funding: x.m.funding } : {}),
+      ...(x.m.distHigh52w != null ? { distHigh52w: x.m.distHigh52w } : {}),
+      ...(x.m.rank != null ? { mcapRank: x.m.rank } : {}),
+      ...(x.m.id ? { id: x.m.id } : {}) // CoinGecko coin id (crypto only) — lets the dashboard link out to a real coin page
+    };
+  };
   const sortSide = (side) => scored
     .slice()
     .sort((a, b) => (side === 'long' ? b.c.long - a.c.long : b.c.short - a.c.short)
@@ -1043,7 +1125,7 @@ function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHori
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats) {
   const started = Date.now();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
 
@@ -1114,7 +1196,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon) {
         return buildCryptoMetrics(c, { funding: funding[sym], trending: trending.has(sym), daily });
       })
       .filter(Boolean);
-    cryptoBoards = rankBoards(metrics, 'crypto', reliability, marketContext, reliabilityByHorizon);
+    cryptoBoards = rankBoards(metrics, 'crypto', reliability, marketContext, reliabilityByHorizon, moveStats);
   }
 
   let stockBoards = { breakout: [], breakdown: [], universe: 0 };
@@ -1128,7 +1210,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon) {
         if (m) metrics.push(m);
       } else stockFailures.push(r && r._item);
     }
-    stockBoards = rankBoards(metrics, 'stock', reliability, marketContext, reliabilityByHorizon);
+    stockBoards = rankBoards(metrics, 'stock', reliability, marketContext, reliabilityByHorizon, moveStats);
   }
 
   // If both primary sources yielded nothing, this is a real outage: throw so
@@ -1328,6 +1410,10 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .horizon{font-size:9.5px;letter-spacing:.06em;padding:1px 6px;border-radius:3px;border:1px solid var(--line);cursor:help}
   .horizon.hz-hist{color:var(--amber);border-color:rgba(255,178,36,.35)}
   .horizon.hz-meth{color:var(--dim)}
+  .range{font-size:11px;cursor:help}
+  .range.hz-hist{color:var(--amber)}
+  .range.hz-meth{color:var(--muted)}
+  .topind{display:block;color:var(--dim);font-size:10px;margin-top:3px;font-family:var(--disp);white-space:normal}
 
   @keyframes rise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
   tbody tr.in{animation:rise .35s ease both}
@@ -1406,9 +1492,11 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       <p><b>The valuation layer.</b> For equities, Wall Street consensus mean price targets and recommendation ratings: trading well below a buy-rated consensus target votes bullish, trading above the consensus target votes bearish. Trefis does not publish a public API, so consensus targets stand in for model-based estimates; site operators can supply Trefis or other model values through a server-side override, in which case the payload labels the source. For crypto, the layer uses perpetual futures funding rates (crowded positive funding on a parabolic move votes bearish, skeptical funding during an uptrend votes bullish) and trending-list crowding.</p>
       <p><b>Adaptive weighting.</b> Every hour's directional calls are logged and checked back against what the asset's price actually did 24 hours and 7 days later. Once a technique has enough scored history for a specific asset, its weight for that asset going forward is nudged up if it has been reliably right and down if it has been reliably wrong, capped at plus or minus 50%. A technique that is only a coin flip for a given asset keeps its plain baseline weight.</p>
       <p><b>Leading vs. lagging, and the expected timeframe.</b> Techniques are split into two kinds. Leading techniques try to anticipate a move before it's confirmed: RSI, Bollinger squeeze, stochastic crosses, OBV, the divergence proxy, the volatility regime read, reversal-pattern detection, and the valuation/positioning layer. Lagging techniques describe a move already underway: momentum alignment, MACD, the moving-average stack, Donchian breakout proximity, volume confirmation, and swing structure. The small window shown next to each score (for example <b>1-3 days</b>) is this engine's estimate of when that specific call is expected to resolve, built from whichever techniques are actually voting on that asset right now. Where an asset has enough of its own scored history, the window uses that asset's real measured accuracy at the 24-hour versus 7-day mark (marked with a check and shown in amber) instead of a generic estimate — the same historical record the adaptive weighting above draws on, just answering "how soon" instead of "how much weight." Without enough history yet, it falls back to a weighted average of the active techniques' typical horizons (shown in gray) — an informed estimate, not a measurement.</p>
+      <p><b>Expected range.</b> The Range column is a band around the current price, not a point prediction, for the same timeframe as the horizon chip next to it. Its width comes from real volatility: this asset's own historical realized move size at that horizon once evaluateMatured has scored enough of its own outcomes (amber, marked historical), or its recent realized daily volatility scaled by the square root of time otherwise (gray, marked methodology) — the standard random-walk approximation for "how far a price plausibly wanders in N days." The band's center only shifts toward the called direction once the score shows real conviction, and the shift is capped well inside the band, so a weak score gives a wide, roughly symmetric range rather than a false point estimate.</p>
+      <p><b>Which indicator this asset leans on.</b> "Leans on X (n%)" under an asset's name names whichever technique has, on its own, the strongest individually-proven track record for that specific asset — some assets really are better predicted by one kind of signal than another, and this surfaces that once a technique has enough of its own scored history to say so, using the same adaptive-weighting data above.</p>
       <p><b>Data.</b> CoinGecko free API for the top 100 coins by market cap with real daily price and volume history per coin, plus global stats and trending (stablecoins and wrappers excluded), alternative.me Fear &amp; Greed, Bybit linear perp funding rates, Yahoo Finance daily OHLCV with Stooq CSV fallback, and Yahoo analyst estimates. Free feeds can lag or drop symbols; the feeds counter in the status bar shows current coverage, and any technique without data simply abstains rather than guessing.</p>
       <p><b>Refresh mechanics.</b> A scheduled job rebuilds the full payload hourly and writes it to this page's cache; every visit reads that cache, so the page itself never runs the engine. This page also re-checks every 10 minutes so a new hour's data appears without a reload.</p>
-      <p><b>What the scores are not.</b> A score of 70 with 10/14 agreement is a strong mechanical setup, not a 70% probability, and the timeframe next to it is an estimate of when the setup should resolve, not a guarantee it will. The model has no knowledge of token unlocks, earnings dates, lawsuits, or macro events.</p>
+      <p><b>What the scores are not.</b> A score of 70 with 10/14 agreement is a strong mechanical setup, not a 70% probability; the timeframe next to it is an estimate of when the setup should resolve, not a guarantee it will; and the range is a plausible band from real volatility, not a target price. The model has no knowledge of token unlocks, earnings dates, lawsuits, or macro events.</p>
     </div>
   </details>
 
@@ -1502,14 +1590,19 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     return null;
   }
 
-  var SORT_COLS = [
+  var SORT_COLS_LEFT = [
     {key:'symbol', label:'Asset', dir:1},
     {key:'price', label:'Price', dir:-1},
     {key:'chg24h', label:'24h', dir:-1},
     {key:'chg7d', label:'7d', dir:-1},
-    {key:'rsi', label:'RSI', dir:-1},
-    {key:'score', label:'Signal', dir:-1}
+    {key:'rsi', label:'RSI', dir:-1}
   ];
+  var SIGNAL_COL = {key:'score', label:'Signal', dir:-1};
+  function sortableTh(c, spec, boardId){
+    var active = spec&&spec.key===c.key;
+    var arrow = active ? (spec.dir===1?' ▲':' ▼') : '';
+    return '<th class="sortable'+(active?' active':'')+'" data-board="'+boardId+'" data-key="'+c.key+'" data-dir="'+(active?spec.dir:c.dir)+'">'+c.label+arrow+'</th>';
+  }
   function sortRows(rows, spec){
     if(!spec||!rows) return rows;
     var key=spec.key, dir=spec.dir;
@@ -1532,11 +1625,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     h+='<div class="board-count">TOP '+(rows?rows.length:0)+' / '+(universe||0)+' SCREENED</div></div>';
     h+='<div class="tbl-wrap"><table><thead><tr>';
     h+='<th>#</th>';
-    SORT_COLS.forEach(function(c){
-      var active = spec&&spec.key===c.key;
-      var arrow = active ? (spec.dir===1?' ▲':' ▼') : '';
-      h+='<th class="sortable'+(active?' active':'')+'" data-board="'+cfg.boardId+'" data-key="'+c.key+'" data-dir="'+(active?spec.dir:c.dir)+'">'+c.label+arrow+'</th>';
-    });
+    SORT_COLS_LEFT.forEach(function(c){ h+=sortableTh(c, spec, cfg.boardId); });
+    h+='<th>Range</th>';
+    h+=sortableTh(SIGNAL_COL, spec, cfg.boardId);
     h+='</tr></thead><tbody>';
     if(rows&&rows.length){
       rows.forEach(function(r,i){
@@ -1546,20 +1637,23 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           : '<span class="sym">'+esc(r.symbol)+'</span>';
         var name = r.name && r.name!==r.symbol ? '<span class="nm">'+esc(r.name)+'</span>' : '';
         var why = (r.drivers&&r.drivers.length)?'<span class="why">'+esc(r.drivers.join(' · '))+'</span>':'';
+        var topInd = r.topIndicator ? '<span class="topind" title="Best individually-proven indicator for '+esc(r.symbol)+' so far, out of '+r.topIndicator.total+' scored calls">Leans on '+esc(r.topIndicator.id)+' ('+Math.round(r.topIndicator.accuracy*100)+'%)</span>' : '';
         var conf = r.conf ? '<span class="conf">'+r.conf.agree+'/'+r.conf.total+' aligned</span>' : '';
         var horizon = r.horizon ? '<span class="horizon '+(r.horizon.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+(r.horizon.basis==='historical'?"Based on this asset's own historical accuracy by horizon":"Methodology estimate, not yet enough of this asset's own history to say")+'">'+esc(r.horizon.label)+(r.horizon.basis==='historical'?' ✓':'')+'</span>' : '';
+        var range = r.range ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+(r.range.basis==='historical'?"Band width from this asset's own historical move size at this horizon":"Band width estimated from this asset's recent realized volatility, scaled to the horizon")+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>' : '<span class="dim">—</span>';
         h+='<tr class="in" style="animation-delay:'+(i*30)+'ms">'
           +'<td class="rk">'+(i+1)+'</td>'
-          +'<td class="asset">'+symHtml+name+why+'</td>'
+          +'<td class="asset">'+symHtml+name+why+topInd+'</td>'
           +'<td>'+fmtPrice(r.price)+'</td>'
           +'<td class="'+pctCls(r.chg24h)+'">'+fmtPct(r.chg24h)+'</td>'
           +'<td class="'+pctCls(r.chg7d)+'">'+fmtPct(r.chg7d)+'</td>'
           +'<td class="'+rsiCls(r.rsi)+'">'+(r.rsi!=null?r.rsi.toFixed(0):'—')+'</td>'
+          +'<td>'+range+'</td>'
           +'<td><span class="sigcell"><span class="sigrow">'+meter(r.score)+'<span class="score">'+r.score+'</span></span>'+conf+horizon+'</span></td>'
           +'</tr>';
       });
     } else {
-      h+='<tr><td colspan="7" style="text-align:left;padding:16px 10px;color:var(--dim)">No qualifying setups this hour.</td></tr>';
+      h+='<tr><td colspan="8" style="text-align:left;padding:16px 10px;color:var(--dim)">No qualifying setups this hour.</td></tr>';
     }
     h+='</tbody></table></div></section>';
     return h;

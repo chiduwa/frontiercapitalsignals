@@ -93,6 +93,19 @@ Every technique in `worker.js` is classified in `TECHNIQUE_META` as **leading** 
 
 This reuses `reliability.mjs`'s existing D1 data rather than adding a new store: `loadReliability()` now returns `{ blended, byHorizon }` — `blended` (sums correct/total across horizons) is what `evaluateTechniques()` uses to weight votes; `byHorizon` (keeps 24h and 168h separate) is what `horizonEstimate()` uses to compare which horizon has actually been more accurate for a specific asset.
 
+## Expected price range
+
+Every row shows a Range column — a band around the current price for the same timeframe as the horizon chip, never a single figure. `predictedRange()` in `worker.js` builds it from real volatility, in the same historical-vs-methodology pattern as the horizon estimate:
+
+- **Historical**: once `evaluateMatured()` has scored at least `MIN_RELIABILITY_SAMPLES` realized moves for this asset at this horizon (`asset_move_stats`, a new D1 table — `symbol, horizon_hours, n, sum_pct, sum_pct_sq`, a running mean/stdev accumulator), the band width comes from that asset's own historical move size at this horizon. This is computed **once per (symbol, run_at) pair, not once per technique-vote** — the exact same correlation trap as the horizon confidence gate: several techniques voting on one asset in one hour all describe the same underlying price move, so counting it once per technique would inflate the sample size without adding real information. `evaluateMatured()` dedupes with a `seenMoves` set before folding a realized move into `asset_move_stats`.
+- **Methodology**: the fallback before that — `realizedVolPct()` computes this asset's own recent daily volatility directly from its real price history (already being fetched for the indicators, no new data source), scaled by the square root of the horizon in days (the standard random-walk approximation for expected range over N days).
+
+The band's center shifts toward the called direction only once the score shows real conviction (`score <= 50` gives a symmetric band with no directional assumption at all; the shift is capped at half the band width even at `score = 100`), so it never collapses into a false point prediction regardless of how strong the call is.
+
+## Which indicator an asset leans on
+
+`topIndicator()` scans a specific asset's entry in the reliability map and surfaces whichever technique has, on its own, the best individually-proven accuracy for that asset — shown under the asset's name once one exists ("Leans on divergence (71%)"). Some assets really are better predicted by one kind of signal than another; this is the direct answer to that, reusing the exact same per-(asset, technique) data the adaptive weighting draws on, gated by the same `MIN_RELIABILITY_SAMPLES` bar so a technique with a lucky handful of calls can't claim it.
+
 ## Valuation layer and Trefis
 
 Equities use Wall Street consensus mean price targets and recommendation ratings (Yahoo quoteSummary via a crumb handshake): trading well below a buy-rated target votes bullish, trading above it votes bearish. Trefis publishes no public API, so consensus stands in by default. Supply your own model targets via the `TREFIS_OVERRIDES` variable and those win, labeled `source: "override"` in the payload. Crypto uses Bybit perpetual funding rates and CoinGecko trending-list crowding as its positioning layer.
