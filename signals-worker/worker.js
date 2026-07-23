@@ -40,7 +40,16 @@ export const CACHE_SECONDS = 3600;
 export const CRYPTO_UNIVERSE = 100;
 export const CRYPTO_MIN_MCAP = 30_000_000;
 export const CRYPTO_MIN_VOLUME = 2_000_000;
-export const CRYPTO_HISTORY_DAYS = 210;
+// 365, not 210: a real 52-week window for dwellAtExtreme(), matching
+// stocks' own 10-year Yahoo fetch, and long enough for seasonalAnalog() to
+// find several candidate analog years for coins old enough to have them
+// (most won't — most top-100 tokens are only a few years old — but the
+// ones that do, like BTC/ETH, benefit, and everything else just gets
+// however much real history actually exists rather than an artificial cap).
+// Still one fetch per coin either way (CoinGecko's market_chart returns
+// daily granularity for any days > 90), so this adds no request volume,
+// just a longer response per call.
+export const CRYPTO_HISTORY_DAYS = 2000;
 // Sequential, not concurrent: a live run showed ~100% of per-coin history
 // calls failing when fired in bursts of 5 from a GitHub Actions runner
 // (shared CI IP ranges are more rate-limit-prone against CoinGecko's free
@@ -325,7 +334,9 @@ export const TECHNIQUE_META = {
   reversal:    { leading: true,  horizonDays: 2 },
   valuation:   { leading: true,  horizonDays: 30 },
   positioning: { leading: true,  horizonDays: 3 },
-  attention:   { leading: true,  horizonDays: 2 }
+  attention:   { leading: true,  horizonDays: 2 },
+  dwell:       { leading: true,  horizonDays: 5 },
+  seasonal:    { leading: true,  horizonDays: 7 }
 };
 
 export function horizonLabel(days) {
@@ -399,6 +410,94 @@ export function realizedVolPct(closes, lookback = 30) {
   const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
   const variance = rets.reduce((a, b) => a + (b - mean) ** 2, 0) / rets.length;
   return Math.sqrt(variance);
+}
+
+// How long an asset has been sitting at its own extreme, not just whether
+// it currently is. A fresh one-day touch of a high and a multi-week base
+// at the same level are different setups — this distinguishes them
+// directly from the real historical closes already being fetched, no new
+// data source. `lookback` bounds the "N-bar high/low" (up to ~365 daily
+// bars = a real 52-week range, not just whatever the shorter crypto
+// sparkline covers).
+export function dwellAtExtreme(closes, lookback = 252, bandPct = 5) {
+  if (!closes || closes.length < 20) return null;
+  const window = closes.slice(-lookback);
+  const hi = Math.max(...window), lo = Math.min(...window);
+  const price = closes[closes.length - 1];
+  const nearHigh = hi > 0 && price >= hi * (1 - bandPct / 100);
+  const nearLow = lo > 0 && price <= lo * (1 + bandPct / 100);
+  if (!nearHigh && !nearLow) return { dir: 0, days: 0 };
+  const dir = nearHigh ? 1 : -1;
+  const threshold = nearHigh ? hi * (1 - bandPct / 100) : lo * (1 + bandPct / 100);
+  let days = 0;
+  for (let i = closes.length - 1; i >= 0; i--) {
+    const within = dir === 1 ? closes[i] >= threshold : closes[i] <= threshold;
+    if (!within) break;
+    days++;
+  }
+  return { dir, days };
+}
+
+// Pearson correlation of daily returns against a benchmark (BTC for
+// crypto, SPY for equities) over the trailing `lookback` days — is this
+// asset moving with the market right now, or on its own? An asset
+// decoupling from a market that's still trending is a different setup
+// than one just riding the market's own move.
+export function correlationWithBenchmark(closes, benchCloses, lookback = 30) {
+  if (!closes || !benchCloses || closes.length < 2 || benchCloses.length < 2) return null;
+  const retsOf = (series) => {
+    const out = [];
+    for (let i = 1; i < series.length; i++) if (series[i - 1]) out.push(series[i] / series[i - 1] - 1);
+    return out;
+  };
+  const retsA = retsOf(closes), retsB = retsOf(benchCloses);
+  const n = Math.min(retsA.length, retsB.length, lookback);
+  if (n < 10) return null;
+  const a = retsA.slice(-n), b = retsB.slice(-n);
+  const meanA = a.reduce((x, y) => x + y, 0) / n, meanB = b.reduce((x, y) => x + y, 0) / n;
+  let cov = 0, varA = 0, varB = 0;
+  for (let i = 0; i < n; i++) {
+    const da = a[i] - meanA, db = b[i] - meanB;
+    cov += da * db; varA += da * da; varB += db * db;
+  }
+  if (varA === 0 || varB === 0) return null;
+  return cov / Math.sqrt(varA * varB);
+}
+
+// Does this asset's own price history contain a period that behaved like
+// its last `windowDays`, roughly one or more "years" (cycleLength bars —
+// 365 for continuously-traded crypto, ~252 trading days for equities) ago?
+// If so, what happened in the `forwardDays` right after that analog period
+// is a genuine, data-grounded forward hint, distinct from anything the
+// other techniques compute — most assets are too young to have any
+// candidate years at all (returns null, not a guess), and a real 5-6 year
+// history is really only common for the oldest large-caps (BTC, ETH,
+// long-listed equities). Uses the exact same correlation math as
+// correlationWithBenchmark, just against the asset's own past instead of a
+// different asset, and requires a real resemblance (|corr| >= 0.5) before
+// it counts at all — with only a handful of candidate years to compare
+// against, a looser bar would just be fitting noise.
+export function seasonalAnalog(closes, cycleLength, windowDays = 90, forwardDays = 7, maxCycles = 6) {
+  if (!closes || closes.length < cycleLength + windowDays + forwardDays) return null;
+  const currentWindow = closes.slice(-windowDays);
+  let best = null;
+  for (let cycle = 1; cycle <= maxCycles; cycle++) {
+    const anchor = closes.length - cycle * cycleLength; // "cycle years ago" from now, in bars
+    const start = anchor - windowDays;
+    const forwardEnd = anchor + forwardDays;
+    if (start < 0 || forwardEnd > closes.length) continue;
+    const pastWindow = closes.slice(start, anchor);
+    if (pastWindow.length < windowDays || !closes[anchor]) continue;
+    const corr = correlationWithBenchmark(currentWindow, pastWindow, windowDays - 1);
+    if (corr == null) continue;
+    if (!best || Math.abs(corr) > Math.abs(best.corr)) {
+      const forwardReturnPct = ((closes[forwardEnd] / closes[anchor]) - 1) * 100;
+      best = { cycle, corr, forwardReturnPct };
+    }
+  }
+  if (!best || Math.abs(best.corr) < 0.5) return null;
+  const dir = best.forwardReturnPct > 0.5 ? 1 : best.forwardReturnPct < -0.5 ? -1 : 0;
+  return { cycle: best.cycle, corr: best.corr, forwardReturnPct: best.forwardReturnPct, dir };
 }
 
 // Surfaces "this asset leans on certain indicators more than others" —
@@ -638,6 +737,47 @@ export function evaluateTechniques(m, kind, reliability, marketContext) {
     push('reversal', 1.1, null, null);
   }
 
+  // T15 dwell: not just "is this asset at an extreme" but "how long has it
+  // been coiled there" — a fresh one-day touch and a multi-week base at
+  // the same level are different setups. Long dwell at a low, especially
+  // while decoupled from the broader market (its own move, not just
+  // riding the market down), is treated as stored energy for a bounce —
+  // classic accumulation-at-lows/distribution-at-highs — and the mirror
+  // case at highs. This is a prior, not a certainty: it starts at a
+  // modest weight and the adaptive-weighting loop corrects it per asset
+  // from real outcomes exactly like every other technique here, so if
+  // dwell-at-lows turns out to actually predict further downside for a
+  // specific asset, its weight (and the reversal direction it's paired
+  // with) gets pushed down for that asset over time, not just left wrong.
+  const MIN_DWELL_DAYS = 5;
+  if (m.dwell && m.dwell.dir !== 0 && m.dwell.days >= MIN_DWELL_DAYS) {
+    const decoupled = m.corr != null && Math.abs(m.corr) < 0.3;
+    const w = decoupled ? 1.0 : 0.7;
+    if (m.dwell.dir === -1) push('dwell', w, 1, `coiled near its own long-run low for ${m.dwell.days}d${decoupled ? ', decoupled from the broader market' : ''}`);
+    else push('dwell', w, -1, `coiled near its own long-run high for ${m.dwell.days}d${decoupled ? ', decoupled from the broader market' : ''}`);
+  } else if (m.dwell) {
+    push('dwell', 0.8, 0, null);
+  } else {
+    push('dwell', 0.8, null, null);
+  }
+
+  // T16 seasonal: does this asset's own history contain a period that
+  // looks like where it is right now (roughly a year, or several years,
+  // ago), and if so what happened next back then? Only fires when there's
+  // a real resemblance (seasonalAnalog already gates on correlation
+  // strength) — most assets are too young to have any candidate years at
+  // all, which is the common case, not an error.
+  if (m.seasonal) {
+    const conf = clamp((Math.abs(m.seasonal.corr) - 0.5) / 0.5, 0, 1); // 0 right at the 0.5 gate, 1 at a perfect match
+    const w = 0.7 + 0.4 * conf;
+    const cycleLabel = m.seasonal.cycle === 1 ? 'last year' : `${m.seasonal.cycle} years ago`;
+    if (m.seasonal.dir === 1) push('seasonal', w, 1, `resembles ${cycleLabel}'s pattern, which rallied next`);
+    else if (m.seasonal.dir === -1) push('seasonal', w, -1, `resembles ${cycleLabel}'s pattern, which fell next`);
+    else push('seasonal', w, 0, null);
+  } else {
+    push('seasonal', 0.9, null, null);
+  }
+
   return T;
 }
 
@@ -851,7 +991,9 @@ async function stooqDaily(symbol) {
   const rows = txt.trim().split('\n').slice(1);
   if (rows.length < 60) throw new Error(`stooq thin for ${symbol}`);
   const closes = [], volumes = [], highs = [], lows = [];
-  for (const row of rows.slice(-300)) {
+  // ~10 years of trading days, matching the Yahoo path's '10y' fetch — the
+  // Stooq fallback shouldn't quietly give seasonalAnalog() far less history.
+  for (const row of rows.slice(-2600)) {
     const p = row.split(',');
     const c = parseFloat(p[4]);
     if (Number.isFinite(c)) {
@@ -865,7 +1007,10 @@ async function stooqDaily(symbol) {
 }
 
 async function getStock(symbol) {
-  try { return await yahooDaily(symbol); }
+  // '10y', not the default '1y': seasonalAnalog() needs multiple years of
+  // history to find calendar-analogous periods. Same single request either
+  // way, just a longer response.
+  try { return await yahooDaily(symbol, '10y'); }
   catch { return await stooqDaily(symbol); }
 }
 
@@ -960,14 +1105,23 @@ export function buildCryptoMetrics(item, extras = {}) {
   const md = macd(closes);
   const rNow = rsi(closes);
   const rRange = rsiRecentRange(closes, haveDaily ? 10 : 24);
-  // Only from real daily bars — an hourly-sparkline-derived "daily" vol on
-  // the fallback path would be a materially different, wrong number.
+  // Only from real daily bars — an hourly-sparkline-derived "daily" vol
+  // (or "52-week" range, or correlation) on the fallback path would be a
+  // materially different, wrong number.
   const volPct = haveDaily ? realizedVolPct(closes) : null;
+  // 365, not stocks' 252: crypto trades every calendar day, not just
+  // weekdays, so a "1-year cycle" in daily bars is 365 bars here.
+  const dwell = haveDaily ? dwellAtExtreme(closes, 365) : null;
+  const corr = haveDaily && extras.benchCloses ? correlationWithBenchmark(closes, extras.benchCloses, 30) : null;
+  const seasonal = haveDaily ? seasonalAnalog(closes, 365) : null;
 
   return {
     symbol,
     id: item.id,
     name: item.name,
+    dwell,
+    corr,
+    seasonal,
     volPct,
     price,
     mcap,
@@ -1004,7 +1158,7 @@ export function buildCryptoMetrics(item, extras = {}) {
   };
 }
 
-export function buildStockMetrics(row, valuation, override) {
+export function buildStockMetrics(row, valuation, override, benchCloses) {
   const { symbol, price, closes, volumes, highs, lows } = row;
   if (!closes || closes.length < 60) return null;
 
@@ -1018,6 +1172,9 @@ export function buildStockMetrics(row, valuation, override) {
   const rNow = rsi(closes);
   const rRange = rsiRecentRange(closes, 10);
   const volPct = realizedVolPct(closes);
+  const dwell = dwellAtExtreme(closes, 252);
+  const corr = benchCloses ? correlationWithBenchmark(closes, benchCloses, 30) : null;
+  const seasonal = seasonalAnalog(closes, 252);
   const hi52 = Math.max(...closes);
 
   let val = null;
@@ -1039,6 +1196,9 @@ export function buildStockMetrics(row, valuation, override) {
     name: symbol,
     price,
     volPct,
+    dwell,
+    corr,
+    seasonal,
     chgShort: pct(1),
     chg24h: pct(1),
     chg7d: pct(5),
@@ -1136,7 +1296,11 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     getTrending(),
     getFundingMap(),
     pool(STOCK_WATCHLIST, POOL_CONCURRENCY, getStock),
-    pool(OVERVIEW_SYMBOLS, 3, (s) => yahooDaily(s, '1mo')),
+    // '6mo', not '1mo': SPY's closes double as the equities correlation
+    // benchmark now, and 1 month (~21 daily bars) is too thin for a real
+    // 30-day-returns correlation. Same single fetch either way, just more
+    // history per call.
+    pool(OVERVIEW_SYMBOLS, 3, (s) => yahooDaily(s, '6mo')),
     getAllValuations(STOCK_WATCHLIST)
   ]);
 
@@ -1188,12 +1352,15 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     cryptoDailyTotal = histories.length;
     cryptoDailyOk = histories.filter(h => h && !h._error).length;
 
+    const btcIdx = qualifying.findIndex(c => c.id === 'bitcoin');
+    const btcCloses = btcIdx >= 0 && histories[btcIdx] && !histories[btcIdx]._error ? histories[btcIdx].closes : null;
+
     const metrics = qualifying
       .map((c, i) => {
         const sym = (c.symbol || '').toUpperCase();
         const h = histories[i];
         const daily = h && !h._error ? h : null;
-        return buildCryptoMetrics(c, { funding: funding[sym], trending: trending.has(sym), daily });
+        return buildCryptoMetrics(c, { funding: funding[sym], trending: trending.has(sym), daily, benchCloses: btcCloses });
       })
       .filter(Boolean);
     cryptoBoards = rankBoards(metrics, 'crypto', reliability, marketContext, reliabilityByHorizon, moveStats);
@@ -1203,10 +1370,12 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   const stockFailures = [];
   const valMap = valR.status === 'fulfilled' ? valR.value.map : {};
   if (stocksR.status === 'fulfilled') {
+    const spyRow = overviewR.status === 'fulfilled' ? overviewR.value.find(r => r && !r._error && r.symbol === 'SPY') : null;
+    const spyCloses = spyRow ? spyRow.closes : null;
     const metrics = [];
     for (const r of stocksR.value) {
       if (r && !r._error) {
-        const m = buildStockMetrics(r, valMap[r.symbol], overrides[r.symbol]);
+        const m = buildStockMetrics(r, valMap[r.symbol], overrides[r.symbol], spyCloses);
         if (m) metrics.push(m);
       } else stockFailures.push(r && r._item);
     }
@@ -1235,7 +1404,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     generated_at: log.generated_at,
     cache_seconds: CACHE_SECONDS,
     build_ms: Date.now() - started,
-    model: 'confluence-v3 (14 techniques, directional agreement)',
+    model: 'confluence-v4 (16 techniques, directional agreement)',
     health: {
       coingecko: cryptoR.status === 'fulfilled',
       global: globalR.status === 'fulfilled' && !!globalR.value,
@@ -1293,7 +1462,7 @@ const PAGE_HTML = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Frontier Capital Signals — Hourly confluence screens</title>
-<meta name="description" content="Hourly confluence screens across the top 100 cryptos and 60 US equities. Up to 14 techniques per asset must agree before a signal ranks.">
+<meta name="description" content="Hourly confluence screens across the top 100 cryptos and 60 US equities. Up to 16 techniques per asset must agree before a signal ranks.">
 <!-- Consent Mode v2 defaults, same scheme as the main site (fcs_consent_v1 in
      localStorage, shared across the whole origin since localStorage is
      origin- not path-scoped): respects a prior choice made on the main site,
@@ -1464,12 +1633,12 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     <div class="mast-grid">
       <div>
         <h1>Frontier Capital<br><span class="amber">Signals</span></h1>
-        <p class="dek">Confluence screens across the <b>top 100 cryptos</b> and <b>60 US equities</b>. Up to <b>14 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to volume, funding rates, Wall Street price targets and reversal-pattern detection, must point the <b>same direction</b> before a signal ranks — each with an <b>expected timeframe</b> learned from its own track record. <b>Synced hourly.</b></p>
+        <p class="dek">Confluence screens across the <b>top 100 cryptos</b> and <b>60 US equities</b>. Up to <b>16 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to volume, funding rates, Wall Street price targets, reversal-pattern detection and multi-year seasonal analogs, must point the <b>same direction</b> before a signal ranks — each with an <b>expected timeframe</b> learned from its own track record. <b>Synced hourly.</b></p>
       </div>
       <div class="mast-meta">
         DATA REFRESH <b>HOURLY</b><br>
         UNIVERSE <b id="metaUniverse">—</b><br>
-        TECHNIQUES PER ASSET <b>UP TO 14</b>
+        TECHNIQUES PER ASSET <b>UP TO 16</b>
       </div>
     </div>
     <div class="mast-rule"></div>
@@ -1486,9 +1655,11 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   <details>
     <summary>Methodology and data</summary>
     <div class="method">
-      <p><b>The confluence model.</b> Every asset is evaluated by up to 14 independent techniques. Each one votes bullish, bearish, or neutral. The breakout score measures how much weighted evidence points up net of evidence pointing down; the breakdown score mirrors it. The small fraction under each score (for example 9/14) is the raw count of techniques agreeing with that direction out of those that had enough data to vote. High score plus high agreement is the strongest read.</p>
-      <p><b>The 14 techniques.</b> Multi-horizon momentum alignment; Wilder RSI(14) regime and direction; MACD(12/26/9) histogram level and direction; moving-average stack (SMA20/50/200, computed from real daily bars for both equities and crypto); Bollinger %B with squeeze-and-expansion detection; stochastic (14,3) crosses; Donchian 20-bar breakout or breakdown proximity; volume confirmation versus baseline; on-balance volume trend; swing structure of higher-highs and higher-lows; a momentum divergence proxy that flags new price extremes without RSI support; a volatility regime read separating coiled compression from climactic expansion; a reversal-pattern read (below); and a valuation-or-positioning layer.</p>
+      <p><b>The confluence model.</b> Every asset is evaluated by up to 16 independent techniques. Each one votes bullish, bearish, or neutral. The breakout score measures how much weighted evidence points up net of evidence pointing down; the breakdown score mirrors it. The small fraction under each score (for example 9/16) is the raw count of techniques agreeing with that direction out of those that had enough data to vote. High score plus high agreement is the strongest read.</p>
+      <p><b>The 16 techniques.</b> Multi-horizon momentum alignment; Wilder RSI(14) regime and direction; MACD(12/26/9) histogram level and direction; moving-average stack (SMA20/50/200, computed from real daily bars for both equities and crypto); Bollinger %B with squeeze-and-expansion detection; stochastic (14,3) crosses; Donchian 20-bar breakout or breakdown proximity; volume confirmation versus baseline; on-balance volume trend; swing structure of higher-highs and higher-lows; a momentum divergence proxy that flags new price extremes without RSI support; a volatility regime read separating coiled compression from climactic expansion; a reversal-pattern read (below); how long an asset has been coiled at its own long-run high or low and whether it's decoupled from the broader market (below); a seasonal-analog read comparing the current pattern against the asset's own history one or more years back (below); and a valuation-or-positioning layer.</p>
       <p><b>Reversal detection.</b> A separate read from plain RSI level: it looks for RSI having actually bottomed or topped over the last ~10 bars and turned back, confirmed by at least one independent signal (a stochastic cross, a Bollinger band extreme, swing structure, on-balance volume, or the divergence proxy) — it never fires on RSI alone. Market-wide sentiment adds confidence on top when it lines up: extreme fear on the Fear &amp; Greed index for a crypto bottom, or VIX sitting high in its own recent range for an equity bottom (and the mirror image — extreme greed or a complacent VIX — for tops).</p>
+      <p><b>Dwell time and market correlation.</b> Real 52-week (or as much history as exists) highs and lows, and specifically how many days an asset has been sitting within a few percent of one, not just whether it currently is — a fresh one-day touch and a multi-week base at the same level are different setups. Long dwell at a low is read as stored energy for a bounce, the mirror at a high for a pullback, and it carries extra weight when the asset has also decoupled from its usual correlation with the broader market (BTC for crypto, SPY for equities) over the last 30 days, since a move happening on its own is a different setup than one just riding the market. This is a starting assumption, not a fixed rule — the adaptive weighting above corrects it per asset from what actually happens next.</p>
+      <p><b>Seasonal analogs.</b> Where an asset has enough of its own history (most don't — this mainly applies to long-established names like BTC or ETH, or equities with many years listed), the current pattern over the last ~90 days is compared against the same-length window roughly one, two, or more years back, using the same correlation math as the market-correlation read above but against the asset's own past. A real resemblance has to clear a fairly high bar (a correlation of at least 0.5) before it counts at all, since only a handful of candidate years exist to compare against and a looser bar would just be fitting noise. When one clears that bar, what happened in the days right after that historical analog becomes a genuine, data-grounded forward hint.</p>
       <p><b>The valuation layer.</b> For equities, Wall Street consensus mean price targets and recommendation ratings: trading well below a buy-rated consensus target votes bullish, trading above the consensus target votes bearish. Trefis does not publish a public API, so consensus targets stand in for model-based estimates; site operators can supply Trefis or other model values through a server-side override, in which case the payload labels the source. For crypto, the layer uses perpetual futures funding rates (crowded positive funding on a parabolic move votes bearish, skeptical funding during an uptrend votes bullish) and trending-list crowding.</p>
       <p><b>Adaptive weighting.</b> Every hour's directional calls are logged and checked back against what the asset's price actually did 24 hours and 7 days later. Once a technique has enough scored history for a specific asset, its weight for that asset going forward is nudged up if it has been reliably right and down if it has been reliably wrong, capped at plus or minus 50%. A technique that is only a coin flip for a given asset keeps its plain baseline weight.</p>
       <p><b>Leading vs. lagging, and the expected timeframe.</b> Techniques are split into two kinds. Leading techniques try to anticipate a move before it's confirmed: RSI, Bollinger squeeze, stochastic crosses, OBV, the divergence proxy, the volatility regime read, reversal-pattern detection, and the valuation/positioning layer. Lagging techniques describe a move already underway: momentum alignment, MACD, the moving-average stack, Donchian breakout proximity, volume confirmation, and swing structure. The small window shown next to each score (for example <b>1-3 days</b>) is this engine's estimate of when that specific call is expected to resolve, built from whichever techniques are actually voting on that asset right now. Where an asset has enough of its own scored history, the window uses that asset's real measured accuracy at the 24-hour versus 7-day mark (marked with a check and shown in amber) instead of a generic estimate — the same historical record the adaptive weighting above draws on, just answering "how soon" instead of "how much weight." Without enough history yet, it falls back to a weighted average of the active techniques' typical horizons (shown in gray) — an informed estimate, not a measurement.</p>
@@ -1496,7 +1667,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       <p><b>Which indicator this asset leans on.</b> "Leans on X (n%)" under an asset's name names whichever technique has, on its own, the strongest individually-proven track record for that specific asset — some assets really are better predicted by one kind of signal than another, and this surfaces that once a technique has enough of its own scored history to say so, using the same adaptive-weighting data above.</p>
       <p><b>Data.</b> CoinGecko free API for the top 100 coins by market cap with real daily price and volume history per coin, plus global stats and trending (stablecoins and wrappers excluded), alternative.me Fear &amp; Greed, Bybit linear perp funding rates, Yahoo Finance daily OHLCV with Stooq CSV fallback, and Yahoo analyst estimates. Free feeds can lag or drop symbols; the feeds counter in the status bar shows current coverage, and any technique without data simply abstains rather than guessing.</p>
       <p><b>Refresh mechanics.</b> A scheduled job rebuilds the full payload hourly and writes it to this page's cache; every visit reads that cache, so the page itself never runs the engine. This page also re-checks every 10 minutes so a new hour's data appears without a reload.</p>
-      <p><b>What the scores are not.</b> A score of 70 with 10/14 agreement is a strong mechanical setup, not a 70% probability; the timeframe next to it is an estimate of when the setup should resolve, not a guarantee it will; and the range is a plausible band from real volatility, not a target price. The model has no knowledge of token unlocks, earnings dates, lawsuits, or macro events.</p>
+      <p><b>What the scores are not.</b> A score of 70 with 10/16 agreement is a strong mechanical setup, not a 70% probability; the timeframe next to it is an estimate of when the setup should resolve, not a guarantee it will; and the range is a plausible band from real volatility, not a target price. The model has no knowledge of token unlocks, earnings dates, lawsuits, or macro events.</p>
     </div>
   </details>
 

@@ -181,7 +181,7 @@ const { payload: built, log } = await mod.buildPayload({ TREFIS_OVERRIDES: '{"AA
 check('crypto boards populated', built.crypto.breakout.length > 0 && built.crypto.universe >= 3);
 check('stablecoin filtered from universe', built.crypto.universe === 4, `universe=${built.crypto.universe}`);
 check('stocks boards populated', built.stocks.breakout.length > 0);
-check('confluence agreement present', built.crypto.breakout[0].conf && built.crypto.breakout[0].conf.total >= 10 && built.crypto.breakout[0].conf.total <= 14);
+check('confluence agreement present', built.crypto.breakout[0].conf && built.crypto.breakout[0].conf.total >= 10 && built.crypto.breakout[0].conf.total <= 16);
 check('rangePos stays in [0,1]', built.crypto.breakout.every(r => r.rangePos == null || (r.rangePos >= 0 && r.rangePos <= 1)));
 check('valuation flowed in', built.stocks.breakout.concat(built.stocks.breakdown).some(r => r.val));
 check('trefis override applied', built.health.trefis_overrides === 1);
@@ -343,6 +343,61 @@ check('learned move stats below sample threshold: still falls back to methodolog
 console.log('\n== range + topIndicator flow through buildPayload end-to-end ==');
 check('every ranked row carries a range field (object or null, never a crash)', built.crypto.breakout.concat(built.crypto.breakdown, built.stocks.breakout, built.stocks.breakdown).every(r => 'range' in r));
 check('every ranked row carries a topIndicator field (object or null)', built.crypto.breakout.concat(built.crypto.breakdown, built.stocks.breakout, built.stocks.breakdown).every(r => 'topIndicator' in r));
+
+console.log('\n== dwellAtExtreme: how long, not just whether, an asset sits at an extreme ==');
+check('too short a series: returns null', mod.dwellAtExtreme([1, 2, 3]) === null);
+const declineToLow = Array.from({ length: 30 }, (_, i) => 100 - i); // 100 down to 71
+const dwellAtLow = [...declineToLow, ...Array.from({ length: 8 }, () => 71.5)];
+const lowResult = mod.dwellAtExtreme(dwellAtLow, 252, 5);
+check('sitting near the low for a stretch: dir=-1 with a real day count (includes the decline\'s own tail inside the band, not just the flat part)', lowResult.dir === -1 && lowResult.days > 8, JSON.stringify(lowResult));
+const midRange = [...declineToLow, ...Array.from({ length: 8 }, (_, i) => 85 + i * 0.1)]; // recovers away from the low, stays mid-range
+check('back in the middle of the range: dir=0, no dwell claimed', mod.dwellAtExtreme(midRange, 252, 5).dir === 0);
+const declineToHigh = declineToLow.slice().reverse(); // 71 up to 100
+const dwellAtHigh = [...declineToHigh, ...Array.from({ length: 6 }, () => 99.5)];
+check('mirror case, sitting near the high: dir=1', mod.dwellAtExtreme(dwellAtHigh, 252, 5).dir === 1);
+
+console.log('\n== correlationWithBenchmark: real correlation, not a guess ==');
+check('insufficient data: returns null', mod.correlationWithBenchmark([1, 2], [1, 2], 30) === null);
+const wave = Array.from({ length: 40 }, (_, i) => 100 + Math.sin(i / 3) * 5 + i * 0.3);
+check('a series correlated with itself: ~1.0', Math.abs(mod.correlationWithBenchmark(wave, wave, 30) - 1) < 1e-6);
+const inverseWave = wave.map(v => 200 - v);
+check('an inverted series: strongly negative correlation', mod.correlationWithBenchmark(wave, inverseWave, 30) < -0.9);
+
+console.log('\n== seasonalAnalog: does this asset\'s own history contain a real analog? ==');
+check('too short a series: returns null, not a guess', mod.seasonalAnalog(Array.from({ length: 100 }, () => 100), 365) === null);
+function patternWindow(offset) { return Array.from({ length: 90 }, (_, i) => 100 + Math.sin((i + offset) / 10) * 8 + i * 0.1); }
+const cycleLength = 365;
+const totalLen = cycleLength * 2 + 90 + 10;
+const seasonalCloses = new Array(totalLen).fill(100);
+const pattern = patternWindow(0);
+const place = (startIdx) => { for (let i = 0; i < 90; i++) seasonalCloses[startIdx + i] = pattern[i]; };
+place(totalLen - 90); // current window
+place(totalLen - 90 - cycleLength); // 1 year ago: the analog
+const analogEnd = totalLen - 90 - cycleLength + 90;
+for (let i = 0; i < 10; i++) seasonalCloses[analogEnd + i] = pattern[89] * (1 + 0.08 * (i + 1) / 10); // clear +8%-ish forward move after the analog
+const seasonalResult = mod.seasonalAnalog(seasonalCloses, cycleLength, 90, 7, 6);
+check('finds a real analog year and reports what happened next, bullish case', seasonalResult && seasonalResult.cycle === 1 && seasonalResult.dir === 1 && seasonalResult.corr > 0.9, JSON.stringify(seasonalResult));
+const noAnalogCloses = Array.from({ length: totalLen }, () => 100 + Math.random() * 20 - 10);
+const noAnalog = mod.seasonalAnalog(noAnalogCloses, cycleLength, 90, 7, 6);
+check('pure noise, no real resemblance to any prior period: returns null rather than fitting noise', noAnalog === null, JSON.stringify(noAnalog));
+
+console.log('\n== dwell + seasonal techniques: fire only with real signal, learn like every other technique ==');
+const dwellLowMetric = baseMetric({ rsi: 50, rsiPrev: 50, dwell: { dir: -1, days: 12 }, corr: 0.8 }); // dwelling low, but still correlated with the market
+const dwellLowDecoupled = baseMetric({ rsi: 50, rsiPrev: 50, dwell: { dir: -1, days: 12 }, corr: 0.1 }); // same dwell, decoupled
+const dwellTooShort = baseMetric({ rsi: 50, rsiPrev: 50, dwell: { dir: -1, days: 2 }, corr: 0.1 }); // below MIN_DWELL_DAYS
+const dTechCorrelated = findTech(mod.evaluateTechniques(dwellLowMetric, 'crypto'), 'dwell');
+const dTechDecoupled = findTech(mod.evaluateTechniques(dwellLowDecoupled, 'crypto'), 'dwell');
+const dTechTooShort = findTech(mod.evaluateTechniques(dwellTooShort, 'crypto'), 'dwell');
+check('dwelling near a low votes bullish (reversal read)', dTechCorrelated.dir === 1, `dir=${dTechCorrelated.dir}`);
+check('decoupling from the market raises the weight over the same dwell while still correlated', dTechDecoupled.w > dTechCorrelated.w, `decoupled=${dTechDecoupled.w} correlated=${dTechCorrelated.w}`);
+check('below MIN_DWELL_DAYS: does not fire a directional call', dTechTooShort.dir === 0, `dir=${dTechTooShort.dir}`);
+check('no dwell data at all: abstains (null), not a guess', findTech(mod.evaluateTechniques(baseMetric({}), 'crypto'), 'dwell').dir === null);
+
+const seasonalBullMetric = baseMetric({ seasonal: { cycle: 2, corr: 0.75, forwardReturnPct: 6, dir: 1 } });
+const seasonalBearMetric = baseMetric({ seasonal: { cycle: 1, corr: 0.6, forwardReturnPct: -4, dir: -1 } });
+check('a bullish seasonal analog votes bullish', findTech(mod.evaluateTechniques(seasonalBullMetric, 'crypto'), 'seasonal').dir === 1);
+check('a bearish seasonal analog votes bearish', findTech(mod.evaluateTechniques(seasonalBearMetric, 'crypto'), 'seasonal').dir === -1);
+check('no seasonal analog found: abstains (null), the common case for younger assets', findTech(mod.evaluateTechniques(baseMetric({}), 'crypto'), 'seasonal').dir === null);
 
 console.log('\n== api: KV populated by the "Action" (mirrors what build-signals.mjs writes) ==');
 const warmEnv = { FCS_CACHE: new MockKV() };

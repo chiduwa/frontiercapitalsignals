@@ -26,7 +26,13 @@ concurrency:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Bumped from 20: the crypto history fetch now pulls up to ~2000 daily
+    # bars per coin (was ~210) and stocks fetch 10y (was 1y) for the new
+    # dwell/seasonal techniques, so each of the ~160 sequential/pooled
+    # requests carries a bigger response — expect build time to grow
+    # somewhat from the ~10-11 min baseline. Still well under the hourly
+    # cadence either way.
+    timeout-minutes: 28
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
