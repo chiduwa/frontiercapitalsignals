@@ -214,6 +214,15 @@ check('crypto entries carry a CoinGecko id (for the dashboard\'s outbound link)'
 check('stock entries have no id field (not applicable, uses symbol for the Yahoo link instead)', built.stocks.breakout.every(r => r.id === undefined));
 check('every ranked row carries a horizon estimate end-to-end through buildPayload', built.crypto.breakout.concat(built.crypto.breakdown, built.stocks.breakout, built.stocks.breakdown).every(r => r.horizon && typeof r.horizon.label === 'string' && (r.horizon.basis === 'methodology' || r.horizon.basis === 'historical')));
 
+console.log('\n== engine: a qualifying highAccuracy entry carries price + its own predicted range ==');
+const qualifyingReliability = { 'BTC|composite': { correct: 25, total: 25, accuracy: 1 } };
+const { payload: builtQualifying } = await mod.buildPayload({ TREFIS_OVERRIDES: '{"AAPL": 999}' }, qualifyingReliability, undefined, undefined, {});
+const btcEntry = builtQualifying.highAccuracy.find(r => r.symbol === 'BTC');
+check('BTC clears the 95%+ bar given a synthetic 25/25 composite record', !!btcEntry, JSON.stringify(builtQualifying.highAccuracy));
+check('the qualifying entry carries a real current price, not just a bare score', btcEntry && typeof btcEntry.price === 'number' && btcEntry.price > 0);
+check('the qualifying entry carries its own predicted range (low < high) and a coin id to link out', btcEntry && btcEntry.range && btcEntry.range.low < btcEntry.range.high && typeof btcEntry.id === 'string');
+check('the qualifying entry carries a horizon label for that range\'s own period', btcEntry && btcEntry.horizon && typeof btcEntry.horizon.label === 'string');
+
 console.log('\n== reliability weighting: confluence() with a synthetic reliability map ==');
 const btcMetrics = mod.buildCryptoMetrics(btcCoin, { daily: btcDaily });
 const baseline = mod.confluence(btcMetrics, 'crypto');

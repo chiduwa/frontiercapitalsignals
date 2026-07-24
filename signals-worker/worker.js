@@ -1429,25 +1429,45 @@ function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHori
   // Full-universe range-prediction log, same reasoning: a boring, rarely-
   // ranked asset can still build a real track record.
   const rangeLog = [];
+  // Full universe with names, price, and a composite-call range/horizon,
+  // for the track-record leaderboard — deliberately not limited to the
+  // top 10 per side like breakout/breakdown are, since an asset can build
+  // a strong record without ever topping either board, and the person
+  // reading a 95%+ list needs a price and an actual predicted band next
+  // to it, not just a bare score.
+  const allSymbols = [];
   for (const { m, c } of scored) {
     for (const v of c.votes) votesLog.push({ asset_class: kind, symbol: m.symbol, technique_id: v.id, dir: v.dir });
     // One composite directional vote per asset per run — reuses the exact
     // same technique_votes/technique_reliability machinery as every other
     // technique (see compositeCall's docs), just keyed 'composite'.
     const cc = compositeCall(c);
+    let horizon = null, range = null;
     if (cc) {
       votesLog.push({ asset_class: kind, symbol: m.symbol, technique_id: 'composite', dir: cc.dir });
       for (const horizonDays of RANGE_LOG_HORIZONS_DAYS) {
         const r = predictedRange(m.price, horizonDays, cc.score, cc.dir, moveStats, m.symbol, m.volPct);
         if (r) rangeLog.push({ asset_class: kind, symbol: m.symbol, horizon_hours: horizonDays * 24, low: r.low, high: r.high });
       }
+      // Distinct from the fixed 1d/7d pair just logged above (those exist
+      // purely so maturity-scoring always compares like with like) — this
+      // is the asset's own natural resolution window, same horizonEstimate
+      // every top-10 board row already shows, so a leaderboard entry's
+      // band covers whatever period this specific call actually expects to
+      // resolve in rather than an arbitrary fixed one.
+      horizon = cc.dir === 1 ? c.longHorizon : c.shortHorizon;
+      range = horizon ? predictedRange(m.price, horizon.days, cc.score, cc.dir, moveStats, m.symbol, m.volPct) : null;
     }
+    allSymbols.push({
+      symbol: m.symbol,
+      name: m.name,
+      price: m.price,
+      horizon,
+      range,
+      ...(m.id ? { id: m.id } : {})
+    });
   }
   const priceLog = scored.map(({ m }) => ({ asset_class: kind, symbol: m.symbol, price: m.price }));
-  // Full universe with names, for the track-record leaderboard — deliberately
-  // not limited to the top 10 per side like breakout/breakdown are, since an
-  // asset can build a strong record without ever topping either board.
-  const allSymbols = scored.map(({ m }) => ({ symbol: m.symbol, name: m.name }));
   const entry = (x, side) => {
     const dir = side === 'long' ? 1 : -1;
     const score = side === 'long' ? x.c.long : x.c.short;
@@ -1616,9 +1636,14 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   // exactly what's pooled. Full universe, not just this hour's top 10 per
   // side, since a strong record doesn't require currently ranking.
   const highAccuracyFor = (list, assetClass) => list
-    .map(({ symbol, name }) => {
+    .map(({ symbol, name, price, horizon, range, id }) => {
       const s = assetPredictionScore(symbol, reliability, rangeReliability);
-      return s ? { symbol, name, asset_class: assetClass, score: s.score, samples: s.samples } : null;
+      if (!s) return null;
+      return {
+        symbol, name, asset_class: assetClass, score: s.score, samples: s.samples,
+        price, horizon, range,
+        ...(id ? { id } : {})
+      };
     })
     .filter((r) => r && r.score > 95);
   const highAccuracy = [
@@ -1830,10 +1855,12 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .tr-title{font-weight:800;font-size:17px;letter-spacing:-.01em;margin-top:3px}
   .tr-empty{color:var(--muted);font-size:12.5px;line-height:1.75;max-width:760px;font-family:var(--mono);padding:2px 0 16px}
   .tr-list{display:flex;flex-direction:column;gap:1px;background:var(--line);margin-top:14px}
-  .tr-row{display:flex;align-items:center;gap:14px;background:var(--ink-1);padding:10px 12px;font-family:var(--mono);font-size:12.5px}
-  .tr-sym{font-weight:600;color:var(--paper);min-width:64px}
-  .tr-name{color:var(--muted);flex:1;font-family:var(--disp);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tr-row{display:flex;align-items:center;gap:14px;background:var(--ink-1);padding:10px 12px;font-family:var(--mono);font-size:12.5px;flex-wrap:wrap}
+  .tr-asset{display:flex;align-items:baseline;gap:7px;min-width:150px}
+  .tr-name{color:var(--muted);font-family:var(--disp);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px}
   .tr-class{color:var(--dim);font-size:9.5px;letter-spacing:.1em;min-width:56px}
+  .tr-price{color:var(--paper);min-width:70px}
+  .tr-range-wrap{display:flex;align-items:center;gap:8px;flex:1;min-width:170px}
   .tr-score{color:var(--up);font-weight:700;min-width:48px;text-align:right}
   .tr-samples{color:var(--dim);font-size:10.5px;min-width:76px;text-align:right;white-space:nowrap}
 
@@ -1925,7 +1952,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       <p><b>Expected range.</b> The Range column is a band around the current price, not a point prediction, for the same timeframe as the horizon chip next to it. Its width comes from real volatility: this asset's own historical realized move size at that horizon once evaluateMatured has scored enough of its own outcomes (amber, marked historical), or its recent realized daily volatility scaled by the square root of time otherwise (gray, marked methodology) — the standard random-walk approximation for "how far a price plausibly wanders in N days." The band's center only shifts toward the called direction once the score shows real conviction, and the shift is capped well inside the band, so a weak score gives a wide, roughly symmetric range rather than a false point estimate.</p>
       <p><b>How far back the methodology-basis range looks.</b> The gray (methodology) band isn't measured over a single fixed number of days for every asset — it's calibrated per asset. Several candidate lookback windows (10, 20, 30, 60, and 90 days) are backtested against that asset's own price history every hour: for each candidate, the tool checks whether the volatility estimate it would have produced at many past points actually matched what happened next, and keeps whichever window comes closest to correctly sized (hovering your cursor over a gray band shows which one won). A too-short lookback whipsaws on noise; a too-long one smooths over a real shift in how much an asset has started moving. This is a fast, within-run check using history already being fetched — distinct from, and much quicker to react than, the slower live-outcome learning loop described above — so it needs a real backtest sample to trust (an asset too young for that, common at crypto's 365-day history cap, just keeps the plain 30-day default).</p>
       <p><b>Which indicator this asset leans on.</b> "Leans on X (n%)" under an asset's name names whichever technique has, on its own, the strongest individually-proven track record for that specific asset — some assets really are better predicted by one kind of signal than another, and this surfaces that once a technique has enough of its own scored history to say so, using the same adaptive-weighting data above.</p>
-      <p><b>Prediction-score track record (95%+ list).</b> Below the boards, a running scorecard pools three kinds of matured, falsifiable calls per asset: whether its overall composite call (not any single technique) pointed the right direction by the horizon's end; whether the predicted price range actually contained the real price at maturity; and whether its pivot-style calls (the reversal and dwell techniques above) panned out. Every matured outcome across those three counts as one equally-weighted vote rather than a hand-picked blend — a made-up weighting scheme would just be a different kind of guess — so the score is simply correct-calls divided by total-calls, out of 100. An asset only appears once it has a reasonable number of matured predictions behind it (the same minimum-sample bar used everywhere else in this engine); below that, it's left off the list rather than shown with a noisy, overconfident number. This is a track record of this engine's own past calls, not a forecast that the streak continues.</p>
+      <p><b>Prediction-score track record (95%+ list).</b> Below the boards, a running scorecard pools three kinds of matured, falsifiable calls per asset: whether its overall composite call (not any single technique) pointed the right direction by the horizon's end; whether the predicted price range actually contained the real price at maturity; and whether its pivot-style calls (the reversal and dwell techniques above) panned out. Every matured outcome across those three counts as one equally-weighted vote rather than a hand-picked blend — a made-up weighting scheme would just be a different kind of guess — so the score is simply correct-calls divided by total-calls, out of 100. An asset only appears once it has a reasonable number of matured predictions behind it (the same minimum-sample bar used everywhere else in this engine); below that, it's left off the list rather than shown with a noisy, overconfident number. This is a track record of this engine's own past calls, not a forecast that the streak continues. Each listed asset also shows its current price and a predicted range for its own next call — the same horizon-and-range machinery every board row uses, so the period covered varies asset to asset (whatever that asset's own active techniques and history currently point to, typically on the order of a day to a few weeks) rather than one fixed window applied to everyone. All of this is still built from daily price bars, not intraday data, so the shortest period this engine can honestly speak to is about a day, not hours.</p>
       <p><b>Data.</b> CoinGecko free API for the top 100 coins by market cap with real daily price and volume history per coin, plus global stats and trending (stablecoins and wrappers excluded), alternative.me Fear &amp; Greed, Bybit linear perp funding rates, Yahoo Finance daily OHLCV with Stooq CSV fallback, and Yahoo analyst estimates. Free feeds can lag or drop symbols; the feeds counter in the status bar shows current coverage, and any technique without data simply abstains rather than guessing.</p>
       <p><b>Refresh mechanics.</b> A scheduled job rebuilds the full payload — scores, ranges, horizons, every technique call — hourly and writes it to this page's cache; every visit reads that cache, so the page itself never runs the engine. This page also re-checks every 10 minutes so a new hour's data appears without a reload. Price and 24-hour change are the one exception: this page separately polls a lightweight endpoint roughly every 20 seconds for a live tick, straight from CoinGecko and Yahoo, without touching the hourly analysis — so the number in the Price column can move between rebuilds, but the score, range, and every technique read next to it stay fixed until the next hourly rebuild.</p>
       <p><b>What the scores are not.</b> A score of 70 with 10/16 agreement is a strong mechanical setup, not a 70% probability; the timeframe next to it is an estimate of when the setup should resolve, not a guarantee it will; and the range is a plausible band from real volatility, not a target price. The model has no knowledge of token unlocks, earnings dates, lawsuits, or macro events.</p>
@@ -2113,7 +2140,22 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       return;
     }
     var rows = list.map(function(r){
-      return '<div class="tr-row"><span class="tr-sym">'+esc(r.symbol)+'</span><span class="tr-name">'+esc(r.name||'')+'</span><span class="tr-class">'+(r.asset_class==='crypto'?'CRYPTO':'EQUITY')+'</span><span class="tr-score">'+r.score+'%</span><span class="tr-samples">'+r.samples+' calls</span></div>';
+      var url = assetUrl(r.asset_class, r);
+      var symHtml = url
+        ? '<a class="sym-link" target="_blank" rel="noopener noreferrer" href="'+url+'"><span class="sym">'+esc(r.symbol)+'</span></a>'
+        : '<span class="sym">'+esc(r.symbol)+'</span>';
+      var rangeHtml = r.range
+        ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+(r.range.basis==='historical'?"Band from this asset's own historical move size at this horizon":"Band from recent realized volatility, scaled to the horizon")+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>'
+        : '<span class="dim">—</span>';
+      var horizonHtml = r.horizon ? '<span class="horizon '+(r.horizon.basis==='historical'?'hz-hist':'hz-meth')+'">'+esc(r.horizon.label)+'</span>' : '';
+      return '<div class="tr-row">'
+        +'<span class="tr-asset">'+symHtml+'<span class="tr-name">'+esc(r.name||'')+'</span></span>'
+        +'<span class="tr-class">'+(r.asset_class==='crypto'?'CRYPTO':'EQUITY')+'</span>'
+        +'<span class="tr-price">'+fmtPrice(r.price)+'</span>'
+        +'<span class="tr-range-wrap">'+rangeHtml+horizonHtml+'</span>'
+        +'<span class="tr-score">'+r.score+'%</span>'
+        +'<span class="tr-samples">'+r.samples+' calls</span>'
+        +'</div>';
     }).join('');
     el.innerHTML = head + '<div class="tr-list">'+rows+'</div>';
   }
