@@ -29,6 +29,19 @@
 
 const MOUNT = '/signals';
 export const CACHE_KEY = 'signals:latest';
+// Confirmed live: a single simple/price call for ~20 displayed crypto ids
+// got a 429 from CoinGecko with no unusual traffic at all — the same
+// shared-egress-IP rate-limiting GitHub Actions runners hit earlier on the
+// per-coin history endpoint (see getCryptoDailyHistory), just from
+// Workers' shared IP range instead of Actions'. Caching the whole
+// /api/prices result for LIVE_PRICE_CACHE_SECONDS caps upstream calls to
+// at most once per that window regardless of visitor count — the fix has
+// to live here, not in a retry, since the problem is request *volume*
+// against a rate limit, not a transient blip a retry would smooth over.
+// 60 is also KV's own minimum expirationTtl, so this is as tight as KV
+// allows anyway.
+export const LIVE_PRICE_CACHE_KEY = 'signals:live-prices';
+const LIVE_PRICE_CACHE_SECONDS = 60;
 
 // ----------------------------- CONFIG ---------------------------------------
 
@@ -522,6 +535,42 @@ export function topIndicator(reliability, symbol) {
   return best;
 }
 
+// A single track-record score out of 100 for this asset, pooling three
+// kinds of matured, falsifiable calls this engine actually makes:
+//  - "composite": did price move in the direction the overall confluence
+//    score called, by the horizon's end (technique_id 'composite', logged
+//    once per asset per run in rankBoards).
+//  - "reversal"/"dwell": did the two pivot-style techniques' calls pan
+//    out — reused directly from their existing per-technique reliability
+//    rows rather than logging a separate synthetic vote, since they
+//    already are exactly "this asset is at/near an extreme and about to
+//    turn" calls.
+//  - range containment: was the realized price actually inside the
+//    predicted [low, high] band at maturity (range_reliability, pooled
+//    across both horizons by loadRangeReliability).
+// Pooled by raw sample count rather than a hand-picked weighting across
+// the three (e.g. "40% direction, 30% range, 30% pivot") — an arbitrary
+// split would itself be a fabricated-precision choice; treating every
+// matured prediction as one equally-weighted vote is the plain, honest
+// default. Returns null below MIN_RELIABILITY_SAMPLES pooled outcomes —
+// "a reasonable number of predictions" before a score means anything,
+// the same bar every other reliability read in this engine uses.
+export function assetPredictionScore(symbol, reliability, rangeReliability) {
+  const pick = (techniqueId) => {
+    const rec = reliability && reliability[`${symbol}|${techniqueId}`];
+    return rec && rec.total ? { correct: rec.correct, total: rec.total } : { correct: 0, total: 0 };
+  };
+  const composite = pick('composite');
+  const reversal = pick('reversal');
+  const dwell = pick('dwell');
+  const range = (rangeReliability && rangeReliability[symbol]) || { hits: 0, total: 0 };
+
+  const totalCorrect = composite.correct + reversal.correct + dwell.correct + range.hits;
+  const totalCount = composite.total + reversal.total + dwell.total + range.total;
+  if (totalCount < MIN_RELIABILITY_SAMPLES) return null;
+  return { score: Math.round(100 * totalCorrect / totalCount), samples: totalCount };
+}
+
 // Expected price range for the horizon estimate above — a band, never a
 // point figure, and its width comes from real volatility (this asset's own
 // historical realized move size at this horizon once there's enough of
@@ -827,6 +876,20 @@ export function confluence(m, kind, reliability, marketContext, reliabilityByHor
   };
 }
 
+// One directional read per asset, distinct from the long/short pair above
+// (those are independent bullish-lean/bearish-lean scores, not a
+// complementary pair — an asset can score high on both at once). This is
+// "which way does this asset's confluence actually point, if either,"
+// used to log a single composite vote per asset per run and to size its
+// logged range prediction (see rankBoards) — the basis for the per-asset
+// track record surfaced once enough of these have matured. Null when
+// neither side leads: an exact tie carries no falsifiable direction to
+// log, same abstain logic as any per-technique vote.
+export function compositeCall(c) {
+  if (!c || c.long === c.short) return null;
+  return c.long > c.short ? { dir: 1, score: c.long } : { dir: -1, score: c.short };
+}
+
 // ----------------------------- FETCH HELPERS --------------------------------
 
 async function fetchWithTimeout(url, opts = {}) {
@@ -929,6 +992,24 @@ export async function getCryptoDailyHistory(id, days = CRYPTO_HISTORY_DAYS) {
   throw lastErr;
 }
 
+// Live spot price + 24h change for a batch of CoinGecko ids in one call —
+// used by the /api/prices route for between-build price ticks, distinct
+// from getCryptoMarkets (which the hourly build uses for the full metrics
+// set). Never throws on a bad/missing id: just omits it from the result,
+// since one delisted or renamed id shouldn't take down every other price.
+async function coingeckoSimplePrice(ids) {
+  if (!ids.length) return {};
+  const url = 'https://api.coingecko.com/api/v3/simple/price'
+    + `?ids=${ids.map(encodeURIComponent).join(',')}&vs_currencies=usd&include_24hr_change=true`;
+  const j = await fetchJson(url);
+  const out = {};
+  for (const id of ids) {
+    const v = j && j[id];
+    if (v && v.usd != null) out[id] = { price: v.usd, chg24h: v.usd_24h_change != null ? v.usd_24h_change : null };
+  }
+  return out;
+}
+
 async function getGlobal() {
   const j = await fetchJson('https://api.coingecko.com/api/v3/global');
   const d = j && j.data;
@@ -988,6 +1069,22 @@ async function yahooDaily(symbol, range = '1y') {
   }
   const price = (r.meta && r.meta.regularMarketPrice) || closes[closes.length - 1];
   return { symbol, price, closes, volumes, highs, lows, source: 'yahoo' };
+}
+
+// Live spot price + 24h change for one equity symbol — the same chart
+// endpoint yahooDaily uses, but the smallest request that still returns a
+// fresh meta.regularMarketPrice (no need for a year of daily bars just to
+// read today's tick). Used by /api/prices, called once per displayed
+// symbol in parallel (see pool() at the call site), not per build.
+async function yahooQuote(symbol) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d`;
+  const j = await fetchJson(url);
+  const r = j && j.chart && j.chart.result && j.chart.result[0];
+  const meta = r && r.meta;
+  if (!meta || meta.regularMarketPrice == null) throw new Error(`no live quote for ${symbol}`);
+  const prevClose = meta.previousClose != null ? meta.previousClose : meta.chartPreviousClose;
+  const price = meta.regularMarketPrice;
+  return { symbol, price, chg24h: prevClose ? ((price / prevClose) - 1) * 100 : null };
 }
 
 async function stooqDaily(symbol) {
@@ -1235,15 +1332,40 @@ export function buildStockMetrics(row, valuation, override, benchCloses) {
   };
 }
 
+// Matches HORIZONS_HOURS = [24, 168] in scripts/reliability.mjs (1 day, 7
+// days) so every logged range prediction matures on exactly the same
+// schedule as technique_votes — an apples-to-apples "was the 1-day band
+// right 1 day later" and "was the 7-day band right 7 days later," never a
+// mismatched horizon between what's logged and what's checked.
+const RANGE_LOG_HORIZONS_DAYS = [1, 7];
+
 function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHorizon, moveStats) {
   const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, marketContext, reliabilityByHorizon) }));
   // Full-universe vote log (not just the top-10 shown on each board) so the
   // reliability learning loop sees every asset, not only that hour's winners.
   const votesLog = [];
+  // Full-universe range-prediction log, same reasoning: a boring, rarely-
+  // ranked asset can still build a real track record.
+  const rangeLog = [];
   for (const { m, c } of scored) {
     for (const v of c.votes) votesLog.push({ asset_class: kind, symbol: m.symbol, technique_id: v.id, dir: v.dir });
+    // One composite directional vote per asset per run — reuses the exact
+    // same technique_votes/technique_reliability machinery as every other
+    // technique (see compositeCall's docs), just keyed 'composite'.
+    const cc = compositeCall(c);
+    if (cc) {
+      votesLog.push({ asset_class: kind, symbol: m.symbol, technique_id: 'composite', dir: cc.dir });
+      for (const horizonDays of RANGE_LOG_HORIZONS_DAYS) {
+        const r = predictedRange(m.price, horizonDays, cc.score, cc.dir, moveStats, m.symbol, m.volPct);
+        if (r) rangeLog.push({ asset_class: kind, symbol: m.symbol, horizon_hours: horizonDays * 24, low: r.low, high: r.high });
+      }
+    }
   }
   const priceLog = scored.map(({ m }) => ({ asset_class: kind, symbol: m.symbol, price: m.price }));
+  // Full universe with names, for the track-record leaderboard — deliberately
+  // not limited to the top 10 per side like breakout/breakdown are, since an
+  // asset can build a strong record without ever topping either board.
+  const allSymbols = scored.map(({ m }) => ({ symbol: m.symbol, name: m.name }));
   const entry = (x, side) => {
     const dir = side === 'long' ? 1 : -1;
     const score = side === 'long' ? x.c.long : x.c.short;
@@ -1276,7 +1398,7 @@ function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHori
       || (side === 'long' ? b.c.bull - a.c.bull : b.c.bear - a.c.bear))
     .slice(0, 10)
     .map(x => entry(x, side));
-  return { breakout: sortSide('long'), breakdown: sortSide('short'), universe: metrics.length, votesLog, priceLog };
+  return { breakout: sortSide('long'), breakdown: sortSide('short'), universe: metrics.length, votesLog, priceLog, rangeLog, allSymbols };
 }
 
 // ----------------------------- HANDLER --------------------------------------
@@ -1290,7 +1412,7 @@ function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHori
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability) {
   const started = Date.now();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
 
@@ -1395,15 +1517,31 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   }
 
   // Pull the reliability-learning log out before the boards go into the
-  // public payload — votesLog/priceLog are internal bookkeeping, not
-  // something the dashboard or API consumer needs to see.
-  const { votesLog: cryptoVotes, priceLog: cryptoPrices, ...cryptoPublic } = cryptoBoards;
-  const { votesLog: stockVotes, priceLog: stockPrices, ...stockPublic } = stockBoards;
+  // public payload — votesLog/priceLog/rangeLog/allSymbols are internal
+  // bookkeeping, not something the dashboard or API consumer needs to see.
+  const { votesLog: cryptoVotes, priceLog: cryptoPrices, rangeLog: cryptoRanges, allSymbols: cryptoAll, ...cryptoPublic } = cryptoBoards;
+  const { votesLog: stockVotes, priceLog: stockPrices, rangeLog: stockRanges, allSymbols: stockAll, ...stockPublic } = stockBoards;
   const log = {
     generated_at: new Date().toISOString(),
     votes: [...(cryptoVotes || []), ...(stockVotes || [])],
-    prices: [...(cryptoPrices || []), ...(stockPrices || [])]
+    prices: [...(cryptoPrices || []), ...(stockPrices || [])],
+    ranges: [...(cryptoRanges || []), ...(stockRanges || [])]
   };
+
+  // Track record: which assets (either class) have a pooled, matured
+  // prediction score above 95/100 — see assetPredictionScore's docs for
+  // exactly what's pooled. Full universe, not just this hour's top 10 per
+  // side, since a strong record doesn't require currently ranking.
+  const highAccuracyFor = (list, assetClass) => list
+    .map(({ symbol, name }) => {
+      const s = assetPredictionScore(symbol, reliability, rangeReliability);
+      return s ? { symbol, name, asset_class: assetClass, score: s.score, samples: s.samples } : null;
+    })
+    .filter((r) => r && r.score > 95);
+  const highAccuracy = [
+    ...highAccuracyFor(cryptoAll || [], 'crypto'),
+    ...highAccuracyFor(stockAll || [], 'stock')
+  ].sort((a, b) => b.score - a.score);
 
   const payload = {
     generated_at: log.generated_at,
@@ -1433,6 +1571,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     },
     crypto: cryptoPublic,
     stocks: stockPublic,
+    highAccuracy,
     sources: {
       crypto: 'CoinGecko (top 100 by market cap, daily history per coin) + trending list',
       derivatives: 'Bybit linear perp funding rates',
@@ -1459,6 +1598,21 @@ async function getCached(env) {
 function isFresh(payload) {
   if (!payload || !payload.generated_at) return false;
   return (Date.now() - new Date(payload.generated_at).getTime()) < CACHE_SECONDS * 1000;
+}
+
+async function getCachedLivePrices(env) {
+  if (!env || !env.FCS_CACHE) return null;
+  try {
+    const raw = await env.FCS_CACHE.get(LIVE_PRICE_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+async function putCachedLivePrices(env, body) {
+  if (!env || !env.FCS_CACHE) return;
+  try {
+    await env.FCS_CACHE.put(LIVE_PRICE_CACHE_KEY, JSON.stringify(body), { expirationTtl: LIVE_PRICE_CACHE_SECONDS });
+  } catch { /* best-effort — a failed cache write just means the next request fetches fresh again */ }
 }
 
 const PAGE_HTML = `<!DOCTYPE html>
@@ -1589,9 +1743,22 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .range.hz-meth{color:var(--muted)}
   .topind{display:block;color:var(--dim);font-size:10px;margin-top:3px;font-family:var(--disp);white-space:normal}
 
+  .track-record{background:var(--ink-1);border:1px solid var(--line);border-top:2px solid var(--amber);margin-bottom:44px;padding:18px 18px 6px}
+  .tr-title{font-weight:800;font-size:17px;letter-spacing:-.01em;margin-top:3px}
+  .tr-empty{color:var(--muted);font-size:12.5px;line-height:1.75;max-width:760px;font-family:var(--mono);padding:2px 0 16px}
+  .tr-list{display:flex;flex-direction:column;gap:1px;background:var(--line);margin-top:14px}
+  .tr-row{display:flex;align-items:center;gap:14px;background:var(--ink-1);padding:10px 12px;font-family:var(--mono);font-size:12.5px}
+  .tr-sym{font-weight:600;color:var(--paper);min-width:64px}
+  .tr-name{color:var(--muted);flex:1;font-family:var(--disp);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tr-class{color:var(--dim);font-size:9.5px;letter-spacing:.1em;min-width:56px}
+  .tr-score{color:var(--up);font-weight:700;min-width:48px;text-align:right}
+  .tr-samples{color:var(--dim);font-size:10.5px;min-width:76px;text-align:right;white-space:nowrap}
+
   @keyframes rise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
   tbody tr.in{animation:rise .35s ease both}
-  @media (prefers-reduced-motion:reduce){tbody tr.in{animation:none}.dot.live{animation:none}}
+  @keyframes flashtick{0%{background:rgba(255,178,36,.4)}100%{background:transparent}}
+  .live-price-cell.flash, .live-chg-cell.flash{animation:flashtick 1s ease}
+  @media (prefers-reduced-motion:reduce){tbody tr.in{animation:none}.dot.live{animation:none}.live-price-cell.flash,.live-chg-cell.flash{animation:none}}
 
   .notice{background:var(--ink-1);border:1px solid var(--line);padding:26px;font-family:var(--mono);font-size:12.5px;color:var(--muted);line-height:1.8;margin-bottom:40px}
   .notice b{color:var(--paper)}
@@ -1629,6 +1796,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     <span class="stat" id="healthStat">FEEDS <b>—</b></span>
     <span class="stat">LAST SYNC <b id="lastSync">—</b></span>
     <span class="stat">NEXT CHECK <b id="countdown">—</b></span>
+    <span class="stat" title="Price and 24h change tick independently of the hourly analysis rebuild">PRICES <b id="liveStamp">—</b></span>
   </div>
 </div>
 
@@ -1638,10 +1806,11 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     <div class="mast-grid">
       <div>
         <h1>Frontier Capital<br><span class="amber">Signals</span></h1>
-        <p class="dek">Confluence screens across the <b>top 100 cryptos</b> and <b>60 US equities</b>. Up to <b>16 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to volume, funding rates, Wall Street price targets, reversal-pattern detection and multi-year seasonal analogs, must point the <b>same direction</b> before a signal ranks — each with an <b>expected timeframe</b> learned from its own track record. <b>Synced hourly.</b></p>
+        <p class="dek">Confluence screens across the <b>top 100 cryptos</b> and <b>60 US equities</b>. Up to <b>16 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to volume, funding rates, Wall Street price targets, reversal-pattern detection and multi-year seasonal analogs, must point the <b>same direction</b> before a signal ranks — each with an <b>expected timeframe</b> learned from its own track record. <b>Analysis syncs hourly; price and 24h change tick live</b> in between.</p>
       </div>
       <div class="mast-meta">
-        DATA REFRESH <b>HOURLY</b><br>
+        ANALYSIS REFRESH <b>HOURLY</b><br>
+        PRICE TICKS <b>LIVE</b><br>
         UNIVERSE <b id="metaUniverse">—</b><br>
         TECHNIQUES PER ASSET <b>UP TO 16</b>
       </div>
@@ -1657,6 +1826,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   <main class="boards" id="boards">
   </main>
 
+  <section class="track-record" id="trackRecord" aria-label="Prediction track record"></section>
+
   <details>
     <summary>Methodology and data</summary>
     <div class="method">
@@ -1670,8 +1841,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       <p><b>Leading vs. lagging, and the expected timeframe.</b> Techniques are split into two kinds. Leading techniques try to anticipate a move before it's confirmed: RSI, Bollinger squeeze, stochastic crosses, OBV, the divergence proxy, the volatility regime read, reversal-pattern detection, and the valuation/positioning layer. Lagging techniques describe a move already underway: momentum alignment, MACD, the moving-average stack, Donchian breakout proximity, volume confirmation, and swing structure. The small window shown next to each score (for example <b>1-3 days</b>) is this engine's estimate of when that specific call is expected to resolve, built from whichever techniques are actually voting on that asset right now. Where an asset has enough of its own scored history, the window uses that asset's real measured accuracy at the 24-hour versus 7-day mark (marked with a check and shown in amber) instead of a generic estimate — the same historical record the adaptive weighting above draws on, just answering "how soon" instead of "how much weight." Without enough history yet, it falls back to a weighted average of the active techniques' typical horizons (shown in gray) — an informed estimate, not a measurement.</p>
       <p><b>Expected range.</b> The Range column is a band around the current price, not a point prediction, for the same timeframe as the horizon chip next to it. Its width comes from real volatility: this asset's own historical realized move size at that horizon once evaluateMatured has scored enough of its own outcomes (amber, marked historical), or its recent realized daily volatility scaled by the square root of time otherwise (gray, marked methodology) — the standard random-walk approximation for "how far a price plausibly wanders in N days." The band's center only shifts toward the called direction once the score shows real conviction, and the shift is capped well inside the band, so a weak score gives a wide, roughly symmetric range rather than a false point estimate.</p>
       <p><b>Which indicator this asset leans on.</b> "Leans on X (n%)" under an asset's name names whichever technique has, on its own, the strongest individually-proven track record for that specific asset — some assets really are better predicted by one kind of signal than another, and this surfaces that once a technique has enough of its own scored history to say so, using the same adaptive-weighting data above.</p>
+      <p><b>Prediction-score track record (95%+ list).</b> Below the boards, a running scorecard pools three kinds of matured, falsifiable calls per asset: whether its overall composite call (not any single technique) pointed the right direction by the horizon's end; whether the predicted price range actually contained the real price at maturity; and whether its pivot-style calls (the reversal and dwell techniques above) panned out. Every matured outcome across those three counts as one equally-weighted vote rather than a hand-picked blend — a made-up weighting scheme would just be a different kind of guess — so the score is simply correct-calls divided by total-calls, out of 100. An asset only appears once it has a reasonable number of matured predictions behind it (the same minimum-sample bar used everywhere else in this engine); below that, it's left off the list rather than shown with a noisy, overconfident number. This is a track record of this engine's own past calls, not a forecast that the streak continues.</p>
       <p><b>Data.</b> CoinGecko free API for the top 100 coins by market cap with real daily price and volume history per coin, plus global stats and trending (stablecoins and wrappers excluded), alternative.me Fear &amp; Greed, Bybit linear perp funding rates, Yahoo Finance daily OHLCV with Stooq CSV fallback, and Yahoo analyst estimates. Free feeds can lag or drop symbols; the feeds counter in the status bar shows current coverage, and any technique without data simply abstains rather than guessing.</p>
-      <p><b>Refresh mechanics.</b> A scheduled job rebuilds the full payload hourly and writes it to this page's cache; every visit reads that cache, so the page itself never runs the engine. This page also re-checks every 10 minutes so a new hour's data appears without a reload.</p>
+      <p><b>Refresh mechanics.</b> A scheduled job rebuilds the full payload — scores, ranges, horizons, every technique call — hourly and writes it to this page's cache; every visit reads that cache, so the page itself never runs the engine. This page also re-checks every 10 minutes so a new hour's data appears without a reload. Price and 24-hour change are the one exception: this page separately polls a lightweight endpoint roughly every 20 seconds for a live tick, straight from CoinGecko and Yahoo, without touching the hourly analysis — so the number in the Price column can move between rebuilds, but the score, range, and every technique read next to it stay fixed until the next hourly rebuild.</p>
       <p><b>What the scores are not.</b> A score of 70 with 10/16 agreement is a strong mechanical setup, not a 70% probability; the timeframe next to it is an estimate of when the setup should resolve, not a guarantee it will; and the range is a plausible band from real volatility, not a target price. The model has no knowledge of token unlocks, earnings dates, lawsuits, or macro events.</p>
     </div>
   </details>
@@ -1698,6 +1870,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   // when mounted behind the Cloudflare proxy worker.
   var BASE = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/';
   var DATA_URL = BASE + 'api/signals';
+  var PRICES_URL = BASE + 'api/prices';
 
   var $ = function(id){ return document.getElementById(id); };
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -1817,11 +1990,11 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var conf = r.conf ? '<span class="conf">'+r.conf.agree+'/'+r.conf.total+' aligned</span>' : '';
         var horizon = r.horizon ? '<span class="horizon '+(r.horizon.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+(r.horizon.basis==='historical'?"Based on this asset's own historical accuracy by horizon":"Methodology estimate, not yet enough of this asset's own history to say")+'">'+esc(r.horizon.label)+(r.horizon.basis==='historical'?' ✓':'')+'</span>' : '';
         var range = r.range ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+(r.range.basis==='historical'?"Band width from this asset's own historical move size at this horizon":"Band width estimated from this asset's recent realized volatility, scaled to the horizon")+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>' : '<span class="dim">—</span>';
-        h+='<tr class="in" style="animation-delay:'+(i*30)+'ms">'
+        h+='<tr class="in" style="animation-delay:'+(i*30)+'ms" data-symbol="'+esc(r.symbol)+'" data-class="'+cfg.assetClass+'">'
           +'<td class="rk">'+(i+1)+'</td>'
           +'<td class="asset">'+symHtml+name+why+topInd+'</td>'
-          +'<td>'+fmtPrice(r.price)+'</td>'
-          +'<td class="'+pctCls(r.chg24h)+'">'+fmtPct(r.chg24h)+'</td>'
+          +'<td class="live-price-cell"><span class="live-price">'+fmtPrice(r.price)+'</span></td>'
+          +'<td class="live-chg-cell '+pctCls(r.chg24h)+'"><span class="live-chg">'+fmtPct(r.chg24h)+'</span></td>'
           +'<td class="'+pctCls(r.chg7d)+'">'+fmtPct(r.chg7d)+'</td>'
           +'<td class="'+rsiCls(r.rsi)+'">'+(r.rsi!=null?r.rsi.toFixed(0):'—')+'</td>'
           +'<td>'+range+'</td>'
@@ -1842,6 +2015,20 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     b+=boardHtml({side:'long', assetClass:'stock', boardId:'stock-long', eyebrow:'US EQUITIES · <b>LONG SIDE</b>', title:'Breakout watch'}, d.stocks.breakout, d.stocks.universe);
     b+=boardHtml({side:'short', assetClass:'stock', boardId:'stock-short', eyebrow:'US EQUITIES · <b>RISK SIDE</b>', title:'Breakdown risk'}, d.stocks.breakdown, d.stocks.universe);
     $('boards').innerHTML=b;
+  }
+
+  function renderTrackRecord(d){
+    var list = d.highAccuracy||[];
+    var head = '<div><div class="eyebrow">TRACK RECORD</div><div class="tr-title">95%+ prediction accuracy so far</div></div>';
+    var el = $('trackRecord');
+    if(!list.length){
+      el.innerHTML = head + '<div class="tr-empty">No asset has crossed the 95% mark yet. Each asset needs a meaningful number of matured, scored predictions first — pooling its composite directional calls, its price-range accuracy, and its pivot-style (reversal/dwell) calls — before a score shows at all, so this fills in gradually as the hourly track record accumulates. Not empty because nothing works; empty because not enough has matured to say yet.</div>';
+      return;
+    }
+    var rows = list.map(function(r){
+      return '<div class="tr-row"><span class="tr-sym">'+esc(r.symbol)+'</span><span class="tr-name">'+esc(r.name||'')+'</span><span class="tr-class">'+(r.asset_class==='crypto'?'CRYPTO':'EQUITY')+'</span><span class="tr-score">'+r.score+'%</span><span class="tr-samples">'+r.samples+' calls</span></div>';
+    }).join('');
+    el.innerHTML = head + '<div class="tr-list">'+rows+'</div>';
   }
 
   // Delegated so re-renders (refresh, sort change) never need re-binding.
@@ -1904,13 +2091,58 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     window.dataLayer.push(Object.assign({event:name},params||{}));
   }
 
+  var LIVE_MS = 20*1000;
+  function flashCell(el){
+    if(!el) return;
+    el.classList.remove('flash');
+    void el.offsetWidth; // restart the CSS animation on repeated ticks
+    el.classList.add('flash');
+  }
+
+  // Between-build price ticks. Independent of load()/REFETCH_MS on purpose:
+  // this only ever touches price and 24h change text already in the DOM,
+  // never re-renders or re-sorts a board, so it can't disturb someone
+  // mid-sort or mid-scroll the way a full renderBoards() would.
+  function updateLivePrices(){
+    fetch(PRICES_URL,{cache:'no-store'})
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(d){
+        if(!d || (!d.crypto && !d.stocks)) return;
+        var rows = document.querySelectorAll('#boards tr[data-symbol]');
+        rows.forEach(function(row){
+          var sym = row.getAttribute('data-symbol'), cls = row.getAttribute('data-class');
+          var map = cls==='crypto' ? d.crypto : cls==='stock' ? d.stocks : null;
+          var v = map && map[sym];
+          if(!v) return;
+          var priceEl = row.querySelector('.live-price');
+          if(priceEl && v.price!=null){
+            var newPrice = fmtPrice(v.price);
+            if(priceEl.textContent!==newPrice){ priceEl.textContent=newPrice; flashCell(row.querySelector('.live-price-cell')); }
+          }
+          var chgEl = row.querySelector('.live-chg');
+          if(chgEl && v.chg24h!=null){
+            var newChg = fmtPct(v.chg24h);
+            if(chgEl.textContent!==newChg){
+              chgEl.textContent=newChg;
+              var chgCell = row.querySelector('.live-chg-cell');
+              chgCell.className='live-chg-cell '+pctCls(v.chg24h);
+              flashCell(chgCell);
+            }
+          }
+        });
+        var t=new Date();
+        $('liveStamp').textContent = pad(t.getUTCHours())+':'+pad(t.getUTCMinutes())+':'+pad(t.getUTCSeconds())+' UTC';
+      })
+      .catch(function(){ /* silent: a missed live tick isn't a feed error, load() already surfaces those */ });
+  }
+
   function load(){
     var cacheState=null;
     fetch(DATA_URL,{cache:'no-store'})
       .then(function(r){ cacheState=r.headers.get('x-fcs-cache'); if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(d){
         state.data=d; state.error=null;
-        renderStatus(d); renderOverview(d.overview); renderBoards(d);
+        renderStatus(d); renderOverview(d.overview); renderBoards(d); renderTrackRecord(d);
         if(!firstLoadTracked){
           firstLoadTracked=true;
           pushEvent('signals_data_loaded',{
@@ -1931,11 +2163,13 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       .finally(function(){ nextCheckAt = Date.now()+REFETCH_MS; });
   }
   load();
+  setTimeout(updateLivePrices, 2000); // small delay so the boards exist to patch into
   var methodologyEl=document.querySelector('details');
   if(methodologyEl) methodologyEl.addEventListener('toggle',function(){
     if(methodologyEl.open) pushEvent('signals_methodology_open',{});
   });
   setInterval(load, REFETCH_MS);
+  setInterval(updateLivePrices, LIVE_MS);
 })();
 </script>
 </body>
@@ -1996,6 +2230,57 @@ export default {
         return json(cached, { 'X-FCS-Cache': isFresh(cached) ? 'hit' : 'stale' });
       }
       return json({ error: 'signals not yet built — waiting on the first scheduled build to populate the cache' }, { 'X-FCS-Cache': 'empty' });
+    }
+
+    // Live price ticks between hourly rebuilds — deliberately the one
+    // exception to the "single KV read" rule above. Symbols come from the
+    // cached payload itself (whatever's currently displayed), never from
+    // the request, so a caller can't make this fan out to an arbitrary
+    // number of upstream calls. Worst case is one CoinGecko call plus one
+    // Yahoo call per displayed equity (at most 20, deduped) — comfortably
+    // inside the 50-subrequest cap, and cheap on CPU since there's no
+    // indicator math here, just passthrough JSON. Scores, ranges, and
+    // every technique call still only change on the hourly rebuild — this
+    // route only ever touches price and 24h change.
+    if (path === '/api/prices' || path === 'api/prices') {
+      const cached = await getCached(env);
+      if (!cached) return json({ error: 'signals not yet built' }, { 'Cache-Control': 'no-store' });
+
+      // See LIVE_PRICE_CACHE_KEY's docs: this is what actually keeps
+      // CoinGecko's free-tier rate limit from biting under real traffic,
+      // not a retry. Response is identical to a fresh fetch either way —
+      // X-FCS-Live-Cache just says which path served it.
+      const cachedLive = await getCachedLivePrices(env);
+      if (cachedLive) return json(cachedLive, { 'Cache-Control': 'no-store', 'X-FCS-Live-Cache': 'hit' });
+
+      const cryptoRows = [...((cached.crypto && cached.crypto.breakout) || []), ...((cached.crypto && cached.crypto.breakdown) || [])];
+      const stockRows = [...((cached.stocks && cached.stocks.breakout) || []), ...((cached.stocks && cached.stocks.breakdown) || [])];
+      const cryptoIdToSymbol = new Map(cryptoRows.filter(r => r.id).map(r => [r.id, r.symbol]));
+      const stockSymbols = [...new Set(stockRows.map(r => r.symbol))];
+
+      const [cryptoPricesById, stockResults] = await Promise.all([
+        coingeckoSimplePrice([...cryptoIdToSymbol.keys()]).catch(() => ({})),
+        pool(stockSymbols, 10, (s) => yahooQuote(s))
+      ]);
+
+      const crypto = {};
+      for (const [id, symbol] of cryptoIdToSymbol) {
+        if (cryptoPricesById[id]) crypto[symbol] = cryptoPricesById[id];
+      }
+      const stocks = {};
+      for (const r of stockResults) {
+        if (r && !r._error) stocks[r.symbol] = { price: r.price, chg24h: r.chg24h };
+      }
+      // Fall back to the hourly build's own price/chg24h for anything the
+      // live fetch missed (rate-limited, thin/renamed id, Yahoo hiccup) —
+      // still real data, just not freshly ticked, rather than a gap the
+      // dashboard has to guess how to render.
+      for (const r of cryptoRows) if (!crypto[r.symbol] && r.price != null) crypto[r.symbol] = { price: r.price, chg24h: r.chg24h };
+      for (const r of stockRows) if (!stocks[r.symbol] && r.price != null) stocks[r.symbol] = { price: r.price, chg24h: r.chg24h };
+
+      const body = { crypto, stocks, generated_at: new Date().toISOString() };
+      ctx.waitUntil(putCachedLivePrices(env, body));
+      return json(body, { 'Cache-Control': 'no-store', 'X-FCS-Live-Cache': 'miss' });
     }
 
     // Dashboard (any other path under the mount)

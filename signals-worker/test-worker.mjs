@@ -62,6 +62,16 @@ function stubbedFetch(url) {
     headers: { get: () => null, getSetCookie: () => ['A=1; Path=/'] }
   });
   if (u.includes('/coins/markets')) return ok(coins);
+  // /api/prices live-tick fixture. 'solana' deliberately omitted, mirroring
+  // the daily-history fixture above, to exercise "id has no live quote ->
+  // silently omitted, not an error" the same way a thin/renamed coin would.
+  if (u.includes('/simple/price')) {
+    return ok({
+      bitcoin: { usd: 63500.5, usd_24h_change: 1.25 },
+      ethereum: { usd: 1850.2, usd_24h_change: -0.6 },
+      chainlink: { usd: 14.35, usd_24h_change: 2.4 }
+    });
+  }
   if (u.includes('/market_chart')) {
     const id = u.split('/coins/')[1].split('/market_chart')[0];
     if (!CRYPTO_DAILY_HISTORY_COINS.has(decodeURIComponent(id))) {
@@ -87,7 +97,7 @@ function stubbedFetch(url) {
   if (u.includes('finance/chart/')) {
     return ok({ chart: { result: [{
       timestamp: dailyTs,
-      meta: { regularMarketPrice: dailyClose[dailyClose.length - 1] },
+      meta: { regularMarketPrice: dailyClose[dailyClose.length - 1], previousClose: dailyClose[dailyClose.length - 2] },
       indicators: { quote: [{ close: dailyClose, volume: dailyClose.map(() => 1e6), high: dailyClose.map(c => c + 1), low: dailyClose.map(c => c - 1) }] } }] } });
   }
   return Promise.resolve({ ok: false, status: 404, json: async () => ({}), text: async () => '' });
@@ -125,6 +135,8 @@ check('GTM container + consent-mode snippet present in the page', pageText.inclu
 check('custom event pushes present (data-loaded, error, methodology-open)', pageText.includes('signals_data_loaded') && pageText.includes('signals_feed_error') && pageText.includes('signals_methodology_open'));
 check('clickable-row + sortable-header tracking present', pageText.includes('signals_asset_click') && pageText.includes('signals_sort_change') && pageText.includes('sym-link') && pageText.includes('sortable'));
 check('horizon chip markup + methodology copy present', pageText.includes('class="horizon') && pageText.includes('hz-hist') && pageText.includes('hz-meth') && pageText.includes('Leading vs. lagging'));
+check('track-record section + methodology copy present', pageText.includes('id="trackRecord"') && pageText.includes('95%+') && pageText.includes('Prediction-score track record'));
+check('live-price markup + polling code present', pageText.includes('live-price-cell') && pageText.includes('live-chg-cell') && pageText.includes("api/prices") && pageText.includes('updateLivePrices'));
 
 console.log('\n== api: empty KV (before first Action run) ==');
 const empty = await worker.fetch(new Request('https://x.com/signals/api/signals'), emptyEnv, ctx);
@@ -188,10 +200,14 @@ check('trefis override applied', built.health.trefis_overrides === 1);
 check('funding fed to crypto', built.crypto.breakout.concat(built.crypto.breakdown).some(r => r.funding != null));
 check('health counts sane', built.health.stocks_ok === built.health.stocks_total && built.health.valuation_ok > 0);
 check('crypto_daily health reflects the daily-history fetch (3 of 4 succeed, solana has none stubbed)', built.health.crypto_daily_total === 4 && built.health.crypto_daily_ok === 3, `ok=${built.health.crypto_daily_ok} total=${built.health.crypto_daily_total}`);
-check('votesLog/priceLog not leaked into the public payload', built.crypto.votesLog === undefined && built.crypto.priceLog === undefined && built.stocks.votesLog === undefined);
+check('votesLog/priceLog/rangeLog/allSymbols not leaked into the public payload', built.crypto.votesLog === undefined && built.crypto.priceLog === undefined && built.crypto.rangeLog === undefined && built.crypto.allSymbols === undefined && built.stocks.votesLog === undefined && built.stocks.rangeLog === undefined && built.stocks.allSymbols === undefined);
 check('log has directional votes for both asset classes', log.votes.some(v => v.asset_class === 'crypto') && log.votes.some(v => v.asset_class === 'stock'));
 check('log votes are directional only (no 0/null dir)', log.votes.every(v => v.dir === 1 || v.dir === -1));
 check('log has a price row per universe asset, both classes', log.prices.length === built.crypto.universe + built.stocks.universe);
+check('log has one composite vote per directionally-called asset, both classes', log.votes.some(v => v.technique_id === 'composite' && v.asset_class === 'crypto') && log.votes.some(v => v.technique_id === 'composite' && v.asset_class === 'stock'));
+check('log has range predictions at both the 1d (24h) and 7d (168h) horizons', log.ranges.some(r => r.horizon_hours === 24) && log.ranges.some(r => r.horizon_hours === 168));
+check('every logged range prediction is a real band (low < high)', log.ranges.length > 0 && log.ranges.every(r => r.low < r.high));
+check('highAccuracy present as an array even with no reliability data fed in (none qualify yet)', Array.isArray(built.highAccuracy) && built.highAccuracy.length === 0);
 check('crypto entries carry a CoinGecko id (for the dashboard\'s outbound link)', built.crypto.breakout.concat(built.crypto.breakdown).every(r => typeof r.id === 'string' && r.id.length > 0));
 check('stock entries have no id field (not applicable, uses symbol for the Yahoo link instead)', built.stocks.breakout.every(r => r.id === undefined));
 check('every ranked row carries a horizon estimate end-to-end through buildPayload', built.crypto.breakout.concat(built.crypto.breakdown, built.stocks.breakout, built.stocks.breakdown).every(r => r.horizon && typeof r.horizon.label === 'string' && (r.horizon.basis === 'methodology' || r.horizon.basis === 'historical')));
@@ -399,6 +415,27 @@ check('a bullish seasonal analog votes bullish', findTech(mod.evaluateTechniques
 check('a bearish seasonal analog votes bearish', findTech(mod.evaluateTechniques(seasonalBearMetric, 'crypto'), 'seasonal').dir === -1);
 check('no seasonal analog found: abstains (null), the common case for younger assets', findTech(mod.evaluateTechniques(baseMetric({}), 'crypto'), 'seasonal').dir === null);
 
+console.log('\n== compositeCall: one directional read per asset from the long/short pair ==');
+check('a tie (long === short) has no falsifiable direction: null', mod.compositeCall({ long: 60, short: 60 }) === null);
+check('long leading: dir 1, score is the long side', JSON.stringify(mod.compositeCall({ long: 70, short: 30 })) === JSON.stringify({ dir: 1, score: 70 }));
+check('short leading: dir -1, score is the short side', JSON.stringify(mod.compositeCall({ long: 20, short: 55 })) === JSON.stringify({ dir: -1, score: 55 }));
+check('no confluence result at all: null, not a crash', mod.compositeCall(null) === null);
+
+console.log('\n== assetPredictionScore: pooled track record across composite/pivot/range, out of 100 ==');
+check('below MIN_RELIABILITY_SAMPLES pooled outcomes: null, not a noisy guess', mod.assetPredictionScore('THIN', { 'THIN|composite': { correct: 5, total: 10 } }, {}) === null);
+check('exactly one under the threshold (19 total): still null', mod.assetPredictionScore('W', { 'W|composite': { correct: 10, total: 19 } }, {}) === null);
+const pooled = mod.assetPredictionScore('X', {
+  'X|composite': { correct: 9, total: 10 },
+  'X|reversal': { correct: 4, total: 5 },
+  'X|dwell': { correct: 3, total: 5 }
+}, { X: { hits: 8, total: 10 } });
+check('pools composite + reversal + dwell + range hits/totals correctly (24/30 = 80)', pooled && pooled.score === 80 && pooled.samples === 30, JSON.stringify(pooled));
+const rangeOnly = mod.assetPredictionScore('Y', {}, { Y: { hits: 19, total: 20 } });
+check('a symbol with only range data (no matured composite/reversal/dwell yet) still scores off what exists (19/20 = 95, right at the threshold, not yet "above 95")', rangeOnly && rangeOnly.score === 95 && rangeOnly.samples === 20, JSON.stringify(rangeOnly));
+const perfect = mod.assetPredictionScore('Z', { 'Z|composite': { correct: 25, total: 25 } }, {});
+check('a perfect matured record scores 100, not a lower "cautious" number', perfect && perfect.score === 100 && perfect.samples === 25, JSON.stringify(perfect));
+check('assetPredictionScore itself does not apply the >95 leaderboard cutoff (that is buildPayload\'s job) — 95 is a valid returned score', rangeOnly.score === 95);
+
 console.log('\n== api: KV populated by the "Action" (mirrors what build-signals.mjs writes) ==');
 const warmEnv = { FCS_CACHE: new MockKV() };
 await warmEnv.FCS_CACHE.put(mod.CACHE_KEY, JSON.stringify(built));
@@ -413,6 +450,31 @@ await staleEnv.FCS_CACHE.put(mod.CACHE_KEY, JSON.stringify({ ...built, generated
 const stale = await worker.fetch(new Request('https://x.com/signals/api/signals'), staleEnv, ctx);
 check('serves stale cache, marked "stale"', stale.headers.get('x-fcs-cache') === 'stale', stale.headers.get('x-fcs-cache'));
 check('stale response body still has real data', (await stale.json()).crypto.breakout.length > 0);
+
+console.log('\n== api: live prices (between-build ticks, real fetch, symbols only from KV) ==');
+const pricesEmptyEnv = { FCS_CACHE: new MockKV() };
+const pricesEmpty = await worker.fetch(new Request('https://x.com/signals/api/prices'), pricesEmptyEnv, ctx);
+check('no build yet: still 200 with an error body, not a crash', pricesEmpty.status === 200 && typeof (await pricesEmpty.json()).error === 'string');
+
+const pricesEnv = { FCS_CACHE: new MockKV() };
+await pricesEnv.FCS_CACHE.put(mod.CACHE_KEY, JSON.stringify(built));
+const pricesResp = await worker.fetch(new Request('https://x.com/signals/api/prices'), pricesEnv, ctx);
+check('live prices route never browser/CDN-cached (always no-store)', pricesResp.headers.get('cache-control') === 'no-store', pricesResp.headers.get('cache-control'));
+check('first call is a live-price cache miss (nothing cached yet)', pricesResp.headers.get('x-fcs-live-cache') === 'miss', pricesResp.headers.get('x-fcs-live-cache'));
+const pricesBody = await pricesResp.json();
+const displayedCryptoSymbols = new Set(built.crypto.breakout.concat(built.crypto.breakdown).map(r => r.symbol));
+const displayedStockSymbols = new Set(built.stocks.breakout.concat(built.stocks.breakdown).map(r => r.symbol));
+check('crypto live prices keyed by ticker symbol, not CoinGecko id', [...displayedCryptoSymbols].some(sym => pricesBody.crypto[sym] && typeof pricesBody.crypto[sym].price === 'number'));
+const solRow = built.crypto.breakout.concat(built.crypto.breakdown).find(r => r.symbol === 'SOL');
+check('a coin with no live quote (solana, not in the CoinGecko fixture) falls back to the hourly build\'s own price rather than a gap', !!solRow && pricesBody.crypto.SOL && pricesBody.crypto.SOL.price === solRow.price);
+check('stock live prices keyed by symbol with numeric price + chg24h', [...displayedStockSymbols].every(sym => pricesBody.stocks[sym] && typeof pricesBody.stocks[sym].price === 'number' && typeof pricesBody.stocks[sym].chg24h === 'number'));
+
+console.log('\n== api: live prices, second call within the window reuses the cache (CoinGecko/Yahoo rate-limit guard) ==');
+const pricesResp2 = await worker.fetch(new Request('https://x.com/signals/api/prices'), pricesEnv, ctx);
+check('second call within the TTL is a cache hit', pricesResp2.headers.get('x-fcs-live-cache') === 'hit', pricesResp2.headers.get('x-fcs-live-cache'));
+const pricesBody2 = await pricesResp2.json();
+check('cache hit serves the identical previously-fetched body (same generated_at)', pricesBody2.generated_at === pricesBody.generated_at);
+check('response never leaks a raw CoinGecko id key', Object.keys(pricesBody.crypto).every(k => displayedCryptoSymbols.has(k)));
 
 console.log(failures === 0 ? '\nWORKER INTEGRATION OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

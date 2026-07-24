@@ -71,9 +71,21 @@ export async function loadReliability(env) {
   }
   const blended = {};
   for (const [key, v] of Object.entries(acc)) {
-    blended[key] = { accuracy: v.total ? v.correct / v.total : 0.5, total: v.total };
+    blended[key] = { correct: v.correct, accuracy: v.total ? v.correct / v.total : 0.5, total: v.total };
   }
   return { blended, byHorizon };
+}
+
+// Range-prediction hit rate (was realized price actually inside the
+// predicted band), pooled across both horizons per symbol — mirrors how
+// `blended` above pools technique_reliability across horizons. Consumed
+// by assetPredictionScore() in worker.js as one of the pooled inputs to
+// an asset's overall track-record score.
+export async function loadRangeReliability(env) {
+  const rows = await d1(env, 'SELECT symbol, SUM(hits) AS hits, SUM(total) AS total FROM range_reliability WHERE total > 0 GROUP BY symbol');
+  const out = {};
+  for (const r of rows) out[r.symbol] = { hits: r.hits, total: r.total };
+  return out;
 }
 
 // Persists this run's per-asset price and per-technique directional votes,
@@ -88,6 +100,11 @@ export async function logRun(env, runAt, log) {
     const placeholders = batch.map(() => '(?,?,?,?,?)').join(',');
     const params = batch.flatMap((v) => [runAt, v.asset_class, v.symbol, v.technique_id, v.dir]);
     await d1(env, `INSERT OR REPLACE INTO technique_votes (run_at, asset_class, symbol, technique_id, dir) VALUES ${placeholders}`, params);
+  }
+  for (const batch of chunk(log.ranges || [], CHUNK)) {
+    const placeholders = batch.map(() => '(?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap((r) => [runAt, r.asset_class, r.symbol, r.horizon_hours, r.low, r.high]);
+    await d1(env, `INSERT OR REPLACE INTO range_log (run_at, asset_class, symbol, horizon_hours, low, high) VALUES ${placeholders}`, params);
   }
 }
 
@@ -127,12 +144,16 @@ export async function evaluateMatured(env, nowIso) {
     const cutoff = new Date(now - h * 3600 * 1000).toISOString();
     const col = EVAL_COLUMN[h];
     const due = await d1(env, `SELECT run_at, asset_class, symbol, technique_id, dir FROM technique_votes WHERE run_at <= ? AND ${col} = 0`, [cutoff]);
-    if (!due.length) continue;
+    // Range predictions logged at this same horizon (see RANGE_LOG_HORIZONS_DAYS
+    // in worker.js) — each row matures once, at its own horizon_hours, so
+    // there's no evaluated flag to filter on here, just the cutoff.
+    const dueRanges = await d1(env, 'SELECT run_at, asset_class, symbol, low, high FROM range_log WHERE horizon_hours = ? AND run_at <= ?', [h, cutoff]);
+    if (!due.length && !dueRanges.length) continue;
 
     // Most recent logged price per symbol ("now"). Builds run hourly, so
-    // the set of distinct symbols among "due" rows is at most the universe
-    // size, not unbounded.
-    const symbols = [...new Set(due.map((r) => r.symbol))];
+    // the set of distinct symbols among "due"/"dueRanges" rows is at most
+    // the universe size, not unbounded.
+    const symbols = [...new Set([...due.map((r) => r.symbol), ...dueRanges.map((r) => r.symbol)])];
     const priceNow = {};
     for (const batch of chunk(symbols, CHUNK)) {
       const placeholders = batch.map(() => '?').join(',');
@@ -143,12 +164,36 @@ export async function evaluateMatured(env, nowIso) {
     // Price at forecast time. "due" rows cluster into a small number of
     // distinct run_at values each call (roughly one per elapsed hour since
     // this last ran), so this stays a handful of queries, not one per row.
-    const runAts = [...new Set(due.map((r) => r.run_at))];
+    const runAts = [...new Set([...due.map((r) => r.run_at), ...dueRanges.map((r) => r.run_at)])];
     const priceBefore = {};
     for (const runAt of runAts) {
       const rows = await d1(env, 'SELECT symbol, price FROM asset_price_log WHERE run_at = ?', [runAt]);
       for (const r of rows) priceBefore[`${runAt}|${r.symbol}`] = r.price;
     }
+
+    // Range containment only needs the "after" price (was it inside
+    // [low, high]), not "before" — unlike technique_votes' directional
+    // check, there's no direction to compare against.
+    const rangeDeltas = {}; // symbol -> { hits, total, asset_class }
+    for (const r of dueRanges) {
+      const after = priceNow[r.symbol];
+      if (after == null) continue; // symbol vanished from the universe; hard-cap prune handles it eventually
+      if (!rangeDeltas[r.symbol]) rangeDeltas[r.symbol] = { hits: 0, total: 0, asset_class: r.asset_class };
+      rangeDeltas[r.symbol].total += 1;
+      if (after >= r.low && after <= r.high) rangeDeltas[r.symbol].hits += 1;
+    }
+    for (const [symbol, d] of Object.entries(rangeDeltas)) {
+      await d1(env, `
+        INSERT INTO range_reliability (asset_class, symbol, horizon_hours, hits, total, accuracy, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (symbol, horizon_hours) DO UPDATE SET
+          hits = range_reliability.hits + excluded.hits,
+          total = range_reliability.total + excluded.total,
+          accuracy = CAST(range_reliability.hits + excluded.hits AS REAL) / (range_reliability.total + excluded.total),
+          updated_at = excluded.updated_at
+      `, [d.asset_class, symbol, h, d.hits, d.total, d.total ? d.hits / d.total : 0, nowIso]);
+    }
+    if (dueRanges.length) await d1(env, 'DELETE FROM range_log WHERE horizon_hours = ? AND run_at <= ?', [h, cutoff]);
 
     const deltas = {}; // "symbol|technique_id" -> { correct, total, asset_class }
     const moveDeltas = {}; // "symbol" -> { n, sumPct, sumPctSq } — one realized move per (symbol, run_at), deduped across techniques
@@ -216,6 +261,10 @@ export async function evaluateMatured(env, nowIso) {
   const hardCapCutoff = new Date(now - HARD_CAP_HOURS * 3600 * 1000).toISOString();
   await d1(env, 'DELETE FROM technique_votes WHERE run_at < ?', [hardCapCutoff]);
   await d1(env, 'DELETE FROM asset_price_log WHERE run_at < ?', [hardCapCutoff]);
+  // range_log rows are deleted as soon as they mature (see above), so this
+  // hard cap only ever catches ones that never got the chance to (symbol
+  // vanished from the universe before priceNow could see it again).
+  await d1(env, 'DELETE FROM range_log WHERE run_at < ?', [hardCapCutoff]);
 
   return evaluatedCount;
 }

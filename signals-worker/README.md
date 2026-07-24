@@ -1,6 +1,6 @@
 # Frontier Capital Signals — Cloudflare Worker
 
-Hourly confluence screens across the top 100 cryptos (by market cap) and 60 US equities. Up to 16 independent techniques per asset vote bullish, bearish, or neutral; assets rank by weighted directional agreement, and every row shows the raw agreement count (for example 9/16). Each technique's weight for a given asset adapts over time based on how reliably it has actually called that asset's direction (see "Adaptive reliability weighting" below).
+Hourly confluence screens across the top 100 cryptos (by market cap) and 60 US equities. Up to 16 independent techniques per asset vote bullish, bearish, or neutral; assets rank by weighted directional agreement, and every row shows the raw agreement count (for example 9/16). Each technique's weight for a given asset adapts over time based on how reliably it has actually called that asset's direction (see "Adaptive reliability weighting" below). Price and 24h change tick live between rebuilds (see "Live prices" below); the score, range, and every technique read stay fixed until the next hourly rebuild.
 
 Lives at `frontiercapitalsignals.com/signals`, as a Worker bound only to that path — the rest of the domain (the Next.js app, deployed separately via `deploy.yml`) is untouched, and it's linked from the main site's nav, footer, and homepage.
 
@@ -116,6 +116,27 @@ The band's center shifts toward the called direction only once the score shows r
 ## Which indicator an asset leans on
 
 `topIndicator()` scans a specific asset's entry in the reliability map and surfaces whichever technique has, on its own, the best individually-proven accuracy for that asset — shown under the asset's name once one exists ("Leans on divergence (71%)"). Some assets really are better predicted by one kind of signal than another; this is the direct answer to that, reusing the exact same per-(asset, technique) data the adaptive weighting draws on, gated by the same `MIN_RELIABILITY_SAMPLES` bar so a technique with a lucky handful of calls can't claim it.
+
+## Live prices
+
+Price and 24h change tick independently of the hourly rebuild, via a dedicated `/api/prices` route the client polls roughly every 20 seconds (`updateLivePrices()` in `PAGE_HTML`, patching only the price/chg cells already in the DOM — never a re-render, so it can't disturb a mid-sort or mid-scroll). This is the one deliberate exception to "the Worker only ever reads KV at request time": `/api/prices` reads the cached payload to learn which symbols are currently displayed (never from the request itself, so a caller can't make it fan out arbitrarily), then makes one batched CoinGecko `simple/price` call for the displayed crypto and up to ~20 parallel lightweight Yahoo chart calls (`yahooQuote()`, `range=1d`, just enough for `meta.regularMarketPrice`/`previousClose`) for the displayed equities — at most ~22 subrequests, comfortably inside the Free plan's 50-subrequest cap, and cheap on CPU since there's no indicator math, just passthrough JSON.
+
+**CoinGecko rate-limits this from Cloudflare's shared egress IPs** — confirmed live: a single `simple/price` call for the displayed ids got a straight HTTP 429 with no unusual traffic at all, the same shared-IP rate-limiting GitHub Actions runners hit earlier on the per-coin history endpoint (see "The 16 techniques" above), just from Workers' IP range instead of Actions'. Two mitigations, both in the route handler:
+
+- **A short KV-cached window** (`LIVE_PRICE_CACHE_KEY`, `expirationTtl: 60`, KV's own minimum) caps upstream calls to at most once per 60 seconds *regardless of visitor count* — the actual fix, since the problem is request volume against a shared rate limit, not a transient blip a retry would smooth over. `X-FCS-Live-Cache: hit`/`miss` on the response shows which path served it.
+- **Fallback to the hourly build's own price/chg24h** for any symbol the live fetch misses (still rate-limited even at reduced frequency, a thin/renamed id, a Yahoo hiccup) — real data, just not freshly ticked, rather than a gap the dashboard has to guess how to render.
+
+Everything else — score, confluence agreement, range, horizon, every technique call — only changes on the hourly rebuild. Live prices are a between-build nicety, not a claim that the analysis itself is real-time.
+
+## Prediction-score track record (95%+ list)
+
+Below the boards, the dashboard surfaces which assets (either class) have a pooled, matured prediction accuracy above 95/100 — `assetPredictionScore()` in `worker.js`. Three kinds of falsifiable, matured calls get pooled per asset:
+
+- **Composite direction**: `compositeCall()` picks whichever of an asset's `long`/`short` confluence scores leads (null on an exact tie — no falsifiable direction to log) and logs it once per asset per run as a synthetic `technique_id: 'composite'` vote, reusing the *exact same* `technique_votes` → `technique_reliability` pipeline every other technique already goes through. This answers "was the overall call right," not just "was any one technique right."
+- **Range containment**: was the realized price actually inside the predicted `[low, high]` band at maturity, not just on the right side of it. Logged at two fixed horizons — 24h and 168h, `RANGE_LOG_HORIZONS_DAYS = [1, 7]` in `worker.js`, matching `HORIZONS_HOURS` in `reliability.mjs` exactly — into two new D1 tables: `range_log` (this run's predicted band per asset per horizon; each row matures once, at its own horizon, then gets deleted rather than carrying an evaluated flag like `technique_votes` does) and `range_reliability` (the running hit-rate, mirroring `technique_reliability`'s shape). `evaluateMatured()` scores these in the same pass as everything else, reusing the same price lookups.
+- **Pivot-style calls**: the `reversal` and `dwell` techniques' own existing per-technique reliability rows, reused directly rather than logged a second time under a new name — they already are exactly "this asset is at/near an extreme and about to turn" calls.
+
+`assetPredictionScore(symbol, reliability, rangeReliability)` pools all three by raw sample count — every matured outcome counts as one equally-weighted vote (`totalCorrect / totalCount`), rather than a hand-picked split like "40% direction, 30% range, 30% pivot," which would itself be a fabricated-precision choice. Returns `null` below `MIN_RELIABILITY_SAMPLES` (20) pooled outcomes total, the same bar every other reliability read in this engine uses — an asset with a thin history is left off the list, not shown with an overconfident number. `buildPayload()` computes this for the full universe (not just the top 10 per board — a boring, rarely-ranked asset can still build a real record) and includes qualifying assets (`score > 95`) in the payload's `highAccuracy` array, sorted by score descending; the dashboard renders it plainly, including an honest empty state when nothing yet qualifies.
 
 ## Valuation layer and Trefis
 
