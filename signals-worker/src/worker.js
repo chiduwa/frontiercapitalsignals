@@ -430,6 +430,76 @@ export function realizedVolPct(closes, lookback = 30) {
   return Math.sqrt(variance);
 }
 
+// How many trailing days of an asset's own history give the best-calibrated
+// volatility estimate — not "which lookback gives the widest or narrowest
+// band" but "which lookback's implied stdev is actually the right size,"
+// checked the standard way volatility models get backtested: for a
+// correctly-calibrated stdev estimate, the realized move divided by that
+// stdev, squared, should average to 1.0 across many observations (a
+// squared standardized residual, mean 1 by construction whenever the
+// stdev estimate is right; above 1 means the estimate was too small —
+// realized moves are bigger than implied — below 1 means too large). This
+// uses every test point's full magnitude rather than collapsing it to a
+// yes/no "was it inside the band" flag, which matters in practice — an
+// early version of this scored plain in/out-of-band coverage against the
+// usual ~68% one-stdev target instead, and empirically it was dominated by
+// sampling noise at the sample sizes an asset's real history actually
+// gives (crypto's 365-day cap leaves only a few hundred test points at
+// best): candidates that should have clearly differed in a synthetic
+// regime-shift test instead came back within noise of each other. Mean
+// squared standardized residual discriminates far more cleanly at the
+// same sample sizes, confirmed on the same synthetic tests.
+//
+// A too-short lookback is noisy and whipsaws; a too-long one smooths over
+// a real regime change; this picks whichever candidate actually calibrates
+// best against this specific asset's own realized history, walked with no
+// lookahead (every test point's vol estimate uses only data available up
+// to that point).
+//
+// This is a within-run backtest over price history already being fetched,
+// deliberately distinct from (and much faster-feedback than) the live
+// evaluateMatured() reliability loop: it doesn't need to wait weeks for
+// matured outcomes to accumulate, it recomputes fresh every build from
+// whatever history currently exists, and it naturally adapts as more
+// history accrues or the asset's own volatility regime shifts. Falls back
+// to null — the fixed default lookback stays in effect — for an asset too
+// young to have enough history to test at all, same "abstain rather than
+// guess" pattern as everywhere else in this engine.
+const VOL_LOOKBACK_CANDIDATES = [10, 20, 30, 60, 90];
+const VOL_LOOKBACK_HORIZON_DAYS = 7; // calibrate against the standard weekly risk horizon
+const MIN_BACKTEST_SAMPLES = 40;
+
+export function bestVolLookback(
+  closes,
+  candidates = VOL_LOOKBACK_CANDIDATES,
+  horizonDays = VOL_LOOKBACK_HORIZON_DAYS
+) {
+  if (!closes) return null;
+  const maxLookback = Math.max(...candidates);
+  const firstTestIdx = maxLookback + 1;
+  const lastTestIdx = closes.length - horizonDays - 1;
+  if (lastTestIdx - firstTestIdx < MIN_BACKTEST_SAMPLES) return null;
+
+  let best = null;
+  for (const lookback of candidates) {
+    let sumSq = 0, total = 0;
+    for (let i = firstTestIdx; i <= lastTestIdx; i++) {
+      const vol = realizedVolPct(closes.slice(0, i + 1), lookback);
+      if (vol == null || !(vol > 0)) continue;
+      const impliedMove = vol * Math.sqrt(horizonDays);
+      const actualMovePct = ((closes[i + horizonDays] / closes[i]) - 1) * 100;
+      total++;
+      sumSq += (actualMovePct / impliedMove) ** 2;
+    }
+    if (total < MIN_BACKTEST_SAMPLES) continue;
+    const meanSqResidual = sumSq / total;
+    const distance = Math.abs(meanSqResidual - 1);
+    if (!best || distance < best.distance) best = { lookback, meanSqResidual, samples: total, distance };
+  }
+  if (!best) return null;
+  return { lookback: best.lookback, meanSqResidual: best.meanSqResidual, samples: best.samples };
+}
+
 // How long an asset has been sitting at its own extreme, not just whether
 // it currently is. A fresh one-day touch of a high and a multi-week base
 // at the same level are different setups — this distinguishes them
@@ -1209,8 +1279,13 @@ export function buildCryptoMetrics(item, extras = {}) {
   const rRange = rsiRecentRange(closes, haveDaily ? 10 : 24);
   // Only from real daily bars — an hourly-sparkline-derived "daily" vol
   // (or "52-week" range, or correlation) on the fallback path would be a
-  // materially different, wrong number.
-  const volPct = haveDaily ? realizedVolPct(closes) : null;
+  // materially different, wrong number. The lookback itself is chosen per
+  // asset (see bestVolLookback's docs) once there's enough of this coin's
+  // own history to back-test candidates against; falls back to the fixed
+  // 30-day default for a coin too young to test (the common case at
+  // crypto's 365-day history cap).
+  const volLookback = haveDaily ? bestVolLookback(closes) : null;
+  const volPct = haveDaily ? realizedVolPct(closes, volLookback ? volLookback.lookback : undefined) : null;
   // 365, not stocks' 252: crypto trades every calendar day, not just
   // weekdays, so a "1-year cycle" in daily bars is 365 bars here.
   const dwell = haveDaily ? dwellAtExtreme(closes, 365) : null;
@@ -1225,6 +1300,7 @@ export function buildCryptoMetrics(item, extras = {}) {
     corr,
     seasonal,
     volPct,
+    volLookbackDays: volLookback ? volLookback.lookback : null,
     price,
     mcap,
     volume: vol,
@@ -1273,7 +1349,12 @@ export function buildStockMetrics(row, valuation, override, benchCloses) {
   const md = macd(closes);
   const rNow = rsi(closes);
   const rRange = rsiRecentRange(closes, 10);
-  const volPct = realizedVolPct(closes);
+  // Lookback chosen per asset once there's enough of this stock's own
+  // history to back-test candidates against (see bestVolLookback) —
+  // equities' 10y of history means this resolves to a real pick for
+  // nearly every name, unlike crypto's 365-day cap.
+  const volLookback = bestVolLookback(closes);
+  const volPct = realizedVolPct(closes, volLookback ? volLookback.lookback : undefined);
   const dwell = dwellAtExtreme(closes, 252);
   const corr = benchCloses ? correlationWithBenchmark(closes, benchCloses, 30) : null;
   const seasonal = seasonalAnalog(closes, 252);
@@ -1298,6 +1379,7 @@ export function buildStockMetrics(row, valuation, override, benchCloses) {
     name: symbol,
     price,
     volPct,
+    volLookbackDays: volLookback ? volLookback.lookback : null,
     dwell,
     corr,
     seasonal,
@@ -1389,6 +1471,7 @@ function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHori
       ...(x.m.funding != null ? { funding: x.m.funding } : {}),
       ...(x.m.distHigh52w != null ? { distHigh52w: x.m.distHigh52w } : {}),
       ...(x.m.rank != null ? { mcapRank: x.m.rank } : {}),
+      ...(x.m.volLookbackDays != null ? { volLookbackDays: x.m.volLookbackDays } : {}),
       ...(x.m.id ? { id: x.m.id } : {}) // CoinGecko coin id (crypto only) — lets the dashboard link out to a real coin page
     };
   };
@@ -1840,6 +1923,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       <p><b>Adaptive weighting.</b> Every hour's directional calls are logged and checked back against what the asset's price actually did 24 hours and 7 days later. Once a technique has enough scored history for a specific asset, its weight for that asset going forward is nudged up if it has been reliably right and down if it has been reliably wrong, capped at plus or minus 50%. A technique that is only a coin flip for a given asset keeps its plain baseline weight.</p>
       <p><b>Leading vs. lagging, and the expected timeframe.</b> Techniques are split into two kinds. Leading techniques try to anticipate a move before it's confirmed: RSI, Bollinger squeeze, stochastic crosses, OBV, the divergence proxy, the volatility regime read, reversal-pattern detection, and the valuation/positioning layer. Lagging techniques describe a move already underway: momentum alignment, MACD, the moving-average stack, Donchian breakout proximity, volume confirmation, and swing structure. The small window shown next to each score (for example <b>1-3 days</b>) is this engine's estimate of when that specific call is expected to resolve, built from whichever techniques are actually voting on that asset right now. Where an asset has enough of its own scored history, the window uses that asset's real measured accuracy at the 24-hour versus 7-day mark (marked with a check and shown in amber) instead of a generic estimate — the same historical record the adaptive weighting above draws on, just answering "how soon" instead of "how much weight." Without enough history yet, it falls back to a weighted average of the active techniques' typical horizons (shown in gray) — an informed estimate, not a measurement.</p>
       <p><b>Expected range.</b> The Range column is a band around the current price, not a point prediction, for the same timeframe as the horizon chip next to it. Its width comes from real volatility: this asset's own historical realized move size at that horizon once evaluateMatured has scored enough of its own outcomes (amber, marked historical), or its recent realized daily volatility scaled by the square root of time otherwise (gray, marked methodology) — the standard random-walk approximation for "how far a price plausibly wanders in N days." The band's center only shifts toward the called direction once the score shows real conviction, and the shift is capped well inside the band, so a weak score gives a wide, roughly symmetric range rather than a false point estimate.</p>
+      <p><b>How far back the methodology-basis range looks.</b> The gray (methodology) band isn't measured over a single fixed number of days for every asset — it's calibrated per asset. Several candidate lookback windows (10, 20, 30, 60, and 90 days) are backtested against that asset's own price history every hour: for each candidate, the tool checks whether the volatility estimate it would have produced at many past points actually matched what happened next, and keeps whichever window comes closest to correctly sized (hovering your cursor over a gray band shows which one won). A too-short lookback whipsaws on noise; a too-long one smooths over a real shift in how much an asset has started moving. This is a fast, within-run check using history already being fetched — distinct from, and much quicker to react than, the slower live-outcome learning loop described above — so it needs a real backtest sample to trust (an asset too young for that, common at crypto's 365-day history cap, just keeps the plain 30-day default).</p>
       <p><b>Which indicator this asset leans on.</b> "Leans on X (n%)" under an asset's name names whichever technique has, on its own, the strongest individually-proven track record for that specific asset — some assets really are better predicted by one kind of signal than another, and this surfaces that once a technique has enough of its own scored history to say so, using the same adaptive-weighting data above.</p>
       <p><b>Prediction-score track record (95%+ list).</b> Below the boards, a running scorecard pools three kinds of matured, falsifiable calls per asset: whether its overall composite call (not any single technique) pointed the right direction by the horizon's end; whether the predicted price range actually contained the real price at maturity; and whether its pivot-style calls (the reversal and dwell techniques above) panned out. Every matured outcome across those three counts as one equally-weighted vote rather than a hand-picked blend — a made-up weighting scheme would just be a different kind of guess — so the score is simply correct-calls divided by total-calls, out of 100. An asset only appears once it has a reasonable number of matured predictions behind it (the same minimum-sample bar used everywhere else in this engine); below that, it's left off the list rather than shown with a noisy, overconfident number. This is a track record of this engine's own past calls, not a forecast that the streak continues.</p>
       <p><b>Data.</b> CoinGecko free API for the top 100 coins by market cap with real daily price and volume history per coin, plus global stats and trending (stablecoins and wrappers excluded), alternative.me Fear &amp; Greed, Bybit linear perp funding rates, Yahoo Finance daily OHLCV with Stooq CSV fallback, and Yahoo analyst estimates. Free feeds can lag or drop symbols; the feeds counter in the status bar shows current coverage, and any technique without data simply abstains rather than guessing.</p>
@@ -1989,7 +2073,10 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var topInd = r.topIndicator ? '<span class="topind" title="Best individually-proven indicator for '+esc(r.symbol)+' so far, out of '+r.topIndicator.total+' scored calls">Leans on '+esc(r.topIndicator.id)+' ('+Math.round(r.topIndicator.accuracy*100)+'%)</span>' : '';
         var conf = r.conf ? '<span class="conf">'+r.conf.agree+'/'+r.conf.total+' aligned</span>' : '';
         var horizon = r.horizon ? '<span class="horizon '+(r.horizon.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+(r.horizon.basis==='historical'?"Based on this asset's own historical accuracy by horizon":"Methodology estimate, not yet enough of this asset's own history to say")+'">'+esc(r.horizon.label)+(r.horizon.basis==='historical'?' ✓':'')+'</span>' : '';
-        var range = r.range ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+(r.range.basis==='historical'?"Band width from this asset's own historical move size at this horizon":"Band width estimated from this asset's recent realized volatility, scaled to the horizon")+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>' : '<span class="dim">—</span>';
+        var rangeTitle = r.range && r.range.basis==='historical'
+          ? "Band width from this asset's own historical move size at this horizon"
+          : "Band width estimated from this asset's recent realized volatility, scaled to the horizon"+(r.volLookbackDays?" (a "+r.volLookbackDays+"-day lookback, calibrated to this asset)":"");
+        var range = r.range ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+rangeTitle+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>' : '<span class="dim">—</span>';
         h+='<tr class="in" style="animation-delay:'+(i*30)+'ms" data-symbol="'+esc(r.symbol)+'" data-class="'+cfg.assetClass+'">'
           +'<td class="rk">'+(i+1)+'</td>'
           +'<td class="asset">'+symHtml+name+why+topInd+'</td>'

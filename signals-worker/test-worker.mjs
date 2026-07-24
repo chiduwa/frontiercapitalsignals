@@ -187,6 +187,8 @@ check('daily bars give OBV (crypto had none before)', withDaily.obv != null);
 check('sparkline fallback has no SMA stack (falls back to mean7d/slope MA branch)', withoutDaily.sma20 == null && withoutDaily.sma200 == null);
 check('sparkline fallback has no OBV (7d sparkline carries no per-bar volume)', withoutDaily.obv == null);
 check('sparkline fallback still produces a usable rsi/macd/bollinger', withoutDaily.rsi != null && withoutDaily.bb != null);
+check('daily bars (210 days, above the backtest minimum) give a real, asset-calibrated vol lookback', withDaily.volLookbackDays != null && [10, 20, 30, 60, 90].includes(withDaily.volLookbackDays));
+check('sparkline fallback has no calibrated lookback (no real daily history to backtest against)', withoutDaily.volLookbackDays == null);
 
 console.log('\n== engine: buildPayload() called directly, as build-signals.mjs will ==');
 const { payload: built, log } = await mod.buildPayload({ TREFIS_OVERRIDES: '{"AAPL": 999}' });
@@ -320,6 +322,50 @@ check('a flat (zero-volatility) series returns ~0, not null or NaN', mod.realize
 const stepSeries = Array.from({ length: 40 }, (_, i) => i % 2 === 0 ? 100 : 102); // alternates +2%/-1.96%, a known, checkable volatility
 const stepVol = mod.realizedVolPct(stepSeries);
 check('an alternating series returns a real, sane volatility (not null, roughly a couple percent)', stepVol != null && stepVol > 1 && stepVol < 3, `vol=${stepVol}`);
+
+console.log('\n== bestVolLookback: which trailing window best calibrates this asset\'s own volatility ==');
+// Seeded PRNG (mulberry32) + Box-Muller, so these fixtures are reproducible
+// without relying on Math.random — same discipline as every other
+// synthetic-but-checkable fixture in this file, just needing a real
+// distribution (not a deterministic alternating series) since calibration
+// is a distributional question a deterministic step series can't test.
+function mulberry32(seed) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function gaussian(rand) {
+  const u1 = Math.max(rand(), 1e-9), u2 = rand();
+  return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+}
+function buildVolSeries(oldDays, newDays, oldVolPct, newVolPct, seed) {
+  const rand = mulberry32(seed);
+  const closes = [100];
+  for (let i = 0; i < oldDays; i++) closes.push(closes[closes.length - 1] * (1 + gaussian(rand) * oldVolPct / 100));
+  for (let i = 0; i < newDays; i++) closes.push(closes[closes.length - 1] * (1 + gaussian(rand) * newVolPct / 100));
+  return closes;
+}
+
+check('too short a history: null, the fixed default lookback stays in effect', mod.bestVolLookback(Array.from({ length: 101 }, () => 100)) === null);
+check('right at the sample-count boundary (138 days): still null', mod.bestVolLookback(buildVolSeries(0, 137, 1.0, 1.0, 1)) === null);
+check('one day past the boundary (139 days): a real result, not null', mod.bestVolLookback(buildVolSeries(0, 138, 1.0, 1.0, 1)) !== null);
+check('null closes: null, not a crash', mod.bestVolLookback(null) === null);
+
+// A real, reproducible regime-shift fixture: 30 quiet days (0.2% daily
+// vol) then 150 days at a much higher 5% — verified empirically before
+// being written here (see the session notes on why mean-squared-
+// standardized-residual replaced plain coverage: coverage-vs-68% was
+// dominated by sampling noise at this sample size; MSSR-vs-1.0 wasn't).
+const shifted = buildVolSeries(30, 150, 0.2, 5.0, 1);
+const shiftedResult = mod.bestVolLookback(shifted);
+check('a real regime-shift series picks one of the actual candidate lookbacks', shiftedResult && [10, 20, 30, 60, 90].includes(shiftedResult.lookback), JSON.stringify(shiftedResult));
+check('the winning lookback calibrates close to the ideal (meanSqResidual near 1.0)', shiftedResult && Math.abs(shiftedResult.meanSqResidual - 1) < 0.3, JSON.stringify(shiftedResult));
+check('enough samples backed the winning pick', shiftedResult && shiftedResult.samples >= 40, JSON.stringify(shiftedResult));
+check('reproducible: identical input gives identical output', JSON.stringify(mod.bestVolLookback(buildVolSeries(30, 150, 0.2, 5.0, 1))) === JSON.stringify(shiftedResult));
+check('this specific, checked-in-advance fixture picks the shortest candidate (fastest to adapt after the shift)', shiftedResult.lookback === 10, JSON.stringify(shiftedResult));
 
 console.log('\n== topIndicator: which specific indicator this asset leans on ==');
 check('no reliability data: null, not a guess', mod.topIndicator(undefined, 'BTC') === null);
