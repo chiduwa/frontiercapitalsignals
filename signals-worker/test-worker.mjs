@@ -561,6 +561,35 @@ const todTechNoStats = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC
 check('fires through the full technique pipeline when todStats + nowIso are supplied', todTechFires.dir === 1, JSON.stringify(todTechFires));
 check('abstains (null) when todStats/nowIso are not supplied at all', todTechNoStats.dir === null, JSON.stringify(todTechNoStats));
 
+console.log('\n== percentileRank: asset-relative reading, not an absolute one ==');
+check('no history at all: returns null', mod.percentileRank(null, 5) === null);
+check('empty history: returns null', mod.percentileRank([], 5) === null);
+const sortedHistory = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+check('value below everything: 0th percentile', mod.percentileRank(sortedHistory, 0) === 0);
+check('value above everything: 1.0 (100th percentile)', mod.percentileRank(sortedHistory, 11) === 1);
+check('value matching the median position', mod.percentileRank(sortedHistory, 5) === 0.4, mod.percentileRank(sortedHistory, 5));
+
+console.log('\n== positioning technique: prefers this asset\'s own funding percentile once enough history exists ==');
+const fundingFixedFallback = baseMetric({ funding: 0.0009, fundingPercentile: null, chg7d: 25 }); // no history yet -> old fixed-threshold path
+const fundingLowPercentileHighRaw = baseMetric({ funding: 0.0009, fundingPercentile: 0.3, chg7d: 25 }); // high in absolute terms, but unremarkable for THIS asset
+const fundingHighPercentile = baseMetric({ funding: 0.0009, fundingPercentile: 0.95, chg7d: 25 });
+const posFixed = findTech(mod.evaluateTechniques(fundingFixedFallback, 'crypto'), 'positioning');
+const posLowPctile = findTech(mod.evaluateTechniques(fundingLowPercentileHighRaw, 'crypto'), 'positioning');
+const posHighPctile = findTech(mod.evaluateTechniques(fundingHighPercentile, 'crypto'), 'positioning');
+check('no percentile history yet: falls back to the fixed-threshold read (extreme positive funding)', posFixed.dir === -1, JSON.stringify(posFixed));
+check('same raw funding value, but unremarkable for this asset\'s own history: does not fire crowded-longs', posLowPctile.dir === 0, JSON.stringify(posLowPctile));
+check('genuinely extreme for this asset\'s own history: fires crowded-longs', posHighPctile.dir === -1, JSON.stringify(posHighPctile));
+
+console.log('\n== openinterest technique: participation relative to this asset\'s own history, never fabricated on thin data ==');
+const oiNoData = baseMetric({ funding: 0.0001, chg7d: 15 });
+const oiThinOnBigMove = baseMetric({ funding: 0.0001, openInterest: 1e8, oiPercentile: 0.1, chg7d: 15 });
+const oiElevatedOnRally = baseMetric({ funding: 0.0001, openInterest: 1e8, oiPercentile: 0.9, chg7d: 15 });
+const oiElevatedOnSelloff = baseMetric({ funding: 0.0001, openInterest: 1e8, oiPercentile: 0.9, chg7d: -15 });
+check('no OI data at all: abstains (null)', findTech(mod.evaluateTechniques(oiNoData, 'crypto'), 'openinterest').dir === null);
+check('thin participation on a big move: left neutral, not fabricated into a direction', findTech(mod.evaluateTechniques(oiThinOnBigMove, 'crypto'), 'openinterest').dir === 0);
+check('rally backed by elevated OI: bullish (real participation)', findTech(mod.evaluateTechniques(oiElevatedOnRally, 'crypto'), 'openinterest').dir === 1);
+check('selloff with crowded OI: bearish (liquidation risk)', findTech(mod.evaluateTechniques(oiElevatedOnSelloff, 'crypto'), 'openinterest').dir === -1);
+
 console.log('\n== compositeCall: one directional read per asset from the long/short pair ==');
 check('a tie (long === short) has no falsifiable direction: null', mod.compositeCall({ long: 60, short: 60 }) === null);
 check('long leading: dir 1, score is the long side', JSON.stringify(mod.compositeCall({ long: 70, short: 30 })) === JSON.stringify({ dir: 1, score: 70 }));

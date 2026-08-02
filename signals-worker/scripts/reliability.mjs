@@ -333,4 +333,35 @@ export async function evaluateTimeOfDay(env, nowIso, thisRunPrices) {
   return updates;
 }
 
+// Below this many stored days, a symbol's funding/OI percentile is too
+// thin to trust — same "not enough of this asset's own history yet"
+// pattern as everywhere else, gating the technique's historical-vs-
+// methodology basis switch (see the 'positioning'/'openinterest'
+// techniques in worker.js).
+const FUNDING_HISTORY_MIN_DAYS = 20;
+
+// { [symbol]: { fundingRates: sortedAscending[], openInterests: sortedAscending[] } }
+// from the permanent funding_rate_daily archive — consumed by
+// percentileRank (worker.js) to turn today's live funding/OI reading into
+// an asset-relative percentile. A symbol only gets an array once it has
+// FUNDING_HISTORY_MIN_DAYS real days on record; until then its entry is
+// omitted (not a thin/misleading array), same abstain-not-guess pattern
+// used throughout this engine.
+export async function loadFundingHistory(env) {
+  const rows = await d1(env, 'SELECT symbol, funding_rate, open_interest FROM funding_rate_daily');
+  const bySymbol = {};
+  for (const r of rows) {
+    const rec = (bySymbol[r.symbol] ??= { fundingRates: [], openInterests: [] });
+    if (r.funding_rate != null) rec.fundingRates.push(r.funding_rate);
+    if (r.open_interest != null) rec.openInterests.push(r.open_interest);
+  }
+  const out = {};
+  for (const [symbol, rec] of Object.entries(bySymbol)) {
+    const fundingRates = rec.fundingRates.length >= FUNDING_HISTORY_MIN_DAYS ? rec.fundingRates.slice().sort((a, b) => a - b) : null;
+    const openInterests = rec.openInterests.length >= FUNDING_HISTORY_MIN_DAYS ? rec.openInterests.slice().sort((a, b) => a - b) : null;
+    if (fundingRates || openInterests) out[symbol] = { fundingRates, openInterests };
+  }
+  return out;
+}
+
 export { MIN_RELIABILITY_SAMPLES };

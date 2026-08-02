@@ -371,7 +371,8 @@ export const TECHNIQUE_META = {
   dwell:       { leading: true,  horizonDays: 5 },
   seasonal:    { leading: true,  horizonDays: 7 },
   fibonacci:   { leading: true,  horizonDays: 3 },
-  timeofday:   { leading: true,  horizonDays: 0.2 }
+  timeofday:   { leading: true,  horizonDays: 0.2 },
+  openinterest:{ leading: false, horizonDays: 3 }
 };
 
 export function horizonLabel(days) {
@@ -692,6 +693,22 @@ export function predictedRange(price, horizonDays, score, dir, moveStats, symbol
   };
 }
 
+// Fraction of `sortedValues` that sit at or below `value` — a plain
+// percentile rank, used to turn an absolute reading (funding rate, open
+// interest) into an asset-relative one ("high for THIS asset," not high
+// against an arbitrary fixed number every asset is judged by alike).
+// Binary search since `sortedValues` is already sorted ascending by the
+// caller (see loadFundingHistory in reliability.mjs).
+export function percentileRank(sortedValues, value) {
+  if (!sortedValues || !sortedValues.length || value == null) return null;
+  let lo = 0, hi = sortedValues.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sortedValues[mid] < value) lo = mid + 1; else hi = mid;
+  }
+  return lo / sortedValues.length;
+}
+
 // Within this % of a level counts as "at" it for the Fibonacci technique
 // below — tight enough that "near" means a genuine reaction zone, not
 // price merely passing through on its way elsewhere.
@@ -919,8 +936,22 @@ export function evaluateTechniques(m, kind, reliability, marketContext, todStats
   } else {
     const f = m.funding;
     const bigMove = 20;
+    // Prefers this asset's own funding-rate percentile (learned from
+    // funding_rate_daily, the permanent archive — see loadFundingHistory
+    // in reliability.mjs) once enough of its own history exists: a coin
+    // whose funding always runs hot needs a different bar than one where
+    // it never does, the same "asset teaches the model its own behavior"
+    // idea bestVolLookback already applies to volatility. Falls back to
+    // the original fixed global thresholds — unchanged — until then, same
+    // historical-vs-methodology basis switch used throughout this engine.
     if (f != null) {
-      if (f >= 0.0005 && (c7 ?? 0) > bigMove) push('positioning', 1.0, -1, `crowded longs, funding ${(f * 100).toFixed(3)}%`);
+      if (m.fundingPercentile != null) {
+        const p = m.fundingPercentile;
+        if (p >= 0.9 && (c7 ?? 0) > bigMove) push('positioning', 1.0, -1, `crowded longs, funding in its own ${(p * 100).toFixed(0)}th percentile`);
+        else if (p <= 0.1 && (c7 ?? 0) > 0) push('positioning', 1.0, 1, 'rally with funding in its own bottom decile');
+        else if (p >= 0.97) push('positioning', 1.0, -1, 'funding at a historic extreme for this asset');
+        else push('positioning', 1.0, 0, null);
+      } else if (f >= 0.0005 && (c7 ?? 0) > bigMove) push('positioning', 1.0, -1, `crowded longs, funding ${(f * 100).toFixed(3)}%`);
       else if (f <= 0 && (c7 ?? 0) > 0) push('positioning', 1.0, 1, 'rally with skeptical funding');
       else if (f >= 0.0008) push('positioning', 1.0, -1, 'extreme positive funding');
       else push('positioning', 1.0, 0, null);
@@ -929,6 +960,24 @@ export function evaluateTechniques(m, kind, reliability, marketContext, todStats
       if ((m.rsi ?? 50) >= 72) push('attention', 0.6, -1, 'trending list + overbought = crowded');
       else if ((m.rsi ?? 50) >= 40 && (m.rsi ?? 50) <= 65) push('attention', 0.6, 1, 'attention building, not stretched');
       else push('attention', 0.6, 0, null);
+    }
+
+    // T-open interest: OI relative to this asset's OWN recent history
+    // (learned the same way, not an absolute dollar figure that means
+    // wildly different things for BTC vs. a small-cap alt), combined with
+    // price direction. Elevated OI backing a rally is trend confirmation —
+    // real new participation, not price just drifting on thin books;
+    // elevated OI during a selloff is a crowded, liquidation-prone setup.
+    // Thin OI on a big move either way is left neutral, not fabricated
+    // into a direction — a big move on thin participation is genuinely
+    // ambiguous, not a hidden bullish or bearish tell.
+    if (m.openInterest != null && m.oiPercentile != null) {
+      const oiBigMove = 8;
+      if (m.oiPercentile >= 0.8 && (c7 ?? 0) > oiBigMove) push('openinterest', 0.8, 1, `rally backed by elevated open interest (its own ${(m.oiPercentile * 100).toFixed(0)}th pct)`);
+      else if (m.oiPercentile >= 0.8 && (c7 ?? 0) < -oiBigMove) push('openinterest', 0.8, -1, 'selloff with crowded open interest, liquidation risk');
+      else push('openinterest', 0.8, 0, null);
+    } else {
+      push('openinterest', 0.8, null, null);
     }
   }
 
@@ -1514,6 +1563,10 @@ export function buildCryptoMetrics(item, extras = {}) {
     volReg: volRegime(closes, haveDaily ? 20 : 24, haveDaily ? 100 : 120),
     funding: extras.funding != null ? extras.funding.fundingRate : null,
     openInterest: extras.funding != null ? extras.funding.openInterest : null,
+    fundingPercentile: (extras.fundingHistory && extras.fundingHistory.fundingRates && extras.funding != null)
+      ? percentileRank(extras.fundingHistory.fundingRates, extras.funding.fundingRate) : null,
+    oiPercentile: (extras.fundingHistory && extras.fundingHistory.openInterests && extras.funding != null)
+      ? percentileRank(extras.fundingHistory.openInterests, extras.funding.openInterest) : null,
     trending: !!extras.trending
   };
 }
@@ -1700,7 +1753,7 @@ function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHori
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -1781,7 +1834,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
         const sym = (c.symbol || '').toUpperCase();
         const h = histories[i];
         const daily = h && !h._error ? h : null;
-        return buildCryptoMetrics(c, { funding: funding[sym], trending: trending.has(sym), daily, benchCloses: btcCloses });
+        return buildCryptoMetrics(c, { funding: funding[sym], fundingHistory: fundingHistory && fundingHistory[sym], trending: trending.has(sym), daily, benchCloses: btcCloses });
       })
       .filter(Boolean);
     cryptoBoards = rankBoards(metrics, 'crypto', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso);
