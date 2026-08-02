@@ -354,7 +354,8 @@ export const TECHNIQUE_META = {
   positioning: { leading: true,  horizonDays: 3 },
   attention:   { leading: true,  horizonDays: 2 },
   dwell:       { leading: true,  horizonDays: 5 },
-  seasonal:    { leading: true,  horizonDays: 7 }
+  seasonal:    { leading: true,  horizonDays: 7 },
+  fibonacci:   { leading: true,  horizonDays: 3 }
 };
 
 export function horizonLabel(days) {
@@ -675,6 +676,42 @@ export function predictedRange(price, horizonDays, score, dir, moveStats, symbol
   };
 }
 
+// Within this % of a level counts as "at" it for the Fibonacci technique
+// below — tight enough that "near" means a genuine reaction zone, not
+// price merely passing through on its way elsewhere.
+const FIB_PROXIMITY_PCT = 1.2;
+
+// Fibonacci retracement levels of the most recent swing (highest-high /
+// lowest-low over `lookback` bars) — a plain statistic, not a full zigzag/
+// pivot detector, matching this engine's existing preference for
+// explainable reads over heavier pattern recognition elsewhere (Donchian,
+// dwellAtExtreme). Which extreme is more recent decides the live leg
+// direction: if the high came after the low, the swing ran up and price is
+// now expected to retrace DOWN toward these levels as support; if the low
+// came after the high, the swing ran down and price is expected to bounce
+// UP toward these levels as resistance. The technique below only ever
+// watches whichever side is live, never both at once — the standard way
+// this tool is actually used.
+export function fibonacciLevels(closes, lookback = 90) {
+  if (!closes || closes.length < lookback) return null;
+  const window = closes.slice(-lookback);
+  let hiIdx = 0, loIdx = 0;
+  for (let i = 1; i < window.length; i++) {
+    if (window[i] > window[hiIdx]) hiIdx = i;
+    if (window[i] < window[loIdx]) loIdx = i;
+  }
+  const hi = window[hiIdx], lo = window[loIdx];
+  if (!(hi > lo)) return null;
+  const span = hi - lo;
+  return {
+    hi, lo,
+    legUp: hiIdx > loIdx,
+    l382: hi - 0.382 * span,
+    l500: hi - 0.5 * span,
+    l618: hi - 0.618 * span
+  };
+}
+
 export function evaluateTechniques(m, kind, reliability, marketContext) {
   const T = [];
   const push = (id, w, dir, note) => T.push({ id, w: w * reliabilityMultiplier(reliability, m.symbol, id), dir, note });
@@ -902,6 +939,31 @@ export function evaluateTechniques(m, kind, reliability, marketContext) {
     push('seasonal', 0.9, null, null);
   }
 
+  // T17 Fibonacci retracement: price sitting within a tight band of the
+  // 38.2/50/61.8% retracement of the recent swing (the "golden pocket" and
+  // its immediate neighbors — the shallower/deeper 23.6%/78.6% levels
+  // exist but are too weak a reaction zone on their own to vote from).
+  // Never fires on proximity alone — same independent-confirmation bar as
+  // the reversal technique (T14): a stochastic cross, Bollinger extreme,
+  // swing structure, or the divergence proxy has to agree before a level
+  // touch counts as a real reaction rather than price just passing
+  // through. Only the swing's live leg direction (see fibonacciLevels)
+  // counts — a pullback holding support after an up-leg is bullish, a
+  // bounce rejected at resistance after a down-leg is bearish, never both.
+  if (m.fib) {
+    const price = m.price;
+    const band = price * FIB_PROXIMITY_PCT / 100;
+    const levels = [['38.2%', m.fib.l382], ['50%', m.fib.l500], ['61.8%', m.fib.l618]];
+    const near = levels.find(([, v]) => Math.abs(price - v) <= band);
+    const confirmBull = (m.stoch && m.stoch.crossUp) || (m.bb && m.bb.pctB < 0.15) || m.structure === 1 || m.divergence === 1;
+    const confirmBear = (m.stoch && m.stoch.crossDown) || (m.bb && m.bb.pctB > 0.85) || m.structure === -1 || m.divergence === -1;
+    if (near && m.fib.legUp && confirmBull) push('fibonacci', 0.8, 1, `holding ${near[0]} retracement of its recent up-leg`);
+    else if (near && !m.fib.legUp && confirmBear) push('fibonacci', 0.8, -1, `rejected at ${near[0]} retracement of its recent down-leg`);
+    else push('fibonacci', 0.8, 0, null);
+  } else {
+    push('fibonacci', 0.8, null, null);
+  }
+
   return T;
 }
 
@@ -1106,18 +1168,38 @@ async function getTrending() {
   return set;
 }
 
-// Bybit linear perp tickers: one call returns funding for every USDT perp.
+// CoinGecko's aggregated derivatives listing: one call returns funding rate
+// + open interest for every tracked perpetual across every major exchange.
+// Replaced the previous Bybit-only tickers call after that endpoint started
+// returning HTTP 403 from GitHub Actions (confirmed live 2026-08-02 —
+// technique_reliability had zero 'positioning' rows across its entire
+// lifetime, meaning funding had silently never once worked since the
+// reliability system shipped on 2026-07-24, masked by the existing
+// Promise.allSettled fallback to `funding: {}`). This reuses CoinGecko,
+// already the pipeline's proven-reliable primary dependency, instead of
+// swapping in yet another single exchange with its own unknown access risk.
+// For each base symbol, keeps the USDT-margined perpetual market with the
+// highest open interest when more than one exchange lists it — the most
+// liquid, representative venue, not just whichever happens to sort first.
 export async function getFundingMap() {
-  const j = await fetchJson('https://api.bybit.com/v5/market/tickers?category=linear');
+  const j = await fetchJson('https://api.coingecko.com/api/v3/derivatives');
   const map = {};
-  for (const t of (j && j.result && j.result.list) || []) {
-    if (t.symbol && t.symbol.endsWith('USDT') && t.fundingRate !== undefined) {
-      const base = t.symbol.slice(0, -4);
-      const f = parseFloat(t.fundingRate);
-      if (Number.isFinite(f)) map[base] = f;
+  let bestOi = {};
+  for (const t of j || []) {
+    if (t.contract_type !== 'perpetual') continue;
+    if (!t.index_id || !t.symbol || !t.symbol.toUpperCase().endsWith('USDT')) continue;
+    const fundingRate = parseFloat(t.funding_rate);
+    if (!Number.isFinite(fundingRate)) continue;
+    const oiParsed = parseFloat(t.open_interest);
+    const openInterest = Number.isFinite(oiParsed) ? oiParsed : null;
+    const base = t.index_id.toUpperCase();
+    const rank = openInterest ?? -1;
+    if (!(base in bestOi) || rank > bestOi[base]) {
+      bestOi[base] = rank;
+      map[base] = { fundingRate, openInterest, market: t.market || null };
     }
   }
-  if (!Object.keys(map).length) throw new Error('empty funding map');
+  if (!Object.keys(map).length) throw new Error('empty derivatives map');
   return map;
 }
 
@@ -1291,6 +1373,7 @@ export function buildCryptoMetrics(item, extras = {}) {
   const dwell = haveDaily ? dwellAtExtreme(closes, 365) : null;
   const corr = haveDaily && extras.benchCloses ? correlationWithBenchmark(closes, extras.benchCloses, 30) : null;
   const seasonal = haveDaily ? seasonalAnalog(closes, 365) : null;
+  const fib = haveDaily ? fibonacciLevels(closes) : null;
 
   return {
     symbol,
@@ -1299,6 +1382,7 @@ export function buildCryptoMetrics(item, extras = {}) {
     dwell,
     corr,
     seasonal,
+    fib,
     volPct,
     volLookbackDays: volLookback ? volLookback.lookback : null,
     price,
@@ -1331,7 +1415,8 @@ export function buildCryptoMetrics(item, extras = {}) {
     structure: swingStructure(closes, haveDaily ? 40 : 48),
     divergence: divergenceProxy(closes, rNow, haveDaily ? 25 : 36),
     volReg: volRegime(closes, haveDaily ? 20 : 24, haveDaily ? 100 : 120),
-    funding: extras.funding != null ? extras.funding : null,
+    funding: extras.funding != null ? extras.funding.fundingRate : null,
+    openInterest: extras.funding != null ? extras.funding.openInterest : null,
     trending: !!extras.trending
   };
 }
@@ -1358,6 +1443,7 @@ export function buildStockMetrics(row, valuation, override, benchCloses) {
   const dwell = dwellAtExtreme(closes, 252);
   const corr = benchCloses ? correlationWithBenchmark(closes, benchCloses, 30) : null;
   const seasonal = seasonalAnalog(closes, 252);
+  const fib = fibonacciLevels(closes);
   const hi52 = Math.max(...closes);
 
   let val = null;
@@ -1383,6 +1469,7 @@ export function buildStockMetrics(row, valuation, override, benchCloses) {
     dwell,
     corr,
     seasonal,
+    fib,
     chgShort: pct(1),
     chg24h: pct(1),
     chg7d: pct(5),

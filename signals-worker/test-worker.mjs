@@ -85,9 +85,17 @@ function stubbedFetch(url) {
   if (u.includes('/global')) return ok({ data: { total_market_cap: { usd: 2.3e12 }, market_cap_change_percentage_24h_usd: 1.5, market_cap_percentage: { btc: 52.1 } } });
   if (u.includes('alternative.me/fng')) return ok({ data: [{ value: '38', value_classification: 'Fear' }] });
   if (u.includes('search/trending')) return ok({ coins: [{ item: { symbol: 'SOL' } }] });
-  if (u.includes('bybit.com')) return ok({ result: { list: [
-    { symbol: 'BTCUSDT', fundingRate: '0.00005' }, { symbol: 'SOLUSDT', fundingRate: '-0.0001' }, { symbol: 'LINKUSDT', fundingRate: '0.0002' }
-  ] } });
+  // CoinGecko's aggregated derivatives listing (replaced Bybit's tickers
+  // call after that endpoint started 403-ing from GitHub Actions — see
+  // getFundingMap's docs). BTC deliberately listed on two markets with
+  // different open_interest to exercise "keeps the highest-OI market."
+  if (u.includes('/derivatives')) return ok([
+    { contract_type: 'perpetual', index_id: 'BTC', symbol: 'BTCUSDT', funding_rate: 0.00005, open_interest: 5e9, market: 'Binance (Futures)' },
+    { contract_type: 'perpetual', index_id: 'BTC', symbol: 'BTCUSDT', funding_rate: 0.00009, open_interest: 1e8, market: 'OKX (Futures)' },
+    { contract_type: 'perpetual', index_id: 'SOL', symbol: 'SOLUSDT', funding_rate: -0.0001, open_interest: 8e8, market: 'Binance (Futures)' },
+    { contract_type: 'perpetual', index_id: 'LINK', symbol: 'LINKUSDT', funding_rate: 0.0002, open_interest: 2e8, market: 'Binance (Futures)' },
+    { contract_type: 'futures', index_id: 'BTC', symbol: 'BTCUSD_1226', funding_rate: 0.0003, open_interest: 9e9, market: 'CME (Futures)' }
+  ]);
   if (u.includes('fc.yahoo.com')) return ok('', true);
   if (u.includes('getcrumb')) return ok('testcrumb', true);
   if (u.includes('quoteSummary')) {
@@ -137,6 +145,12 @@ check('clickable-row + sortable-header tracking present', pageText.includes('sig
 check('horizon chip markup + methodology copy present', pageText.includes('class="horizon') && pageText.includes('hz-hist') && pageText.includes('hz-meth') && pageText.includes('Leading vs. lagging'));
 check('track-record section + methodology copy present', pageText.includes('id="trackRecord"') && pageText.includes('95%+') && pageText.includes('Prediction-score track record'));
 check('live-price markup + polling code present', pageText.includes('live-price-cell') && pageText.includes('live-chg-cell') && pageText.includes("api/prices") && pageText.includes('updateLivePrices'));
+
+console.log('\n== getFundingMap: CoinGecko derivatives, highest-OI perpetual market wins ==');
+const fundingMap = await mod.getFundingMap();
+check('BTC picks the higher-OI perpetual market (Binance, 5e9) over the lower-OI one (OKX, 1e8)', fundingMap.BTC.fundingRate === 0.00005 && fundingMap.BTC.openInterest === 5e9, JSON.stringify(fundingMap.BTC));
+check('a futures (non-perpetual) contract with even higher OI is correctly excluded', fundingMap.BTC.market === 'Binance (Futures)', fundingMap.BTC.market);
+check('SOL and LINK (single-market fixtures) both present', fundingMap.SOL.fundingRate === -0.0001 && fundingMap.LINK.fundingRate === 0.0002);
 
 console.log('\n== api: empty KV (before first Action run) ==');
 const empty = await worker.fetch(new Request('https://x.com/signals/api/signals'), emptyEnv, ctx);
@@ -452,6 +466,18 @@ const noAnalogCloses = Array.from({ length: totalLen }, () => 100 + Math.random(
 const noAnalog = mod.seasonalAnalog(noAnalogCloses, cycleLength, 90, 7, 6);
 check('pure noise, no real resemblance to any prior period: returns null rather than fitting noise', noAnalog === null, JSON.stringify(noAnalog));
 
+console.log('\n== fibonacciLevels: retracement of the real recent swing, not a guess ==');
+check('too short a series: returns null', mod.fibonacciLevels(Array.from({ length: 10 }, () => 100), 90) === null);
+check('flat series (hi===lo): returns null', mod.fibonacciLevels(Array.from({ length: 90 }, () => 100), 90) === null);
+const upLeg = Array.from({ length: 90 }, (_, i) => 100 + i); // low at idx0, high at idx89
+const upFib = mod.fibonacciLevels(upLeg, 90);
+check('clean up-leg: low came first, high is most recent -> legUp true', upFib && upFib.legUp === true, JSON.stringify(upFib));
+check('up-leg 50% level sits at the true midpoint', upFib && Math.abs(upFib.l500 - (upFib.hi + upFib.lo) / 2) < 1e-9);
+check('up-leg levels ordered high > 38.2% > 50% > 61.8% > low (38.2% is the shallow retracement, closer to the high)', upFib.hi > upFib.l382 && upFib.l382 > upFib.l500 && upFib.l500 > upFib.l618 && upFib.l618 > upFib.lo);
+const downLeg = Array.from({ length: 90 }, (_, i) => 189 - i); // high at idx0, low is most recent
+const downFib = mod.fibonacciLevels(downLeg, 90);
+check('clean down-leg: high came first, low is most recent -> legUp false', downFib && downFib.legUp === false, JSON.stringify(downFib));
+
 console.log('\n== dwell + seasonal techniques: fire only with real signal, learn like every other technique ==');
 const dwellLowMetric = baseMetric({ rsi: 50, rsiPrev: 50, dwell: { dir: -1, days: 12 }, corr: 0.8 }); // dwelling low, but still correlated with the market
 const dwellLowDecoupled = baseMetric({ rsi: 50, rsiPrev: 50, dwell: { dir: -1, days: 12 }, corr: 0.1 }); // same dwell, decoupled
@@ -469,6 +495,20 @@ const seasonalBearMetric = baseMetric({ seasonal: { cycle: 1, corr: 0.6, forward
 check('a bullish seasonal analog votes bullish', findTech(mod.evaluateTechniques(seasonalBullMetric, 'crypto'), 'seasonal').dir === 1);
 check('a bearish seasonal analog votes bearish', findTech(mod.evaluateTechniques(seasonalBearMetric, 'crypto'), 'seasonal').dir === -1);
 check('no seasonal analog found: abstains (null), the common case for younger assets', findTech(mod.evaluateTechniques(baseMetric({}), 'crypto'), 'seasonal').dir === null);
+
+console.log('\n== fibonacci technique: never fires on proximity to a level alone ==');
+const fibUp = { hi: 200, lo: 100, legUp: true, l382: 200 - 0.382 * 100, l500: 150, l618: 200 - 0.618 * 100 };
+const fibAtFiftyConfirmed = baseMetric({ price: 150, fib: fibUp, structure: 1 });
+const fibAtFiftyUnconfirmed = baseMetric({ price: 150, fib: fibUp, structure: 0 });
+const fibFarFromLevel = baseMetric({ price: 180, fib: fibUp, structure: 1 });
+const fTechConfirmed = findTech(mod.evaluateTechniques(fibAtFiftyConfirmed, 'crypto'), 'fibonacci');
+const fTechUnconfirmed = findTech(mod.evaluateTechniques(fibAtFiftyUnconfirmed, 'crypto'), 'fibonacci');
+const fTechFar = findTech(mod.evaluateTechniques(fibFarFromLevel, 'crypto'), 'fibonacci');
+const fTechNoData = findTech(mod.evaluateTechniques(baseMetric({ price: 150 }), 'crypto'), 'fibonacci');
+check('holding the 50% retracement of an up-leg, confirmed by structure: bullish', fTechConfirmed.dir === 1, JSON.stringify(fTechConfirmed));
+check('same level, no independent confirmation: does not fire', fTechUnconfirmed.dir === 0, JSON.stringify(fTechUnconfirmed));
+check('nowhere near a level: neutral, not a guess', fTechFar.dir === 0, JSON.stringify(fTechFar));
+check('no fib data at all: abstains (null), not a guess', fTechNoData.dir === null, JSON.stringify(fTechNoData));
 
 console.log('\n== compositeCall: one directional read per asset from the long/short pair ==');
 check('a tie (long === short) has no falsifiable direction: null', mod.compositeCall({ long: 60, short: 60 }) === null);

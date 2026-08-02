@@ -80,73 +80,28 @@ export async function coingeckoDailyBars(id, days = 365) {
   return bars;
 }
 
-// Bybit funding-rate history, paginated backward via endTime until either
-// `sinceMs` is reached or the exchange runs out of history for this
-// contract (whichever's first — most perps don't go back a full year).
-// NOTE: response shape (`result.list[].fundingRateTimestamp/.fundingRate`)
-// follows Bybit's documented v5 API and mirrors the already-proven-live
-// ticker endpoint's field-naming convention, but this specific endpoint has
-// not been exercised live yet (see the plan) — logs a truncated raw
-// response on an unexpected shape so the first real run is debuggable
-// rather than silently wrong.
-export async function bybitFundingHistory(contractSymbol, sinceMs, maxPages = 40) {
-  const out = [];
-  let endTime = Date.now();
-  for (let page = 0; page < maxPages; page++) {
-    const url = `https://api.bybit.com/v5/market/funding/history`
-      + `?category=linear&symbol=${encodeURIComponent(contractSymbol)}&endTime=${endTime}&limit=200`;
-    const j = await fetchJson(url);
-    if (j.retCode !== 0) throw new Error(`Bybit retCode ${j.retCode}: ${j.retMsg}`);
-    const rows = (j.result && j.result.list) || [];
-    if (!rows.length) break;
-    for (const row of rows) {
-      const ts = Number(row.fundingRateTimestamp);
-      const rate = Number(row.fundingRate);
-      if (!Number.isFinite(ts) || !Number.isFinite(rate)) {
-        console.error(`bybitFundingHistory: unexpected row shape for ${contractSymbol}:`, JSON.stringify(row).slice(0, 200));
-        continue;
-      }
-      out.push({ ts, date: new Date(ts).toISOString().slice(0, 10), fundingRate: rate });
-    }
-    const oldest = Math.min(...rows.map((r) => Number(r.fundingRateTimestamp)));
-    if (!Number.isFinite(oldest) || oldest <= sinceMs) break;
-    endTime = oldest - 1;
-    await new Promise((res) => setTimeout(res, 250));
+// Funding/OI history has no dedicated function here anymore: Bybit's
+// funding/history and open-interest endpoints (the original plan) turned
+// out to require a paid-tier-only access path — a live run confirmed
+// api.bybit.com/v5/market/tickers itself now returns HTTP 403 from GitHub
+// Actions, and technique_reliability had zero 'positioning' rows across its
+// entire lifetime, meaning Bybit funding had silently never worked at all
+// since the reliability system shipped. Replaced with CoinGecko's
+// /derivatives listing (see getFundingMap in worker.js) for the *live*
+// snapshot — reusing the pipeline's already-proven-reliable primary
+// dependency instead of a second unproven exchange. That endpoint has no
+// history equivalent, so funding_rate_daily has no deep-backfill path the
+// way asset_daily_bars does: depth grows the same way the ~29% CoinGecko-
+// fallback slice of the price archive does — one real snapshot logged per
+// day, starting from whenever daily-refresh.mjs first runs, accumulating
+// forward from there. See appendTodaysFundingSnapshot below.
+export function fundingSnapshotToRows(fundingMap, date) {
+  const rows = [];
+  for (const [symbol, v] of Object.entries(fundingMap || {})) {
+    if (v.fundingRate == null && v.openInterest == null) continue;
+    rows.push({ symbol, date, fundingRate: v.fundingRate ?? null, openInterest: v.openInterest ?? null, source: 'coingecko' });
   }
-  // Multiple funding events/day (most perps: every 8h) collapse to one
-  // archive row per day — mean of that day's rates, which is what a
-  // "today's funding level" read should mean at daily grain.
-  const byDate = new Map();
-  for (const f of out) {
-    const cur = byDate.get(f.date);
-    if (!cur) byDate.set(f.date, { sum: f.fundingRate, n: 1 });
-    else { cur.sum += f.fundingRate; cur.n += 1; }
-  }
-  return [...byDate.entries()].map(([date, v]) => ({ date, fundingRate: v.sum / v.n }));
-}
-
-// Bybit open interest, daily granularity, most-recent window only (this
-// endpoint's lookback is short regardless of pagination per Bybit's docs —
-// depth here comes from accumulating one call/day going forward via
-// daily-refresh.mjs, same pattern as everything else in this archive).
-// Same shape-uncertainty caveat as bybitFundingHistory above.
-export async function bybitOpenInterest(contractSymbol) {
-  const url = `https://api.bybit.com/v5/market/open-interest`
-    + `?category=linear&symbol=${encodeURIComponent(contractSymbol)}&intervalTime=1d&limit=200`;
-  const j = await fetchJson(url);
-  if (j.retCode !== 0) throw new Error(`Bybit retCode ${j.retCode}: ${j.retMsg}`);
-  const rows = (j.result && j.result.list) || [];
-  const out = [];
-  for (const row of rows) {
-    const ts = Number(row.timestamp);
-    const oi = Number(row.openInterest);
-    if (!Number.isFinite(ts) || !Number.isFinite(oi)) {
-      console.error(`bybitOpenInterest: unexpected row shape for ${contractSymbol}:`, JSON.stringify(row).slice(0, 200));
-      continue;
-    }
-    out.push({ date: new Date(ts).toISOString().slice(0, 10), openInterest: oi });
-  }
-  return out;
+  return rows;
 }
 
 // Per-symbol (minDate, maxDate, count) already in asset_daily_bars — lets

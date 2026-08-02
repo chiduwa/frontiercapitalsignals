@@ -11,7 +11,7 @@
 import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST } from '../worker.js';
 import {
   yahooFullHistory, coingeckoDailyBars, getExistingCoverage,
-  upsertDailyBars, bybitFundingHistory, bybitOpenInterest, upsertFundingDaily
+  upsertDailyBars, fundingSnapshotToRows, upsertFundingDaily
 } from './archive.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
@@ -96,50 +96,32 @@ async function main() {
   if (priceFailed.length) console.log(`  failures: ${priceFailed.join('; ')}`);
   console.log(`price rows written: ${priceRowsWritten}/${PRICE_ROW_BUDGET}`);
 
-  // Independent budget — always gets a turn even when the price leg above
-  // (iterated market-cap-first, so BTC/ETH/the biggest, oldest assets go
-  // first and can burn an entire shared budget on their own) used all of
-  // its own.
+  // No deep-history backfill for funding/OI — CoinGecko's /derivatives
+  // (see getFundingMap in worker.js, and fundingSnapshotToRows's docs in
+  // archive.mjs for why this replaced the original Bybit-history plan) is a
+  // live-snapshot-only endpoint with no historical equivalent. This just
+  // logs *today's* real snapshot; depth grows one real day at a time from
+  // here forward, same as the CoinGecko-fallback slice of the price
+  // archive. FUNDING_ROW_BUDGET still applies (caps how many symbols'
+  // snapshots get written this run) even though a single day's snapshot is
+  // tiny compared to the price leg's multi-year pulls.
   let fundingRowsWritten = 0;
-  const fundingBudgetLeft = () => FUNDING_ROW_BUDGET - fundingRowsWritten;
-  let fundingMap = {};
-  try { fundingMap = await getFundingMap(); } catch (e) { console.error('getFundingMap failed, skipping funding/OI backfill:', e.message); }
-  const perpSymbols = cryptoUniverse.filter((a) => fundingMap[a.symbol] !== undefined);
-  console.log(`${perpSymbols.length} of ${cryptoUniverse.length} crypto assets have a Bybit perp`);
-
-  let fundingOk = 0;
-  const fundingFailed = [];
-  const oneYearAgoMs = Date.now() - 365 * 86400000;
-  for (const a of perpSymbols) {
-    if (fundingBudgetLeft() <= 0) { console.log('funding budget exhausted — stopping funding backfill early, resume next run'); break; }
-    const contract = `${a.symbol}USDT`;
-    try {
-      const [funding, oi] = await Promise.all([
-        bybitFundingHistory(contract, oneYearAgoMs),
-        bybitOpenInterest(contract).catch((e) => { console.error(`OI failed for ${a.symbol}:`, e.message); return []; })
-      ]);
-      const byDate = new Map();
-      for (const f of funding) byDate.set(f.date, { symbol: a.symbol, date: f.date, fundingRate: f.fundingRate, openInterest: null, source: 'bybit' });
-      for (const o of oi) {
-        const row = byDate.get(o.date) || { symbol: a.symbol, date: o.date, fundingRate: null, openInterest: null, source: 'bybit' };
-        row.openInterest = o.openInterest;
-        byDate.set(o.date, row);
-      }
-      const rows = [...byDate.values()].slice(0, Math.max(fundingBudgetLeft(), 0));
-      if (rows.length) {
-        const written = await upsertFundingDaily(env, rows);
-        fundingRowsWritten += written;
-        rowsWrittenThisRun += written;
-      }
-      fundingOk++;
-    } catch (e) {
-      fundingFailed.push(`${a.symbol} (${e.message})`);
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    const fundingMap = await getFundingMap();
+    const perpSymbols = cryptoUniverse.filter((a) => fundingMap[a.symbol] !== undefined);
+    console.log(`${perpSymbols.length} of ${cryptoUniverse.length} crypto assets have derivatives coverage`);
+    const wantedMap = Object.fromEntries(perpSymbols.map((a) => [a.symbol, fundingMap[a.symbol]]));
+    const rows = fundingSnapshotToRows(wantedMap, today).slice(0, FUNDING_ROW_BUDGET);
+    if (rows.length) {
+      fundingRowsWritten = await upsertFundingDaily(env, rows);
+      rowsWrittenThisRun += fundingRowsWritten;
     }
-    await new Promise((r) => setTimeout(r, 300));
+    console.log(`funding/OI snapshot: wrote today's reading for ${rows.length} symbols`);
+  } catch (e) {
+    console.error('getFundingMap failed, skipping funding/OI snapshot:', e.message);
   }
-  console.log(`funding/OI backfill: ok ${fundingOk}, failed ${fundingFailed.length}`);
-  if (fundingFailed.length) console.log(`  failures: ${fundingFailed.join('; ')}`);
-  console.log(`funding rows written: ${fundingRowsWritten}/${FUNDING_ROW_BUDGET}`);
+  console.log(`funding rows written: ${fundingRowsWritten}`);
 
   const finalCoverage = await getExistingCoverage(env, universe.map((u) => u.symbol));
   const depths = Object.values(finalCoverage).map((c) => c.count).sort((a, b) => a - b);
