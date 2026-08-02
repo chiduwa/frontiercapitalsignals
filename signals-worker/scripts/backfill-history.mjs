@@ -8,7 +8,7 @@
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID
 // Optional env: BACKFILL_ROW_BUDGET (default 15000 — free-D1-tier-safe;
 //   raise once Workers Paid is confirmed active, see the plan)
-import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST } from '../worker.js';
+import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, BENCHMARK_SYMBOLS } from '../worker.js';
 import {
   yahooFullHistory, coingeckoDailyBars, getExistingCoverage,
   upsertDailyBars, fundingSnapshotToRows, upsertFundingDaily
@@ -40,10 +40,15 @@ async function main() {
   const cryptoUniverse = cryptoRaw
     .filter((c) => !CRYPTO_BLOCKLIST.has((c.symbol || '').toLowerCase()))
     .filter((c) => (c.market_cap || 0) >= CRYPTO_MIN_MCAP && (c.total_volume || 0) >= CRYPTO_MIN_VOLUME)
-    .map((c) => ({ symbol: (c.symbol || '').toUpperCase(), id: c.id, assetClass: 'crypto' }));
-  const stockUniverse = STOCK_WATCHLIST.map((s) => ({ symbol: s, assetClass: 'stock' }));
-  const universe = [...cryptoUniverse, ...stockUniverse];
-  console.log(`universe: ${cryptoUniverse.length} crypto + ${stockUniverse.length} stock = ${universe.length}`);
+    .map((c) => ({ symbol: (c.symbol || '').toUpperCase(), id: c.id, assetClass: 'crypto', yahooTicker: `${(c.symbol || '').toUpperCase()}-USD` }));
+  const stockUniverse = STOCK_WATCHLIST.map((s) => ({ symbol: s, assetClass: 'stock', yahooTicker: s }));
+  // Macro benchmarks (DXY/Gold/Oil) — archived alongside crypto/stocks so
+  // they're eligible candidate leaders for the cross-asset lead/lag engine
+  // (scripts/daily-refresh.mjs), same as any other asset. Yahoo-only, no
+  // CoinGecko fallback applicable (these aren't crypto).
+  const benchmarkUniverse = BENCHMARK_SYMBOLS.map((b) => ({ symbol: b.symbol, assetClass: 'benchmark', yahooTicker: b.yahoo }));
+  const universe = [...cryptoUniverse, ...stockUniverse, ...benchmarkUniverse];
+  console.log(`universe: ${cryptoUniverse.length} crypto + ${stockUniverse.length} stock + ${benchmarkUniverse.length} benchmark = ${universe.length}`);
 
   const coverage = await getExistingCoverage(env, universe.map((u) => u.symbol));
 
@@ -62,8 +67,7 @@ async function main() {
 
     let bars = null, source = null;
     try {
-      const ticker = a.assetClass === 'crypto' ? `${a.symbol}-USD` : a.symbol;
-      bars = await yahooFullHistory(ticker);
+      bars = await yahooFullHistory(a.yahooTicker);
       source = 'yahoo';
       yahooOk++;
     } catch (e) {

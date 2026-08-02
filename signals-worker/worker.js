@@ -99,6 +99,21 @@ export const STOCK_WATCHLIST = [
 
 export const OVERVIEW_SYMBOLS = ['SPY', 'QQQ', '^VIX'];
 
+// Macro benchmarks: not screened against the confluence score like crypto/
+// stocks are (nothing "trades" DXY/Gold/Oil here), fetched purely as
+// market-wide context and — via the permanent archive (see
+// scripts/backfill-history.mjs, which includes these in its universe) — as
+// candidate leaders for the cross-asset lead/lag engine. A lot of textbook
+// lead/lag relationships run through exactly these three (a rising dollar
+// often leads crypto/gold weaker, oil leads inflation-sensitive equities,
+// etc.). `yahoo` is the fetch ticker; `symbol` is the stable name used
+// everywhere else in the pipeline (archive rows, payload.overview, D1).
+export const BENCHMARK_SYMBOLS = [
+  { symbol: 'DXY', yahoo: 'DX-Y.NYB', label: 'US Dollar Index' },
+  { symbol: 'GOLD', yahoo: 'GC=F', label: 'Gold futures' },
+  { symbol: 'OIL', yahoo: 'CL=F', label: 'WTI crude futures' }
+];
+
 const FETCH_TIMEOUT_MS = 9000;
 const POOL_CONCURRENCY = 8;
 const UA = 'Mozilla/5.0 (compatible; FrontierCapitalSignals/2.0)';
@@ -1576,6 +1591,7 @@ function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHori
       topIndicator: topIndicator(reliability, x.m.symbol),
       ...(x.m.val ? { val: { target: x.m.val.target, upside: x.m.val.upside, recKey: x.m.val.recKey, source: x.m.val.source } } : {}),
       ...(x.m.funding != null ? { funding: x.m.funding } : {}),
+      ...(x.m.openInterest != null ? { openInterest: x.m.openInterest } : {}),
       ...(x.m.distHigh52w != null ? { distHigh52w: x.m.distHigh52w } : {}),
       ...(x.m.rank != null ? { mcapRank: x.m.rank } : {}),
       ...(x.m.volLookbackDays != null ? { volLookbackDays: x.m.volLookbackDays } : {}),
@@ -1606,7 +1622,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   const started = Date.now();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
 
-  const [cryptoR, globalR, fngR, trendR, fundR, stocksR, overviewR, valR] = await Promise.allSettled([
+  const [cryptoR, globalR, fngR, trendR, fundR, stocksR, overviewR, valR, benchR] = await Promise.allSettled([
     getCryptoMarkets(),
     getGlobal(),
     getFearGreed(),
@@ -1618,7 +1634,11 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     // 30-day-returns correlation. Same single fetch either way, just more
     // history per call.
     pool(OVERVIEW_SYMBOLS, 3, (s) => yahooDaily(s, '6mo')),
-    getAllValuations(STOCK_WATCHLIST)
+    getAllValuations(STOCK_WATCHLIST),
+    // Macro benchmarks (see BENCHMARK_SYMBOLS docs) — fetched by Yahoo
+    // ticker, relabeled to the stable `symbol` name before use since the
+    // two differ (e.g. yahoo 'DX-Y.NYB' -> symbol 'DXY').
+    pool(BENCHMARK_SYMBOLS, 3, (b) => yahooDaily(b.yahoo, '6mo').then((r) => ({ ...r, symbol: b.symbol })))
   ]);
 
   const trending = trendR.status === 'fulfilled' ? trendR.value : new Set();
@@ -1632,8 +1652,9 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   // absolute threshold). Computed from data already being fetched for the
   // overview tiles — no extra calls.
   const idx = {};
-  if (overviewR.status === 'fulfilled') {
-    for (const r of overviewR.value) {
+  for (const settled of [overviewR, benchR]) {
+    if (settled.status !== 'fulfilled') continue;
+    for (const r of settled.value) {
       if (r && !r._error && r.closes && r.closes.length >= 2) {
         const prev = r.closes[r.closes.length - 2];
         idx[r.symbol] = {
@@ -1762,7 +1783,10 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
       fear_greed: fngR.status === 'fulfilled' ? fngR.value : null,
       spy: idx['SPY'] || null,
       qqq: idx['QQQ'] || null,
-      vix: idx['^VIX'] || null
+      vix: idx['^VIX'] || null,
+      dxy: idx['DXY'] || null,
+      gold: idx['GOLD'] || null,
+      oil: idx['OIL'] || null
     },
     crypto: cryptoPublic,
     stocks: stockPublic,

@@ -214,6 +214,8 @@ check('rangePos stays in [0,1]', built.crypto.breakout.every(r => r.rangePos == 
 check('valuation flowed in', built.stocks.breakout.concat(built.stocks.breakdown).some(r => r.val));
 check('trefis override applied', built.health.trefis_overrides === 1);
 check('funding fed to crypto', built.crypto.breakout.concat(built.crypto.breakdown).some(r => r.funding != null));
+check('open interest fed to crypto', built.crypto.breakout.concat(built.crypto.breakdown).some(r => r.openInterest != null));
+check('DXY/Gold/Oil macro benchmarks reach payload.overview', built.overview.dxy && built.overview.gold && built.overview.oil, JSON.stringify(built.overview));
 check('health counts sane', built.health.stocks_ok === built.health.stocks_total && built.health.valuation_ok > 0);
 check('crypto_daily health reflects the daily-history fetch (3 of 4 succeed, solana has none stubbed)', built.health.crypto_daily_total === 4 && built.health.crypto_daily_ok === 3, `ok=${built.health.crypto_daily_ok} total=${built.health.crypto_daily_total}`);
 check('votesLog/priceLog/rangeLog/allSymbols not leaked into the public payload', built.crypto.votesLog === undefined && built.crypto.priceLog === undefined && built.crypto.rangeLog === undefined && built.crypto.allSymbols === undefined && built.stocks.votesLog === undefined && built.stocks.rangeLog === undefined && built.stocks.allSymbols === undefined);
