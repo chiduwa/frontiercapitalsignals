@@ -11,9 +11,13 @@ on:
   workflow_dispatch:
     inputs:
       row_budget:
-        description: "Max archive rows to write this run"
+        description: "Max price-bar rows to write this run"
         required: false
         default: "15000"
+      funding_row_budget:
+        description: "Max funding/OI rows to write this run"
+        required: false
+        default: "4000"
 
 jobs:
   backfill:
@@ -36,3 +40,4 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
           BACKFILL_ROW_BUDGET: ${{ inputs.row_budget }}
+          BACKFILL_FUNDING_ROW_BUDGET: ${{ inputs.funding_row_budget }}

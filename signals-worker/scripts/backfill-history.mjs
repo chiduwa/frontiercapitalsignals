@@ -20,12 +20,21 @@ for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUN
 }
 const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID };
 
-const ROW_BUDGET = Number(process.env.BACKFILL_ROW_BUDGET || 15000);
+// Separate budgets for the price leg and the funding/OI leg, not one
+// shared pool: a live run confirmed the price leg alone can burn an entire
+// 15,000-row budget on just ~5 of the oldest/biggest crypto assets (BTC's
+// full history alone is 4,000+ daily bars, iterated first since the
+// universe is market-cap-ordered) — sharing one budget meant funding/OI
+// silently never got a turn at all, run after run. Each leg now always
+// gets to make some progress every invocation.
+const PRICE_ROW_BUDGET = Number(process.env.BACKFILL_ROW_BUDGET || 15000);
+const FUNDING_ROW_BUDGET = Number(process.env.BACKFILL_FUNDING_ROW_BUDGET || 4000);
 let rowsWrittenThisRun = 0;
-const budgetLeft = () => ROW_BUDGET - rowsWrittenThisRun;
+let priceRowsWritten = 0;
+const priceBudgetLeft = () => PRICE_ROW_BUDGET - priceRowsWritten;
 
 async function main() {
-  console.log(`backfill-history starting, row budget ${ROW_BUDGET}`);
+  console.log(`backfill-history starting, price budget ${PRICE_ROW_BUDGET}, funding budget ${FUNDING_ROW_BUDGET}`);
 
   const cryptoRaw = await getCryptoMarkets();
   const cryptoUniverse = cryptoRaw
@@ -41,7 +50,7 @@ async function main() {
   let yahooOk = 0, cgFallback = 0;
   const priceFailed = [];
   for (const a of universe) {
-    if (budgetLeft() <= 0) { console.log('row budget exhausted — stopping price backfill early, resume next run'); break; }
+    if (priceBudgetLeft() <= 0) { console.log('price budget exhausted — stopping price backfill early, resume next run'); break; }
     const existing = coverage[a.symbol];
     const daysSinceMax = existing ? (Date.now() - new Date(existing.maxDate).getTime()) / 86400000 : Infinity;
     // Already caught up (a recent bar + a real amount of depth) — skip
@@ -75,62 +84,71 @@ async function main() {
       const maxExisting = existing ? existing.maxDate : null;
       const fresh = bars.filter((b) => (!minExisting || b.date < minExisting) || (!maxExisting || b.date > maxExisting));
       if (fresh.length) {
-        const toWrite = fresh.slice(0, Math.max(budgetLeft(), 0)).map((b) => ({ symbol: a.symbol, assetClass: a.assetClass, ...b, source }));
-        rowsWrittenThisRun += await upsertDailyBars(env, toWrite);
+        const toWrite = fresh.slice(0, Math.max(priceBudgetLeft(), 0)).map((b) => ({ symbol: a.symbol, assetClass: a.assetClass, ...b, source }));
+        const written = await upsertDailyBars(env, toWrite);
+        priceRowsWritten += written;
+        rowsWrittenThisRun += written;
       }
     }
     await new Promise((r) => setTimeout(r, 250));
   }
   console.log(`price backfill: yahoo ${yahooOk}, coingecko fallback ${cgFallback}, failed ${priceFailed.length}`);
   if (priceFailed.length) console.log(`  failures: ${priceFailed.join('; ')}`);
-  console.log(`rows written so far: ${rowsWrittenThisRun}/${ROW_BUDGET}`);
+  console.log(`price rows written: ${priceRowsWritten}/${PRICE_ROW_BUDGET}`);
 
-  if (budgetLeft() > 0) {
-    let fundingMap = {};
-    try { fundingMap = await getFundingMap(); } catch (e) { console.error('getFundingMap failed, skipping funding/OI backfill:', e.message); }
-    const perpSymbols = cryptoUniverse.filter((a) => fundingMap[a.symbol] !== undefined);
-    console.log(`${perpSymbols.length} of ${cryptoUniverse.length} crypto assets have a Bybit perp`);
+  // Independent budget — always gets a turn even when the price leg above
+  // (iterated market-cap-first, so BTC/ETH/the biggest, oldest assets go
+  // first and can burn an entire shared budget on their own) used all of
+  // its own.
+  let fundingRowsWritten = 0;
+  const fundingBudgetLeft = () => FUNDING_ROW_BUDGET - fundingRowsWritten;
+  let fundingMap = {};
+  try { fundingMap = await getFundingMap(); } catch (e) { console.error('getFundingMap failed, skipping funding/OI backfill:', e.message); }
+  const perpSymbols = cryptoUniverse.filter((a) => fundingMap[a.symbol] !== undefined);
+  console.log(`${perpSymbols.length} of ${cryptoUniverse.length} crypto assets have a Bybit perp`);
 
-    let fundingOk = 0;
-    const fundingFailed = [];
-    const oneYearAgoMs = Date.now() - 365 * 86400000;
-    for (const a of perpSymbols) {
-      if (budgetLeft() <= 0) { console.log('row budget exhausted — stopping funding backfill early, resume next run'); break; }
-      const contract = `${a.symbol}USDT`;
-      try {
-        const [funding, oi] = await Promise.all([
-          bybitFundingHistory(contract, oneYearAgoMs),
-          bybitOpenInterest(contract).catch((e) => { console.error(`OI failed for ${a.symbol}:`, e.message); return []; })
-        ]);
-        const byDate = new Map();
-        for (const f of funding) byDate.set(f.date, { symbol: a.symbol, date: f.date, fundingRate: f.fundingRate, openInterest: null, source: 'bybit' });
-        for (const o of oi) {
-          const row = byDate.get(o.date) || { symbol: a.symbol, date: o.date, fundingRate: null, openInterest: null, source: 'bybit' };
-          row.openInterest = o.openInterest;
-          byDate.set(o.date, row);
-        }
-        const rows = [...byDate.values()].slice(0, Math.max(budgetLeft(), 0));
-        if (rows.length) rowsWrittenThisRun += await upsertFundingDaily(env, rows);
-        fundingOk++;
-      } catch (e) {
-        fundingFailed.push(`${a.symbol} (${e.message})`);
+  let fundingOk = 0;
+  const fundingFailed = [];
+  const oneYearAgoMs = Date.now() - 365 * 86400000;
+  for (const a of perpSymbols) {
+    if (fundingBudgetLeft() <= 0) { console.log('funding budget exhausted — stopping funding backfill early, resume next run'); break; }
+    const contract = `${a.symbol}USDT`;
+    try {
+      const [funding, oi] = await Promise.all([
+        bybitFundingHistory(contract, oneYearAgoMs),
+        bybitOpenInterest(contract).catch((e) => { console.error(`OI failed for ${a.symbol}:`, e.message); return []; })
+      ]);
+      const byDate = new Map();
+      for (const f of funding) byDate.set(f.date, { symbol: a.symbol, date: f.date, fundingRate: f.fundingRate, openInterest: null, source: 'bybit' });
+      for (const o of oi) {
+        const row = byDate.get(o.date) || { symbol: a.symbol, date: o.date, fundingRate: null, openInterest: null, source: 'bybit' };
+        row.openInterest = o.openInterest;
+        byDate.set(o.date, row);
       }
-      await new Promise((r) => setTimeout(r, 300));
+      const rows = [...byDate.values()].slice(0, Math.max(fundingBudgetLeft(), 0));
+      if (rows.length) {
+        const written = await upsertFundingDaily(env, rows);
+        fundingRowsWritten += written;
+        rowsWrittenThisRun += written;
+      }
+      fundingOk++;
+    } catch (e) {
+      fundingFailed.push(`${a.symbol} (${e.message})`);
     }
-    console.log(`funding/OI backfill: ok ${fundingOk}, failed ${fundingFailed.length}`);
-    if (fundingFailed.length) console.log(`  failures: ${fundingFailed.join('; ')}`);
-  } else {
-    console.log('row budget exhausted before funding backfill — resume next run');
+    await new Promise((r) => setTimeout(r, 300));
   }
+  console.log(`funding/OI backfill: ok ${fundingOk}, failed ${fundingFailed.length}`);
+  if (fundingFailed.length) console.log(`  failures: ${fundingFailed.join('; ')}`);
+  console.log(`funding rows written: ${fundingRowsWritten}/${FUNDING_ROW_BUDGET}`);
 
   const finalCoverage = await getExistingCoverage(env, universe.map((u) => u.symbol));
   const depths = Object.values(finalCoverage).map((c) => c.count).sort((a, b) => a - b);
   const totalRows = depths.reduce((a, b) => a + b, 0);
   const covered = Object.keys(finalCoverage).length;
   console.log(`asset_daily_bars: ${covered}/${universe.length} symbols covered, ${totalRows} total rows, median depth ${depths.length ? depths[Math.floor(depths.length / 2)] : 0} days`);
-  console.log(covered >= universe.length && budgetLeft() > 0
-    ? 'backfill appears fully caught up — future runs should be near no-ops'
-    : 'backfill not yet complete — re-run (workflow_dispatch) to continue');
+  console.log(covered >= universe.length && priceBudgetLeft() > 0
+    ? 'price backfill appears fully caught up — future runs should be near no-ops'
+    : 'price backfill not yet complete — re-run (workflow_dispatch) to continue');
   console.log(`total rows written this run: ${rowsWrittenThisRun}`);
 }
 

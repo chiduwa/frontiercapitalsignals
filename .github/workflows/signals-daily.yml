@@ -44,6 +44,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
-          # Free-tier-safe default (see backfill-history.mjs) — raise once
+          # Free-tier-safe defaults (see backfill-history.mjs) — raise once
           # Workers Paid is confirmed active on the account.
           BACKFILL_ROW_BUDGET: ${{ vars.BACKFILL_ROW_BUDGET || '15000' }}
+          BACKFILL_FUNDING_ROW_BUDGET: ${{ vars.BACKFILL_FUNDING_ROW_BUDGET || '4000' }}
