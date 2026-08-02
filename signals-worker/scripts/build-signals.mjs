@@ -12,7 +12,7 @@
 // Optional env: TREFIS_OVERRIDES
 // Optional (enables reliability weighting when set): FCS_D1_DATABASE_ID
 import { buildPayload, CACHE_KEY } from '../worker.js';
-import { loadReliability, loadMoveStats, loadRangeReliability, logRun, evaluateMatured } from './reliability.mjs';
+import { loadReliability, loadMoveStats, loadRangeReliability, loadTimeOfDayStats, logRun, evaluateMatured, evaluateTimeOfDay } from './reliability.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID })) {
@@ -26,7 +26,7 @@ const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID };
 // succeed with today's baseline (unweighted, methodology-only-horizon,
 // volatility-only-range) scoring rather than blocking the hourly KV
 // refresh on a secondary subsystem.
-let reliability, reliabilityByHorizon, moveStats, rangeReliability;
+let reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats;
 if (FCS_D1_DATABASE_ID) {
   try {
     const rel = await loadReliability(env);
@@ -37,15 +37,17 @@ if (FCS_D1_DATABASE_ID) {
     console.log(`loaded realized-move stats for ${Object.keys(moveStats).length} (symbol, horizon) pairs`);
     rangeReliability = await loadRangeReliability(env);
     console.log(`loaded range-prediction stats for ${Object.keys(rangeReliability).length} symbols`);
+    todStats = await loadTimeOfDayStats(env);
+    console.log(`loaded time-of-day stats for ${Object.keys(todStats).length} (symbol, slot, horizon) triples`);
   } catch (e) {
-    console.error('loadReliability/loadMoveStats/loadRangeReliability failed, continuing with baseline weights:', e.message || e);
+    console.error('loadReliability/loadMoveStats/loadRangeReliability/loadTimeOfDayStats failed, continuing with baseline weights:', e.message || e);
   }
 } else {
   console.log('FCS_D1_DATABASE_ID not set — reliability weighting disabled, using baseline weights');
 }
 
 const started = Date.now();
-const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon, moveStats, rangeReliability);
+const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats);
 console.log(`built payload in ${Date.now() - started}ms — crypto ${payload.crypto.universe} assets, stocks ${payload.stocks.universe} assets`);
 console.log('health:', JSON.stringify(payload.health));
 
@@ -69,5 +71,14 @@ if (FCS_D1_DATABASE_ID) {
     console.log(`logged ${log.votes.length} votes + ${log.prices.length} prices + ${log.ranges.length} range predictions; scored ${evaluatedCount} matured outcomes`);
   } catch (e) {
     console.error('reliability logging/evaluation failed (KV already updated, dashboard unaffected):', e.message || e);
+  }
+  try {
+    // Reuses this run's own just-logged prices (no re-query) — see
+    // evaluateTimeOfDay's docs for why this needs nothing to mature.
+    const priceMap = Object.fromEntries(log.prices.map((p) => [p.symbol, { price: p.price, assetClass: p.asset_class }]));
+    const todUpdates = await evaluateTimeOfDay(env, payload.generated_at, priceMap);
+    console.log(`updated time-of-day stats for ${todUpdates} (symbol, slot) pairs`);
+  } catch (e) {
+    console.error('time-of-day evaluation failed (KV already updated, dashboard unaffected):', e.message || e);
   }
 }

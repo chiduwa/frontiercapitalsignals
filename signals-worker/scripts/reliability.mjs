@@ -4,8 +4,18 @@
 // Talks to Cloudflare's D1 HTTP API directly via d1-client.mjs, shared with
 // the archive/backfill scripts so there's one D1 client, not a hand-copied
 // duplicate that could drift.
-import { MIN_RELIABILITY_SAMPLES } from '../worker.js';
+import { MIN_RELIABILITY_SAMPLES, slotsForTimestamp } from '../worker.js';
 import { d1, chunk } from './d1-client.mjs';
+
+// Matches the horizons timeOfDaySignal (worker.js) checks.
+const TOD_HORIZONS_HOURS = [1, 4];
+// How far a logged asset_price_log row is allowed to sit from the ideal
+// "horizon hours ago" instant and still count as that horizon's
+// observation — the hourly cadence isn't perfectly on-the-hour (see
+// signals-refresh.yml's :13-past note), so this tolerates normal jitter
+// while still rejecting a genuinely skipped cycle (which just means that
+// horizon is skipped this run, not mismeasured).
+const TOD_MATCH_TOLERANCE_MIN = 40;
 
 const HORIZONS_HOURS = [24, 168];
 const EVAL_COLUMN = { 24: 'evaluated_24', 168: 'evaluated_168' };
@@ -246,6 +256,81 @@ export async function evaluateMatured(env, nowIso) {
   await d1(env, 'DELETE FROM range_log WHERE run_at < ?', [hardCapCutoff]);
 
   return evaluatedCount;
+}
+
+// { meanPct, stdevPct, n } per "symbol|slot|horizon_hours" — mirrors
+// loadMoveStats' shape exactly, just with the added slot dimension.
+// Consumed by timeOfDaySignal (worker.js) once a slot clears its own
+// sample/effect-size bar.
+export async function loadTimeOfDayStats(env) {
+  const rows = await d1(env, 'SELECT symbol, slot, horizon_hours, n, sum_pct, sum_pct_sq FROM time_of_day_stats WHERE n > 0');
+  const out = {};
+  for (const r of rows) {
+    const mean = r.sum_pct / r.n;
+    const variance = Math.max(0, r.sum_pct_sq / r.n - mean * mean);
+    out[`${r.symbol}|${r.slot}|${r.horizon_hours}`] = { meanPct: mean, stdevPct: Math.sqrt(variance), n: r.n };
+  }
+  return out;
+}
+
+// Computes and persists the realized return from "horizon hours ago" to
+// "now" for every symbol, bucketed by the clock slot(s) the *earlier*
+// instant belonged to (see slotsForTimestamp in worker.js). Unlike
+// evaluateMatured above, this needs nothing to mature: both endpoints
+// (a `horizon` hours old asset_price_log row, and this run's own
+// just-logged prices) already exist by the time this runs, so it's a
+// realized statistic computed immediately, not a forecast scored later.
+// `thisRunPrices` is `{ symbol: { price, assetClass } }`, built by the
+// caller from the same log.prices this run already logged via logRun —
+// reused directly rather than re-querying what's already in memory.
+export async function evaluateTimeOfDay(env, nowIso, thisRunPrices) {
+  const now = new Date(nowIso).getTime();
+  let updates = 0;
+  for (const h of TOD_HORIZONS_HOURS) {
+    const targetMs = now - h * 3600 * 1000;
+    const toleranceMs = TOD_MATCH_TOLERANCE_MIN * 60 * 1000;
+    const rows = await d1(env, 'SELECT run_at, symbol, price FROM asset_price_log WHERE run_at BETWEEN ? AND ?', [
+      new Date(targetMs - toleranceMs).toISOString(),
+      new Date(targetMs + toleranceMs).toISOString()
+    ]);
+    if (!rows.length) continue;
+
+    // Nearest logged row per symbol to the ideal "h hours ago" instant.
+    const nearest = {};
+    for (const r of rows) {
+      const diff = Math.abs(new Date(r.run_at).getTime() - targetMs);
+      if (!nearest[r.symbol] || diff < nearest[r.symbol].diff) nearest[r.symbol] = { run_at: r.run_at, price: r.price, diff };
+    }
+
+    const deltas = {}; // "symbol|slot" -> { sumPct, sumPctSq, n, assetClass }
+    for (const [symbol, before] of Object.entries(nearest)) {
+      const after = thisRunPrices[symbol];
+      if (!after || after.price == null || !before.price) continue;
+      const pct = ((after.price / before.price) - 1) * 100;
+      for (const slot of slotsForTimestamp(before.run_at)) {
+        const key = `${symbol}|${slot}`;
+        if (!deltas[key]) deltas[key] = { sumPct: 0, sumPctSq: 0, n: 0, assetClass: after.assetClass };
+        deltas[key].sumPct += pct;
+        deltas[key].sumPctSq += pct * pct;
+        deltas[key].n += 1;
+      }
+    }
+
+    for (const [key, d_] of Object.entries(deltas)) {
+      const [symbol, slot] = key.split('|');
+      await d1(env, `
+        INSERT INTO time_of_day_stats (symbol, asset_class, slot, horizon_hours, n, sum_pct, sum_pct_sq, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (symbol, slot, horizon_hours) DO UPDATE SET
+          n = time_of_day_stats.n + excluded.n,
+          sum_pct = time_of_day_stats.sum_pct + excluded.sum_pct,
+          sum_pct_sq = time_of_day_stats.sum_pct_sq + excluded.sum_pct_sq,
+          updated_at = excluded.updated_at
+      `, [symbol, d_.assetClass, slot, h, d_.n, d_.sumPct, d_.sumPctSq, nowIso]);
+      updates++;
+    }
+  }
+  return updates;
 }
 
 export { MIN_RELIABILITY_SAMPLES };

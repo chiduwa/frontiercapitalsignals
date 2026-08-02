@@ -171,3 +171,26 @@ CREATE TABLE IF NOT EXISTS asset_score_snapshots (
   samples INTEGER NOT NULL,
   PRIMARY KEY (symbol, snapshot_date)
 );
+
+-- Time-of-day / day-of-week behavioral profile per asset: does this asset
+-- systematically move in a consistent direction in the `horizon_hours`
+-- after a specific clock slot (see slotsForTimestamp in worker.js — UTC
+-- hour-of-day, NY-local hour-of-day (DST-aware, so this alone captures
+-- midnight ET, NYSE's 9am/4pm hours, without any hardcoded session list),
+-- and UTC day-of-week)? Computed every hour by reliability.mjs's
+-- evaluateTimeOfDay directly from asset_price_log's own already-logged
+-- prices (this run's price vs. the price from `horizon_hours` ago) — both
+-- endpoints already exist by the time this runs, so unlike technique_votes
+-- there's nothing to wait for or mark evaluated. Same running-sum/sum-of-
+-- squares shape as asset_move_stats, just with an added `slot` dimension.
+CREATE TABLE IF NOT EXISTS time_of_day_stats (
+  symbol TEXT NOT NULL,
+  asset_class TEXT NOT NULL,
+  slot TEXT NOT NULL,
+  horizon_hours INTEGER NOT NULL,
+  n INTEGER NOT NULL DEFAULT 0,
+  sum_pct REAL NOT NULL DEFAULT 0,
+  sum_pct_sq REAL NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (symbol, slot, horizon_hours)
+);

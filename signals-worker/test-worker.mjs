@@ -209,7 +209,13 @@ const { payload: built, log } = await mod.buildPayload({ TREFIS_OVERRIDES: '{"AA
 check('crypto boards populated', built.crypto.breakout.length > 0 && built.crypto.universe >= 3);
 check('stablecoin filtered from universe', built.crypto.universe === 4, `universe=${built.crypto.universe}`);
 check('stocks boards populated', built.stocks.breakout.length > 0);
-check('confluence agreement present', built.crypto.breakout[0].conf && built.crypto.breakout[0].conf.total >= 10 && built.crypto.breakout[0].conf.total <= 16);
+// Ceiling is 18, not 16, now that fibonacci and timeofday exist (see
+// TECHNIQUE_META) — 'attention' is crypto-trending-conditional so it's
+// already excluded from the max in practice, same as before; timeofday
+// specifically abstains (null) in this call since no todStats was passed,
+// but the bound should describe what CAN apply, not happen to match
+// whatever one fixture's seasonalAnalog result coincidentally lands on.
+check('confluence agreement present', built.crypto.breakout[0].conf && built.crypto.breakout[0].conf.total >= 10 && built.crypto.breakout[0].conf.total <= 18);
 check('rangePos stays in [0,1]', built.crypto.breakout.every(r => r.rangePos == null || (r.rangePos >= 0 && r.rangePos <= 1)));
 check('valuation flowed in', built.stocks.breakout.concat(built.stocks.breakdown).some(r => r.val));
 check('trefis override applied', built.health.trefis_overrides === 1);
@@ -511,6 +517,49 @@ check('holding the 50% retracement of an up-leg, confirmed by structure: bullish
 check('same level, no independent confirmation: does not fire', fTechUnconfirmed.dir === 0, JSON.stringify(fTechUnconfirmed));
 check('nowhere near a level: neutral, not a guess', fTechFar.dir === 0, JSON.stringify(fTechFar));
 check('no fib data at all: abstains (null), not a guess', fTechNoData.dir === null, JSON.stringify(fTechNoData));
+
+console.log('\n== etHour: DST-aware NY-local hour, not a fixed UTC offset ==');
+check('January (EST, UTC-5): 05:00 UTC is midnight ET', mod.etHour(new Date('2026-01-15T05:00:00.000Z')) === 0);
+check('July (EDT, UTC-4): 04:00 UTC is midnight ET', mod.etHour(new Date('2026-07-15T04:00:00.000Z')) === 0);
+check('July (EDT): 13:45 UTC falls in the 9am ET hour (NYSE open)', mod.etHour(new Date('2026-07-15T13:45:00.000Z')) === 9);
+
+console.log('\n== slotsForTimestamp: the three clock dimensions a timestamp belongs to ==');
+const todSlots = mod.slotsForTimestamp('2026-01-15T05:00:00.000Z');
+check('exactly 3 slots: UTC hour, ET hour, UTC day-of-week', todSlots.length === 3, JSON.stringify(todSlots));
+check('UTC hour slot format', todSlots.includes('hour_utc_05'), JSON.stringify(todSlots));
+check('ET hour slot format (midnight ET, matches the etHour check above)', todSlots.includes('hour_et_00'), JSON.stringify(todSlots));
+check('day-of-week slot present', todSlots.some(s => s.startsWith('dow_utc_')), JSON.stringify(todSlots));
+
+console.log('\n== timeOfDaySignal: only fires with real sample depth AND a real effect size ==');
+const todNow = '2026-03-10T14:00:00.000Z';
+const [slotA, slotB] = mod.slotsForTimestamp(todNow);
+check('no todStats at all: abstains (null)', mod.timeOfDaySignal(null, 'BTC', todNow) === null);
+check('todStats present but this symbol/slot never recorded: abstains (null)', mod.timeOfDaySignal({}, 'BTC', todNow) === null);
+
+const todStrongBull = { [`BTC|${slotA}|1`]: { meanPct: 2.0, stdevPct: 1.0, n: 50 } }; // effect 2.0, well above the bar
+check('real sample depth + strong positive effect: fires bullish', mod.timeOfDaySignal(todStrongBull, 'BTC', todNow)?.dir === 1, JSON.stringify(mod.timeOfDaySignal(todStrongBull, 'BTC', todNow)));
+
+const todStrongBear = { [`BTC|${slotB}|4`]: { meanPct: -1.5, stdevPct: 0.5, n: 30 } }; // effect 3.0
+check('strong negative effect: fires bearish', mod.timeOfDaySignal(todStrongBear, 'BTC', todNow)?.dir === -1);
+
+const todTooThin = { [`BTC|${slotA}|1`]: { meanPct: 2.0, stdevPct: 1.0, n: 5 } }; // strong effect, but n is too low
+check('below the sample-count bar despite a strong mean: abstains (null)', mod.timeOfDaySignal(todTooThin, 'BTC', todNow) === null);
+
+const todNoisyMean = { [`BTC|${slotA}|1`]: { meanPct: 0.1, stdevPct: 2.0, n: 50 } }; // n is fine, effect (0.05) is noise
+check('enough samples but the mean is indistinguishable from noise: abstains (null)', mod.timeOfDaySignal(todNoisyMean, 'BTC', todNow) === null);
+
+const todMultiCandidate = {
+  [`BTC|${slotA}|1`]: { meanPct: 1.0, stdevPct: 1.0, n: 40 },  // effect 1.0
+  [`BTC|${slotB}|4`]: { meanPct: -3.0, stdevPct: 1.0, n: 40 }  // effect 3.0, stronger
+};
+const todPicked = mod.timeOfDaySignal(todMultiCandidate, 'BTC', todNow);
+check('picks the strongest-effect candidate among several qualifying slots, not just the first', todPicked && todPicked.dir === -1 && todPicked.meanPct === -3, JSON.stringify(todPicked));
+
+console.log('\n== timeofday technique: wired into evaluateTechniques like every other technique ==');
+const todTechFires = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC' }), 'crypto', undefined, undefined, todStrongBull, todNow), 'timeofday');
+const todTechNoStats = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC' }), 'crypto', undefined, undefined, undefined, todNow), 'timeofday');
+check('fires through the full technique pipeline when todStats + nowIso are supplied', todTechFires.dir === 1, JSON.stringify(todTechFires));
+check('abstains (null) when todStats/nowIso are not supplied at all', todTechNoStats.dir === null, JSON.stringify(todTechNoStats));
 
 console.log('\n== compositeCall: one directional read per asset from the long/short pair ==');
 check('a tie (long === short) has no falsifiable direction: null', mod.compositeCall({ long: 60, short: 60 }) === null);

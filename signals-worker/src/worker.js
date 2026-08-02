@@ -370,7 +370,8 @@ export const TECHNIQUE_META = {
   attention:   { leading: true,  horizonDays: 2 },
   dwell:       { leading: true,  horizonDays: 5 },
   seasonal:    { leading: true,  horizonDays: 7 },
-  fibonacci:   { leading: true,  horizonDays: 3 }
+  fibonacci:   { leading: true,  horizonDays: 3 },
+  timeofday:   { leading: true,  horizonDays: 0.2 }
 };
 
 export function horizonLabel(days) {
@@ -727,7 +728,73 @@ export function fibonacciLevels(closes, lookback = 90) {
   };
 }
 
-export function evaluateTechniques(m, kind, reliability, marketContext) {
+// NY-local (America/New_York) hour-of-day for a given instant, DST-aware
+// via Intl rather than a hardcoded UTC-5/UTC-4 offset — so "midnight ET"
+// and the NYSE's 9am/4pm hours both fall out of the same one calculation
+// correctly year-round, with no separate DST branch to get wrong twice a
+// year.
+export function etHour(date) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' }).formatToParts(date);
+  return Number(parts.find((p) => p.type === 'hour').value);
+}
+
+// The clock "slots" a given instant belongs to, for the time-of-day
+// behavioral profile (time_of_day_stats): UTC hour-of-day (captures
+// midnight UTC, and crypto funding settlement hours 00/08/16 UTC directly,
+// since perp funding times are themselves UTC-aligned), NY-local hour-of-
+// day (captures midnight ET and the NYSE's 9am/4pm hours without any
+// separate named-session list — DST-aware via etHour above), and UTC
+// day-of-week (Sunday=0..Saturday=6, JS's own convention). Deliberately
+// generic rather than a hardcoded list of "named sessions": every slot
+// here falls out of the same handful of calendar reads, so there's nothing
+// bespoke to maintain as sessions change.
+export function slotsForTimestamp(iso) {
+  const d = new Date(iso);
+  const hourUtc = String(d.getUTCHours()).padStart(2, '0');
+  const hourEt = String(etHour(d)).padStart(2, '0');
+  return [`hour_utc_${hourUtc}`, `hour_et_${hourEt}`, `dow_utc_${d.getUTCDay()}`];
+}
+
+// Below this many observations, a slot's measured mean/stdev is too noisy
+// to act on — same reasoning as MIN_RELIABILITY_SAMPLES elsewhere, applied
+// to time-of-day stats specifically since they accumulate at only 1-2
+// samples/day/slot (far slower than technique votes, which get one sample
+// per applicable run) and would otherwise fire on a handful of coincidental
+// observations.
+const TOD_MIN_SAMPLES = 20;
+// How many standard deviations the slot's mean return sits from zero —
+// below this, a positive or negative mean is indistinguishable from noise
+// even with enough raw sample count. Deliberately modest (not a strict
+// statistical-significance bar): this is one vote among many in the
+// confluence score, not a standalone claim, and the per-asset reliability
+// loop will down-weight it over time if it doesn't actually pan out.
+const TOD_MIN_EFFECT = 0.4;
+
+// Does this asset have a real, measured behavioral bias at the CURRENT
+// clock slot(s)? Checks every slot `nowIso` belongs to, across both
+// tracked horizons (1h, 4h ahead), and returns whichever candidate has the
+// strongest effect size — not the first match, so a asset's occasional
+// coincidentally-large mean at a thin slot can't crowd out a better-
+// supported one. Returns null (abstain) until a slot has both real sample
+// depth and a real effect size, same "no data yet" pattern as every other
+// technique here.
+export function timeOfDaySignal(todStats, symbol, nowIso) {
+  if (!todStats) return null;
+  let best = null;
+  for (const slot of slotsForTimestamp(nowIso)) {
+    for (const h of [1, 4]) {
+      const rec = todStats[`${symbol}|${slot}|${h}`];
+      if (!rec || rec.n < TOD_MIN_SAMPLES || !(rec.stdevPct > 0)) continue;
+      const effect = Math.abs(rec.meanPct) / rec.stdevPct;
+      if (effect < TOD_MIN_EFFECT) continue;
+      if (!best || effect > best.effect) best = { slot, horizonHours: h, meanPct: rec.meanPct, effect, n: rec.n };
+    }
+  }
+  if (!best) return null;
+  return { dir: best.meanPct > 0 ? 1 : -1, slot: best.slot, horizonHours: best.horizonHours, meanPct: best.meanPct, n: best.n };
+}
+
+export function evaluateTechniques(m, kind, reliability, marketContext, todStats, nowIso) {
   const T = [];
   const push = (id, w, dir, note) => T.push({ id, w: w * reliabilityMultiplier(reliability, m.symbol, id), dir, note });
   const cS = m.chgShort, c24 = m.chg24h, c7 = m.chg7d, c30 = m.chg30d;
@@ -979,11 +1046,26 @@ export function evaluateTechniques(m, kind, reliability, marketContext) {
     push('fibonacci', 0.8, null, null);
   }
 
+  // T18 time-of-day: does this asset have a proven, measured behavioral
+  // bias at the current UTC hour, NY-local hour (midnight ET, NYSE's
+  // 9am/4pm hours), or day of week? See timeOfDaySignal's docs — only
+  // fires once a slot has real sample depth and a real effect size, never
+  // on a handful of coincidental observations. `nowIso` is required (the
+  // technique needs to know what time it is to look itself up); silently
+  // abstains without it rather than guessing at "now".
+  if (todStats && nowIso) {
+    const tod = timeOfDaySignal(todStats, m.symbol, nowIso);
+    if (tod) push('timeofday', 0.7, tod.dir, `${tod.dir > 0 ? 'tends to rise' : 'tends to fall'} in the ${tod.horizonHours}h after ${tod.slot.replace(/_/g, ' ')} (${tod.n} obs)`);
+    else push('timeofday', 0.7, 0, null);
+  } else {
+    push('timeofday', 0.7, null, null);
+  }
+
   return T;
 }
 
-export function confluence(m, kind, reliability, marketContext, reliabilityByHorizon) {
-  const T = evaluateTechniques(m, kind, reliability, marketContext);
+export function confluence(m, kind, reliability, marketContext, reliabilityByHorizon, todStats, nowIso) {
+  const T = evaluateTechniques(m, kind, reliability, marketContext, todStats, nowIso);
   const applicable = T.filter(t => t.dir !== null);
   const totalW = applicable.reduce((a, t) => a + t.w, 0) || 1;
   let bullW = 0, bearW = 0, bullN = 0, bearN = 0;
@@ -1523,8 +1605,8 @@ export function buildStockMetrics(row, valuation, override, benchCloses) {
 // mismatched horizon between what's logged and what's checked.
 const RANGE_LOG_HORIZONS_DAYS = [1, 7];
 
-function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHorizon, moveStats) {
-  const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, marketContext, reliabilityByHorizon) }));
+function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso) {
+  const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, marketContext, reliabilityByHorizon, todStats, nowIso) }));
   // Full-universe vote log (not just the top-10 shown on each board) so the
   // reliability learning loop sees every asset, not only that hour's winners.
   const votesLog = [];
@@ -1618,8 +1700,9 @@ function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHori
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats) {
   const started = Date.now();
+  const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
 
   const [cryptoR, globalR, fngR, trendR, fundR, stocksR, overviewR, valR, benchR] = await Promise.allSettled([
@@ -1701,7 +1784,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
         return buildCryptoMetrics(c, { funding: funding[sym], trending: trending.has(sym), daily, benchCloses: btcCloses });
       })
       .filter(Boolean);
-    cryptoBoards = rankBoards(metrics, 'crypto', reliability, marketContext, reliabilityByHorizon, moveStats);
+    cryptoBoards = rankBoards(metrics, 'crypto', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso);
   }
 
   let stockBoards = { breakout: [], breakdown: [], universe: 0 };
@@ -1717,7 +1800,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
         if (m) metrics.push(m);
       } else stockFailures.push(r && r._item);
     }
-    stockBoards = rankBoards(metrics, 'stock', reliability, marketContext, reliabilityByHorizon, moveStats);
+    stockBoards = rankBoards(metrics, 'stock', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso);
   }
 
   // If both primary sources yielded nothing, this is a real outage: throw so
