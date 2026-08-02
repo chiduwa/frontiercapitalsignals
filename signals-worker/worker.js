@@ -2710,6 +2710,37 @@ const SECURITY_HEADERS = {
   'Referrer-Policy': 'strict-origin-when-cross-origin'
 };
 
+// Best-effort per-IP rate limiter for /api/asset/:symbol specifically —
+// unlike /api/signals and /api/prices (cheap KV-only reads, or already
+// damped by LIVE_PRICE_CACHE_SECONDS regardless of visitor count), this
+// route runs 3 real D1 queries per call with no caching layer of its own,
+// making it the most expensive-per-request route in this Worker and the
+// one most worth guarding against a high-volume single-source flood
+// (Workers requests and D1 reads are both metered on Workers Paid — see
+// the plan). In-memory, resets whenever this isolate cold-starts: the same
+// accepted-risk pattern already used for /api/scan's rate limiter in the
+// main Next.js app (real protection against a sustained single-source
+// flood, not a cryptographic guarantee across every edge PoP). A
+// zone-level Cloudflare Rate Limiting rule (Security > WAF > Rate limiting
+// rules in the dashboard) is the stronger complement — it blocks before
+// the Worker even runs, covering every route at once, not just this one.
+const RATE_LIMIT_MAX = 20;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX_TRACKED_IPS = 5000; // opportunistic cap so a distributed flood can't grow this unboundedly within one long-lived isolate
+let assetRouteHits = new Map();
+
+function isRateLimited(ip) {
+  const now = Date.now();
+  if (assetRouteHits.size > RATE_LIMIT_MAX_TRACKED_IPS) assetRouteHits = new Map(); // cheap reset rather than per-entry pruning
+  const rec = assetRouteHits.get(ip);
+  if (!rec || now - rec.windowStart > RATE_LIMIT_WINDOW_MS) {
+    assetRouteHits.set(ip, { count: 1, windowStart: now });
+    return false;
+  }
+  rec.count++;
+  return rec.count > RATE_LIMIT_MAX;
+}
+
 const PAGE_CSP = [
   "default-src 'none'",
   "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com",
@@ -2822,6 +2853,13 @@ export default {
     // read is trivial by comparison and stays well inside Workers Free
     // plan's per-request limits regardless of which plan is active.
     if (path.startsWith('/api/asset/') || path.startsWith('api/asset/')) {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      if (isRateLimited(ip)) {
+        return new Response(JSON.stringify({ error: 'rate limited, try again shortly' }), {
+          status: 429,
+          headers: { 'Content-Type': 'application/json; charset=utf-8', 'Retry-After': '60', ...SECURITY_HEADERS }
+        });
+      }
       const raw = path.slice(path.indexOf('asset/') + 'asset/'.length);
       const symbol = decodeURIComponent(raw).toUpperCase();
       if (!symbol) return json({ error: 'symbol required' });

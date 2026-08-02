@@ -789,5 +789,16 @@ const unknownSymbolResp = await worker.fetch(new Request('https://x.com/signals/
 const unknownSymbolBody = await unknownSymbolResp.json();
 check('unknown symbol: empty arrays, not an error (no data yet, not a failure)', unknownSymbolBody.techniques.length === 0 && unknownSymbolBody.range.length === 0 && unknownSymbolBody.drift === null, JSON.stringify(unknownSymbolBody));
 
+console.log('\n== api: /api/asset/:symbol is rate-limited per IP (protects Workers requests/D1-reads billing from a flood) ==');
+const rlRequest = (ip) => new Request('https://x.com/signals/api/asset/BTC', { headers: { 'CF-Connecting-IP': ip } });
+let lastRlResp;
+for (let i = 0; i < 20; i++) lastRlResp = await worker.fetch(rlRequest('203.0.113.5'), d1Env, ctx);
+check('the 20th request from one IP within the window still succeeds', lastRlResp.status === 200, lastRlResp.status);
+const rl21st = await worker.fetch(rlRequest('203.0.113.5'), d1Env, ctx);
+check('the 21st request from the same IP within the window is rate-limited (429)', rl21st.status === 429, rl21st.status);
+check('rate-limit response includes Retry-After', rl21st.headers.get('retry-after') === '60');
+const rlDifferentIp = await worker.fetch(rlRequest('203.0.113.9'), d1Env, ctx);
+check('a different IP is not affected by another IP\'s rate limit', rlDifferentIp.status === 200, rlDifferentIp.status);
+
 console.log(failures === 0 ? '\nWORKER INTEGRATION OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);
