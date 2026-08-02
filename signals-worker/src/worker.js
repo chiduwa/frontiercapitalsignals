@@ -1022,7 +1022,7 @@ export async function poolPaced(items, batchSize, delayMs, fn) {
 
 // ----------------------------- DATA SOURCES ---------------------------------
 
-async function getCryptoMarkets() {
+export async function getCryptoMarkets() {
   const url = 'https://api.coingecko.com/api/v3/coins/markets'
     + `?vs_currency=usd&order=market_cap_desc&per_page=${CRYPTO_UNIVERSE}&page=1`
     + '&sparkline=true&price_change_percentage=1h,24h,7d,30d';
@@ -1107,7 +1107,7 @@ async function getTrending() {
 }
 
 // Bybit linear perp tickers: one call returns funding for every USDT perp.
-async function getFundingMap() {
+export async function getFundingMap() {
   const j = await fetchJson('https://api.bybit.com/v5/market/tickers?category=linear');
   const map = {};
   for (const t of (j && j.result && j.result.list) || []) {

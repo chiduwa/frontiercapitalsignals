@@ -1,0 +1,38 @@
+name: Signals Backfill
+
+# On-demand accelerator for the historical archive backfill (see
+# signals-daily.yml, which runs the same script once/day automatically).
+# Manually re-trigger this a few times in a row to catch the archive up
+# faster than the daily cadence alone would, e.g. right after raising
+# row_budget once Workers Paid is confirmed active. Idempotent/resumable —
+# see backfill-history.mjs's coverage check — so re-running after the
+# archive is already caught up is a fast no-op, not a mistake.
+on:
+  workflow_dispatch:
+    inputs:
+      row_budget:
+        description: "Max archive rows to write this run"
+        required: false
+        default: "15000"
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Run historical backfill
+        working-directory: signals-worker
+        run: node scripts/backfill-history.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+          BACKFILL_ROW_BUDGET: ${{ inputs.row_budget }}

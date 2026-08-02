@@ -1,9 +1,11 @@
 // D1-backed reliability learning loop for the confluence engine. Runs from
 // build-signals.mjs (plain Node, GitHub Actions) — the Worker itself never
 // touches D1, only the hourly build needs this, not request-time serving.
-// Talks to Cloudflare's D1 HTTP API directly, same pattern as the KV write
-// in build-signals.mjs.
+// Talks to Cloudflare's D1 HTTP API directly via d1-client.mjs, shared with
+// the archive/backfill scripts so there's one D1 client, not a hand-copied
+// duplicate that could drift.
 import { MIN_RELIABILITY_SAMPLES } from '../worker.js';
+import { d1, chunk } from './d1-client.mjs';
 
 const HORIZONS_HOURS = [24, 168];
 const EVAL_COLUMN = { 24: 'evaluated_24', 168: 'evaluated_168' };
@@ -26,29 +28,6 @@ const RETENTION_HOURS = 200;
 // the universe (delisted stock, coin falls out of top-100) can't leave
 // orphaned rows growing forever.
 const HARD_CAP_HOURS = 24 * 30;
-
-function d1Url(env) {
-  return `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/d1/database/${env.FCS_D1_DATABASE_ID}/query`;
-}
-
-async function d1(env, sql, params = []) {
-  const res = await fetch(d1Url(env), {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sql, params })
-  });
-  const body = await res.json().catch(() => null);
-  if (!res.ok || !body || body.success !== true) {
-    throw new Error(`D1 query failed: HTTP ${res.status} ${JSON.stringify(body && body.errors)}`);
-  }
-  return (body.result && body.result[0] && body.result[0].results) || [];
-}
-
-function chunk(arr, n) {
-  const out = [];
-  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
-  return out;
-}
 
 // Returns { blended, byHorizon }. `blended` sums raw correct/total across
 // horizons (equivalent to a total-weighted average of each horizon's

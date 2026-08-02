@@ -1,0 +1,49 @@
+name: Signals Daily
+
+# Keeps the permanent historical archive (asset_daily_bars, funding_rate_daily
+# — see signals-worker/scripts/schema.sql) current: one run/day is plenty for
+# daily-grain data. Deliberately its own workflow, not folded into
+# signals-refresh.yml (hourly) — this repo already splits unrelated cadences
+# for exactly this reason (deploy.yml vs daily-intelligence.yml vs
+# signals-refresh.yml): one job's slowness or failure shouldn't block another.
+#
+# Runs backfill-history.mjs first (safe to call every day, not just once —
+# it only ever writes dates not already stored, so once the archive is
+# caught up this step degenerates into a cheap incremental append; early on,
+# each run chips away at the remaining backfill within its row budget).
+on:
+  schedule:
+    # 02:37 UTC — after D1's daily write-quota reset (00:00 UTC) so this
+    # always starts with a full budget, and off the hourly job's :13 mark
+    # (see signals-refresh.yml's own note on avoiding top-of-hour/round-
+    # minute scheduling contention).
+    - cron: "37 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: signals-daily
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Keep the historical archive current
+        working-directory: signals-worker
+        run: node scripts/backfill-history.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+          # Free-tier-safe default (see backfill-history.mjs) — raise once
+          # Workers Paid is confirmed active on the account.
+          BACKFILL_ROW_BUDGET: ${{ vars.BACKFILL_ROW_BUDGET || '15000' }}
