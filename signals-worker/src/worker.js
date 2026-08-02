@@ -2711,20 +2711,28 @@ const SECURITY_HEADERS = {
 };
 
 // Best-effort per-IP rate limiter for /api/asset/:symbol specifically —
-// unlike /api/signals and /api/prices (cheap KV-only reads, or already
-// damped by LIVE_PRICE_CACHE_SECONDS regardless of visitor count), this
-// route runs 3 real D1 queries per call with no caching layer of its own,
-// making it the most expensive-per-request route in this Worker and the
-// one most worth guarding against a high-volume single-source flood
-// (Workers requests and D1 reads are both metered on Workers Paid — see
-// the plan). In-memory, resets whenever this isolate cold-starts: the same
-// accepted-risk pattern already used for /api/scan's rate limiter in the
-// main Next.js app (real protection against a sustained single-source
-// flood, not a cryptographic guarantee across every edge PoP). A
-// zone-level Cloudflare Rate Limiting rule (Security > WAF > Rate limiting
-// rules in the dashboard) is the stronger complement — it blocks before
-// the Worker even runs, covering every route at once, not just this one.
-const RATE_LIMIT_MAX = 20;
+// scoped to only this route (never /api/signals or /api/prices, which
+// real visitor traffic depends on: the dashboard polls /api/prices every
+// 20s and /api/signals every 10min — confirmed live in this file's own
+// client JS, REFETCH_MS/LIVE_MS below). This route runs 3 real D1 queries
+// per call with no caching layer of its own, unlike those two.
+//
+// CONFIRMED LIVE this does NOT reliably work: 30 truly concurrent requests
+// against the deployed Worker all returned 200, none blocked — Cloudflare
+// spreads concurrent (and even rapid sequential) requests across multiple
+// isolates/data centers, and this in-memory Map only ever sees whatever
+// fraction landed on one isolate. Left in as harmless, marginal defense-in-
+// depth (it does catch a slow, sustained single-isolate sequence), NOT as
+// the real protection. The actual fix is a zone-level Cloudflare Rate
+// Limiting rule (Security > WAF > Rate limiting rules), scoped to
+// /signals/api/asset/* specifically so it can never touch the two routes
+// live traffic actually needs — that's the one that correctly coordinates
+// counts across Cloudflare's whole network instead of per-isolate.
+// Threshold kept generous (well above the ~10-20/session a human clicking
+// through several assets would ever generate, since nothing in the
+// dashboard even calls this route yet) so future features that use it
+// more have headroom without needing a re-tune.
+const RATE_LIMIT_MAX = 40;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_TRACKED_IPS = 5000; // opportunistic cap so a distributed flood can't grow this unboundedly within one long-lived isolate
 let assetRouteHits = new Map();

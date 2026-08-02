@@ -789,14 +789,14 @@ const unknownSymbolResp = await worker.fetch(new Request('https://x.com/signals/
 const unknownSymbolBody = await unknownSymbolResp.json();
 check('unknown symbol: empty arrays, not an error (no data yet, not a failure)', unknownSymbolBody.techniques.length === 0 && unknownSymbolBody.range.length === 0 && unknownSymbolBody.drift === null, JSON.stringify(unknownSymbolBody));
 
-console.log('\n== api: /api/asset/:symbol is rate-limited per IP (protects Workers requests/D1-reads billing from a flood) ==');
+console.log('\n== api: /api/asset/:symbol is rate-limited per IP (marginal defense-in-depth only — see the code comment on why the real fix is a zone-level Cloudflare rule) ==');
 const rlRequest = (ip) => new Request('https://x.com/signals/api/asset/BTC', { headers: { 'CF-Connecting-IP': ip } });
 let lastRlResp;
-for (let i = 0; i < 20; i++) lastRlResp = await worker.fetch(rlRequest('203.0.113.5'), d1Env, ctx);
-check('the 20th request from one IP within the window still succeeds', lastRlResp.status === 200, lastRlResp.status);
-const rl21st = await worker.fetch(rlRequest('203.0.113.5'), d1Env, ctx);
-check('the 21st request from the same IP within the window is rate-limited (429)', rl21st.status === 429, rl21st.status);
-check('rate-limit response includes Retry-After', rl21st.headers.get('retry-after') === '60');
+for (let i = 0; i < 40; i++) lastRlResp = await worker.fetch(rlRequest('203.0.113.5'), d1Env, ctx);
+check('the 40th request from one IP within the window still succeeds', lastRlResp.status === 200, lastRlResp.status);
+const rl41st = await worker.fetch(rlRequest('203.0.113.5'), d1Env, ctx);
+check('the 41st request from the same IP within the window is rate-limited (429)', rl41st.status === 429, rl41st.status);
+check('rate-limit response includes Retry-After', rl41st.headers.get('retry-after') === '60');
 const rlDifferentIp = await worker.fetch(rlRequest('203.0.113.9'), d1Env, ctx);
 check('a different IP is not affected by another IP\'s rate limit', rlDifferentIp.status === 200, rlDifferentIp.status);
 
