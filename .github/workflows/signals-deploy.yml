@@ -1,0 +1,47 @@
+name: Signals Worker Deploy
+
+# Deploys the standalone signals-worker Cloudflare Worker (the confluence
+# engine's dashboard + API routes, bound at frontiercapitalsignals.com/signals*
+# — distinct from the main Next.js site's own deploy.yml, and from
+# signals-refresh.yml/signals-daily.yml, which only ever write DATA into
+# KV/D1 via plain Node and never touch the Worker's own deployed code).
+# Until this workflow existed, every worker.js change needed a manual
+# `wrangler deploy` (per this repo's own long-standing header comment) —
+# this closes that gap using the same CLOUDFLARE_API_TOKEN/
+# CLOUDFLARE_ACCOUNT_ID secrets already relied on by the workflows above.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "signals-worker/**"
+      - ".github/workflows/signals-deploy.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      # Enforced, not auto-fixed: wrangler deploys src/worker.js, but the
+      # actual source of truth is worker.js at the signals-worker root (no
+      # build step wires them together). A silent auto-copy here could
+      # paper over someone having edited the wrong copy; failing loudly
+      # is safer for a file this important.
+      - name: Verify src/worker.js is byte-identical to worker.js
+        working-directory: signals-worker
+        run: diff worker.js src/worker.js
+
+      - name: Deploy to Cloudflare Workers
+        working-directory: signals-worker
+        run: npx --yes wrangler@4 deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
