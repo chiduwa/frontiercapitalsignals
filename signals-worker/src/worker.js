@@ -677,6 +677,35 @@ export function topIndicator(reliability, symbol) {
   return best;
 }
 
+// Every technique's measured accuracy for one asset — not just the single
+// best one topIndicator returns above, the full per-technique picture,
+// including the 24h-vs-168h split technique_reliability already tracks per
+// (symbol, technique). That split is itself an empirically-measured
+// leading/lagging read for THIS specific asset (does RSI resolve faster or
+// slower for DOGE than the static TECHNIQUE_META guess assumes?) distinct
+// from the hardcoded methodology table — surfaced here rather than only
+// used internally by horizonEstimate's blended average. This is drill-down
+// detail (see the /api/asset/:symbol route), not something every hourly
+// dashboard row needs, so it stays out of the main payload.
+export function techniqueBreakdown(reliability, reliabilityByHorizon, symbol) {
+  const out = [];
+  for (const id of Object.keys(TECHNIQUE_META)) {
+    const rec = reliability && reliability[`${symbol}|${id}`];
+    if (!rec || rec.total < MIN_RELIABILITY_SAMPLES) continue;
+    const byHorizon = {};
+    for (const h of [24, 168]) {
+      const hr = reliabilityByHorizon && reliabilityByHorizon[h] && reliabilityByHorizon[h][`${symbol}|${id}`];
+      if (hr && hr.total >= MIN_RELIABILITY_SAMPLES) byHorizon[h] = { accuracy: hr.correct / hr.total, total: hr.total };
+    }
+    out.push({
+      id, accuracy: rec.accuracy, total: rec.total,
+      leading: TECHNIQUE_META[id].leading,
+      ...(Object.keys(byHorizon).length ? { byHorizon } : {})
+    });
+  }
+  return out.sort((a, b) => b.accuracy - a.accuracy);
+}
+
 // A single track-record score out of 100 for this asset, pooling three
 // kinds of matured, falsifiable calls this engine actually makes:
 //  - "composite": did price move in the direction the overall confluence
@@ -2022,7 +2051,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     generated_at: log.generated_at,
     cache_seconds: CACHE_SECONDS,
     build_ms: Date.now() - started,
-    model: 'confluence-v4 (16 techniques, directional agreement)',
+    model: 'confluence-v5 (23 techniques, directional agreement)',
     health: {
       coingecko: cryptoR.status === 'fulfilled',
       global: globalR.status === 'fulfilled' && !!globalR.value,
@@ -2052,10 +2081,11 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     highAccuracy,
     sources: {
       crypto: 'CoinGecko (top 100 by market cap, daily history per coin) + trending list',
-      derivatives: 'Bybit linear perp funding rates',
-      sentiment: 'alternative.me Fear & Greed',
+      derivatives: 'CoinGecko aggregated derivatives (funding rate + open interest, highest-OI perpetual market per asset)',
+      sentiment: 'alternative.me Fear & Greed (full history archived) + VIX positioning + CoinGecko community votes; CoinMarketCap Fear & Greed and CryptoPanic news sentiment where configured',
       equities: 'Yahoo Finance daily OHLCV, Stooq fallback',
       valuation: 'Wall Street consensus targets via Yahoo; TREFIS_OVERRIDES env accepted',
+      archive: 'Permanent daily-bar/funding/sentiment history (Yahoo full-depth + CoinGecko fallback) backs Fibonacci, time-of-day, and cross-asset lead/lag detection',
       note: 'Mechanical confluence composites. Not investment advice.'
     }
   };
@@ -2099,7 +2129,7 @@ const PAGE_HTML = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Frontier Capital Signals — Hourly confluence screens</title>
-<meta name="description" content="Hourly confluence screens across the top 100 cryptos and 60 US equities. Up to 16 techniques per asset must agree before a signal ranks.">
+<meta name="description" content="Hourly confluence screens across the top 100 cryptos and 60 US equities. Up to 23 techniques per asset must agree before a signal ranks.">
 <!-- Consent Mode v2 defaults, same scheme as the main site (fcs_consent_v1 in
      localStorage, shared across the whole origin since localStorage is
      origin- not path-scoped): respects a prior choice made on the main site,
@@ -2286,13 +2316,13 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     <div class="mast-grid">
       <div>
         <h1>Frontier Capital<br><span class="amber">Signals</span></h1>
-        <p class="dek">Confluence screens across the <b>top 100 cryptos</b> and <b>60 US equities</b>. Up to <b>16 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to volume, funding rates, Wall Street price targets, reversal-pattern detection and multi-year seasonal analogs, must point the <b>same direction</b> before a signal ranks — each with an <b>expected timeframe</b> learned from its own track record. <b>Analysis syncs hourly; price and 24h change tick live</b> in between.</p>
+        <p class="dek">Confluence screens across the <b>top 100 cryptos</b> and <b>60 US equities</b>. Up to <b>23 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to funding-rate percentiles, open interest, Fibonacci retracements, time-of-day/day-of-week bias, market sentiment, and proven cross-asset lead/lag relationships, must point the <b>same direction</b> before a signal ranks — each with an <b>expected timeframe</b> learned from its own track record. Prices, funding, and sentiment archive permanently for deep multi-year pattern analysis. <b>Analysis syncs hourly; price and 24h change tick live</b> in between.</p>
       </div>
       <div class="mast-meta">
         ANALYSIS REFRESH <b>HOURLY</b><br>
         PRICE TICKS <b>LIVE</b><br>
         UNIVERSE <b id="metaUniverse">—</b><br>
-        TECHNIQUES PER ASSET <b>UP TO 16</b>
+        TECHNIQUES PER ASSET <b>UP TO 23</b>
       </div>
     </div>
     <div class="mast-rule"></div>
@@ -2311,14 +2341,14 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   <details>
     <summary>Methodology and data</summary>
     <div class="method">
-      <p><b>The confluence model.</b> Every asset is evaluated by up to 16 independent techniques. Each one votes bullish, bearish, or neutral. The breakout score measures how much weighted evidence points up net of evidence pointing down; the breakdown score mirrors it. The small fraction under each score (for example 9/16) is the raw count of techniques agreeing with that direction out of those that had enough data to vote. High score plus high agreement is the strongest read.</p>
-      <p><b>The 16 techniques.</b> Multi-horizon momentum alignment; Wilder RSI(14) regime and direction; MACD(12/26/9) histogram level and direction; moving-average stack (SMA20/50/200, computed from real daily bars for both equities and crypto); Bollinger %B with squeeze-and-expansion detection; stochastic (14,3) crosses; Donchian 20-bar breakout or breakdown proximity; volume confirmation versus baseline; on-balance volume trend; swing structure of higher-highs and higher-lows; a momentum divergence proxy that flags new price extremes without RSI support; a volatility regime read separating coiled compression from climactic expansion; a reversal-pattern read (below); how long an asset has been coiled at its own long-run high or low and whether it's decoupled from the broader market (below); a seasonal-analog read comparing the current pattern against the asset's own history one or more years back (below); and a valuation-or-positioning layer.</p>
+      <p><b>The confluence model.</b> Every asset is evaluated by up to 23 independent techniques. Each one votes bullish, bearish, or neutral. The breakout score measures how much weighted evidence points up net of evidence pointing down; the breakdown score mirrors it. The small fraction under each score (for example 9/23) is the raw count of techniques agreeing with that direction out of those that had enough data to vote. High score plus high agreement is the strongest read.</p>
+      <p><b>The 23 techniques.</b> Multi-horizon momentum alignment; Wilder RSI(14) regime and direction; MACD(12/26/9) histogram level and direction; moving-average stack (SMA20/50/200, computed from real daily bars for both equities and crypto); Bollinger %B with squeeze-and-expansion detection; stochastic (14,3) crosses; Donchian 20-bar breakout or breakdown proximity; volume confirmation versus baseline; on-balance volume trend; swing structure of higher-highs and higher-lows; a momentum divergence proxy that flags new price extremes without RSI support; a volatility regime read separating coiled compression from climactic expansion; a reversal-pattern read (below); how long an asset has been coiled at its own long-run high or low and whether it's decoupled from the broader market (below); a seasonal-analog read comparing the current pattern against the asset's own history one or more years back (below); a valuation-or-positioning layer, positioning now weighted by this asset's own funding-rate percentile once enough of its own history exists rather than a fixed global threshold; a Fibonacci retracement read off the asset's most recent swing, direction-aware and never firing without independent confirmation; open interest relative to this asset's own recent history, paired with price direction to separate real participation from a thin, untrusted move; a time-of-day and day-of-week behavioral profile (UTC hour, NY-local hour — which alone captures midnight ET and the NYSE's 9am/4pm hours — and day of week), learned per asset once a slot has real sample depth and a real effect size; market sentiment (Fear &amp; Greed for crypto, VIX's position in its own recent range for equities, pooled with per-asset community/news sentiment where available); and a cross-asset lead/lag read that looks up whichever other assets — in either asset class, including the dollar, gold, and oil — have proven, over the full historical archive, to predict this one's moves some number of days later.</p>
       <p><b>Reversal detection.</b> A separate read from plain RSI level: it looks for RSI having actually bottomed or topped over the last ~10 bars and turned back, confirmed by at least one independent signal (a stochastic cross, a Bollinger band extreme, swing structure, on-balance volume, or the divergence proxy) — it never fires on RSI alone. Market-wide sentiment adds confidence on top when it lines up: extreme fear on the Fear &amp; Greed index for a crypto bottom, or VIX sitting high in its own recent range for an equity bottom (and the mirror image — extreme greed or a complacent VIX — for tops).</p>
       <p><b>Dwell time and market correlation.</b> Real 52-week (or as much history as exists) highs and lows, and specifically how many days an asset has been sitting within a few percent of one, not just whether it currently is — a fresh one-day touch and a multi-week base at the same level are different setups. Long dwell at a low is read as stored energy for a bounce, the mirror at a high for a pullback, and it carries extra weight when the asset has also decoupled from its usual correlation with the broader market (BTC for crypto, SPY for equities) over the last 30 days, since a move happening on its own is a different setup than one just riding the market. This is a starting assumption, not a fixed rule — the adaptive weighting above corrects it per asset from what actually happens next.</p>
       <p><b>Seasonal analogs.</b> Where an asset has enough of its own history, the current pattern over the last ~90 days is compared against the same-length window roughly one, two, or more years back, using the same correlation math as the market-correlation read above but against the asset's own past. A real resemblance has to clear a fairly high bar (a correlation of at least 0.5) before it counts at all, since only a handful of candidate years exist to compare against and a looser bar would just be fitting noise. When one clears that bar, what happened in the days right after that historical analog becomes a genuine, data-grounded forward hint. In practice this only applies to equities: CoinGecko's free tier caps crypto history at 365 days, which isn't enough to compare against even one year back, so this abstains for every crypto asset rather than reaching for a shorter, less meaningful comparison.</p>
       <p><b>The valuation layer.</b> For equities, Wall Street consensus mean price targets and recommendation ratings: trading well below a buy-rated consensus target votes bullish, trading above the consensus target votes bearish. Trefis does not publish a public API, so consensus targets stand in for model-based estimates; site operators can supply Trefis or other model values through a server-side override, in which case the payload labels the source. For crypto, the layer uses perpetual futures funding rates (crowded positive funding on a parabolic move votes bearish, skeptical funding during an uptrend votes bullish) and trending-list crowding.</p>
       <p><b>Adaptive weighting.</b> Every hour's directional calls are logged and checked back against what the asset's price actually did 24 hours and 7 days later. Once a technique has enough scored history for a specific asset, its weight for that asset going forward is nudged up if it has been reliably right and down if it has been reliably wrong, capped at plus or minus 50%. A technique that is only a coin flip for a given asset keeps its plain baseline weight.</p>
-      <p><b>Leading vs. lagging, and the expected timeframe.</b> Techniques are split into two kinds. Leading techniques try to anticipate a move before it's confirmed: RSI, Bollinger squeeze, stochastic crosses, OBV, the divergence proxy, the volatility regime read, reversal-pattern detection, and the valuation/positioning layer. Lagging techniques describe a move already underway: momentum alignment, MACD, the moving-average stack, Donchian breakout proximity, volume confirmation, and swing structure. The small window shown next to each score (for example <b>1-3 days</b>) is this engine's estimate of when that specific call is expected to resolve, built from whichever techniques are actually voting on that asset right now. Where an asset has enough of its own scored history, the window uses that asset's real measured accuracy at the 24-hour versus 7-day mark (marked with a check and shown in amber) instead of a generic estimate — the same historical record the adaptive weighting above draws on, just answering "how soon" instead of "how much weight." Without enough history yet, it falls back to a weighted average of the active techniques' typical horizons (shown in gray) — an informed estimate, not a measurement.</p>
+      <p><b>Leading vs. lagging, and the expected timeframe.</b> Techniques are split into two kinds. Leading techniques try to anticipate a move before it's confirmed: RSI, Bollinger squeeze, stochastic crosses, OBV, the divergence proxy, the volatility regime read, reversal-pattern detection, the valuation/positioning layer, Fibonacci retracement, the time-of-day/day-of-week read, sentiment, and the cross-asset lead/lag read. Lagging (confirming) techniques describe a move already underway: momentum alignment, MACD, the moving-average stack, Donchian breakout proximity, volume confirmation, swing structure, and open interest. This is a methodology classification, not the last word for a given asset — where enough of that asset's own history exists, its measured accuracy at each horizon (below) is the real, asset-specific answer to which of its own signals actually lead versus lag, which can and does differ from this general table. The small window shown next to each score (for example <b>1-3 days</b>) is this engine's estimate of when that specific call is expected to resolve, built from whichever techniques are actually voting on that asset right now. Where an asset has enough of its own scored history, the window uses that asset's real measured accuracy at the 24-hour versus 7-day mark (marked with a check and shown in amber) instead of a generic estimate — the same historical record the adaptive weighting above draws on, just answering "how soon" instead of "how much weight." Without enough history yet, it falls back to a weighted average of the active techniques' typical horizons (shown in gray) — an informed estimate, not a measurement.</p>
       <p><b>Expected range.</b> The Range column is a band around the current price, not a point prediction, for the same timeframe as the horizon chip next to it. Its width comes from real volatility: this asset's own historical realized move size at that horizon once evaluateMatured has scored enough of its own outcomes (amber, marked historical), or its recent realized daily volatility scaled by the square root of time otherwise (gray, marked methodology) — the standard random-walk approximation for "how far a price plausibly wanders in N days." The band's center only shifts toward the called direction once the score shows real conviction, and the shift is capped well inside the band, so a weak score gives a wide, roughly symmetric range rather than a false point estimate.</p>
       <p><b>How far back the methodology-basis range looks.</b> The gray (methodology) band isn't measured over a single fixed number of days for every asset — it's calibrated per asset. Several candidate lookback windows (10, 20, 30, 60, and 90 days) are backtested against that asset's own price history every hour: for each candidate, the tool checks whether the volatility estimate it would have produced at many past points actually matched what happened next, and keeps whichever window comes closest to correctly sized (hovering your cursor over a gray band shows which one won). A too-short lookback whipsaws on noise; a too-long one smooths over a real shift in how much an asset has started moving. This is a fast, within-run check using history already being fetched — distinct from, and much quicker to react than, the slower live-outcome learning loop described above — so it needs a real backtest sample to trust (an asset too young for that, common at crypto's 365-day history cap, just keeps the plain 30-day default).</p>
       <p><b>Which indicator this asset leans on.</b> "Leans on X (n%)" under an asset's name names whichever technique has, on its own, the strongest individually-proven track record for that specific asset — some assets really are better predicted by one kind of signal than another, and this surfaces that once a technique has enough of its own scored history to say so, using the same adaptive-weighting data above.</p>
@@ -2780,6 +2810,48 @@ export default {
       const body = { crypto, stocks, generated_at: new Date().toISOString() };
       ctx.waitUntil(putCachedLivePrices(env, body));
       return json(body, { 'Cache-Control': 'no-store', 'X-FCS-Live-Cache': 'miss' });
+    }
+
+    // Per-asset accuracy drill-down: every technique's measured accuracy
+    // for one symbol (not just the single best one the main payload shows
+    // via topIndicator), plus its range-prediction hit rate and score
+    // history. A deliberate, narrow exception to "the Worker only ever
+    // reads KV" (see buildPayload's docs) — that rule exists to keep the
+    // *heavy engine* (~130 fetches + indicator math across ~260 assets)
+    // off the Worker, not to ban D1 outright. An occasional single-symbol
+    // read is trivial by comparison and stays well inside Workers Free
+    // plan's per-request limits regardless of which plan is active.
+    if (path.startsWith('/api/asset/') || path.startsWith('api/asset/')) {
+      const raw = path.slice(path.indexOf('asset/') + 'asset/'.length);
+      const symbol = decodeURIComponent(raw).toUpperCase();
+      if (!symbol) return json({ error: 'symbol required' });
+      if (!env.FCS_DB) return json({ error: 'per-asset detail not available (D1 not bound)' });
+      try {
+        const [techRows, rangeRows, snapRows] = await Promise.all([
+          env.FCS_DB.prepare('SELECT technique_id, horizon_hours, correct, total, accuracy FROM technique_reliability WHERE symbol = ?').bind(symbol).all(),
+          env.FCS_DB.prepare('SELECT horizon_hours, hits, total, accuracy FROM range_reliability WHERE symbol = ?').bind(symbol).all(),
+          env.FCS_DB.prepare('SELECT snapshot_date, score, samples FROM asset_score_snapshots WHERE symbol = ? ORDER BY snapshot_date DESC LIMIT 90').bind(symbol).all()
+        ]);
+        const techniques = (techRows.results || []).map((r) => ({
+          id: r.technique_id, horizonHours: r.horizon_hours, correct: r.correct, total: r.total, accuracy: r.accuracy,
+          leading: TECHNIQUE_META[r.technique_id] ? TECHNIQUE_META[r.technique_id].leading : null
+        }));
+        const range = (rangeRows.results || []).map((r) => ({ horizonHours: r.horizon_hours, hits: r.hits, total: r.total, accuracy: r.accuracy }));
+        const scoreHistory = (snapRows.results || []).map((r) => ({ date: r.snapshot_date, score: r.score, samples: r.samples }));
+        // Simple drift flag: trailing-30-snapshot score vs. all-time —
+        // enough of a trend line to notice a regime change, not a
+        // full statistical test.
+        let drift = null;
+        if (scoreHistory.length >= 2) {
+          const recent = scoreHistory.slice(0, Math.min(30, scoreHistory.length));
+          const recentAvg = recent.reduce((a, r) => a + r.score, 0) / recent.length;
+          const allTimeAvg = scoreHistory.reduce((a, r) => a + r.score, 0) / scoreHistory.length;
+          drift = Math.round(recentAvg - allTimeAvg);
+        }
+        return json({ symbol, techniques, range, scoreHistory, drift }, { 'Cache-Control': 'public, max-age=300' });
+      } catch (e) {
+        return json({ error: 'per-asset query failed', detail: String((e && e.message) || e) });
+      }
     }
 
     // Dashboard (any other path under the mount)

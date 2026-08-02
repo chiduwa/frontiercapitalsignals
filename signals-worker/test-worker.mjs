@@ -118,6 +118,22 @@ class MockKV {
   async put(k, v) { this.store.set(k, v); }
 }
 
+// ---- mock D1 (Workers binding surface: prepare(sql).bind(...args).all()) --
+// Table choice is inferred from the SQL text (same substring-matching
+// style as stubbedFetch's URL matching above) since this mock only ever
+// needs to serve the one route (/api/asset/:symbol) that reads D1 directly.
+class MockD1 {
+  constructor(seed) { this.seed = seed || { technique_reliability: [], range_reliability: [], asset_score_snapshots: [] }; }
+  prepare(sql) {
+    const table = sql.includes('technique_reliability') ? 'technique_reliability'
+      : sql.includes('range_reliability') ? 'range_reliability'
+      : sql.includes('asset_score_snapshots') ? 'asset_score_snapshots'
+      : null;
+    const rows = (table && this.seed[table]) || [];
+    return { bind: (symbol) => ({ all: async () => ({ results: rows.filter((r) => r.symbol === symbol) }) }) };
+  }
+}
+
 // ---- load the worker module (also exports buildPayload + CACHE_KEY) -------
 global.fetch = stubbedFetch;
 const ctx = { waitUntil: (p) => { if (p && p.then) p.catch(() => {}); } };
@@ -720,6 +736,58 @@ check('second call within the TTL is a cache hit', pricesResp2.headers.get('x-fc
 const pricesBody2 = await pricesResp2.json();
 check('cache hit serves the identical previously-fetched body (same generated_at)', pricesBody2.generated_at === pricesBody.generated_at);
 check('response never leaks a raw CoinGecko id key', Object.keys(pricesBody.crypto).every(k => displayedCryptoSymbols.has(k)));
+
+console.log('\n== techniqueBreakdown: every technique\'s own accuracy for one asset, not just the best ==');
+const breakdownReliability = {
+  'BTC|rsi': { correct: 18, accuracy: 0.9, total: 20 },
+  'BTC|macd': { correct: 8, accuracy: 0.4, total: 20 },
+  'BTC|momentum': { correct: 5, accuracy: 0.5, total: 10 } // below MIN_RELIABILITY_SAMPLES(20) -> excluded
+};
+const breakdownByHorizon = { 24: { 'BTC|rsi': { correct: 19, total: 20 } }, 168: { 'BTC|rsi': { correct: 12, total: 20 } } };
+const breakdown = mod.techniqueBreakdown(breakdownReliability, breakdownByHorizon, 'BTC');
+check('includes every technique with enough samples, not just the top one', breakdown.some(t => t.id === 'rsi') && breakdown.some(t => t.id === 'macd'), JSON.stringify(breakdown));
+check('excludes a technique below MIN_RELIABILITY_SAMPLES', !breakdown.some(t => t.id === 'momentum'));
+check('sorted by accuracy, best first', breakdown[0].id === 'rsi' && breakdown[0].accuracy === 0.9);
+check('carries the measured per-horizon split (an empirically-measured leading/lagging read) when it exists', breakdown[0].byHorizon && breakdown[0].byHorizon[24].accuracy === 0.95 && breakdown[0].byHorizon[168].accuracy === 0.6, JSON.stringify(breakdown[0]));
+check('a technique with no per-horizon data at MIN_RELIABILITY_SAMPLES omits byHorizon rather than fabricating it', breakdown.find(t => t.id === 'macd').byHorizon === undefined);
+check('empty input: empty array, not an error', mod.techniqueBreakdown(null, null, 'BTC').length === 0);
+
+console.log('\n== api: /api/asset/:symbol — per-asset drill-down, a deliberate narrow exception to "Worker only reads KV" ==');
+// 35 snapshot rows, not 2: the drift calc compares the trailing 30 against
+// the full history, so a fixture with 30 or fewer rows can never show any
+// drift at all (both windows would be identical) — this needs to exceed
+// 30 to actually exercise "recent window differs from all-time."
+const snapshotRows = [];
+for (let i = 0; i < 30; i++) snapshotRows.push({ symbol: 'BTC', snapshot_date: `2026-08-${String(30 - i).padStart(2, '0')}`, score: 96, samples: 40 }); // 30 recent days at 96
+for (let i = 0; i < 5; i++) snapshotRows.push({ symbol: 'BTC', snapshot_date: `2026-06-${String(25 - i).padStart(2, '0')}`, score: 50, samples: 20 }); // 5 older days at 50, pulling the all-time average down
+const expectedRecentAvg = 96;
+const expectedAllTimeAvg = (30 * 96 + 5 * 50) / 35;
+const expectedDrift = Math.round(expectedRecentAvg - expectedAllTimeAvg);
+const assetSeed = {
+  technique_reliability: [
+    { symbol: 'BTC', technique_id: 'rsi', horizon_hours: 24, correct: 19, total: 20, accuracy: 0.95 },
+    { symbol: 'BTC', technique_id: 'macd', horizon_hours: 168, correct: 8, total: 20, accuracy: 0.4 }
+  ],
+  range_reliability: [{ symbol: 'BTC', horizon_hours: 24, hits: 18, total: 20, accuracy: 0.9 }],
+  asset_score_snapshots: snapshotRows
+};
+const d1Env = { FCS_CACHE: new MockKV(), FCS_DB: new MockD1(assetSeed) };
+const assetResp = await worker.fetch(new Request('https://x.com/signals/api/asset/btc'), d1Env, ctx);
+const assetBody = await assetResp.json();
+check('200 with the requested symbol uppercased', assetResp.status === 200 && assetBody.symbol === 'BTC', JSON.stringify(assetBody));
+check('carries every technique for this symbol, not just the best one', assetBody.techniques.length === 2, JSON.stringify(assetBody.techniques));
+check('a known technique_id carries its TECHNIQUE_META leading/lagging classification', assetBody.techniques.find(t => t.id === 'rsi').leading === true);
+check('range-prediction hit rate present', assetBody.range.length === 1 && assetBody.range[0].hits === 18);
+check('score history present, most-recent-first', assetBody.scoreHistory.length === 35 && assetBody.scoreHistory[0].date === '2026-08-30');
+check('drift computed correctly: recent-30 average vs. the full all-time average', assetBody.drift === expectedDrift, `got ${assetBody.drift}, expected ${expectedDrift}`);
+
+const noD1Resp = await worker.fetch(new Request('https://x.com/signals/api/asset/BTC'), emptyEnv, ctx);
+const noD1Body = await noD1Resp.json();
+check('D1 not bound: graceful message, not a crash', noD1Resp.status === 200 && typeof noD1Body.error === 'string', JSON.stringify(noD1Body));
+
+const unknownSymbolResp = await worker.fetch(new Request('https://x.com/signals/api/asset/NOPE'), d1Env, ctx);
+const unknownSymbolBody = await unknownSymbolResp.json();
+check('unknown symbol: empty arrays, not an error (no data yet, not a failure)', unknownSymbolBody.techniques.length === 0 && unknownSymbolBody.range.length === 0 && unknownSymbolBody.drift === null, JSON.stringify(unknownSymbolBody));
 
 console.log(failures === 0 ? '\nWORKER INTEGRATION OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

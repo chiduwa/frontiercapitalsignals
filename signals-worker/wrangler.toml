@@ -9,6 +9,16 @@ compatibility_date = "2024-11-01"
 binding = "FCS_CACHE"
 id = "9dd922a242fc4fa58853b954693b9eee"
 
+# Same D1 database the hourly build (scripts/build-signals.mjs, via the
+# REST API) already writes the reliability-learning tables into — bound
+# here too, read-only in practice, ONLY for the narrow /api/asset/:symbol
+# drill-down route (one symbol's technique breakdown on request, not the
+# heavy engine). Everything else in this Worker still only ever reads KV.
+[[d1_databases]]
+binding = "FCS_DB"
+database_name = "frontier-capital-signals-reliability"
+database_id = "b07a4faa-8330-4b13-bf94-99fc662d4d6e"
+
 # No [triggers] cron here: the engine is too heavy for Workers Free plan's
 # 10ms CPU / 50-subrequest caps (~130 fetches + indicator math across ~260
 # assets). It instead runs hourly via a GitHub Actions workflow

@@ -12,7 +12,7 @@
 // Optional env: TREFIS_OVERRIDES
 // Optional (enables reliability weighting when set): FCS_D1_DATABASE_ID
 import { buildPayload, CACHE_KEY } from '../worker.js';
-import { loadReliability, loadMoveStats, loadRangeReliability, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, logRun, evaluateMatured, evaluateTimeOfDay } from './reliability.mjs';
+import { loadReliability, loadMoveStats, loadRangeReliability, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, logRun, evaluateMatured, evaluateTimeOfDay, snapshotAssetScores } from './reliability.mjs';
 import { upsertMarketSentiment, loadRecentBars } from './archive.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES } = process.env;
@@ -106,5 +106,15 @@ if (FCS_D1_DATABASE_ID) {
     });
   } catch (e) {
     console.error('market-wide sentiment logging failed (KV already updated, dashboard unaffected):', e.message || e);
+  }
+  try {
+    // Reuses this run's own already-loaded reliability/rangeReliability
+    // (no re-query) — upserts, so "today" reflects this run's numbers
+    // every hour until the date rolls over, then freezes as history.
+    const today = payload.generated_at.slice(0, 10);
+    const snapshotted = await snapshotAssetScores(env, today, reliability, rangeReliability);
+    console.log(`snapshotted prediction scores for ${snapshotted} assets`);
+  } catch (e) {
+    console.error('score snapshotting failed (KV already updated, dashboard unaffected):', e.message || e);
   }
 }

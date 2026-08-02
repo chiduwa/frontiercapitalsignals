@@ -4,7 +4,7 @@
 // Talks to Cloudflare's D1 HTTP API directly via d1-client.mjs, shared with
 // the archive/backfill scripts so there's one D1 client, not a hand-copied
 // duplicate that could drift.
-import { MIN_RELIABILITY_SAMPLES, slotsForTimestamp } from '../worker.js';
+import { MIN_RELIABILITY_SAMPLES, slotsForTimestamp, assetPredictionScore } from '../worker.js';
 import { d1, chunk } from './d1-client.mjs';
 
 // Matches the horizons timeOfDaySignal (worker.js) checks.
@@ -400,6 +400,44 @@ export async function loadLeadLagSignals(env) {
     (out[r.follower_symbol] ??= []).push({ leaderSymbol: r.leader_symbol, lagDays: r.lag_days, corr: r.corr, samples: r.samples });
   }
   return out;
+}
+
+// Snapshots assetPredictionScore() for every symbol with enough matured
+// history into asset_score_snapshots, keyed by (symbol, date) — turns the
+// existing cumulative all-time score into a real trend line. Upserts (not
+// INSERT OR IGNORE): called every hour, so today's row reflects the latest
+// computation each time it runs, while past days stay frozen once their
+// own date has passed — a live-updating "today" with real history behind
+// it, not a once-a-day snapshot that could miss the day entirely if that
+// one run failed.
+export async function snapshotAssetScores(env, date, reliability, rangeReliability) {
+  const symbols = new Set();
+  for (const key of Object.keys(reliability || {})) symbols.add(key.split('|')[0]);
+  for (const symbol of Object.keys(rangeReliability || {})) symbols.add(symbol);
+  if (!symbols.size) return 0;
+
+  const classRows = await d1(env, 'SELECT DISTINCT symbol, asset_class FROM technique_reliability');
+  const classBySymbol = Object.fromEntries(classRows.map((r) => [r.symbol, r.asset_class]));
+
+  const rows = [];
+  for (const symbol of symbols) {
+    const score = assetPredictionScore(symbol, reliability, rangeReliability);
+    if (score && classBySymbol[symbol]) rows.push({ symbol, assetClass: classBySymbol[symbol], score: score.score, samples: score.samples });
+  }
+  let written = 0;
+  for (const batch of chunk(rows, 15)) {
+    const placeholders = batch.map(() => '(?,?,?,?,?)').join(',');
+    const params = batch.flatMap((r) => [r.symbol, r.assetClass, date, r.score, r.samples]);
+    await d1(env, `
+      INSERT INTO asset_score_snapshots (symbol, asset_class, snapshot_date, score, samples)
+      VALUES ${placeholders}
+      ON CONFLICT (symbol, snapshot_date) DO UPDATE SET
+        score = excluded.score,
+        samples = excluded.samples
+    `, params);
+    written += batch.length;
+  }
+  return written;
 }
 
 export { MIN_RELIABILITY_SAMPLES };
