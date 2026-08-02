@@ -590,6 +590,28 @@ check('thin participation on a big move: left neutral, not fabricated into a dir
 check('rally backed by elevated OI: bullish (real participation)', findTech(mod.evaluateTechniques(oiElevatedOnRally, 'crypto'), 'openinterest').dir === 1);
 check('selloff with crowded OI: bearish (liquidation risk)', findTech(mod.evaluateTechniques(oiElevatedOnSelloff, 'crypto'), 'openinterest').dir === -1);
 
+console.log('\n== sentiment technique: market-wide extremes take priority over per-asset noise ==');
+const sentExtremeFear = baseMetric({});
+const sentExtremeGreed = baseMetric({});
+const sentPerAssetBullish = baseMetric({ sentimentScore: 0.5 });
+const sentPerAssetBearish = baseMetric({ sentimentScore: -0.6 });
+const sentWeakPerAsset = baseMetric({ sentimentScore: 0.1 });
+const sentNothing = baseMetric({});
+const sentFearOverridesBearishPerAsset = baseMetric({ sentimentScore: -0.5 }); // contradicts the market-wide read
+check('crypto: market-wide extreme fear votes bullish (contrarian)', findTech(mod.evaluateTechniques(sentExtremeFear, 'crypto', undefined, { fearGreed: 15 }), 'sentiment').dir === 1);
+check('crypto: market-wide extreme greed votes bearish (contrarian)', findTech(mod.evaluateTechniques(sentExtremeGreed, 'crypto', undefined, { fearGreed: 88 }), 'sentiment').dir === -1);
+check('crypto: no market-wide extreme, strong bullish per-asset sentiment fires', findTech(mod.evaluateTechniques(sentPerAssetBullish, 'crypto', undefined, { fearGreed: 50 }), 'sentiment').dir === 1);
+check('crypto: no market-wide extreme, strong bearish per-asset sentiment fires', findTech(mod.evaluateTechniques(sentPerAssetBearish, 'crypto', undefined, { fearGreed: 50 }), 'sentiment').dir === -1);
+check('crypto: weak per-asset sentiment (below the 0.3 bar) stays neutral, not fabricated', findTech(mod.evaluateTechniques(sentWeakPerAsset, 'crypto', undefined, { fearGreed: 50 }), 'sentiment').dir === 0);
+check('crypto: neither market-wide nor per-asset data at all: abstains (null)', findTech(mod.evaluateTechniques(sentNothing, 'crypto', undefined, {}), 'sentiment').dir === null);
+check('crypto: a market-wide extreme wins even when per-asset sentiment disagrees', findTech(mod.evaluateTechniques(sentFearOverridesBearishPerAsset, 'crypto', undefined, { fearGreed: 15 }), 'sentiment').dir === 1);
+
+console.log('\n== sentiment technique (equities): VIX position, same contrarian read as elsewhere in this engine ==');
+check('VIX near a recent extreme (spiking): bullish, fear already priced in', findTech(mod.evaluateTechniques(baseMetric({}), 'stock', undefined, { vixRangePos: 0.9 }), 'sentiment').dir === 1);
+check('VIX complacent near recent lows: bearish', findTech(mod.evaluateTechniques(baseMetric({}), 'stock', undefined, { vixRangePos: 0.05 }), 'sentiment').dir === -1);
+check('VIX mid-range: neutral', findTech(mod.evaluateTechniques(baseMetric({}), 'stock', undefined, { vixRangePos: 0.5 }), 'sentiment').dir === 0);
+check('no VIX data at all: abstains (null)', findTech(mod.evaluateTechniques(baseMetric({}), 'stock', undefined, {}), 'sentiment').dir === null);
+
 console.log('\n== compositeCall: one directional read per asset from the long/short pair ==');
 check('a tie (long === short) has no falsifiable direction: null', mod.compositeCall({ long: 60, short: 60 }) === null);
 check('long leading: dir 1, score is the long side', JSON.stringify(mod.compositeCall({ long: 70, short: 30 })) === JSON.stringify({ dir: 1, score: 70 }));

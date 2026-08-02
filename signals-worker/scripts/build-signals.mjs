@@ -12,7 +12,8 @@
 // Optional env: TREFIS_OVERRIDES
 // Optional (enables reliability weighting when set): FCS_D1_DATABASE_ID
 import { buildPayload, CACHE_KEY } from '../worker.js';
-import { loadReliability, loadMoveStats, loadRangeReliability, loadTimeOfDayStats, loadFundingHistory, logRun, evaluateMatured, evaluateTimeOfDay } from './reliability.mjs';
+import { loadReliability, loadMoveStats, loadRangeReliability, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, logRun, evaluateMatured, evaluateTimeOfDay } from './reliability.mjs';
+import { upsertMarketSentiment } from './archive.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID })) {
@@ -26,7 +27,7 @@ const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID };
 // succeed with today's baseline (unweighted, methodology-only-horizon,
 // volatility-only-range) scoring rather than blocking the hourly KV
 // refresh on a secondary subsystem.
-let reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory;
+let reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap;
 if (FCS_D1_DATABASE_ID) {
   try {
     const rel = await loadReliability(env);
@@ -41,15 +42,17 @@ if (FCS_D1_DATABASE_ID) {
     console.log(`loaded time-of-day stats for ${Object.keys(todStats).length} (symbol, slot, horizon) triples`);
     fundingHistory = await loadFundingHistory(env);
     console.log(`loaded funding/OI percentile history for ${Object.keys(fundingHistory).length} symbols`);
+    sentimentMap = await loadSentimentMap(env);
+    console.log(`loaded per-asset sentiment for ${Object.keys(sentimentMap).length} symbols`);
   } catch (e) {
-    console.error('loadReliability/loadMoveStats/loadRangeReliability/loadTimeOfDayStats/loadFundingHistory failed, continuing with baseline weights:', e.message || e);
+    console.error('loadReliability/loadMoveStats/loadRangeReliability/loadTimeOfDayStats/loadFundingHistory/loadSentimentMap failed, continuing with baseline weights:', e.message || e);
   }
 } else {
   console.log('FCS_D1_DATABASE_ID not set — reliability weighting disabled, using baseline weights');
 }
 
 const started = Date.now();
-const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory);
+const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap);
 console.log(`built payload in ${Date.now() - started}ms — crypto ${payload.crypto.universe} assets, stocks ${payload.stocks.universe} assets`);
 console.log('health:', JSON.stringify(payload.health));
 
@@ -82,5 +85,19 @@ if (FCS_D1_DATABASE_ID) {
     console.log(`updated time-of-day stats for ${todUpdates} (symbol, slot) pairs`);
   } catch (e) {
     console.error('time-of-day evaluation failed (KV already updated, dashboard unaffected):', e.message || e);
+  }
+  try {
+    // Reuses Fear & Greed / VIX already fetched for this run's own
+    // payload.overview — no new call. Per-asset sentiment (CoinGecko
+    // votes, CryptoPanic) is a daily-cadence job (scripts/daily-refresh.mjs)
+    // since it needs one fetch per symbol; this is just today's market-
+    // wide reading, cheap enough to log every hour it changes.
+    const today = payload.generated_at.slice(0, 10);
+    await upsertMarketSentiment(env, today, {
+      fearGreedAltme: payload.overview.fear_greed ? payload.overview.fear_greed.value : null,
+      vixRangePos: payload.overview.vix ? payload.overview.vix.rangePos : null
+    });
+  } catch (e) {
+    console.error('market-wide sentiment logging failed (KV already updated, dashboard unaffected):', e.message || e);
   }
 }

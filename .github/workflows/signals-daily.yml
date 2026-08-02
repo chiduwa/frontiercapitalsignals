@@ -48,3 +48,17 @@ jobs:
           # Workers Paid is confirmed active on the account.
           BACKFILL_ROW_BUDGET: ${{ vars.BACKFILL_ROW_BUDGET || '15000' }}
           BACKFILL_FUNDING_ROW_BUDGET: ${{ vars.BACKFILL_FUNDING_ROW_BUDGET || '4000' }}
+
+      - name: Refresh per-asset sentiment
+        working-directory: signals-worker
+        run: node scripts/daily-refresh.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+          # Both optional — CoinMarketCap's Fear & Greed cross-check and
+          # CryptoPanic's per-asset news sentiment simply don't run until
+          # these are set (coinmarketcap.com/api, cryptopanic.com/developers/api,
+          # both free). CoinGecko's community-vote sentiment needs no key.
+          CMC_API_KEY: ${{ secrets.CMC_API_KEY }}
+          CRYPTOPANIC_API_TOKEN: ${{ secrets.CRYPTOPANIC_API_TOKEN }}

@@ -11,8 +11,10 @@
 import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, BENCHMARK_SYMBOLS } from '../worker.js';
 import {
   yahooFullHistory, coingeckoDailyBars, getExistingCoverage,
-  upsertDailyBars, fundingSnapshotToRows, upsertFundingDaily
+  upsertDailyBars, fundingSnapshotToRows, upsertFundingDaily,
+  fearGreedHistory, insertFearGreedHistory
 } from './archive.mjs';
+import { d1 } from './d1-client.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
@@ -126,6 +128,27 @@ async function main() {
     console.error('getFundingMap failed, skipping funding/OI snapshot:', e.message);
   }
   console.log(`funding rows written: ${fundingRowsWritten}`);
+
+  // Fear & Greed deep history: unlike everything else in this script, a
+  // single call gets genuinely deep history in one shot (confirmed live —
+  // alternative.me's limit=0 returns all 3,101+ daily points back to
+  // 2018-02-01) — no pagination, no per-symbol loop, nothing to spread
+  // across multiple runs. Checked-and-skipped once it's already in: no
+  // point re-fetching+re-inserting thousands of already-stored rows every
+  // single day this script runs.
+  try {
+    const [{ oldest } = {}] = await d1(env, "SELECT MIN(date) AS oldest FROM sentiment_daily WHERE symbol = '' AND fear_greed_altme IS NOT NULL");
+    if (oldest && oldest <= '2018-03-01') {
+      console.log(`Fear & Greed history already backfilled (earliest stored: ${oldest})`);
+    } else {
+      const fg = await fearGreedHistory(0);
+      const written = await insertFearGreedHistory(env, fg);
+      const earliest = fg.reduce((min, r) => (!min || r.date < min ? r.date : min), null);
+      console.log(`Fear & Greed history: inserted up to ${written} new daily rows (${fg.length} fetched, back to ${earliest || 'n/a'})`);
+    }
+  } catch (e) {
+    console.error('Fear & Greed history backfill failed:', e.message);
+  }
 
   const finalCoverage = await getExistingCoverage(env, universe.map((u) => u.symbol));
   const depths = Object.values(finalCoverage).map((c) => c.count).sort((a, b) => a - b);

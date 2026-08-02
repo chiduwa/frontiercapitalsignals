@@ -364,4 +364,28 @@ export async function loadFundingHistory(env) {
   return out;
 }
 
+// { [symbol]: number (-1..1) } pooling CoinGecko's community up-vote %
+// (rescaled from 0-100 to -1..1) and CryptoPanic's already -1..1 news
+// score, from the MOST RECENT sentiment_daily row per symbol — "today's
+// reading," not a smoothed average (the technique_reliability learning
+// loop already handles smoothing accuracy over time; this should reflect
+// current mood). Consumed as m.sentimentScore by the 'sentiment'
+// technique in worker.js.
+export async function loadSentimentMap(env) {
+  const rows = await d1(env, `
+    SELECT symbol, coingecko_up_pct, cryptopanic_score, date FROM sentiment_daily
+    WHERE symbol != '' AND (coingecko_up_pct IS NOT NULL OR cryptopanic_score IS NOT NULL)
+    ORDER BY date DESC
+  `);
+  const out = {};
+  for (const r of rows) {
+    if (r.symbol in out) continue; // first hit per symbol (DESC order) = most recent
+    const parts = [];
+    if (r.coingecko_up_pct != null) parts.push((r.coingecko_up_pct - 50) / 50);
+    if (r.cryptopanic_score != null) parts.push(r.cryptopanic_score);
+    if (parts.length) out[r.symbol] = parts.reduce((a, b) => a + b, 0) / parts.length;
+  }
+  return out;
+}
+
 export { MIN_RELIABILITY_SAMPLES };

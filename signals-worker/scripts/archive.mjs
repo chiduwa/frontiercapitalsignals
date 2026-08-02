@@ -151,3 +151,134 @@ export async function upsertFundingDaily(env, rows) {
   }
   return attempted;
 }
+
+// ----------------------------- SENTIMENT ------------------------------------
+// Four sources, three of them free-and-keyless, combined into one daily
+// archive row per date (market-wide fields) or (date, symbol) (per-asset
+// fields) — see sentiment_daily in schema.sql. CMC_API_KEY and
+// CRYPTOPANIC_API_TOKEN are optional: both sources simply produce nothing
+// when the corresponding env var is unset, same "additive, never load-
+// bearing" pattern as TREFIS_OVERRIDES/FCS_D1_DATABASE_ID elsewhere in this
+// pipeline — the sentiment technique degrades to whichever fields exist.
+
+// alternative.me's Fear & Greed index goes back to 2018-02-01 in a SINGLE
+// call with limit=0 (confirmed live: 3,101 daily points, one request) —
+// genuinely deep history, no pagination needed, unlike almost everything
+// else in this archive.
+export async function fearGreedHistory(limit = 0) {
+  const j = await fetchJson(`https://api.alternative.me/fng/?limit=${limit}`);
+  const rows = (j && j.data) || [];
+  return rows
+    .map((r) => ({ date: new Date(Number(r.timestamp) * 1000).toISOString().slice(0, 10), value: Number(r.value) }))
+    .filter((r) => Number.isFinite(r.value));
+}
+
+// CoinGecko's per-coin detail endpoint (NOT the bulk /markets one already
+// used hourly) carries a community up/down-vote split — a real but thin
+// signal (a poll, not sentiment analysis), which is exactly why it's
+// pooled with the other sources rather than trusted alone. One call per
+// coin, so this stays in the daily job, not the hourly one.
+export async function coingeckoSentiment(id) {
+  const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}`
+    + '?localization=false&tickers=false&market_data=false&community_data=false&developer_data=false&sparkline=false';
+  const j = await fetchJson(url);
+  const up = Number(j && j.sentiment_votes_up_percentage);
+  return Number.isFinite(up) ? up : null;
+}
+
+// CoinMarketCap's independently-calculated Fear & Greed Index — a second
+// cross-check against alternative.me's, not a replacement for it. Requires
+// a free CMC_API_KEY (coinmarketcap.com/api); returns null rather than
+// throwing when unset so callers can no-op cleanly. Endpoint/response
+// shape follows CMC's documented v3 fear-and-greed/latest — not yet
+// exercised live against a real key, so log-and-continue on an unexpected
+// shape rather than letting one bad response take down the whole daily run.
+export async function cmcFearGreed(apiKey) {
+  if (!apiKey) return null;
+  const res = await fetch('https://pro-api.coinmarketcap.com/v3/fear-and-greed/latest', {
+    headers: { 'X-CMC_PRO_API_KEY': apiKey, Accept: 'application/json' }
+  });
+  if (!res.ok) throw new Error(`CMC HTTP ${res.status}`);
+  const j = await res.json();
+  const value = Number(j && j.data && j.data.value);
+  if (!Number.isFinite(value)) {
+    console.error('cmcFearGreed: unexpected response shape:', JSON.stringify(j).slice(0, 200));
+    return null;
+  }
+  return value;
+}
+
+// CryptoPanic's per-currency news feed, community-tagged bullish/bearish —
+// real news sentiment, not a price-derived proxy, which is what makes it
+// genuinely additive here. Requires a free CRYPTOPANIC_API_TOKEN
+// (cryptopanic.com/developers/api); returns null when unset. Reduces a
+// page of posts to a single -1..1 score: (bullish - bearish) / (bullish +
+// bearish) votes, 0 when a currency has posts but no votes either way, null
+// when it has no posts at all this pull (not the same thing — "no signal"
+// vs. "neutral signal" stay distinguishable). Response shape/auth style
+// (auth_token query param, CryptoPanic's documented v1 approach) has not
+// been exercised live — same log-and-continue discipline as cmcFearGreed.
+export async function cryptoPanicSentiment(symbol, apiToken) {
+  if (!apiToken) return null;
+  const url = `https://cryptopanic.com/api/v1/posts/?auth_token=${encodeURIComponent(apiToken)}&currencies=${encodeURIComponent(symbol)}&public=true`;
+  const j = await fetchJson(url);
+  const results = (j && j.results) || [];
+  if (!results.length) return null;
+  let bullish = 0, bearish = 0;
+  for (const post of results) {
+    const votes = post.votes || {};
+    bullish += Number(votes.positive || votes.liked || 0);
+    bearish += Number(votes.negative || votes.disliked || votes.toxic || 0);
+  }
+  if (bullish + bearish === 0) return 0;
+  return (bullish - bearish) / (bullish + bearish);
+}
+
+// Upserts market-wide sentiment fields onto the symbol='' sentinel row for
+// `date` — merges field-by-field (COALESCE) so the hourly job's F&G/VIX
+// write and the daily job's CMC write don't clobber each other regardless
+// of which runs first on a given day.
+export async function upsertMarketSentiment(env, date, { fearGreedAltme, fearGreedCmc, vixRangePos } = {}) {
+  await d1(env, `
+    INSERT INTO sentiment_daily (date, symbol, fear_greed_altme, fear_greed_cmc, vix_range_pos)
+    VALUES (?, '', ?, ?, ?)
+    ON CONFLICT (date, symbol) DO UPDATE SET
+      fear_greed_altme = COALESCE(excluded.fear_greed_altme, sentiment_daily.fear_greed_altme),
+      fear_greed_cmc = COALESCE(excluded.fear_greed_cmc, sentiment_daily.fear_greed_cmc),
+      vix_range_pos = COALESCE(excluded.vix_range_pos, sentiment_daily.vix_range_pos)
+  `, [date, fearGreedAltme ?? null, fearGreedCmc ?? null, vixRangePos ?? null]);
+}
+
+// Bulk-insert historical Fear & Greed onto the symbol='' sentinel row per
+// date — used once by backfill-history.mjs's deep F&G pull. INSERT OR
+// IGNORE (not UPSERT) since this only ever fills in dates that don't exist
+// yet; today's own row is owned by upsertMarketSentiment above.
+export async function insertFearGreedHistory(env, rows) {
+  let attempted = 0;
+  for (const batch of chunk(rows, 20)) {
+    const placeholders = batch.map(() => "(?, '', ?)").join(',');
+    const params = batch.flatMap((r) => [r.date, r.value]);
+    await d1(env, `INSERT OR IGNORE INTO sentiment_daily (date, symbol, fear_greed_altme) VALUES ${placeholders}`, params);
+    attempted += batch.length;
+  }
+  return attempted;
+}
+
+// Upserts per-asset sentiment fields for `date` — same field-by-field
+// COALESCE merge as upsertMarketSentiment, for the same reason.
+export async function upsertAssetSentiment(env, date, rows) {
+  let attempted = 0;
+  for (const batch of chunk(rows, 15)) {
+    const placeholders = batch.map(() => '(?, ?, ?, ?)').join(',');
+    const params = batch.flatMap((r) => [date, r.symbol, r.coingeckoUpPct ?? null, r.cryptopanicScore ?? null]);
+    await d1(env, `
+      INSERT INTO sentiment_daily (date, symbol, coingecko_up_pct, cryptopanic_score)
+      VALUES ${placeholders}
+      ON CONFLICT (date, symbol) DO UPDATE SET
+        coingecko_up_pct = COALESCE(excluded.coingecko_up_pct, sentiment_daily.coingecko_up_pct),
+        cryptopanic_score = COALESCE(excluded.cryptopanic_score, sentiment_daily.cryptopanic_score)
+    `, params);
+    attempted += batch.length;
+  }
+  return attempted;
+}

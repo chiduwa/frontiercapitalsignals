@@ -372,7 +372,8 @@ export const TECHNIQUE_META = {
   seasonal:    { leading: true,  horizonDays: 7 },
   fibonacci:   { leading: true,  horizonDays: 3 },
   timeofday:   { leading: true,  horizonDays: 0.2 },
-  openinterest:{ leading: false, horizonDays: 3 }
+  openinterest:{ leading: false, horizonDays: 3 },
+  sentiment:   { leading: true,  horizonDays: 4 }
 };
 
 export function horizonLabel(days) {
@@ -1110,6 +1111,39 @@ export function evaluateTechniques(m, kind, reliability, marketContext, todStats
     push('timeofday', 0.7, null, null);
   }
 
+  // T19 sentiment: market-wide extremes — Fear & Greed for crypto, VIX's
+  // position in its own recent range for equities — now also scored as
+  // their own standalone, falsifiable vote (not just the confidence
+  // kicker they already are inside 'reversal'), combined with per-asset
+  // community/news sentiment (m.sentimentScore, -1..1, pooled from
+  // CoinGecko's up-vote % and CryptoPanic's bullish/bearish news balance
+  // by loadSentimentMap — see reliability.mjs) once it exists. Same
+  // contrarian read as 'reversal' already uses for VIX: an extreme (fear,
+  // or a VIX spike) leans bullish, complacency (greed, or a quiet VIX)
+  // leans bearish — consistent with how this engine already treats those
+  // two elsewhere, not a new interpretation invented here.
+  if (kind === 'crypto') {
+    const fg = marketContext && marketContext.fearGreed;
+    const per = m.sentimentScore;
+    let dir = null, note = null;
+    if (fg != null && fg <= 20) { dir = 1; note = 'market-wide extreme fear'; }
+    else if (fg != null && fg >= 80) { dir = -1; note = 'market-wide extreme greed'; }
+    if (dir == null && per != null && Math.abs(per) >= 0.3) {
+      dir = per > 0 ? 1 : -1;
+      note = per > 0 ? 'net-bullish community/news sentiment' : 'net-bearish community/news sentiment';
+    }
+    if (dir != null) push('sentiment', 0.6, dir, note);
+    else if (fg != null || per != null) push('sentiment', 0.6, 0, null);
+    else push('sentiment', 0.6, null, null);
+  } else {
+    const vix = marketContext && marketContext.vixRangePos;
+    if (vix != null) {
+      if (vix >= 0.85) push('sentiment', 0.6, 1, 'VIX near a recent extreme, fear already priced in');
+      else if (vix <= 0.15) push('sentiment', 0.6, -1, 'VIX complacent near recent lows');
+      else push('sentiment', 0.6, 0, null);
+    } else push('sentiment', 0.6, null, null);
+  }
+
   return T;
 }
 
@@ -1567,6 +1601,7 @@ export function buildCryptoMetrics(item, extras = {}) {
       ? percentileRank(extras.fundingHistory.fundingRates, extras.funding.fundingRate) : null,
     oiPercentile: (extras.fundingHistory && extras.fundingHistory.openInterests && extras.funding != null)
       ? percentileRank(extras.fundingHistory.openInterests, extras.funding.openInterest) : null,
+    sentimentScore: extras.sentimentScore != null ? extras.sentimentScore : null,
     trending: !!extras.trending
   };
 }
@@ -1753,7 +1788,7 @@ function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHori
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -1834,7 +1869,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
         const sym = (c.symbol || '').toUpperCase();
         const h = histories[i];
         const daily = h && !h._error ? h : null;
-        return buildCryptoMetrics(c, { funding: funding[sym], fundingHistory: fundingHistory && fundingHistory[sym], trending: trending.has(sym), daily, benchCloses: btcCloses });
+        return buildCryptoMetrics(c, { funding: funding[sym], fundingHistory: fundingHistory && fundingHistory[sym], sentimentScore: sentimentMap && sentimentMap[sym], trending: trending.has(sym), daily, benchCloses: btcCloses });
       })
       .filter(Boolean);
     cryptoBoards = rankBoards(metrics, 'crypto', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso);
