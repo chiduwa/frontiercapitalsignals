@@ -456,6 +456,54 @@ check('a series correlated with itself: ~1.0', Math.abs(mod.correlationWithBench
 const inverseWave = wave.map(v => 200 - v);
 check('an inverted series: strongly negative correlation', mod.correlationWithBenchmark(wave, inverseWave, 30) < -0.9);
 
+console.log('\n== laggedCorrelation + nDayReturnFromBars: the cross-asset lead/lag primitives ==');
+check('pearsonCorr: too few overlapping points returns null', mod.pearsonCorr([1, 2, 3], [1, 2, 3]) === null);
+// Build a synthetic leader whose return at date D perfectly predicts a
+// follower's return two days later (date D+2) — a real, unambiguous lag-2
+// relationship, not noise, to confirm laggedCorrelation actually finds the
+// right lag rather than just running without erroring.
+const llDates = Array.from({ length: 200 }, (_, i) => new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10));
+const leaderReturnsFixture = {}, followerReturnsFixture = {};
+for (let i = 0; i < llDates.length; i++) {
+  const r = Math.sin(i / 5) * 3 + (i % 7 === 0 ? 2 : -0.5); // some real, non-degenerate pattern
+  leaderReturnsFixture[llDates[i]] = r;
+  if (i + 2 < llDates.length) followerReturnsFixture[llDates[i + 2]] = r; // follower echoes the leader, 2 days later
+}
+const lagResultRight = mod.laggedCorrelation(leaderReturnsFixture, followerReturnsFixture, 2);
+const lagResultWrong = mod.laggedCorrelation(leaderReturnsFixture, followerReturnsFixture, 5);
+check('finds a near-perfect correlation at the true lag (2 days)', lagResultRight && lagResultRight.corr > 0.99, JSON.stringify(lagResultRight));
+check('a wrong lag on the same data does not show the same strength', lagResultWrong && Math.abs(lagResultWrong.corr) < Math.abs(lagResultRight.corr));
+check('no date overlap at all: returns null', mod.laggedCorrelation({ '2026-01-01': 1 }, { '2099-01-01': 1 }, 1) === null);
+
+const recentBars = [
+  { date: '2026-01-01', close: 100 }, { date: '2026-01-02', close: 102 },
+  { date: '2026-01-03', close: 101 }, { date: '2026-01-04', close: 105 }
+];
+check('nDayReturnFromBars: 3-day return computed correctly', Math.abs(mod.nDayReturnFromBars(recentBars, 3) - 5) < 1e-9, mod.nDayReturnFromBars(recentBars, 3));
+check('nDayReturnFromBars: not enough bars for the requested lag returns null', mod.nDayReturnFromBars(recentBars, 10) === null);
+
+console.log('\n== leadlag technique: only votes when a proven leader actually moved ==');
+const llSignalsFixture = { TESTASSET: [{ leaderSymbol: 'BTC', lagDays: 3, corr: 0.7, samples: 200 }, { leaderSymbol: 'ETH', lagDays: 2, corr: -0.9, samples: 200 }] };
+const llReturnsBtcUp = { BTC: [{ date: '2026-01-01', close: 100 }, { date: '2026-01-02', close: 100 }, { date: '2026-01-03', close: 100 }, { date: '2026-01-04', close: 110 }] }; // BTC +10% over 3d
+const llTechFires = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, undefined, undefined, undefined, llSignalsFixture, llReturnsBtcUp), 'leadlag');
+check('registered leader moved meaningfully: fires in the implied direction (positive corr, leader up -> bullish)', llTechFires.dir === 1, JSON.stringify(llTechFires));
+
+const llReturnsFlat = { BTC: [{ date: '2026-01-01', close: 100 }, { date: '2026-01-02', close: 100 }, { date: '2026-01-03', close: 100 }, { date: '2026-01-04', close: 100.2 }] }; // flat
+const llTechFlat = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, undefined, undefined, undefined, llSignalsFixture, llReturnsFlat), 'leadlag');
+check('registered leader but it did not move meaningfully: neutral, not fabricated', llTechFlat.dir === 0, JSON.stringify(llTechFlat));
+
+const llTechNoSignals = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, undefined, undefined, undefined, undefined, undefined), 'leadlag');
+check('no lead/lag signals loaded at all: abstains (null)', llTechNoSignals.dir === null);
+
+const llSignalsStronger = { TESTASSET: [{ leaderSymbol: 'BTC', lagDays: 3, corr: 0.3, samples: 200 }, { leaderSymbol: 'ETH', lagDays: 3, corr: -0.9, samples: 200 }] };
+const fourBarsUp = [{ date: '2026-01-01', close: 100 }, { date: '2026-01-02', close: 100 }, { date: '2026-01-03', close: 100 }, { date: '2026-01-04', close: 110 }]; // +10% over the 3-day lag
+const llReturnsBoth = {
+  BTC: fourBarsUp, // +10%, weak corr leader (0.3)
+  ETH: fourBarsUp  // +10%, strong corr leader (-0.9)
+};
+const llTechPicksStrongest = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, undefined, undefined, undefined, llSignalsStronger, llReturnsBoth), 'leadlag');
+check('with two qualifying leaders, follows the stronger-correlation one (ETH, negative corr -> bearish) not just the first', llTechPicksStrongest.dir === -1, JSON.stringify(llTechPicksStrongest));
+
 console.log('\n== seasonalAnalog: does this asset\'s own history contain a real analog? ==');
 check('too short a series: returns null, not a guess', mod.seasonalAnalog(Array.from({ length: 100 }, () => 100), 365) === null);
 function patternWindow(offset) { return Array.from({ length: 90 }, (_, i) => 100 + Math.sin((i + offset) / 10) * 8 + i * 0.1); }

@@ -1,12 +1,13 @@
 // Daily-cadence companion to the hourly build (scripts/build-signals.mjs):
 // owns whatever genuinely only needs to run once a day, either because the
-// upstream data itself only changes daily (sentiment) or because it needs
-// one fetch per symbol and doing that hourly would meaningfully inflate
-// the hourly job's runtime/fetch count for no real benefit. Currently:
+// upstream data itself only changes daily (sentiment) or because it's
+// expensive enough (per-symbol fetches, or an O(n^2)-pairs computation)
+// that doing it hourly would add real cost for no real benefit. Currently:
 // per-asset sentiment (CoinGecko community votes, CryptoPanic news
-// balance, both optional) and CoinMarketCap's Fear & Greed cross-check
-// (optional). Invoked once/day by .github/workflows/signals-daily.yml,
-// after backfill-history.mjs in the same job.
+// balance, both optional), CoinMarketCap's Fear & Greed cross-check
+// (optional), and the cross-asset lead/lag recompute. Invoked once/day by
+// .github/workflows/signals-daily.yml, after backfill-history.mjs in the
+// same job (lead/lag needs that step's archive data to already be there).
 //
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID
 // Optional env: CMC_API_KEY, CRYPTOPANIC_API_TOKEN — both sources simply
@@ -15,7 +16,8 @@
 import { getCryptoMarkets, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME } from '../worker.js';
 import {
   coingeckoSentiment, cryptoPanicSentiment, cmcFearGreed,
-  upsertAssetSentiment, upsertMarketSentiment
+  upsertAssetSentiment, upsertMarketSentiment,
+  computeLeadLag, replaceLeadLagSignals
 } from './archive.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, CMC_API_KEY, CRYPTOPANIC_API_TOKEN } = process.env;
@@ -61,11 +63,12 @@ async function main() {
       console.error(`cryptoPanicSentiment failed for ${a.symbol}:`, e.message);
     }
     if (coingeckoUpPct != null || cryptopanicScore != null) rows.push({ symbol: a.symbol, coingeckoUpPct, cryptopanicScore });
-    // Light pacing against CoinGecko's per-coin-detail endpoint and
-    // CryptoPanic's per-IP rate limit — same spirit as the archive
-    // backfill's pacing, just a shorter gap since these are much smaller
-    // responses than a multi-year history pull.
-    await new Promise((r) => setTimeout(r, 300));
+    // 3000ms, not a shorter gap: confirmed live that CoinGecko's per-coin
+    // detail endpoint is meaningfully more rate-limit-sensitive than the
+    // bulk /markets endpoint already used elsewhere (70/73 calls 429'd at
+    // an original 300ms pacing) — matches CRYPTO_HISTORY_DELAY_MS's
+    // already-proven-safe value for this same class of per-coin call.
+    await new Promise((r) => setTimeout(r, 3000));
   }
   console.log(`CoinGecko votes: ${cgOk} ok, ${cgFailed} failed${CRYPTOPANIC_API_TOKEN ? '' : ' (CryptoPanic: CRYPTOPANIC_API_TOKEN not set, skipped)'}`);
   if (CRYPTOPANIC_API_TOKEN) console.log(`CryptoPanic: ${cpOk} ok, ${cpFailed} failed`);
@@ -89,6 +92,15 @@ async function main() {
     }
   } else {
     console.log('CMC_API_KEY not set — CoinMarketCap Fear & Greed cross-check skipped');
+  }
+
+  try {
+    const started = Date.now();
+    const signals = await computeLeadLag(env);
+    const written = await replaceLeadLagSignals(env, signals, new Date().toISOString());
+    console.log(`lead/lag: ${written} significant relationships registered (recomputed in ${Date.now() - started}ms)`);
+  } catch (e) {
+    console.error('lead/lag recompute failed:', e.message);
   }
 
   console.log('daily-refresh complete');

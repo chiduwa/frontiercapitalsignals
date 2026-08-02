@@ -388,4 +388,18 @@ export async function loadSentimentMap(env) {
   return out;
 }
 
+// { [followerSymbol]: [{leaderSymbol, lagDays, corr, samples}] } — grouped
+// by follower for direct per-asset lookup by the leadlag technique
+// (worker.js). Relationships are (re)computed daily by computeLeadLag
+// (scripts/archive.mjs, driven from scripts/daily-refresh.mjs); this just
+// loads whatever's currently registered.
+export async function loadLeadLagSignals(env) {
+  const rows = await d1(env, 'SELECT leader_symbol, follower_symbol, lag_days, corr, samples FROM lead_lag_signals');
+  const out = {};
+  for (const r of rows) {
+    (out[r.follower_symbol] ??= []).push({ leaderSymbol: r.leader_symbol, lagDays: r.lag_days, corr: r.corr, samples: r.samples });
+  }
+  return out;
+}
+
 export { MIN_RELIABILITY_SAMPLES };

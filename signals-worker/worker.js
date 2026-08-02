@@ -373,7 +373,8 @@ export const TECHNIQUE_META = {
   fibonacci:   { leading: true,  horizonDays: 3 },
   timeofday:   { leading: true,  horizonDays: 0.2 },
   openinterest:{ leading: false, horizonDays: 3 },
-  sentiment:   { leading: true,  horizonDays: 4 }
+  sentiment:   { leading: true,  horizonDays: 4 },
+  leadlag:     { leading: true,  horizonDays: 3 }
 };
 
 export function horizonLabel(days) {
@@ -545,6 +546,26 @@ export function dwellAtExtreme(closes, lookback = 252, bandPct = 5) {
   return { dir, days };
 }
 
+// Plain Pearson correlation of two equal-length numeric series — the
+// shared primitive behind correlationWithBenchmark (same-index-aligned
+// trailing windows, both fetched in the same run) and laggedCorrelation
+// below (date-aligned across the permanent archive, which the hourly
+// fetch never needs to deal with). Kept separate from either caller's own
+// alignment logic so there's exactly one implementation of the actual
+// statistic.
+export function pearsonCorr(a, b) {
+  const n = Math.min(a.length, b.length);
+  if (n < 10) return null;
+  const meanA = a.reduce((x, y) => x + y, 0) / n, meanB = b.reduce((x, y) => x + y, 0) / n;
+  let cov = 0, varA = 0, varB = 0;
+  for (let i = 0; i < n; i++) {
+    const da = a[i] - meanA, db = b[i] - meanB;
+    cov += da * db; varA += da * da; varB += db * db;
+  }
+  if (varA === 0 || varB === 0) return null;
+  return cov / Math.sqrt(varA * varB);
+}
+
 // Pearson correlation of daily returns against a benchmark (BTC for
 // crypto, SPY for equities) over the trailing `lookback` days — is this
 // asset moving with the market right now, or on its own? An asset
@@ -560,15 +581,47 @@ export function correlationWithBenchmark(closes, benchCloses, lookback = 30) {
   const retsA = retsOf(closes), retsB = retsOf(benchCloses);
   const n = Math.min(retsA.length, retsB.length, lookback);
   if (n < 10) return null;
-  const a = retsA.slice(-n), b = retsB.slice(-n);
-  const meanA = a.reduce((x, y) => x + y, 0) / n, meanB = b.reduce((x, y) => x + y, 0) / n;
-  let cov = 0, varA = 0, varB = 0;
-  for (let i = 0; i < n; i++) {
-    const da = a[i] - meanA, db = b[i] - meanB;
-    cov += da * db; varA += da * da; varB += db * db;
+  return pearsonCorr(retsA.slice(-n), retsB.slice(-n));
+}
+
+// Correlation between leader's return at day T and follower's return at
+// day T+lag, both DATE-aligned first (unlike correlationWithBenchmark,
+// which assumes its two inputs are already same-index trailing windows —
+// not true across the permanent archive, where different assets can have
+// different date ranges or gaps). `leaderReturns`/`followerReturns` are
+// `{ date: pctReturn }` maps (built by the caller from asset_daily_bars —
+// see computeLeadLag in archive.mjs); this function only does the
+// alignment-and-correlate step, kept pure/testable independent of D1.
+export function laggedCorrelation(leaderReturns, followerReturns, lag) {
+  const leaderDates = Object.keys(leaderReturns).sort();
+  const a = [], b = [];
+  for (const date of leaderDates) {
+    const followerDate = shiftDate(date, lag);
+    if (followerDate in followerReturns) {
+      a.push(leaderReturns[date]);
+      b.push(followerReturns[followerDate]);
+    }
   }
-  if (varA === 0 || varB === 0) return null;
-  return cov / Math.sqrt(varA * varB);
+  const corr = pearsonCorr(a, b);
+  return corr == null ? null : { corr, samples: a.length };
+}
+
+function shiftDate(dateStr, days) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// The actual data point the leadlag technique needs: how much did this
+// symbol move from `lagDays` ago to its most recent archived close? `bars`
+// is a small date-sorted-ascending array (see loadRecentBars in
+// archive.mjs) — not re-fetched live, the permanent archive already has it.
+export function nDayReturnFromBars(bars, lagDays) {
+  if (!bars || bars.length < lagDays + 1) return null;
+  const now = bars[bars.length - 1].close;
+  const before = bars[bars.length - 1 - lagDays].close;
+  if (!before) return null;
+  return ((now / before) - 1) * 100;
 }
 
 // Does this asset's own price history contain a period that behaved like
@@ -812,7 +865,7 @@ export function timeOfDaySignal(todStats, symbol, nowIso) {
   return { dir: best.meanPct > 0 ? 1 : -1, slot: best.slot, horizonHours: best.horizonHours, meanPct: best.meanPct, n: best.n };
 }
 
-export function evaluateTechniques(m, kind, reliability, marketContext, todStats, nowIso) {
+export function evaluateTechniques(m, kind, reliability, marketContext, todStats, nowIso, leadLagSignals, leaderReturns) {
   const T = [];
   const push = (id, w, dir, note) => T.push({ id, w: w * reliabilityMultiplier(reliability, m.symbol, id), dir, note });
   const cS = m.chgShort, c24 = m.chg24h, c7 = m.chg7d, c30 = m.chg30d;
@@ -1144,11 +1197,46 @@ export function evaluateTechniques(m, kind, reliability, marketContext, todStats
     } else push('sentiment', 0.6, null, null);
   }
 
+  // T20 lead/lag: has ANOTHER asset — not necessarily in the same asset
+  // class; crypto can lead stocks, DXY/Gold/Oil can lead either — proven,
+  // over the permanent archive, to predict THIS asset's move some number
+  // of days later? See computeLeadLag (scripts/archive.mjs, run daily) for
+  // how relationships are discovered and scored, and loadLeadLagSignals
+  // (reliability.mjs) for how they're loaded each hour. Votes in the
+  // direction the relationship implies (correlation sign × the leader's
+  // own actual recent move direction) only once the leader has moved
+  // meaningfully over the matching window — a flat leader implies nothing
+  // either way, so this abstains rather than fabricating a direction from
+  // noise. When an asset has several registered leaders, only the
+  // strongest-correlation one that actually moved gets to vote — same
+  // "best candidate, not every candidate" discipline as timeOfDaySignal.
+  // Scored through the exact same technique_reliability pipeline as every
+  // other technique, so a relationship that stops working gets weighted
+  // down automatically, same as any other technique here.
+  const registeredLeaders = leadLagSignals && leadLagSignals[m.symbol];
+  if (registeredLeaders && registeredLeaders.length && leaderReturns) {
+    let best = null;
+    for (const rel of registeredLeaders) {
+      const bars = leaderReturns[rel.leaderSymbol];
+      const move = bars ? nDayReturnFromBars(bars, rel.lagDays) : null;
+      if (move == null || Math.abs(move) < 1) continue; // flat leader this run: no signal to relay
+      if (!best || Math.abs(rel.corr) > Math.abs(best.corr)) best = { ...rel, move };
+    }
+    if (best) {
+      const dir = (best.corr > 0 ? 1 : -1) * (best.move > 0 ? 1 : -1);
+      push('leadlag', 0.8, dir, `${best.leaderSymbol} moved ${best.move > 0 ? '+' : ''}${best.move.toFixed(1)}% ${best.lagDays}d ago (proven leader, corr ${best.corr.toFixed(2)})`);
+    } else {
+      push('leadlag', 0.8, 0, null);
+    }
+  } else {
+    push('leadlag', 0.8, null, null);
+  }
+
   return T;
 }
 
-export function confluence(m, kind, reliability, marketContext, reliabilityByHorizon, todStats, nowIso) {
-  const T = evaluateTechniques(m, kind, reliability, marketContext, todStats, nowIso);
+export function confluence(m, kind, reliability, marketContext, reliabilityByHorizon, todStats, nowIso, leadLagSignals, leaderReturns) {
+  const T = evaluateTechniques(m, kind, reliability, marketContext, todStats, nowIso, leadLagSignals, leaderReturns);
   const applicable = T.filter(t => t.dir !== null);
   const totalW = applicable.reduce((a, t) => a + t.w, 0) || 1;
   let bullW = 0, bearW = 0, bullN = 0, bearN = 0;
@@ -1693,8 +1781,8 @@ export function buildStockMetrics(row, valuation, override, benchCloses) {
 // mismatched horizon between what's logged and what's checked.
 const RANGE_LOG_HORIZONS_DAYS = [1, 7];
 
-function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso) {
-  const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, marketContext, reliabilityByHorizon, todStats, nowIso) }));
+function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns) {
+  const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, marketContext, reliabilityByHorizon, todStats, nowIso, leadLagSignals, leaderReturns) }));
   // Full-universe vote log (not just the top-10 shown on each board) so the
   // reliability learning loop sees every asset, not only that hour's winners.
   const votesLog = [];
@@ -1788,7 +1876,7 @@ function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHori
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -1872,7 +1960,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
         return buildCryptoMetrics(c, { funding: funding[sym], fundingHistory: fundingHistory && fundingHistory[sym], sentimentScore: sentimentMap && sentimentMap[sym], trending: trending.has(sym), daily, benchCloses: btcCloses });
       })
       .filter(Boolean);
-    cryptoBoards = rankBoards(metrics, 'crypto', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso);
+    cryptoBoards = rankBoards(metrics, 'crypto', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns);
   }
 
   let stockBoards = { breakout: [], breakdown: [], universe: 0 };
@@ -1888,7 +1976,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
         if (m) metrics.push(m);
       } else stockFailures.push(r && r._item);
     }
-    stockBoards = rankBoards(metrics, 'stock', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso);
+    stockBoards = rankBoards(metrics, 'stock', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns);
   }
 
   // If both primary sources yielded nothing, this is a real outage: throw so

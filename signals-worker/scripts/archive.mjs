@@ -15,6 +15,7 @@
 // two are genuinely the same need either way: "what's in the universe" and
 // "what's each coin's live funding right now."
 import { d1, chunk } from './d1-client.mjs';
+import { laggedCorrelation } from '../worker.js';
 
 const UA = 'Mozilla/5.0 (compatible; FrontierCapitalSignals/2.0)';
 
@@ -178,12 +179,32 @@ export async function fearGreedHistory(limit = 0) {
 // signal (a poll, not sentiment analysis), which is exactly why it's
 // pooled with the other sources rather than trusted alone. One call per
 // coin, so this stays in the daily job, not the hourly one.
+//
+// Retries on 429 with backoff, same pattern (and same backoff schedule) as
+// getCryptoDailyHistory's per-coin history calls in worker.js — confirmed
+// live that this specific per-coin-detail endpoint is meaningfully more
+// rate-limit-sensitive than the bulk /markets endpoint (70 of 73 calls
+// 429'd at the daily job's original 300ms pacing); the caller
+// (daily-refresh.mjs) also paces more conservatively now, matching
+// CRYPTO_HISTORY_DELAY_MS's already-proven-safe value.
 export async function coingeckoSentiment(id) {
   const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}`
     + '?localization=false&tickers=false&market_data=false&community_data=false&developer_data=false&sparkline=false';
-  const j = await fetchJson(url);
-  const up = Number(j && j.sentiment_votes_up_percentage);
-  return Number.isFinite(up) ? up : null;
+  const backoffsMs = [3000, 6000];
+  let lastErr;
+  for (let attempt = 0; attempt <= backoffsMs.length; attempt++) {
+    try {
+      const j = await fetchJson(url);
+      const up = Number(j && j.sentiment_votes_up_percentage);
+      return Number.isFinite(up) ? up : null;
+    } catch (e) {
+      lastErr = e;
+      const is429 = /^HTTP 429/.test(String(e && e.message));
+      if (!is429 || attempt === backoffsMs.length) throw lastErr;
+      await new Promise((r) => setTimeout(r, backoffsMs[attempt]));
+    }
+  }
+  throw lastErr;
 }
 
 // CoinMarketCap's independently-calculated Fear & Greed Index — a second
@@ -281,4 +302,95 @@ export async function upsertAssetSentiment(env, date, rows) {
     attempted += batch.length;
   }
   return attempted;
+}
+
+// ----------------------------- CROSS-ASSET LEAD/LAG -------------------------
+
+// Every ordered (leader, follower) pair is tested at each of these lags
+// (days) and the strongest is kept, once it clears both bars below —
+// mirrors this engine's existing "no data or no real signal -> abstain"
+// discipline rather than reporting a weak/coincidental best-of-several.
+const LEAD_LAG_LAGS = [1, 2, 3, 4, 5, 7, 10];
+const LEAD_LAG_MIN_ABS_CORR = 0.5;
+const LEAD_LAG_MIN_SAMPLES = 180;
+
+// Bulk-reads the ENTIRE asset_daily_bars archive once (a full-table scan,
+// but cheap even at real scale relative to D1's 5M-rows-read/day cap — see
+// the plan's own sizing) and tests every ordered pair in memory — the
+// expensive part of O(n^2) pairs is per-pair D1 round-trips, which loading
+// once avoids entirely; the arithmetic itself is trivial even at a few
+// hundred symbols (tens of thousands of ordered pairs × a handful of lags
+// each, all plain JS after the one read).
+export async function computeLeadLag(env) {
+  const rows = await d1(env, 'SELECT symbol, date, close FROM asset_daily_bars ORDER BY symbol, date');
+  const barsBySymbol = {};
+  for (const r of rows) (barsBySymbol[r.symbol] ??= []).push(r);
+
+  const returnsBySymbol = {};
+  for (const [symbol, bars] of Object.entries(barsBySymbol)) {
+    if (bars.length < 2) continue;
+    const rets = {};
+    for (let i = 1; i < bars.length; i++) {
+      if (bars[i - 1].close) rets[bars[i].date] = (bars[i].close / bars[i - 1].close - 1) * 100;
+    }
+    returnsBySymbol[symbol] = rets;
+  }
+
+  const symbols = Object.keys(returnsBySymbol);
+  const signals = [];
+  for (const leader of symbols) {
+    for (const follower of symbols) {
+      if (leader === follower) continue;
+      let best = null;
+      for (const lag of LEAD_LAG_LAGS) {
+        const r = laggedCorrelation(returnsBySymbol[leader], returnsBySymbol[follower], lag);
+        if (!r || r.samples < LEAD_LAG_MIN_SAMPLES) continue;
+        if (!best || Math.abs(r.corr) > Math.abs(best.corr)) best = { lag, ...r };
+      }
+      if (best && Math.abs(best.corr) >= LEAD_LAG_MIN_ABS_CORR) {
+        signals.push({ leaderSymbol: leader, followerSymbol: follower, lagDays: best.lag, corr: best.corr, samples: best.samples });
+      }
+    }
+  }
+  return signals;
+}
+
+// Wholesale replace, not upsert: a relationship that no longer clears the
+// significance bar should disappear from the table, not linger from a
+// stale prior computation — this recomputes the full current set fresh
+// every run (see computeLeadLag above) and swaps it in atomically-enough
+// for this purpose (delete-then-insert; a reader mid-way through would see
+// an empty or partial table for a moment, acceptable for a technique that
+// already treats "no registered leader" as a normal abstain case).
+export async function replaceLeadLagSignals(env, signals, computedAt) {
+  await d1(env, 'DELETE FROM lead_lag_signals');
+  let written = 0;
+  for (const batch of chunk(signals, 12)) {
+    const placeholders = batch.map(() => '(?,?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap((s) => [s.leaderSymbol, s.followerSymbol, s.lagDays, s.corr, s.samples, s.samples, computedAt]);
+    await d1(env, `INSERT INTO lead_lag_signals (leader_symbol, follower_symbol, lag_days, corr, window_days, samples, computed_at) VALUES ${placeholders}`, params);
+    written += batch.length;
+  }
+  return written;
+}
+
+// Most recent `days` closes per symbol from asset_daily_bars, date-sorted
+// ascending — lets the leadlag technique (worker.js) compute a registered
+// leader's actual recent N-day return at hourly-build time straight from
+// the archive, no live re-fetch needed (the archive already has it).
+export async function loadRecentBars(env, symbols, days = 15) {
+  if (!symbols.length) return {};
+  const out = {};
+  for (const batch of chunk(symbols, 20)) {
+    const placeholders = batch.map(() => '?').join(',');
+    const rows = await d1(env, `SELECT symbol, date, close FROM asset_daily_bars WHERE symbol IN (${placeholders}) ORDER BY date DESC`, batch);
+    const seenPerSymbol = {};
+    for (const r of rows) {
+      const count = (seenPerSymbol[r.symbol] = (seenPerSymbol[r.symbol] || 0) + 1);
+      if (count > days) continue; // DESC order, so anything past `days` is older than we need
+      (out[r.symbol] ??= []).push(r);
+    }
+  }
+  for (const symbol of Object.keys(out)) out[symbol].sort((a, b) => a.date.localeCompare(b.date));
+  return out;
 }
