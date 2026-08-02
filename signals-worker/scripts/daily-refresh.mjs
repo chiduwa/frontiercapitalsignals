@@ -63,12 +63,16 @@ async function main() {
       console.error(`cryptoPanicSentiment failed for ${a.symbol}:`, e.message);
     }
     if (coingeckoUpPct != null || cryptopanicScore != null) rows.push({ symbol: a.symbol, coingeckoUpPct, cryptopanicScore });
-    // 3000ms, not a shorter gap: confirmed live that CoinGecko's per-coin
-    // detail endpoint is meaningfully more rate-limit-sensitive than the
-    // bulk /markets endpoint already used elsewhere (70/73 calls 429'd at
-    // an original 300ms pacing) — matches CRYPTO_HISTORY_DELAY_MS's
-    // already-proven-safe value for this same class of per-coin call.
-    await new Promise((r) => setTimeout(r, 3000));
+    // 4500ms: even 3000ms (CRYPTO_HISTORY_DELAY_MS's own already-proven-
+    // safe value for the *other* per-coin CoinGecko endpoint) still showed
+    // real 429s on a live run against this specific one (35/73 succeeded,
+    // not a crash — errors are caught and logged per-symbol, never fatal).
+    // This endpoint is evidently rate-limited tighter than that one. Not
+    // chasing a fully-429-free run further than this: whatever still fails
+    // today is retried tomorrow (no "already have data" skip on this
+    // path), so partial success now is expected to self-heal over a few
+    // days rather than needing a perfectly-tuned delay up front.
+    await new Promise((r) => setTimeout(r, 4500));
   }
   console.log(`CoinGecko votes: ${cgOk} ok, ${cgFailed} failed${CRYPTOPANIC_API_TOKEN ? '' : ' (CryptoPanic: CRYPTOPANIC_API_TOKEN not set, skipped)'}`);
   if (CRYPTOPANIC_API_TOKEN) console.log(`CryptoPanic: ${cpOk} ok, ${cpFailed} failed`);
