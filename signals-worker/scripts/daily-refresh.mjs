@@ -115,7 +115,7 @@ async function main() {
     const composites = await computeSectorComposites(env, sectorRows);
     if (composites.length) {
       const written = await upsertDailyBars(env, composites);
-      console.log(`sector composites: ${new Set(composites.map((c) => c.symbol)).size} sector series, ${written} rows attempted (full history recomputed each run; INSERT OR IGNORE means only genuinely new dates land)`);
+      console.log(`sector composites: ${new Set(composites.map((c) => c.symbol)).size} sector series, ${written} rows attempted (full history on a sector's first run, a 1-2-row append after that)`);
     } else {
       console.log('sector composites: no sector cleared the minimum-constituent bar yet');
     }
