@@ -667,7 +667,16 @@ export function mapCategoriesToSectors(categories) {
 // Skipped when a sector has fewer than minConstituents members with any
 // return data at all, since a 1-2 asset "sector" is just noise dressed up
 // as a composite, not a real basket.
-export function computeSectorCompositeSeries(returnsBySymbol, symbolsBySector, minConstituents = 3) {
+//
+// `seeds[sector]` (optional) is this sector's own last-already-written
+// { date, close } — when given, only dates strictly after it are computed,
+// continuing to compound from that real close instead of restarting at
+// 100. Without a seed, the full available history is computed (the first
+// time a sector ever qualifies). This is what keeps the daily recompute a
+// 1-2-row append once a sector is established, matching this pipeline's
+// existing discipline elsewhere of never redoing already-done write work
+// (row budgets, coverage checks) rather than growing daily cost forever.
+export function computeSectorCompositeSeries(returnsBySymbol, symbolsBySector, minConstituents = 3, seeds = {}) {
   const out = {};
   for (const [sector, symbols] of Object.entries(symbolsBySector)) {
     const members = symbols.filter((s) => returnsBySymbol[s]);
@@ -678,8 +687,13 @@ export function computeSectorCompositeSeries(returnsBySymbol, symbolsBySector, m
         (byDate[date] ??= []).push(ret);
       }
     }
-    const dates = Object.keys(byDate).sort();
+    const seed = seeds[sector];
+    let dates = Object.keys(byDate).sort();
     let close = 100;
+    if (seed) {
+      dates = dates.filter((d) => d > seed.date);
+      close = seed.close;
+    }
     const series = [];
     for (const date of dates) {
       const rets = byDate[date];

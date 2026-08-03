@@ -416,26 +416,37 @@ export async function replaceAssetSectors(env, rows) {
   return written;
 }
 
-// Recomputes each eligible sector's FULL composite history (not just
-// today) from whatever depth asset_daily_bars already has for its member
-// symbols — the archive may hold years of history from the backfill, so
-// the very first time a sector clears MIN_SECTOR_CONSTITUENTS, its whole
-// composite series is available immediately rather than accumulating one
-// day at a time going forward. Cheap to redo in full each day: the write
-// path (upsertDailyBars, called by the caller with this function's output)
-// is INSERT OR IGNORE keyed by (symbol, date), so re-deriving already-
-// written dates is a fast no-op and only genuinely new dates land.
+// The very first time a sector clears MIN_SECTOR_CONSTITUENTS, its whole
+// available composite history is computed in one pass (the archive may
+// already hold years of it from the backfill); every run after that only
+// appends dates after this sector's own last-written point (see the
+// `seeds` parameter on computeSectorCompositeSeries) — same "don't redo
+// already-done write work" discipline as BACKFILL_ROW_BUDGET/coverage
+// checks elsewhere in this pipeline, so daily cost stays roughly constant
+// (a 1-2-row append per sector) rather than growing with the archive's
+// depth forever.
 export async function computeSectorComposites(env, sectorRows, minConstituents = MIN_SECTOR_CONSTITUENTS) {
   const symbolsBySector = {};
   for (const r of sectorRows) (symbolsBySector[r.sector] ??= new Set()).add(r.symbol);
-  const allSymbols = [...new Set(sectorRows.map((r) => r.symbol))];
-  if (!allSymbols.length) return [];
+  const allMemberSymbols = [...new Set(sectorRows.map((r) => r.symbol))];
+  if (!allMemberSymbols.length) return [];
 
+  const sectorPseudoSymbols = Object.keys(symbolsBySector).map((s) => `SECTOR:${s}`);
+  const allSymbols = [...allMemberSymbols, ...sectorPseudoSymbols];
   const placeholders = allSymbols.map(() => '?').join(',');
   const rows = await d1(env, `SELECT symbol, date, close FROM asset_daily_bars WHERE symbol IN (${placeholders}) ORDER BY symbol, date`, allSymbols);
-  const returnsBySymbol = barsRowsToReturnsBySymbol(rows);
+
+  const barsBySymbol = {};
+  for (const r of rows) (barsBySymbol[r.symbol] ??= []).push(r);
+  const seeds = {};
+  for (const s of Object.keys(symbolsBySector)) {
+    const bars = barsBySymbol[`SECTOR:${s}`];
+    if (bars && bars.length) seeds[s] = { date: bars[bars.length - 1].date, close: bars[bars.length - 1].close };
+  }
+
+  const returnsBySymbol = barsRowsToReturnsBySymbol(rows); // also produces an unused returns entry per SECTOR:<name> pseudo-row; harmless, never read below
   const bySectorArrays = Object.fromEntries(Object.entries(symbolsBySector).map(([sector, syms]) => [sector, [...syms]]));
-  const composites = computeSectorCompositeSeries(returnsBySymbol, bySectorArrays, minConstituents);
+  const composites = computeSectorCompositeSeries(returnsBySymbol, bySectorArrays, minConstituents, seeds);
 
   const out = [];
   for (const [sector, series] of Object.entries(composites)) {

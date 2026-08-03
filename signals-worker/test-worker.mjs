@@ -565,6 +565,16 @@ check('a date where only some members have data still gets a composite point, av
 
 check('a symbol with no return data at all (never in returnsBySymbol) is simply not counted toward the constituent minimum', mod.computeSectorCompositeSeries(sectorReturnsBySymbol, { GhostSector: ['AAA', 'BBB', 'ZZZ'] }).GhostSector === undefined, 'ZZZ has no entry in returnsBySymbol, so only 2 real members qualify');
 
+console.log('\n== computeSectorCompositeSeries with a seed: daily recompute appends, it does not redo full history ==');
+const seedAtDay1 = { TestSector: { date: '2026-01-01', close: 104 } }; // matches day 1's real close from the unseeded run above
+const compositeSeeded = mod.computeSectorCompositeSeries(sectorReturnsBySymbol, { TestSector: ['AAA', 'BBB', 'CCC'] }, 3, seedAtDay1);
+check('with a seed at day 1, only day 2 (strictly after the seed date) is returned, not day 1 again', compositeSeeded.TestSector.length === 1 && compositeSeeded.TestSector[0].date === '2026-01-02', JSON.stringify(compositeSeeded.TestSector));
+check('the appended day continues compounding from the seed close, not from 100', Math.abs(compositeSeeded.TestSector[0].close - 104 * (1 + day2MeanRet / 100)) < 1e-9, JSON.stringify(compositeSeeded.TestSector));
+
+const seedAtLatestDate = { TestSector: { date: '2026-01-02', close: 104 } };
+const compositeFullyCaughtUp = mod.computeSectorCompositeSeries(sectorReturnsBySymbol, { TestSector: ['AAA', 'BBB', 'CCC'] }, 3, seedAtLatestDate);
+check('a sector already caught up through the latest available date: empty series, not an error', JSON.stringify(compositeFullyCaughtUp.TestSector) === '[]', JSON.stringify(compositeFullyCaughtUp));
+
 console.log('\n== seasonalAnalog: does this asset\'s own history contain a real analog? ==');
 check('too short a series: returns null, not a guess', mod.seasonalAnalog(Array.from({ length: 100 }, () => 100), 365) === null);
 function patternWindow(offset) { return Array.from({ length: 90 }, (_, i) => 100 + Math.sin((i + offset) / 10) * 8 + i * 0.1); }
