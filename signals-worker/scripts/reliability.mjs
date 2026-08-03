@@ -482,4 +482,18 @@ export async function loadSwingTimeStats(env) {
   return out;
 }
 
+// Recent hack/exploit events per symbol (see asset_events, populated by
+// fetchDefiLlamaHacks/matchHacksToUniverse in archive.mjs, run daily).
+// Only pulls events within `withinDays` — the eventshock technique
+// (worker.js) only cares about recent shocks, not the full ~10-year
+// history — so this stays cheap regardless of how large asset_events
+// grows over time.
+export async function loadRecentEvents(env, nowIso, withinDays = 14) {
+  const cutoff = new Date(new Date(nowIso).getTime() - withinDays * 86400000).toISOString().slice(0, 10);
+  const rows = await d1(env, 'SELECT symbol, event_date, event_type, severity_usd, description FROM asset_events WHERE symbol IS NOT NULL AND event_date >= ?', [cutoff]);
+  const out = {};
+  for (const r of rows) (out[r.symbol] ??= []).push({ date: r.event_date, type: r.event_type, severityUsd: r.severity_usd, description: r.description });
+  return out;
+}
+
 export { MIN_RELIABILITY_SAMPLES };

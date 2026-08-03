@@ -659,6 +659,44 @@ check('same proven pattern, but price is mid-range: does not fire (timing alone 
 check('proven high-timing slot + price actually near its high right now: fires bearish', stTechBearish.dir === -1, JSON.stringify(stTechBearish));
 check('no swing-time stats loaded at all: abstains (null)', stTechNoStats.dir === null, JSON.stringify(stTechNoStats));
 
+console.log('\n== selectWorstRecentEvent: recency + severity-relative-to-mcap, not an absolute dollar figure ==');
+const esNow = new Date('2026-03-10T00:00:00.000Z').getTime();
+check('no events at all: returns null', mod.selectWorstRecentEvent(null, esNow, 1e9) === null);
+check('empty events array: returns null', mod.selectWorstRecentEvent([], esNow, 1e9) === null);
+
+const esToday = [{ date: '2026-03-10', type: 'hack', severityUsd: 100e6, description: 'Test Hack' }];
+const esPickedToday = mod.selectWorstRecentEvent(esToday, esNow, 1e9); // $100M hack on a $1B mcap asset
+check('relSeverity computed correctly (100M/1B = 0.1)', esPickedToday && Math.abs(esPickedToday.relSeverity - 0.1) < 1e-9, JSON.stringify(esPickedToday));
+check('a hack today: full recency weight (no time decay yet)', esPickedToday.recencyFactor === 1, esPickedToday.recencyFactor);
+
+const esOld = [{ date: '2026-02-01', type: 'hack', severityUsd: 100e6, description: 'Old Hack' }]; // 37 days before esNow, well outside the 14-day window
+check('an event outside the recency window is excluded', mod.selectWorstRecentEvent(esOld, esNow, 1e9) === null);
+
+const esUnknownSeverity = [{ date: '2026-03-10', type: 'hack', severityUsd: null, description: 'Unconfirmed Hack' }];
+const esPickedUnknown = mod.selectWorstRecentEvent(esUnknownSeverity, esNow, 1e9);
+check('unknown dollar amount gets a modest default impact, not zero', esPickedUnknown && esPickedUnknown.relSeverity === 0.05, JSON.stringify(esPickedUnknown));
+
+const esMultiple = [
+  { date: '2026-03-09', type: 'hack', severityUsd: 10e6, description: 'Small Hack' },  // small, recent (1d ago)
+  { date: '2026-03-03', type: 'hack', severityUsd: 500e6, description: 'Big Hack' }    // big, a week old
+];
+const esPickedWorst = mod.selectWorstRecentEvent(esMultiple, esNow, 1e9);
+check('with multiple events, picks the worst (severity x recency), not just the most recent', esPickedWorst && esPickedWorst.description === 'Big Hack', JSON.stringify(esPickedWorst));
+
+console.log('\n== eventshock technique: a matched recent hack votes bearish, crypto-only, never fabricated ==');
+const esRecentEvents = { BTC: [{ date: '2026-03-10', type: 'hack', severityUsd: 200e6, description: 'Test Protocol Hack' }] };
+const esTechFires = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', mcap: 1e9 }), 'crypto', undefined, undefined, undefined, '2026-03-10T00:00:00.000Z', undefined, undefined, undefined, esRecentEvents), 'eventshock');
+check('a matched recent hack fires bearish', esTechFires.dir === -1, JSON.stringify(esTechFires));
+
+const esTechNoEventForSymbol = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'ETH', mcap: 1e9 }), 'crypto', undefined, undefined, undefined, '2026-03-10T00:00:00.000Z', undefined, undefined, undefined, esRecentEvents), 'eventshock');
+check('recentEvents loaded but nothing for this symbol: neutral, not fabricated', esTechNoEventForSymbol.dir === 0, JSON.stringify(esTechNoEventForSymbol));
+
+const esTechNoData = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', mcap: 1e9 }), 'crypto'), 'eventshock');
+check('no recentEvents/nowIso at all: abstains (null)', esTechNoData.dir === null, JSON.stringify(esTechNoData));
+
+const esTechStockGated = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', mcap: 1e9 }), 'stock', undefined, undefined, undefined, '2026-03-10T00:00:00.000Z', undefined, undefined, undefined, esRecentEvents), 'eventshock');
+check('crypto-only: stocks never fire this technique even with matching event data', esTechStockGated.dir === null, JSON.stringify(esTechStockGated));
+
 console.log('\n== timeOfDaySignal: only fires with real sample depth AND a real effect size ==');
 const todNow = '2026-03-10T14:00:00.000Z';
 const [slotA, slotB] = mod.slotsForTimestamp(todNow);

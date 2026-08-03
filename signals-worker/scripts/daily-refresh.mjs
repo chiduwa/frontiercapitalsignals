@@ -17,7 +17,8 @@ import { getCryptoMarkets, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME 
 import {
   coingeckoSentiment, cryptoPanicSentiment, cmcFearGreed,
   upsertAssetSentiment, upsertMarketSentiment,
-  computeLeadLag, replaceLeadLagSignals
+  computeLeadLag, replaceLeadLagSignals,
+  fetchDefiLlamaHacks, matchHacksToUniverse, upsertAssetEvents
 } from './archive.mjs';
 import { evaluateYesterdaySwingTimes } from './reliability.mjs';
 
@@ -38,12 +39,15 @@ async function main() {
   console.log(`daily-refresh starting for ${today}`);
 
   const cryptoRaw = await getCryptoMarkets();
-  const universe = cryptoRaw
+  const fullUniverse = cryptoRaw
     .filter((c) => !CRYPTO_BLOCKLIST.has((c.symbol || '').toLowerCase()))
     .filter((c) => (c.market_cap || 0) >= CRYPTO_MIN_MCAP && (c.total_volume || 0) >= CRYPTO_MIN_VOLUME)
-    .map((c) => ({ symbol: (c.symbol || '').toUpperCase(), id: c.id }))
-    .slice(0, MAX_SYMBOLS);
-  console.log(`universe: ${universe.length} crypto assets`);
+    .map((c) => ({ symbol: (c.symbol || '').toUpperCase(), id: c.id, name: c.name || '' }));
+  // Sentiment specifically stays capped at MAX_SYMBOLS (per-coin fetches
+  // are the expensive part there); hack-matching below uses the full
+  // universe since a hack can hit any tracked asset, not just the first N.
+  const universe = fullUniverse.slice(0, MAX_SYMBOLS);
+  console.log(`universe: ${fullUniverse.length} crypto assets (${universe.length} in the sentiment pass)`);
 
   let cgOk = 0, cgFailed = 0, cpOk = 0, cpFailed = 0;
   const rows = [];
@@ -113,6 +117,16 @@ async function main() {
     console.log(`swing-time-of-day: tallied yesterday for ${updated} symbols`);
   } catch (e) {
     console.error('swing-time-of-day forward tally failed:', e.message);
+  }
+
+  try {
+    const hacks = await fetchDefiLlamaHacks();
+    const matched = matchHacksToUniverse(hacks, fullUniverse);
+    const written = await upsertAssetEvents(env, matched);
+    const linked = matched.filter((h) => h.symbol).length;
+    console.log(`hack/exploit events: ${hacks.length} fetched, ${linked} matched to a tracked symbol, ${written} rows attempted (INSERT OR IGNORE, so re-runs are cheap)`);
+  } catch (e) {
+    console.error('DeFiLlama hacks fetch failed:', e.message);
   }
 
   console.log('daily-refresh complete');

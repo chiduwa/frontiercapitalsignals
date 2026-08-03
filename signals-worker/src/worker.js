@@ -375,7 +375,8 @@ export const TECHNIQUE_META = {
   openinterest:{ leading: false, horizonDays: 3 },
   sentiment:   { leading: true,  horizonDays: 4 },
   leadlag:     { leading: true,  horizonDays: 3 },
-  swingtime:   { leading: true,  horizonDays: 0.3 }
+  swingtime:   { leading: true,  horizonDays: 0.3 },
+  eventshock:  { leading: true,  horizonDays: 3 }
 };
 
 export function horizonLabel(days) {
@@ -946,7 +947,33 @@ export function swingTimeSignal(swingTimeStats, symbol, nowIso) {
   return best;
 }
 
-export function evaluateTechniques(m, kind, reliability, marketContext, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats) {
+// How many days back a hack/exploit event still counts as "recent" for
+// the eventshock technique — a real shock's price impact is overwhelmingly
+// concentrated in the first days, not weeks.
+const EVENT_SHOCK_WINDOW_DAYS = 14;
+
+// Picks the worst (highest severity-relative-to-mcap × recency) of an
+// asset's recent events, or null if none qualify. Severity relative to
+// THIS asset's own market cap, not an absolute dollar figure — a $50M
+// hack means something very different to a $200M-cap token than a $200B
+// one. An unknown dollar amount gets a modest default impact rather than
+// being treated as zero, on the theory that DeFiLlama still thought it
+// worth recording even without a confirmed figure.
+export function selectWorstRecentEvent(events, nowMs, mcap, windowDays = EVENT_SHOCK_WINDOW_DAYS) {
+  if (!events || !events.length) return null;
+  let best = null;
+  for (const ev of events) {
+    const ageDays = (nowMs - new Date(ev.date).getTime()) / 86400000;
+    if (ageDays < 0 || ageDays > windowDays) continue;
+    const relSeverity = ev.severityUsd != null && mcap > 0 ? ev.severityUsd / mcap : 0.05;
+    const recencyFactor = clamp(1 - ageDays / windowDays, 0.15, 1);
+    const score = relSeverity * recencyFactor;
+    if (!best || score > best.score) best = { ...ev, ageDays, relSeverity, recencyFactor, score };
+  }
+  return best;
+}
+
+export function evaluateTechniques(m, kind, reliability, marketContext, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents) {
   const T = [];
   const push = (id, w, dir, note) => T.push({ id, w: w * reliabilityMultiplier(reliability, m.symbol, id), dir, note });
   const cS = m.chgShort, c24 = m.chg24h, c7 = m.chg7d, c30 = m.chg30d;
@@ -1336,11 +1363,36 @@ export function evaluateTechniques(m, kind, reliability, marketContext, todStats
     push('swingtime', 0.7, null, null);
   }
 
+  // T22 event shock: a matched hack/exploit within the last two weeks
+  // (see selectWorstRecentEvent, DeFiLlama-sourced — archive.mjs/
+  // reliability.mjs) votes bearish, weighted by recency and by severity
+  // relative to THIS asset's own market cap. Unlike most techniques here,
+  // a real matched event is not treated as ambiguous/abstain-worthy — the
+  // direction is unambiguous (this engine's own reasoning, matching how
+  // the user who asked for this framed it: a hack "would almost certainly
+  // create a crazy downtrend") — but the reliability loop still calibrates
+  // the WEIGHT per asset over time if it turns out to over- or under-react
+  // for a given one, same as every other technique. Crypto-only (hacks
+  // are a crypto-specific concept in this engine).
+  if (kind === 'crypto' && recentEvents && nowIso) {
+    const best = selectWorstRecentEvent(recentEvents[m.symbol], new Date(nowIso).getTime(), m.mcap);
+    if (best) {
+      const w = clamp(0.6 + best.relSeverity * 3, 0.6, 1.8) * best.recencyFactor;
+      const ageLabel = best.ageDays < 1 ? 'today' : `${Math.round(best.ageDays)}d ago`;
+      const sevLabel = best.severityUsd ? `, ~$${(best.severityUsd / 1e6).toFixed(0)}M` : '';
+      push('eventshock', w, -1, `${best.type} ${ageLabel}${sevLabel} (${best.description})`);
+    } else {
+      push('eventshock', 0.6, 0, null);
+    }
+  } else {
+    push('eventshock', 0.6, null, null);
+  }
+
   return T;
 }
 
-export function confluence(m, kind, reliability, marketContext, reliabilityByHorizon, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats) {
-  const T = evaluateTechniques(m, kind, reliability, marketContext, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats);
+export function confluence(m, kind, reliability, marketContext, reliabilityByHorizon, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents) {
+  const T = evaluateTechniques(m, kind, reliability, marketContext, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents);
   const applicable = T.filter(t => t.dir !== null);
   const totalW = applicable.reduce((a, t) => a + t.w, 0) || 1;
   let bullW = 0, bearW = 0, bullN = 0, bearN = 0;
@@ -1885,8 +1937,8 @@ export function buildStockMetrics(row, valuation, override, benchCloses) {
 // mismatched horizon between what's logged and what's checked.
 const RANGE_LOG_HORIZONS_DAYS = [1, 7];
 
-function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats) {
-  const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, marketContext, reliabilityByHorizon, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats) }));
+function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents) {
+  const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, marketContext, reliabilityByHorizon, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents) }));
   // Full-universe vote log (not just the top-10 shown on each board) so the
   // reliability learning loop sees every asset, not only that hour's winners.
   const votesLog = [];
@@ -1980,7 +2032,7 @@ function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHori
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -2064,7 +2116,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
         return buildCryptoMetrics(c, { funding: funding[sym], fundingHistory: fundingHistory && fundingHistory[sym], sentimentScore: sentimentMap && sentimentMap[sym], trending: trending.has(sym), daily, benchCloses: btcCloses });
       })
       .filter(Boolean);
-    cryptoBoards = rankBoards(metrics, 'crypto', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats);
+    cryptoBoards = rankBoards(metrics, 'crypto', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents);
   }
 
   let stockBoards = { breakout: [], breakdown: [], universe: 0 };
@@ -2080,7 +2132,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
         if (m) metrics.push(m);
       } else stockFailures.push(r && r._item);
     }
-    stockBoards = rankBoards(metrics, 'stock', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats);
+    stockBoards = rankBoards(metrics, 'stock', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents);
   }
 
   // If both primary sources yielded nothing, this is a real outage: throw so

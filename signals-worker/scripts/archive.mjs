@@ -495,3 +495,43 @@ export async function getSwingTimeCoverage(env) {
   const rows = await d1(env, 'SELECT symbol, MAX(total_days) AS total_days FROM swing_time_stats GROUP BY symbol');
   return Object.fromEntries(rows.map((r) => [r.symbol, r.total_days]));
 }
+
+// ----------------------------- EVENT SEVERITY (HACKS) -----------------------
+// DeFiLlama's public hacks tracker — confirmed live: 607 records back to
+// 2016-06-17, a real USD `amount` on 594 of them (top five: $3.5B/$1.4B/
+// $624M/$611M/$570M). Free, keyless, no pagination needed (one call
+// returns the full history to date).
+export async function fetchDefiLlamaHacks() {
+  const j = await fetchJson('https://api.llama.fi/hacks');
+  return (Array.isArray(j) ? j : [])
+    .filter((r) => r.date && r.name)
+    .map((r) => ({
+      date: new Date(r.date * 1000).toISOString().slice(0, 10),
+      name: r.name,
+      amount: typeof r.amount === 'number' && r.amount > 0 ? r.amount : null,
+      classification: r.classification || null,
+      technique: r.technique || null
+    }));
+}
+
+// Conservative on purpose: only an exact (case-insensitive, trimmed) name
+// match against the tracked universe counts. A fuzzy/partial match risks
+// tagging the WRONG asset with a bearish event, which is worse than
+// silently missing a real one — records that don't clearly match keep
+// symbol=null (stored for later review, never guessed at).
+export function matchHacksToUniverse(hacks, universe) {
+  const byName = new Map(universe.map((a) => [a.name.trim().toLowerCase(), a.symbol]));
+  return hacks.map((h) => ({ ...h, symbol: byName.get(h.name.trim().toLowerCase()) || null }));
+}
+
+export async function upsertAssetEvents(env, events) {
+  if (!events.length) return 0;
+  let written = 0;
+  for (const batch of chunk(events, 10)) {
+    const placeholders = batch.map(() => '(?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap((e) => [e.symbol, e.date, 'hack', e.amount, e.name, 'defillama']);
+    await d1(env, `INSERT OR IGNORE INTO asset_events (symbol, event_date, event_type, severity_usd, description, source) VALUES ${placeholders}`, params);
+    written += batch.length;
+  }
+  return written;
+}
