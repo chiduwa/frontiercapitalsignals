@@ -10,7 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { computeSwingTimeTallies } from './scripts/archive.mjs';
+import { computeSwingTimeTallies, barsRowsToReturnsBySymbol } from './scripts/archive.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -472,6 +472,55 @@ const wave = Array.from({ length: 40 }, (_, i) => 100 + Math.sin(i / 3) * 5 + i 
 check('a series correlated with itself: ~1.0', Math.abs(mod.correlationWithBenchmark(wave, wave, 30) - 1) < 1e-6);
 const inverseWave = wave.map(v => 200 - v);
 check('an inverted series: strongly negative correlation', mod.correlationWithBenchmark(wave, inverseWave, 30) < -0.9);
+
+console.log('\n== barsRowsToReturnsBySymbol: skips implausible single-day returns as data artifacts ==');
+const brRowsClean = [
+  { symbol: 'AAA', date: '2026-01-01', close: 100 },
+  { symbol: 'AAA', date: '2026-01-02', close: 105 },
+  { symbol: 'AAA', date: '2026-01-03', close: 103 }
+];
+const brReturnsClean = barsRowsToReturnsBySymbol(brRowsClean);
+check('a normal day-to-day move is kept', Object.keys(brReturnsClean.AAA).length === 2, JSON.stringify(brReturnsClean));
+
+// Mirrors the real UNI-USD pattern found live in production: a stuck
+// near-zero price for a stretch, then a jump to a real-ish price — the
+// implied "return" (+1,573,986% in the real case) is a Yahoo data
+// artifact, not a real move, and should be dropped rather than distort
+// anything compounded from it (sector composites) or correlated against
+// it (computeLeadLag).
+const brRowsGlitch = [
+  { symbol: 'UNI', date: '2022-10-19', close: 0.000038 },
+  { symbol: 'UNI', date: '2022-10-20', close: 0.000038 },
+  { symbol: 'UNI', date: '2022-10-21', close: 0.598 },   // implied +1,573,886% — a glitch, not a move
+  { symbol: 'UNI', date: '2022-10-22', close: 0.396 }    // a normal, plausible day from here on
+];
+const brReturnsGlitch = barsRowsToReturnsBySymbol(brRowsGlitch);
+check('the implausible glitch day is dropped entirely (missing, not a fabricated capped value)', !('2022-10-21' in brReturnsGlitch.UNI), JSON.stringify(brReturnsGlitch));
+check('the normal days on either side of the glitch are unaffected', ('2022-10-20' in brReturnsGlitch.UNI) && ('2022-10-22' in brReturnsGlitch.UNI), JSON.stringify(brReturnsGlitch));
+
+const brRowsExactlyAtBar = [
+  { symbol: 'BBB', date: '2026-01-01', close: 100 },
+  { symbol: 'BBB', date: '2026-01-02', close: 2100 } // exactly +2000%, at the bar, not over it
+];
+check('a return exactly at the threshold is kept (strictly-greater-than, not off-by-one)', '2026-01-02' in barsRowsToReturnsBySymbol(brRowsExactlyAtBar).BBB);
+
+const brRowsJustOverBar = [
+  { symbol: 'CCC', date: '2026-01-01', close: 100 },
+  { symbol: 'CCC', date: '2026-01-02', close: 2100.01 } // just over +2000%
+];
+check('a return just over the threshold is dropped', !('2026-01-02' in barsRowsToReturnsBySymbol(brRowsJustOverBar).CCC));
+
+// Percentage returns are inherently asymmetric: floored at -100% (a price
+// can't go negative) but unbounded above — so this filter is necessarily
+// upside-focused. A crash INTO a fake-near-zero regime shows up as a
+// bounded ~-100% return (undesirable noise in a composite mean, but not
+// the unbounded compounding blow-up the upside case causes), while the
+// jump back OUT of one is what actually needs catching, and is.
+const brRowsNearTotalCrash = [
+  { symbol: 'DDD', date: '2026-01-01', close: 100 },
+  { symbol: 'DDD', date: '2026-01-02', close: 0.01 } // -99.99%, a real (if extreme) crash, still well short of the -100% floor
+];
+check('a near-total crash is still nowhere near the implausibility bar (returns are floored at -100%, never past it)', '2026-01-02' in barsRowsToReturnsBySymbol(brRowsNearTotalCrash).DDD);
 
 console.log('\n== laggedCorrelation + nDayReturnFromBars: the cross-asset lead/lag primitives ==');
 check('pearsonCorr: too few overlapping points returns null', mod.pearsonCorr([1, 2, 3], [1, 2, 3]) === null);

@@ -320,11 +320,25 @@ const LEAD_LAG_LAGS = [1, 2, 3, 4, 5, 7, 10];
 const LEAD_LAG_MIN_ABS_CORR = 0.5;
 const LEAD_LAG_MIN_SAMPLES = 180;
 
+// A single-day return this extreme is essentially always a data artifact,
+// not a real move, for anything liquid enough to clear this pipeline's own
+// mcap/volume gates — confirmed live by tracing several: Yahoo's UNI-USD
+// sat at a stuck ~$0.000038 with volume=3 for days in Oct 2022 then jumped
+// to a real-ish price (+1,573,986% in one day), same "stuck-then-jump"
+// pattern independently found on CC/GRAM/WLD, and even AAVE has one
+// (+10,189%, Oct 2020) — a real, recurring Yahoo data-quality issue, not a
+// one-off. 2000% (a 21x move) is well above any genuine single-day move
+// for an asset that clears CRYPTO_MIN_MCAP/CRYPTO_MIN_VOLUME.
+const IMPLAUSIBLE_DAILY_RETURN_PCT = 2000;
+
 // Shared by computeLeadLag and computeSectorComposites below: turns
 // date-sorted (symbol, date, close) rows into a { symbol: { date: pctReturn } }
 // map. One implementation of "how do we turn bars into returns," not two
-// copies that could drift apart.
-function barsRowsToReturnsBySymbol(rows) {
+// copies that could drift apart. Skips (rather than clamps) a day whose
+// implied return is implausible (see IMPLAUSIBLE_DAILY_RETURN_PCT above) —
+// treated as missing data for that (symbol, date), same as if the
+// underlying bar were absent, not replaced with a fabricated capped value.
+export function barsRowsToReturnsBySymbol(rows) {
   const barsBySymbol = {};
   for (const r of rows) (barsBySymbol[r.symbol] ??= []).push(r);
 
@@ -333,7 +347,10 @@ function barsRowsToReturnsBySymbol(rows) {
     if (bars.length < 2) continue;
     const rets = {};
     for (let i = 1; i < bars.length; i++) {
-      if (bars[i - 1].close) rets[bars[i].date] = (bars[i].close / bars[i - 1].close - 1) * 100;
+      if (!bars[i - 1].close) continue;
+      const ret = (bars[i].close / bars[i - 1].close - 1) * 100;
+      if (Math.abs(ret) > IMPLAUSIBLE_DAILY_RETURN_PCT) continue;
+      rets[bars[i].date] = ret;
     }
     returnsBySymbol[symbol] = rets;
   }
