@@ -172,6 +172,40 @@ CREATE TABLE IF NOT EXISTS asset_score_snapshots (
   PRIMARY KEY (symbol, snapshot_date)
 );
 
+-- Frequency tally, not a return statistic (distinct shape from
+-- time_of_day_stats, which tracks mean/stdev of RETURNS around a slot —
+-- this tracks how often a slot IS the day's actual high or low). Bootstrapped
+-- once from ~2 years of Yahoo hourly bars (scripts/archive.mjs), then
+-- appended to daily from asset_price_log's own retained history (see
+-- daily-refresh.mjs) — same methodology both ways: bucket by UTC calendar
+-- day, find that day's max-close hour and min-close hour, tally their
+-- slots (see slotsForTimestamp in worker.js).
+CREATE TABLE IF NOT EXISTS swing_time_stats (
+  symbol TEXT NOT NULL,
+  asset_class TEXT NOT NULL,
+  slot TEXT NOT NULL,
+  extreme_type TEXT NOT NULL, -- 'high' | 'low'
+  count INTEGER NOT NULL DEFAULT 0,
+  total_days INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (symbol, slot, extreme_type)
+);
+
+-- Hack/exploit events (DeFiLlama's public tracker — see fetchDefiLlamaHacks
+-- in archive.mjs), matched to a tracked symbol only on a strong name match;
+-- symbol is NULL for records that didn't clearly match anything we track
+-- (kept for later review, never guessed at). Consumed by the 'eventshock'
+-- technique in worker.js.
+CREATE TABLE IF NOT EXISTS asset_events (
+  symbol TEXT,
+  event_date TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  severity_usd REAL,
+  description TEXT NOT NULL, -- DeFiLlama's incident name, e.g. "Super Sushi Samurai" — part of the key since (date, name) is what's actually unique per record, not date alone
+  source TEXT NOT NULL,
+  PRIMARY KEY (event_date, description)
+);
+
 -- Time-of-day / day-of-week behavioral profile per asset: does this asset
 -- systematically move in a consistent direction in the `horizon_hours`
 -- after a specific clock slot (see slotsForTimestamp in worker.js — UTC

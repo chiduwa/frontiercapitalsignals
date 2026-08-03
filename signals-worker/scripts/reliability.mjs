@@ -6,6 +6,7 @@
 // duplicate that could drift.
 import { MIN_RELIABILITY_SAMPLES, slotsForTimestamp, assetPredictionScore } from '../worker.js';
 import { d1, chunk } from './d1-client.mjs';
+import { computeSwingTimeTallies, upsertSwingTimeStats } from './archive.mjs';
 
 // Matches the horizons timeOfDaySignal (worker.js) checks.
 const TOD_HORIZONS_HOURS = [1, 4];
@@ -438,6 +439,47 @@ export async function snapshotAssetScores(env, date, reliability, rangeReliabili
     written += batch.length;
   }
   return written;
+}
+
+// Forward half of the swing-time-of-day profile (see computeSwingTimeTallies
+// in archive.mjs for the one-time backfill half — same day-bucketing logic,
+// so both build one consistent statistic, not two different ones). Pulls
+// the previous UTC calendar day's rows straight from asset_price_log
+// (already retained ~200h, comfortably covers "yesterday"), finds that
+// day's max/min price and which clock slots those hours belong to, and
+// tallies them. Runs once/day from daily-refresh.mjs.
+export async function evaluateYesterdaySwingTimes(env, nowIso) {
+  const now = new Date(nowIso);
+  const y = new Date(now);
+  y.setUTCDate(y.getUTCDate() - 1);
+  const dayStart = new Date(Date.UTC(y.getUTCFullYear(), y.getUTCMonth(), y.getUTCDate())).toISOString();
+  const dayEnd = new Date(Date.UTC(y.getUTCFullYear(), y.getUTCMonth(), y.getUTCDate(), 23, 59, 59, 999)).toISOString();
+
+  const rows = await d1(env, 'SELECT run_at, asset_class, symbol, price FROM asset_price_log WHERE run_at BETWEEN ? AND ?', [dayStart, dayEnd]);
+  const bySymbol = {};
+  for (const r of rows) {
+    (bySymbol[r.symbol] ??= { assetClass: r.asset_class, bars: [] }).bars.push({ ts: r.run_at, close: r.price });
+  }
+
+  let updated = 0;
+  for (const [symbol, { assetClass, bars }] of Object.entries(bySymbol)) {
+    const { tallies, totalDays } = computeSwingTimeTallies(bars);
+    if (totalDays > 0) {
+      await upsertSwingTimeStats(env, symbol, assetClass, tallies, totalDays, nowIso);
+      updated++;
+    }
+  }
+  return updated;
+}
+
+// { [symbol|slot|extremeType]: { count, totalDays } } — consumed by
+// swingTimeSignal (worker.js) to check whether the CURRENT clock slot has
+// a proven tendency to hold this asset's daily high or low.
+export async function loadSwingTimeStats(env) {
+  const rows = await d1(env, 'SELECT symbol, slot, extreme_type, count, total_days FROM swing_time_stats WHERE total_days > 0');
+  const out = {};
+  for (const r of rows) out[`${r.symbol}|${r.slot}|${r.extreme_type}`] = { count: r.count, totalDays: r.total_days };
+  return out;
 }
 
 export { MIN_RELIABILITY_SAMPLES };

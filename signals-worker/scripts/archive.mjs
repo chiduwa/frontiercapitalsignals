@@ -15,7 +15,7 @@
 // two are genuinely the same need either way: "what's in the universe" and
 // "what's each coin's live funding right now."
 import { d1, chunk } from './d1-client.mjs';
-import { laggedCorrelation } from '../worker.js';
+import { laggedCorrelation, slotsForTimestamp } from '../worker.js';
 
 const UA = 'Mozilla/5.0 (compatible; FrontierCapitalSignals/2.0)';
 
@@ -393,4 +393,105 @@ export async function loadRecentBars(env, symbols, days = 15) {
   }
   for (const symbol of Object.keys(out)) out[symbol].sort((a, b) => a.date.localeCompare(b.date));
   return out;
+}
+
+// ----------------------------- SWING-TIME-OF-DAY ----------------------------
+// Not "does this asset tend to move up/down at time X" (time_of_day_stats
+// already answers that) — "WHEN in the day does this asset's high/low
+// actually tend to land." Bootstrapped once from ~2 years of real Yahoo
+// hourly bars, then appended to daily from asset_price_log's own retained
+// history (see daily-refresh.mjs) using the exact same day-bucketing logic,
+// so the two sources build one consistent statistic, not two different ones.
+
+// Yahoo's intraday chart endpoint, confirmed live to be hard-capped at 730
+// days ("must be within the last 730 days" — the actual error message when
+// exceeded), unlike the daily endpoint's effectively unlimited depth. 700,
+// not 730, for a small safety margin against that boundary.
+export async function yahooHourlyBars(ticker, days = 700) {
+  const period2 = Math.floor(Date.now() / 1000);
+  const period1 = period2 - days * 86400;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}`
+    + `?period1=${period1}&period2=${period2}&interval=1h`;
+  const j = await fetchJson(url);
+  const r = j && j.chart && j.chart.result && j.chart.result[0];
+  if (!r || !r.timestamp || !r.timestamp.length) throw new Error('empty chart');
+  const q = r.indicators.quote[0];
+  const bars = [];
+  for (let i = 0; i < r.timestamp.length; i++) {
+    if (q.close[i] != null) bars.push({ ts: new Date(r.timestamp[i] * 1000).toISOString(), close: q.close[i] });
+  }
+  if (bars.length < 100) throw new Error(`thin intraday history (${bars.length} bars)`);
+  return bars;
+}
+
+// Groups hourly bars (`{ts, close}`, any order) into UTC calendar days,
+// finds each day's max-close and min-close hour, and tallies the slots
+// those hours belong to (see slotsForTimestamp in worker.js). Days with
+// fewer than 12 of a possible 24 hourly bars (a data gap, or the partial
+// first/last day of the fetch window) are skipped rather than trusted —
+// a real day's extreme could easily be one of the *missing* hours.
+// Pure/no I/O — reused identically by the one-time backfill (Yahoo hourly)
+// and the daily forward-tally (asset_price_log rows), so both build the
+// same statistic the same way.
+export function computeSwingTimeTallies(hourlyBars) {
+  const byDay = new Map();
+  for (const bar of hourlyBars) {
+    const day = bar.ts.slice(0, 10);
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day).push(bar);
+  }
+  const tallies = {};
+  let totalDays = 0;
+  for (const dayBars of byDay.values()) {
+    if (dayBars.length < 12) continue;
+    let hi = dayBars[0], lo = dayBars[0];
+    for (const b of dayBars) {
+      if (b.close > hi.close) hi = b;
+      if (b.close < lo.close) lo = b;
+    }
+    totalDays++;
+    for (const slot of slotsForTimestamp(hi.ts)) {
+      (tallies[slot] ??= { high: 0, low: 0 }).high++;
+    }
+    for (const slot of slotsForTimestamp(lo.ts)) {
+      (tallies[slot] ??= { high: 0, low: 0 }).low++;
+    }
+  }
+  return { tallies, totalDays };
+}
+
+// Additive upsert: the same slot gets touched by both the one-time
+// backfill and every subsequent daily tally, and count/total_days should
+// accumulate across all of them, never overwrite.
+export async function upsertSwingTimeStats(env, symbol, assetClass, tallies, totalDays, updatedAt) {
+  const rows = [];
+  for (const [slot, t] of Object.entries(tallies)) {
+    if (t.high) rows.push({ slot, extremeType: 'high', count: t.high });
+    if (t.low) rows.push({ slot, extremeType: 'low', count: t.low });
+  }
+  if (!rows.length) return 0;
+  let written = 0;
+  for (const batch of chunk(rows, 12)) {
+    const placeholders = batch.map(() => '(?,?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap((r) => [symbol, assetClass, r.slot, r.extremeType, r.count, totalDays, updatedAt]);
+    await d1(env, `
+      INSERT INTO swing_time_stats (symbol, asset_class, slot, extreme_type, count, total_days, updated_at)
+      VALUES ${placeholders}
+      ON CONFLICT (symbol, slot, extreme_type) DO UPDATE SET
+        count = swing_time_stats.count + excluded.count,
+        total_days = swing_time_stats.total_days + excluded.total_days,
+        updated_at = excluded.updated_at
+    `, params);
+    written += batch.length;
+  }
+  return written;
+}
+
+// Existing coverage check so the (one-time-ish) backfill doesn't re-fetch
+// and re-tally a symbol that's already been bootstrapped — checks the
+// symbol's own max total_days across its rows (same value on every row
+// for a given symbol, see upsertSwingTimeStats's docs).
+export async function getSwingTimeCoverage(env) {
+  const rows = await d1(env, 'SELECT symbol, MAX(total_days) AS total_days FROM swing_time_stats GROUP BY symbol');
+  return Object.fromEntries(rows.map((r) => [r.symbol, r.total_days]));
 }

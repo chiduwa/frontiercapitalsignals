@@ -12,7 +12,8 @@ import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRY
 import {
   yahooFullHistory, coingeckoDailyBars, getExistingCoverage,
   upsertDailyBars, fundingSnapshotToRows, upsertFundingDaily,
-  fearGreedHistory, insertFearGreedHistory
+  fearGreedHistory, insertFearGreedHistory,
+  yahooHourlyBars, computeSwingTimeTallies, upsertSwingTimeStats, getSwingTimeCoverage
 } from './archive.mjs';
 import { d1 } from './d1-client.mjs';
 
@@ -148,6 +149,37 @@ async function main() {
     }
   } catch (e) {
     console.error('Fear & Greed history backfill failed:', e.message);
+  }
+
+  // Swing-time-of-day bootstrap: ~2 real years of Yahoo hourly bars per
+  // symbol, tallied into which slots hold each day's high/low (see
+  // computeSwingTimeTallies's docs) — a distinct budget from the price/
+  // funding legs above, since the persisted footprint here is tiny
+  // regardless of how many symbols get processed (a few hundred rows per
+  // symbol, not raw hourly bars) — the real cost is the Yahoo fetch itself,
+  // paced accordingly. getSwingTimeCoverage lets repeat runs skip symbols
+  // already well-bootstrapped rather than re-fetching 700 days every time.
+  try {
+    const swingCoverage = await getSwingTimeCoverage(env);
+    let swingOk = 0, swingSkipped = 0;
+    const swingFailed = [];
+    for (const a of universe) {
+      if (a.assetClass === 'benchmark') continue; // no swing-timing story for macro benchmarks — nothing trades them directly
+      if ((swingCoverage[a.symbol] || 0) >= 600) { swingSkipped++; continue; }
+      try {
+        const bars = await yahooHourlyBars(a.yahooTicker);
+        const { tallies, totalDays } = computeSwingTimeTallies(bars);
+        if (totalDays > 0) await upsertSwingTimeStats(env, a.symbol, a.assetClass, tallies, totalDays, new Date().toISOString());
+        swingOk++;
+      } catch (e) {
+        swingFailed.push(`${a.symbol} (${e.message})`);
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    console.log(`swing-time backfill: ok ${swingOk}, already covered ${swingSkipped}, failed ${swingFailed.length}`);
+    if (swingFailed.length) console.log(`  failures: ${swingFailed.slice(0, 10).join('; ')}${swingFailed.length > 10 ? ` (+${swingFailed.length - 10} more)` : ''}`);
+  } catch (e) {
+    console.error('swing-time backfill failed:', e.message);
   }
 
   const finalCoverage = await getExistingCoverage(env, universe.map((u) => u.symbol));

@@ -10,6 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { computeSwingTimeTallies } from './scripts/archive.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -587,12 +588,76 @@ check('January (EST, UTC-5): 05:00 UTC is midnight ET', mod.etHour(new Date('202
 check('July (EDT, UTC-4): 04:00 UTC is midnight ET', mod.etHour(new Date('2026-07-15T04:00:00.000Z')) === 0);
 check('July (EDT): 13:45 UTC falls in the 9am ET hour (NYSE open)', mod.etHour(new Date('2026-07-15T13:45:00.000Z')) === 9);
 
-console.log('\n== slotsForTimestamp: the three clock dimensions a timestamp belongs to ==');
+console.log('\n== hourInZone: the general primitive etHour now wraps ==');
+check('etHour(x) === hourInZone(x, America/New_York)', mod.etHour(new Date('2026-07-15T13:45:00.000Z')) === mod.hourInZone(new Date('2026-07-15T13:45:00.000Z'), 'America/New_York'));
+check('Tokyo has no DST: always UTC+9 regardless of season', mod.hourInZone(new Date('2026-01-15T05:00:00.000Z'), 'Asia/Tokyo') === 14 && mod.hourInZone(new Date('2026-07-15T05:00:00.000Z'), 'Asia/Tokyo') === 14);
+check('London is on GMT (UTC+0) in January, BST (UTC+1) in July', mod.hourInZone(new Date('2026-01-15T05:00:00.000Z'), 'Europe/London') === 5 && mod.hourInZone(new Date('2026-07-15T05:00:00.000Z'), 'Europe/London') === 6);
+
+console.log('\n== slotsForTimestamp: the five clock dimensions a timestamp belongs to ==');
 const todSlots = mod.slotsForTimestamp('2026-01-15T05:00:00.000Z');
-check('exactly 3 slots: UTC hour, ET hour, UTC day-of-week', todSlots.length === 3, JSON.stringify(todSlots));
+check('exactly 5 slots: UTC/ET/London/Tokyo hour + UTC day-of-week', todSlots.length === 5, JSON.stringify(todSlots));
 check('UTC hour slot format', todSlots.includes('hour_utc_05'), JSON.stringify(todSlots));
 check('ET hour slot format (midnight ET, matches the etHour check above)', todSlots.includes('hour_et_00'), JSON.stringify(todSlots));
+check('London session slot present (GMT in January, so matches UTC)', todSlots.includes('hour_ldn_05'), JSON.stringify(todSlots));
+check('Tokyo session slot present (UTC+9, no DST)', todSlots.includes('hour_tyo_14'), JSON.stringify(todSlots));
 check('day-of-week slot present', todSlots.some(s => s.startsWith('dow_utc_')), JSON.stringify(todSlots));
+
+console.log('\n== computeSwingTimeTallies: which hour holds the day\'s actual high/low, not just direction ==');
+function mkDay(dateStr, values) {
+  return values.map((close, h) => ({ ts: `${dateStr}T${String(h).padStart(2, '0')}:00:00.000Z`, close }));
+}
+const swingDay1 = mkDay('2026-01-15', Array.from({ length: 24 }, (_, h) => (h === 14 ? 200 : h === 3 ? 50 : 100)));
+const swing1 = computeSwingTimeTallies(swingDay1);
+check('one full day tallies to totalDays=1', swing1.totalDays === 1, swing1.totalDays);
+check('the max-hour (14) slot gets a high tally', swing1.tallies['hour_utc_14'] && swing1.tallies['hour_utc_14'].high === 1, JSON.stringify(swing1.tallies['hour_utc_14']));
+check('the min-hour (3) slot gets a low tally', swing1.tallies['hour_utc_03'] && swing1.tallies['hour_utc_03'].low === 1, JSON.stringify(swing1.tallies['hour_utc_03']));
+check('the max-hour slot does not also get a low tally', !swing1.tallies['hour_utc_14'].low);
+
+const swingThinDay = mkDay('2026-01-16', Array.from({ length: 24 }, (_, h) => (h === 14 ? 200 : h === 3 ? 50 : 100))).slice(0, 8);
+check('a day with fewer than 12 hourly bars is skipped, not trusted', computeSwingTimeTallies(swingThinDay).totalDays === 0);
+
+const swingDay2 = mkDay('2026-01-17', Array.from({ length: 24 }, (_, h) => (h === 14 ? 300 : 100)));
+const swing2 = computeSwingTimeTallies([...swingDay1, ...swingDay2]);
+check('two days accumulate: totalDays=2', swing2.totalDays === 2, swing2.totalDays);
+check('a recurring peak hour (14, both days) accumulates a count of 2', swing2.tallies['hour_utc_14'].high === 2, JSON.stringify(swing2.tallies['hour_utc_14']));
+
+const swingEmpty = computeSwingTimeTallies([]);
+check('empty input: zero days, no tallies', swingEmpty.totalDays === 0 && Object.keys(swingEmpty.tallies).length === 0);
+
+console.log('\n== swingTimeSignal: does THIS asset\'s daily high/low tend to land in the current slot? ==');
+const stNow = '2026-03-10T14:00:00.000Z';
+const [stSlotA, stSlotB] = mod.slotsForTimestamp(stNow); // both hour-type slots -> baseline 1/24 for the ratio math below
+check('no stats at all: abstains (null)', mod.swingTimeSignal(null, 'BTC', stNow) === null);
+check('stats present but nothing for this symbol: abstains (null)', mod.swingTimeSignal({}, 'BTC', stNow) === null);
+
+const stRealPattern = { [`BTC|${stSlotA}|low`]: { count: 30, totalDays: 100 } }; // 30% vs ~4.2% hour baseline -> ~7x
+const stPicked = mod.swingTimeSignal(stRealPattern, 'BTC', stNow);
+check('a real, well-sampled pattern is picked up', stPicked && stPicked.extremeType === 'low' && stPicked.slot === stSlotA, JSON.stringify(stPicked));
+
+const stWeakRatio = { [`BTC|${stSlotA}|low`]: { count: 5, totalDays: 100 } }; // 5%, barely above the ~4.2% baseline
+check('a probability barely above baseline (ratio < 2x): abstains (null)', mod.swingTimeSignal(stWeakRatio, 'BTC', stNow) === null);
+
+const stTooFewDays = { [`BTC|${stSlotA}|low`]: { count: 10, totalDays: 20 } }; // strong 50% ratio, but only 20 days observed
+check('a strong ratio but too few days observed (below 40): abstains (null)', mod.swingTimeSignal(stTooFewDays, 'BTC', stNow) === null);
+
+const stMultiCandidate = {
+  [`BTC|${stSlotA}|low`]: { count: 20, totalDays: 100 },  // ~4.8x baseline
+  [`BTC|${stSlotB}|high`]: { count: 40, totalDays: 100 }  // ~9.6x baseline, stronger
+};
+const stMultiPicked = mod.swingTimeSignal(stMultiCandidate, 'BTC', stNow);
+check('with multiple qualifying candidates, picks the strongest ratio', stMultiPicked && stMultiPicked.extremeType === 'high' && stMultiPicked.slot === stSlotB, JSON.stringify(stMultiPicked));
+
+console.log('\n== swingtime technique: only fires when the timing pattern AND current price position both agree ==');
+const stLowPattern = { [`BTC|${stSlotA}|low`]: { count: 30, totalDays: 100 } };
+const stHighPattern = { [`BTC|${stSlotA}|high`]: { count: 30, totalDays: 100 } };
+const stTechBullish = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', rangePos: 0.05 }), 'crypto', undefined, undefined, undefined, stNow, undefined, undefined, stLowPattern), 'swingtime');
+const stTechNoConfirm = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', rangePos: 0.5 }), 'crypto', undefined, undefined, undefined, stNow, undefined, undefined, stLowPattern), 'swingtime');
+const stTechBearish = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', rangePos: 0.95 }), 'crypto', undefined, undefined, undefined, stNow, undefined, undefined, stHighPattern), 'swingtime');
+const stTechNoStats = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', rangePos: 0.05 }), 'crypto'), 'swingtime');
+check('proven low-timing slot + price actually near its low right now: fires bullish', stTechBullish.dir === 1, JSON.stringify(stTechBullish));
+check('same proven pattern, but price is mid-range: does not fire (timing alone is not enough)', stTechNoConfirm.dir === 0, JSON.stringify(stTechNoConfirm));
+check('proven high-timing slot + price actually near its high right now: fires bearish', stTechBearish.dir === -1, JSON.stringify(stTechBearish));
+check('no swing-time stats loaded at all: abstains (null)', stTechNoStats.dir === null, JSON.stringify(stTechNoStats));
 
 console.log('\n== timeOfDaySignal: only fires with real sample depth AND a real effect size ==');
 const todNow = '2026-03-10T14:00:00.000Z';

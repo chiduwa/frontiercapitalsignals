@@ -374,7 +374,8 @@ export const TECHNIQUE_META = {
   timeofday:   { leading: true,  horizonDays: 0.2 },
   openinterest:{ leading: false, horizonDays: 3 },
   sentiment:   { leading: true,  horizonDays: 4 },
-  leadlag:     { leading: true,  horizonDays: 3 }
+  leadlag:     { leading: true,  horizonDays: 3 },
+  swingtime:   { leading: true,  horizonDays: 0.3 }
 };
 
 export function horizonLabel(days) {
@@ -828,31 +829,42 @@ export function fibonacciLevels(closes, lookback = 90) {
   };
 }
 
-// NY-local (America/New_York) hour-of-day for a given instant, DST-aware
-// via Intl rather than a hardcoded UTC-5/UTC-4 offset — so "midnight ET"
-// and the NYSE's 9am/4pm hours both fall out of the same one calculation
+// Local hour-of-day in an arbitrary IANA timezone for a given instant,
+// DST-aware via Intl rather than a hardcoded fixed offset — so "midnight
+// ET"/"London open"/"Tokyo open" all fall out of the same one calculation
 // correctly year-round, with no separate DST branch to get wrong twice a
-// year.
-export function etHour(date) {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' }).formatToParts(date);
+// year (Tokyo has no DST at all, so it's just as correct there by not
+// needing to special-case it).
+export function hourInZone(date, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', hourCycle: 'h23' }).formatToParts(date);
   return Number(parts.find((p) => p.type === 'hour').value);
 }
 
+// Kept as a thin wrapper (rather than removed) since it's already used
+// directly elsewhere (tests, docs) — NY-local hour specifically.
+export function etHour(date) {
+  return hourInZone(date, 'America/New_York');
+}
+
 // The clock "slots" a given instant belongs to, for the time-of-day
-// behavioral profile (time_of_day_stats): UTC hour-of-day (captures
-// midnight UTC, and crypto funding settlement hours 00/08/16 UTC directly,
-// since perp funding times are themselves UTC-aligned), NY-local hour-of-
-// day (captures midnight ET and the NYSE's 9am/4pm hours without any
-// separate named-session list — DST-aware via etHour above), and UTC
-// day-of-week (Sunday=0..Saturday=6, JS's own convention). Deliberately
-// generic rather than a hardcoded list of "named sessions": every slot
-// here falls out of the same handful of calendar reads, so there's nothing
-// bespoke to maintain as sessions change.
+// behavioral profile (time_of_day_stats) and the swing-time-of-day profile
+// (swing_time_stats): UTC hour-of-day (captures midnight UTC, and crypto
+// funding settlement hours 00/08/16 UTC directly, since perp funding times
+// are themselves UTC-aligned), NY/London/Tokyo-local hour-of-day (captures
+// midnight ET and the NYSE's 9am/4pm hours, London's open around 8am
+// local, and Tokyo's open around 9am local — all without any separate
+// named-session list, DST-aware via hourInZone above), and UTC day-of-week
+// (Sunday=0..Saturday=6, JS's own convention). Deliberately generic rather
+// than a hardcoded list of "named sessions": every slot here falls out of
+// the same handful of calendar reads, so there's nothing bespoke to
+// maintain as sessions change.
 export function slotsForTimestamp(iso) {
   const d = new Date(iso);
   const hourUtc = String(d.getUTCHours()).padStart(2, '0');
-  const hourEt = String(etHour(d)).padStart(2, '0');
-  return [`hour_utc_${hourUtc}`, `hour_et_${hourEt}`, `dow_utc_${d.getUTCDay()}`];
+  const hourEt = String(hourInZone(d, 'America/New_York')).padStart(2, '0');
+  const hourLdn = String(hourInZone(d, 'Europe/London')).padStart(2, '0');
+  const hourTyo = String(hourInZone(d, 'Asia/Tokyo')).padStart(2, '0');
+  return [`hour_utc_${hourUtc}`, `hour_et_${hourEt}`, `hour_ldn_${hourLdn}`, `hour_tyo_${hourTyo}`, `dow_utc_${d.getUTCDay()}`];
 }
 
 // Below this many observations, a slot's measured mean/stdev is too noisy
@@ -894,7 +906,47 @@ export function timeOfDaySignal(todStats, symbol, nowIso) {
   return { dir: best.meanPct > 0 ? 1 : -1, slot: best.slot, horizonHours: best.horizonHours, meanPct: best.meanPct, n: best.n };
 }
 
-export function evaluateTechniques(m, kind, reliability, marketContext, todStats, nowIso, leadLagSignals, leaderReturns) {
+// Below this many observed days, a slot's tallied high/low probability is
+// too noisy to act on. Days accumulate far slower than hourly technique-
+// vote samples (one tally per day per slot, not one per hour), so this
+// bar is lower than MIN_RELIABILITY_SAMPLES/TOD_MIN_SAMPLES — still real
+// depth, just calibrated to this statistic's slower cadence.
+const SWING_TIME_MIN_DAYS = 40;
+// How many times above the naive uniform baseline (1/24 for an hour slot,
+// 1/7 for day-of-week) a slot's observed probability must be to count as
+// a real pattern rather than noise.
+const SWING_TIME_MIN_RATIO = 2;
+
+function swingTimeBaseline(slot) {
+  return slot.startsWith('dow_utc_') ? 1 / 7 : 1 / 24;
+}
+
+// Does this asset have a proven tendency for its daily high or low to
+// specifically land in the CURRENT clock slot? Distinct from
+// timeOfDaySignal (which measures directional bias in the hour(s) AFTER a
+// slot) — this measures where the extreme ITSELF tends to fall. Checks
+// every slot `nowIso` belongs to and every extreme type, keeps whichever
+// candidate has the strongest ratio-over-baseline with enough days
+// observed — same "best candidate, not every candidate" discipline as
+// timeOfDaySignal.
+export function swingTimeSignal(swingTimeStats, symbol, nowIso) {
+  if (!swingTimeStats) return null;
+  let best = null;
+  for (const slot of slotsForTimestamp(nowIso)) {
+    const baseline = swingTimeBaseline(slot);
+    for (const extremeType of ['high', 'low']) {
+      const rec = swingTimeStats[`${symbol}|${slot}|${extremeType}`];
+      if (!rec || rec.totalDays < SWING_TIME_MIN_DAYS) continue;
+      const prob = rec.count / rec.totalDays;
+      const ratio = prob / baseline;
+      if (ratio < SWING_TIME_MIN_RATIO) continue;
+      if (!best || ratio > best.ratio) best = { slot, extremeType, prob, ratio, totalDays: rec.totalDays };
+    }
+  }
+  return best;
+}
+
+export function evaluateTechniques(m, kind, reliability, marketContext, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats) {
   const T = [];
   const push = (id, w, dir, note) => T.push({ id, w: w * reliabilityMultiplier(reliability, m.symbol, id), dir, note });
   const cS = m.chgShort, c24 = m.chg24h, c7 = m.chg7d, c30 = m.chg30d;
@@ -1261,11 +1313,34 @@ export function evaluateTechniques(m, kind, reliability, marketContext, todStats
     push('leadlag', 0.8, null, null);
   }
 
+  // T21 swing-time-of-day: has this asset's daily high or low proven to
+  // specifically land in the CURRENT clock slot (see swingTimeSignal) —
+  // not just "does it tend to move up/down around now" (timeofday already
+  // answers that), but "does the actual swing extreme tend to happen right
+  // now"? Never fires on timing alone: also needs the asset to be sitting
+  // near its own recent high/low right now (rangePos, already computed),
+  // same discipline as reversal/fibonacci — a well-timed slot with price
+  // sitting mid-range isn't a real setup, just a coincidence of the clock.
+  if (swingTimeStats && nowIso) {
+    const swing = swingTimeSignal(swingTimeStats, m.symbol, nowIso);
+    const pos = m.rangePos;
+    const slotLabel = swing ? swing.slot.replace(/_/g, ' ') : null;
+    if (swing && pos != null && swing.extremeType === 'low' && pos <= 0.15) {
+      push('swingtime', 0.7, 1, `daily low tends to land at ${slotLabel} for this asset (${(swing.prob * 100).toFixed(0)}% of ${swing.totalDays}d, ${swing.ratio.toFixed(1)}x baseline), and it's there now`);
+    } else if (swing && pos != null && swing.extremeType === 'high' && pos >= 0.85) {
+      push('swingtime', 0.7, -1, `daily high tends to land at ${slotLabel} for this asset (${(swing.prob * 100).toFixed(0)}% of ${swing.totalDays}d, ${swing.ratio.toFixed(1)}x baseline), and it's there now`);
+    } else {
+      push('swingtime', 0.7, 0, null);
+    }
+  } else {
+    push('swingtime', 0.7, null, null);
+  }
+
   return T;
 }
 
-export function confluence(m, kind, reliability, marketContext, reliabilityByHorizon, todStats, nowIso, leadLagSignals, leaderReturns) {
-  const T = evaluateTechniques(m, kind, reliability, marketContext, todStats, nowIso, leadLagSignals, leaderReturns);
+export function confluence(m, kind, reliability, marketContext, reliabilityByHorizon, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats) {
+  const T = evaluateTechniques(m, kind, reliability, marketContext, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats);
   const applicable = T.filter(t => t.dir !== null);
   const totalW = applicable.reduce((a, t) => a + t.w, 0) || 1;
   let bullW = 0, bearW = 0, bullN = 0, bearN = 0;
@@ -1810,8 +1885,8 @@ export function buildStockMetrics(row, valuation, override, benchCloses) {
 // mismatched horizon between what's logged and what's checked.
 const RANGE_LOG_HORIZONS_DAYS = [1, 7];
 
-function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns) {
-  const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, marketContext, reliabilityByHorizon, todStats, nowIso, leadLagSignals, leaderReturns) }));
+function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats) {
+  const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, marketContext, reliabilityByHorizon, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats) }));
   // Full-universe vote log (not just the top-10 shown on each board) so the
   // reliability learning loop sees every asset, not only that hour's winners.
   const votesLog = [];
@@ -1905,7 +1980,7 @@ function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHori
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -1989,7 +2064,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
         return buildCryptoMetrics(c, { funding: funding[sym], fundingHistory: fundingHistory && fundingHistory[sym], sentimentScore: sentimentMap && sentimentMap[sym], trending: trending.has(sym), daily, benchCloses: btcCloses });
       })
       .filter(Boolean);
-    cryptoBoards = rankBoards(metrics, 'crypto', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns);
+    cryptoBoards = rankBoards(metrics, 'crypto', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats);
   }
 
   let stockBoards = { breakout: [], breakdown: [], universe: 0 };
@@ -2005,7 +2080,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
         if (m) metrics.push(m);
       } else stockFailures.push(r && r._item);
     }
-    stockBoards = rankBoards(metrics, 'stock', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns);
+    stockBoards = rankBoards(metrics, 'stock', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats);
   }
 
   // If both primary sources yielded nothing, this is a real outage: throw so

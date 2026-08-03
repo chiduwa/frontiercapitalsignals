@@ -12,7 +12,7 @@
 // Optional env: TREFIS_OVERRIDES
 // Optional (enables reliability weighting when set): FCS_D1_DATABASE_ID
 import { buildPayload, CACHE_KEY } from '../worker.js';
-import { loadReliability, loadMoveStats, loadRangeReliability, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, logRun, evaluateMatured, evaluateTimeOfDay, snapshotAssetScores } from './reliability.mjs';
+import { loadReliability, loadMoveStats, loadRangeReliability, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, loadSwingTimeStats, logRun, evaluateMatured, evaluateTimeOfDay, snapshotAssetScores } from './reliability.mjs';
 import { upsertMarketSentiment, loadRecentBars } from './archive.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES } = process.env;
@@ -27,7 +27,7 @@ const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID };
 // succeed with today's baseline (unweighted, methodology-only-horizon,
 // volatility-only-range) scoring rather than blocking the hourly KV
 // refresh on a secondary subsystem.
-let reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns;
+let reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats;
 if (FCS_D1_DATABASE_ID) {
   try {
     const rel = await loadReliability(env);
@@ -51,15 +51,17 @@ if (FCS_D1_DATABASE_ID) {
     // archive — kept small and cheap regardless of how deep the archive
     // itself grows.
     leaderReturns = await loadRecentBars(env, leaderSymbols, 15);
+    swingTimeStats = await loadSwingTimeStats(env);
+    console.log(`loaded swing-time-of-day stats for ${Object.keys(swingTimeStats).length} (symbol, slot, extreme) triples`);
   } catch (e) {
-    console.error('loadReliability/loadMoveStats/loadRangeReliability/loadTimeOfDayStats/loadFundingHistory/loadSentimentMap/loadLeadLagSignals failed, continuing with baseline weights:', e.message || e);
+    console.error('loadReliability/loadMoveStats/loadRangeReliability/loadTimeOfDayStats/loadFundingHistory/loadSentimentMap/loadLeadLagSignals/loadSwingTimeStats failed, continuing with baseline weights:', e.message || e);
   }
 } else {
   console.log('FCS_D1_DATABASE_ID not set — reliability weighting disabled, using baseline weights');
 }
 
 const started = Date.now();
-const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns);
+const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats);
 console.log(`built payload in ${Date.now() - started}ms — crypto ${payload.crypto.universe} assets, stocks ${payload.stocks.universe} assets`);
 console.log('health:', JSON.stringify(payload.health));
 

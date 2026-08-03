@@ -19,6 +19,7 @@ import {
   upsertAssetSentiment, upsertMarketSentiment,
   computeLeadLag, replaceLeadLagSignals
 } from './archive.mjs';
+import { evaluateYesterdaySwingTimes } from './reliability.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, CMC_API_KEY, CRYPTOPANIC_API_TOKEN } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
@@ -105,6 +106,13 @@ async function main() {
     console.log(`lead/lag: ${written} significant relationships registered (recomputed in ${Date.now() - started}ms)`);
   } catch (e) {
     console.error('lead/lag recompute failed:', e.message);
+  }
+
+  try {
+    const updated = await evaluateYesterdaySwingTimes(env, new Date().toISOString());
+    console.log(`swing-time-of-day: tallied yesterday for ${updated} symbols`);
+  } catch (e) {
+    console.error('swing-time-of-day forward tally failed:', e.message);
   }
 
   console.log('daily-refresh complete');
