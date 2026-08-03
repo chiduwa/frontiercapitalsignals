@@ -15,7 +15,7 @@
 // two are genuinely the same need either way: "what's in the universe" and
 // "what's each coin's live funding right now."
 import { d1, chunk } from './d1-client.mjs';
-import { laggedCorrelation, slotsForTimestamp } from '../worker.js';
+import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries } from '../worker.js';
 
 const UA = 'Mozilla/5.0 (compatible; FrontierCapitalSignals/2.0)';
 
@@ -187,6 +187,11 @@ export async function fearGreedHistory(limit = 0) {
 // 429'd at the daily job's original 300ms pacing); the caller
 // (daily-refresh.mjs) also paces more conservatively now, matching
 // CRYPTO_HISTORY_DELAY_MS's already-proven-safe value.
+// Returns { up, categories }: the sentiment vote plus this same response's
+// `categories` array (CoinGecko's raw ~850-string taxonomy, e.g.
+// "Decentralized Finance (DeFi)", "Governance") — reused by the daily
+// sector-taxonomy step (see mapCategoriesToSectors in worker.js) so that
+// step costs zero additional fetches, not a second per-coin call.
 export async function coingeckoSentiment(id) {
   const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}`
     + '?localization=false&tickers=false&market_data=false&community_data=false&developer_data=false&sparkline=false';
@@ -196,7 +201,8 @@ export async function coingeckoSentiment(id) {
     try {
       const j = await fetchJson(url);
       const up = Number(j && j.sentiment_votes_up_percentage);
-      return Number.isFinite(up) ? up : null;
+      const categories = Array.isArray(j && j.categories) ? j.categories : [];
+      return { up: Number.isFinite(up) ? up : null, categories };
     } catch (e) {
       lastErr = e;
       const is429 = /^HTTP 429/.test(String(e && e.message));
@@ -314,15 +320,11 @@ const LEAD_LAG_LAGS = [1, 2, 3, 4, 5, 7, 10];
 const LEAD_LAG_MIN_ABS_CORR = 0.5;
 const LEAD_LAG_MIN_SAMPLES = 180;
 
-// Bulk-reads the ENTIRE asset_daily_bars archive once (a full-table scan,
-// but cheap even at real scale relative to D1's 5M-rows-read/day cap — see
-// the plan's own sizing) and tests every ordered pair in memory — the
-// expensive part of O(n^2) pairs is per-pair D1 round-trips, which loading
-// once avoids entirely; the arithmetic itself is trivial even at a few
-// hundred symbols (tens of thousands of ordered pairs × a handful of lags
-// each, all plain JS after the one read).
-export async function computeLeadLag(env) {
-  const rows = await d1(env, 'SELECT symbol, date, close FROM asset_daily_bars ORDER BY symbol, date');
+// Shared by computeLeadLag and computeSectorComposites below: turns
+// date-sorted (symbol, date, close) rows into a { symbol: { date: pctReturn } }
+// map. One implementation of "how do we turn bars into returns," not two
+// copies that could drift apart.
+function barsRowsToReturnsBySymbol(rows) {
   const barsBySymbol = {};
   for (const r of rows) (barsBySymbol[r.symbol] ??= []).push(r);
 
@@ -335,6 +337,23 @@ export async function computeLeadLag(env) {
     }
     returnsBySymbol[symbol] = rets;
   }
+  return returnsBySymbol;
+}
+
+// Bulk-reads the ENTIRE asset_daily_bars archive once (a full-table scan,
+// but cheap even at real scale relative to D1's 5M-rows-read/day cap — see
+// the plan's own sizing) and tests every ordered pair in memory — the
+// expensive part of O(n^2) pairs is per-pair D1 round-trips, which loading
+// once avoids entirely; the arithmetic itself is trivial even at a few
+// hundred symbols (tens of thousands of ordered pairs × a handful of lags
+// each, all plain JS after the one read). This also naturally includes any
+// SECTOR:<name> composite pseudo-symbols already written by
+// computeSectorComposites (below) as just more rows in the same table, so
+// sector-leads-sector and sector-leads-asset relationships fall out of this
+// same O(n^2) pass for free — no separate sector-lead-lag engine needed.
+export async function computeLeadLag(env) {
+  const rows = await d1(env, 'SELECT symbol, date, close FROM asset_daily_bars ORDER BY symbol, date');
+  const returnsBySymbol = barsRowsToReturnsBySymbol(rows);
 
   const symbols = Object.keys(returnsBySymbol);
   const signals = [];
@@ -372,6 +391,59 @@ export async function replaceLeadLagSignals(env, signals, computedAt) {
     written += batch.length;
   }
   return written;
+}
+
+// ------------------------------ SECTORS -------------------------------------
+// Category -> sector membership, recomputed daily from whichever symbols
+// the sentiment loop (daily-refresh.mjs) already fetched CoinGecko detail
+// for — zero extra fetches (see coingeckoSentiment's categories field
+// above). Wholesale replace, not upsert: same "a relationship that no
+// longer holds should disappear" reasoning as replaceLeadLagSignals — a
+// token's categories rarely change, but should if CoinGecko's do.
+const MIN_SECTOR_CONSTITUENTS = 3;
+
+export async function replaceAssetSectors(env, rows) {
+  await d1(env, 'DELETE FROM asset_sectors');
+  if (!rows.length) return 0;
+  let written = 0;
+  const updatedAt = new Date().toISOString();
+  for (const batch of chunk(rows, 20)) {
+    const placeholders = batch.map(() => '(?,?,?)').join(',');
+    const params = batch.flatMap((r) => [r.symbol, r.sector, updatedAt]);
+    await d1(env, `INSERT INTO asset_sectors (symbol, sector, updated_at) VALUES ${placeholders}`, params);
+    written += batch.length;
+  }
+  return written;
+}
+
+// Recomputes each eligible sector's FULL composite history (not just
+// today) from whatever depth asset_daily_bars already has for its member
+// symbols — the archive may hold years of history from the backfill, so
+// the very first time a sector clears MIN_SECTOR_CONSTITUENTS, its whole
+// composite series is available immediately rather than accumulating one
+// day at a time going forward. Cheap to redo in full each day: the write
+// path (upsertDailyBars, called by the caller with this function's output)
+// is INSERT OR IGNORE keyed by (symbol, date), so re-deriving already-
+// written dates is a fast no-op and only genuinely new dates land.
+export async function computeSectorComposites(env, sectorRows, minConstituents = MIN_SECTOR_CONSTITUENTS) {
+  const symbolsBySector = {};
+  for (const r of sectorRows) (symbolsBySector[r.sector] ??= new Set()).add(r.symbol);
+  const allSymbols = [...new Set(sectorRows.map((r) => r.symbol))];
+  if (!allSymbols.length) return [];
+
+  const placeholders = allSymbols.map(() => '?').join(',');
+  const rows = await d1(env, `SELECT symbol, date, close FROM asset_daily_bars WHERE symbol IN (${placeholders}) ORDER BY symbol, date`, allSymbols);
+  const returnsBySymbol = barsRowsToReturnsBySymbol(rows);
+  const bySectorArrays = Object.fromEntries(Object.entries(symbolsBySector).map(([sector, syms]) => [sector, [...syms]]));
+  const composites = computeSectorCompositeSeries(returnsBySymbol, bySectorArrays, minConstituents);
+
+  const out = [];
+  for (const [sector, series] of Object.entries(composites)) {
+    for (const point of series) {
+      out.push({ symbol: `SECTOR:${sector}`, assetClass: 'sector', date: point.date, close: point.close, high: null, low: null, volume: null, source: 'composite' });
+    }
+  }
+  return out;
 }
 
 // Most recent `days` closes per symbol from asset_daily_bars, date-sorted

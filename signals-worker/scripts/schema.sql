@@ -228,3 +228,18 @@ CREATE TABLE IF NOT EXISTS time_of_day_stats (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (symbol, slot, horizon_hours)
 );
+
+-- Category -> sector membership (see mapCategoriesToSectors in worker.js
+-- and replaceAssetSectors in archive.mjs), recomputed wholesale each day
+-- from CoinGecko's per-coin `categories` field — the same call already
+-- made for the 'sentiment' technique, so this costs no extra fetches. Feeds
+-- computeSectorComposites, which writes SECTOR:<name> composite pseudo-
+-- symbols into asset_daily_bars so the existing lead/lag engine
+-- (lead_lag_signals above) picks up sector-vs-sector and sector-vs-asset
+-- relationships with no engine-level changes.
+CREATE TABLE IF NOT EXISTS asset_sectors (
+  symbol TEXT NOT NULL,
+  sector TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (symbol, sector)
+);

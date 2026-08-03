@@ -521,6 +521,50 @@ const llReturnsBoth = {
 const llTechPicksStrongest = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, undefined, undefined, undefined, llSignalsStronger, llReturnsBoth), 'leadlag');
 check('with two qualifying leaders, follows the stronger-correlation one (ETH, negative corr -> bearish) not just the first', llTechPicksStrongest.dir === -1, JSON.stringify(llTechPicksStrongest));
 
+const llSignalsSector = { TESTASSET: [{ leaderSymbol: 'SECTOR:DeFi', lagDays: 2, corr: 0.8, samples: 200 }] };
+const llReturnsSector = { 'SECTOR:DeFi': fourBarsUp };
+const llTechSectorLeader = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, undefined, undefined, undefined, llSignalsSector, llReturnsSector), 'leadlag');
+check('a SECTOR:<name> pseudo-symbol works as a registered leader with zero special-casing', llTechSectorLeader.dir === 1, JSON.stringify(llTechSectorLeader));
+check('the displayed note prettifies the SECTOR: prefix rather than showing the raw pseudo-symbol', llTechSectorLeader.note.startsWith('the DeFi sector moved'), llTechSectorLeader.note);
+
+console.log('\n== mapCategoriesToSectors: curated CoinGecko-category -> broad sector bucket ==');
+check('no categories at all: empty array, not an error', JSON.stringify(mod.mapCategoriesToSectors(null)) === '[]');
+check('empty categories array: empty array', JSON.stringify(mod.mapCategoriesToSectors([])) === '[]');
+check('a pure L1 (Ethereum-like): maps to L1 only', JSON.stringify(mod.mapCategoriesToSectors(['Smart Contract Platform', 'Layer 1 (L1)', 'Ethereum Ecosystem'])) === '["L1"]');
+check('an L2 (Arbitrum-like) with Governance too: maps to both, in bucket-declaration order', JSON.stringify(mod.mapCategoriesToSectors(['Smart Contract Platform', 'Layer 2 (L2)', 'Governance'])) === '["L1","L2","Governance"]');
+check('a DeFi+Governance token (Uniswap-like): real multi-membership, not a bug', JSON.stringify(mod.mapCategoriesToSectors(['Decentralized Exchange (DEX)', 'Decentralized Finance (DeFi)', 'Governance'])) === '["DeFi","Governance"]');
+check('irrelevant ecosystem/portfolio noise with no whitelisted tag: empty array', JSON.stringify(mod.mapCategoriesToSectors(['FTX Holdings', 'Made in USA', 'Coinbase 50 Index'])) === '[]');
+check('a meme coin (Dogecoin-like): Meme, plus L1 since it also carries Smart Contract Platform', JSON.stringify(mod.mapCategoriesToSectors(['Smart Contract Platform', 'Meme', 'Dog-Themed'])) === '["L1","Meme"]');
+
+console.log('\n== computeSectorCompositeSeries: simple-mean daily return, compounded into a start-at-100 index ==');
+const sectorReturnsBySymbol = {
+  AAA: { '2026-01-01': 10, '2026-01-02': -5 },  // +10%, then -5%
+  BBB: { '2026-01-01': 2, '2026-01-02': 1 },    // +2%, then +1%
+  CCC: { '2026-01-01': 0, '2026-01-02': 4 }     // 0%, then +4%
+};
+const compositeThree = mod.computeSectorCompositeSeries(sectorReturnsBySymbol, { TestSector: ['AAA', 'BBB', 'CCC'] });
+const day1MeanRet = (10 + 2 + 0) / 3; // 4
+const day2MeanRet = (-5 + 1 + 4) / 3; // 0
+check('day 1 close compounds the simple mean of all three members\' returns off a base of 100', Math.abs(compositeThree.TestSector[0].close - 100 * (1 + day1MeanRet / 100)) < 1e-9, JSON.stringify(compositeThree.TestSector));
+check('day 2 close compounds onto day 1\'s close, not back to 100', Math.abs(compositeThree.TestSector[1].close - 100 * (1 + day1MeanRet / 100) * (1 + day2MeanRet / 100)) < 1e-9, JSON.stringify(compositeThree.TestSector));
+
+const compositeTwoMembers = mod.computeSectorCompositeSeries(sectorReturnsBySymbol, { TooSmall: ['AAA', 'BBB'] });
+check('below the minimum-constituent bar (default 3): sector omitted entirely, not computed from 2', compositeTwoMembers.TooSmall === undefined, JSON.stringify(compositeTwoMembers));
+
+const compositeCustomMin = mod.computeSectorCompositeSeries(sectorReturnsBySymbol, { TooSmall: ['AAA', 'BBB'] }, 2);
+check('a lower explicit minConstituents allows a 2-member composite', Array.isArray(compositeCustomMin.TooSmall) && compositeCustomMin.TooSmall.length === 2, JSON.stringify(compositeCustomMin));
+
+const sectorReturnsPartial = {
+  AAA: { '2026-01-01': 10, '2026-01-02': -5 },
+  BBB: { '2026-01-01': 2 },                      // no 2026-01-02 data for BBB
+  CCC: { '2026-01-01': 0, '2026-01-02': 4 }
+};
+const compositePartial = mod.computeSectorCompositeSeries(sectorReturnsPartial, { PartialSector: ['AAA', 'BBB', 'CCC'] });
+const day2MeanPartial = (-5 + 4) / 2; // only AAA + CCC have a 2026-01-02 return
+check('a date where only some members have data still gets a composite point, averaged over whoever reported', Math.abs(compositePartial.PartialSector[1].close - 100 * (1 + day1MeanRet / 100) * (1 + day2MeanPartial / 100)) < 1e-9, JSON.stringify(compositePartial.PartialSector));
+
+check('a symbol with no return data at all (never in returnsBySymbol) is simply not counted toward the constituent minimum', mod.computeSectorCompositeSeries(sectorReturnsBySymbol, { GhostSector: ['AAA', 'BBB', 'ZZZ'] }).GhostSector === undefined, 'ZZZ has no entry in returnsBySymbol, so only 2 real members qualify');
+
 console.log('\n== seasonalAnalog: does this asset\'s own history contain a real analog? ==');
 check('too short a series: returns null, not a guess', mod.seasonalAnalog(Array.from({ length: 100 }, () => 100), 365) === null);
 function patternWindow(offset) { return Array.from({ length: 90 }, (_, i) => 100 + Math.sin((i + offset) / 10) * 8 + i * 0.1); }

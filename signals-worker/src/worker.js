@@ -626,6 +626,72 @@ export function nDayReturnFromBars(bars, lagDays) {
   return ((now / before) - 1) * 100;
 }
 
+// Curated CoinGecko-category -> broad sector bucket mapping. A small
+// hand-picked whitelist, not a translation of every one of CoinGecko's
+// ~850 raw category strings — most of those are ecosystem tags ("Arbitrum
+// Ecosystem") describing what a token is DEPLOYED on, not what kind of
+// asset it economically is. Confirmed live against BTC/ETH/SOL/ARB/AAVE/
+// UNI/SAND/DOGE/XRP/LINK/DOT which strings actually recur in practice. An
+// asset can land in more than one bucket (Uniswap is both DeFi and
+// Governance) — that overlap is real, not a bug, the same way sector
+// indices in traditional finance overlap (a regional bank is both
+// "Financials" and "Regional Banks").
+export const SECTOR_CATEGORY_MAP = {
+  L1: ['Smart Contract Platform', 'Layer 1 (L1)', 'Layer 0 (L0)'],
+  L2: ['Layer 2 (L2)', 'Rollup'],
+  DeFi: ['Decentralized Finance (DeFi)', 'Decentralized Exchange (DEX)', 'Yield Farming', 'Lending/Borrowing Protocols', 'Automated Market Maker (AMM)'],
+  Governance: ['Governance', 'DAO'],
+  Utility: ['Oracle', 'Infrastructure', 'Payment Solutions'],
+  Gaming: ['Gaming (GameFi)', 'Metaverse', 'Play To Earn'],
+  Meme: ['Meme']
+};
+
+export function mapCategoriesToSectors(categories) {
+  if (!categories || !categories.length) return [];
+  const set = new Set(categories);
+  const sectors = [];
+  for (const [sector, tags] of Object.entries(SECTOR_CATEGORY_MAP)) {
+    if (tags.some((t) => set.has(t))) sectors.push(sector);
+  }
+  return sectors;
+}
+
+// Builds a synthetic composite return-index per sector from each member
+// symbol's already-computed { date: pctReturn } map (see archive.mjs's
+// returns-from-bars helper) and a sector -> member-symbols map: the simple
+// mean of member returns each day, compounded into a start-at-100 index.
+// This lets a sector be written into asset_daily_bars as a SECTOR:<name>
+// pseudo-symbol and flow through computeLeadLag/loadRecentBars/the leadlag
+// technique completely unmodified — nothing downstream needs to know a
+// "sector" is anything other than another symbol with a close price.
+// Skipped when a sector has fewer than minConstituents members with any
+// return data at all, since a 1-2 asset "sector" is just noise dressed up
+// as a composite, not a real basket.
+export function computeSectorCompositeSeries(returnsBySymbol, symbolsBySector, minConstituents = 3) {
+  const out = {};
+  for (const [sector, symbols] of Object.entries(symbolsBySector)) {
+    const members = symbols.filter((s) => returnsBySymbol[s]);
+    if (members.length < minConstituents) continue;
+    const byDate = {};
+    for (const s of members) {
+      for (const [date, ret] of Object.entries(returnsBySymbol[s])) {
+        (byDate[date] ??= []).push(ret);
+      }
+    }
+    const dates = Object.keys(byDate).sort();
+    let close = 100;
+    const series = [];
+    for (const date of dates) {
+      const rets = byDate[date];
+      const meanRet = rets.reduce((a, b) => a + b, 0) / rets.length;
+      close *= 1 + meanRet / 100;
+      series.push({ date, close });
+    }
+    out[sector] = series;
+  }
+  return out;
+}
+
 // Does this asset's own price history contain a period that behaved like
 // its last `windowDays`, roughly one or more "years" (cycleLength bars —
 // 365 for continuously-traded crypto, ~252 trading days for equities) ago?
@@ -1332,7 +1398,11 @@ export function evaluateTechniques(m, kind, reliability, marketContext, todStats
     }
     if (best) {
       const dir = (best.corr > 0 ? 1 : -1) * (best.move > 0 ? 1 : -1);
-      push('leadlag', 0.8, dir, `${best.leaderSymbol} moved ${best.move > 0 ? '+' : ''}${best.move.toFixed(1)}% ${best.lagDays}d ago (proven leader, corr ${best.corr.toFixed(2)})`);
+      // A leader can be a real symbol or a SECTOR:<name> composite (see
+      // computeSectorCompositeSeries) — same relationship, just a nicer
+      // label than the raw pseudo-symbol string in the displayed note.
+      const leaderLabel = best.leaderSymbol.startsWith('SECTOR:') ? `the ${best.leaderSymbol.slice(7)} sector` : best.leaderSymbol;
+      push('leadlag', 0.8, dir, `${leaderLabel} moved ${best.move > 0 ? '+' : ''}${best.move.toFixed(1)}% ${best.lagDays}d ago (proven leader, corr ${best.corr.toFixed(2)})`);
     } else {
       push('leadlag', 0.8, 0, null);
     }

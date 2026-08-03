@@ -5,7 +5,8 @@
 // that doing it hourly would add real cost for no real benefit. Currently:
 // per-asset sentiment (CoinGecko community votes, CryptoPanic news
 // balance, both optional), CoinMarketCap's Fear & Greed cross-check
-// (optional), and the cross-asset lead/lag recompute. Invoked once/day by
+// (optional), the sector-taxonomy + composite recompute, and the
+// cross-asset lead/lag recompute. Invoked once/day by
 // .github/workflows/signals-daily.yml, after backfill-history.mjs in the
 // same job (lead/lag needs that step's archive data to already be there).
 //
@@ -13,12 +14,13 @@
 // Optional env: CMC_API_KEY, CRYPTOPANIC_API_TOKEN — both sources simply
 //   produce nothing (not an error) when their key is unset, same pattern
 //   as TREFIS_OVERRIDES elsewhere in this pipeline.
-import { getCryptoMarkets, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME } from '../worker.js';
+import { getCryptoMarkets, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, mapCategoriesToSectors } from '../worker.js';
 import {
   coingeckoSentiment, cryptoPanicSentiment, cmcFearGreed,
   upsertAssetSentiment, upsertMarketSentiment,
   computeLeadLag, replaceLeadLagSignals,
-  fetchDefiLlamaHacks, matchHacksToUniverse, upsertAssetEvents
+  fetchDefiLlamaHacks, matchHacksToUniverse, upsertAssetEvents,
+  replaceAssetSectors, computeSectorComposites, upsertDailyBars
 } from './archive.mjs';
 import { evaluateYesterdaySwingTimes } from './reliability.mjs';
 
@@ -51,11 +53,14 @@ async function main() {
 
   let cgOk = 0, cgFailed = 0, cpOk = 0, cpFailed = 0;
   const rows = [];
+  const sectorRows = [];
   for (const a of universe) {
     let coingeckoUpPct = null, cryptopanicScore = null;
     try {
-      coingeckoUpPct = await coingeckoSentiment(a.id);
+      const cg = await coingeckoSentiment(a.id);
+      coingeckoUpPct = cg.up;
       if (coingeckoUpPct != null) cgOk++;
+      for (const sector of mapCategoriesToSectors(cg.categories)) sectorRows.push({ symbol: a.symbol, sector });
     } catch (e) {
       cgFailed++;
       console.error(`coingeckoSentiment failed for ${a.symbol}:`, e.message);
@@ -103,6 +108,26 @@ async function main() {
     console.log('CMC_API_KEY not set — CoinMarketCap Fear & Greed cross-check skipped');
   }
 
+  try {
+    const sectorsWritten = await replaceAssetSectors(env, sectorRows);
+    const distinctSectors = new Set(sectorRows.map((r) => r.sector));
+    console.log(`sector taxonomy: ${distinctSectors.size} sectors, ${sectorsWritten} (symbol, sector) memberships`);
+    const composites = await computeSectorComposites(env, sectorRows);
+    if (composites.length) {
+      const written = await upsertDailyBars(env, composites);
+      console.log(`sector composites: ${new Set(composites.map((c) => c.symbol)).size} sector series, ${written} rows attempted (full history recomputed each run; INSERT OR IGNORE means only genuinely new dates land)`);
+    } else {
+      console.log('sector composites: no sector cleared the minimum-constituent bar yet');
+    }
+  } catch (e) {
+    console.error('sector taxonomy/composite computation failed:', e.message);
+  }
+
+  // Runs AFTER the sector-composite step above so this same pass's
+  // SECTOR:<name> rows are already in asset_daily_bars — computeLeadLag
+  // treats them as just more symbols, so sector-vs-sector and
+  // sector-vs-asset relationships are discovered in this same O(n^2) call,
+  // no separate sector-lead-lag engine needed.
   try {
     const started = Date.now();
     const signals = await computeLeadLag(env);
