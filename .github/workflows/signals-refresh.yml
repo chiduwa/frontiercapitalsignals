@@ -5,15 +5,25 @@ name: Signals Refresh
 # Kept separate from deploy.yml (which ships the Next.js app) since this
 # job runs on every hour regardless of whether any code changed.
 on:
-  # :13 past the hour, not :00 — GitHub's own docs warn that exactly-on-the-
-  # hour schedules queue heavily since every repo on GitHub with a similar
-  # cron fires at that same instant. Confirmed live: over the first ~41h,
-  # this ran only 28 times instead of the ~41 hourly firings intended (gaps
-  # up to 3h+), which directly slowed the reliability-learning accumulation
-  # rate — no run actually failed, every single one succeeded, so this was
-  # pure scheduling contention, not a bug in the job itself.
+  # GitHub's `schedule` trigger is a request, not a guarantee, and offsetting
+  # off the top of the hour (the original fix here) was NOT enough on its
+  # own: confirmed live over 97 scheduled firings (2026-08-01 to 2026-08-03),
+  # the average gap was 142min against the intended 60min cadence, the worst
+  # was 281min, and it was NEVER once early — this is chronic under this
+  # account's load, not a one-off. GitHub's own docs confirm scheduled runs
+  # can be delayed or dropped entirely under load, with no guaranteed retry.
+  #
+  # Fix: fire 4x/hour instead of 1x (still offset from the round :00/:15/:30/
+  # :45 marks other repos commonly use) so a delayed or dropped slot has
+  # three more chances that same hour to land promptly. This does NOT
+  # quadruple real build cost — build-signals.mjs's own freshness pre-check
+  # (gated to `schedule` events only) skips the ~130-fetch rebuild whenever
+  # the last KV write is under ~50min old, so the actual expensive build
+  # still only runs roughly once an hour; the extra scheduled slots are
+  # cheap insurance, not extra work. This repo is public, so Actions minutes
+  # are free/unlimited regardless.
   schedule:
-    - cron: "13 * * * *"
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -51,3 +61,7 @@ jobs:
           FCS_KV_NAMESPACE_ID: ${{ vars.FCS_KV_NAMESPACE_ID }}
           FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
           TREFIS_OVERRIDES: ${{ vars.TREFIS_OVERRIDES }}
+          # Lets build-signals.mjs's freshness pre-check apply only to
+          # scheduled firings, never to a manual workflow_dispatch (which
+          # always means "I want a real rebuild right now").
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
