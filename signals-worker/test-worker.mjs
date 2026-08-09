@@ -265,13 +265,29 @@ check('the qualifying entry carries a horizon label for that range\'s own period
 console.log('\n== reliability weighting: confluence() with a synthetic reliability map ==');
 const btcMetrics = mod.buildCryptoMetrics(btcCoin, { daily: btcDaily });
 const baseline = mod.confluence(btcMetrics, 'crypto');
-const boosted = mod.confluence(btcMetrics, 'crypto', { [`${btcMetrics.symbol}|rsi`]: { accuracy: 1.0, total: 50 } });
-const nerfed = mod.confluence(btcMetrics, 'crypto', { [`${btcMetrics.symbol}|rsi`]: { accuracy: 0.0, total: 50 } });
-const belowThreshold = mod.confluence(btcMetrics, 'crypto', { [`${btcMetrics.symbol}|rsi`]: { accuracy: 1.0, total: 3 } });
+const boosted = mod.confluence(btcMetrics, 'crypto', { [`${btcMetrics.symbol}|rsi`]: { accuracy: 1.0, correct: 50, total: 50 } });
+const nerfed = mod.confluence(btcMetrics, 'crypto', { [`${btcMetrics.symbol}|rsi`]: { accuracy: 0.0, correct: 0, total: 50 } });
+const belowThreshold = mod.confluence(btcMetrics, 'crypto', { [`${btcMetrics.symbol}|rsi`]: { accuracy: 1.0, correct: 3, total: 3 } });
 check('reliability multiplier changes the score vs baseline (enough samples)', boosted.long !== baseline.long || boosted.short !== baseline.short || nerfed.long !== baseline.long || nerfed.short !== baseline.short);
 check('below MIN_RELIABILITY_SAMPLES, weighting stays at baseline (no overfit to small samples)', belowThreshold.long === baseline.long && belowThreshold.short === baseline.short);
-check('reliabilityMultiplier clamps to [0.5, 1.5]', mod.reliabilityMultiplier({ 'X|y': { accuracy: 5, total: 50 } }, 'X', 'y') === 1.5 && mod.reliabilityMultiplier({ 'X|y': { accuracy: -5, total: 50 } }, 'X', 'y') === 0.5);
+check('reliabilityMultiplier clamps to [0.5, 1.5]', mod.reliabilityMultiplier({ 'X|y': { accuracy: 5, correct: 50, total: 50 } }, 'X', 'y') === 1.5 && mod.reliabilityMultiplier({ 'X|y': { accuracy: -5, correct: 0, total: 50 } }, 'X', 'y') === 0.5);
 check('reliabilityMultiplier is neutral (1) with no reliability data', mod.reliabilityMultiplier(undefined, 'X', 'y') === 1 && mod.reliabilityMultiplier({}, 'X', 'y') === 1);
+
+console.log('\n== isReliabilitySignificant: guards against trusting noise at small sample sizes ==');
+check('14/20 (70%): NOT significant — this is exactly the kind of small-sample noise the guardrail targets', mod.isReliabilitySignificant(14, 20) === false);
+check('15/20 (75%): still not significant', mod.isReliabilitySignificant(15, 20) === false);
+check('16/20 (80%): significant — the bar a small sample actually needs to clear', mod.isReliabilitySignificant(16, 20) === true);
+check('62/100 (62%): not significant at a larger sample too, same z-test', mod.isReliabilitySignificant(62, 100) === false);
+check('63/100 (63%): significant — larger samples need a less extreme rate to clear the same bar', mod.isReliabilitySignificant(63, 100) === true);
+check('exactly 50/50 (10/20): never significant, that is the null hypothesis itself', mod.isReliabilitySignificant(10, 20) === false);
+check('two-sided: a rate significantly BELOW 50% also counts (4/20 = 20%)', mod.isReliabilitySignificant(4, 20) === true);
+check('zero samples: false, not a division-by-zero crash', mod.isReliabilitySignificant(0, 0) === false);
+
+console.log('\n== reliabilityMultiplier: enough samples is not enough on its own, still needs significance ==');
+const notSignificantRec = { 'X|y': { accuracy: 0.7, correct: 14, total: 20 } }; // clears MIN_RELIABILITY_SAMPLES, fails isReliabilitySignificant
+const significantRec = { 'X|y': { accuracy: 0.8, correct: 16, total: 20 } };
+check('14/20 clears the sample-count floor but not significance: multiplier stays neutral (1), not boosted to 1.2', mod.reliabilityMultiplier(notSignificantRec, 'X', 'y') === 1, mod.reliabilityMultiplier(notSignificantRec, 'X', 'y'));
+check('16/20 clears both bars: multiplier actually reflects the measured accuracy', mod.reliabilityMultiplier(significantRec, 'X', 'y') === mod.clamp(0.5 + 0.8, 0.5, 1.5), mod.reliabilityMultiplier(significantRec, 'X', 'y'));
 
 console.log('\n== rsiSeries / rsiRecentRange ==');
 check('rsiSeries final value matches the scalar rsi()', mod.rsiSeries(dailyClose)[mod.rsiSeries(dailyClose).length - 1] === mod.rsi(dailyClose));

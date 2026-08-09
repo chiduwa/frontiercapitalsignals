@@ -334,10 +334,34 @@ export const MIN_RELIABILITY_SAMPLES = 20;
 // blended across the 24h/168h horizons there). accuracy 1.0 (always right
 // for this asset) -> 1.5x weight; accuracy 0.0 (always wrong) -> 0.5x;
 // accuracy 0.5 (coin flip, no information) -> 1x, unchanged from today.
+// A raw hit-rate above 50% at exactly MIN_RELIABILITY_SAMPLES can easily be
+// noise, not a real edge — with 25+ techniques now competing for weight
+// per asset, *something* will clear a naive ">50% given 20 samples" bar by
+// chance alone (the multiple-testing problem). Normal approximation to the
+// one-sample binomial proportion test against the null of a fair coin
+// (p=0.5) — well-behaved at this sample-size range and symmetric around
+// 0.5, unlike an exact binomial computation that needs combinatorics prone
+// to precision issues in plain JS at larger n. alpha=0.01 (two-sided,
+// z >= ~2.576), stricter than the conventional 0.05 given how many
+// techniques are competing, but deliberately not a full Bonferroni
+// correction (1 / active-technique-count) — that would shift, and
+// destabilize, the bar every time a technique is added or removed, and
+// would over-penalize thinner-history assets far more than the noise
+// problem it's meant to solve justifies.
+const RELIABILITY_SIGNIFICANCE_Z = 2.576;
+
+export function isReliabilitySignificant(correct, total) {
+  if (!total) return false;
+  const se = Math.sqrt(0.25 / total); // sqrt(p0*(1-p0)/n) at p0=0.5
+  const z = (correct / total - 0.5) / se;
+  return Math.abs(z) >= RELIABILITY_SIGNIFICANCE_Z;
+}
+
 export function reliabilityMultiplier(reliability, symbol, techniqueId) {
   if (!reliability) return 1;
   const rec = reliability[`${symbol}|${techniqueId}`];
   if (!rec || rec.total < MIN_RELIABILITY_SAMPLES) return 1;
+  if (!isReliabilitySignificant(rec.correct, rec.total)) return 1;
   return clamp(0.5 + rec.accuracy, 0.5, 1.5);
 }
 
