@@ -5,25 +5,35 @@ name: Signals Refresh
 # Kept separate from deploy.yml (which ships the Next.js app) since this
 # job runs on every hour regardless of whether any code changed.
 on:
-  # GitHub's `schedule` trigger is a request, not a guarantee, and offsetting
-  # off the top of the hour (the original fix here) was NOT enough on its
-  # own: confirmed live over 97 scheduled firings (2026-08-01 to 2026-08-03),
-  # the average gap was 142min against the intended 60min cadence, the worst
-  # was 281min, and it was NEVER once early — this is chronic under this
-  # account's load, not a one-off. GitHub's own docs confirm scheduled runs
-  # can be delayed or dropped entirely under load, with no guaranteed retry.
+  # GitHub's `schedule` trigger is a request, not a guarantee. Offsetting off
+  # the top of the hour wasn't enough (confirmed live over 97 firings:
+  # avg gap 142min vs the intended 60min, worst 281min, never once early),
+  # and neither was firing 4x/hour instead of 1x: confirmed over the
+  # following 5 days (86 firings, 2026-08-04 to 2026-08-09) that cut the
+  # average to 81min, but the worst case was still 349min — GitHub's
+  # scheduler doesn't just delay individual slots, it drops whole clusters
+  # of them during sustained high-load windows (consistently ~00:00-15:00
+  # UTC, peak US GitHub usage), so more slots per hour has diminishing
+  # returns against a multi-hour outage rather than a single missed pick.
   #
-  # Fix: fire 4x/hour instead of 1x (still offset from the round :00/:15/:30/
-  # :45 marks other repos commonly use) so a delayed or dropped slot has
-  # three more chances that same hour to land promptly. This does NOT
-  # quadruple real build cost — build-signals.mjs's own freshness pre-check
+  # Fix: */5 * * * * — GitHub's documented minimum interval (12x/hour).
+  # Still doesn't GUARANTEE freshness during a bad window, but maximizes
+  # the odds within what GitHub's own scheduler allows, without the added
+  # complexity/risk of routing this through an external trigger. Does NOT
+  # multiply real build cost — build-signals.mjs's own freshness pre-check
   # (gated to `schedule` events only) skips the ~130-fetch rebuild whenever
   # the last KV write is under ~50min old, so the actual expensive build
   # still only runs roughly once an hour; the extra scheduled slots are
   # cheap insurance, not extra work. This repo is public, so Actions minutes
-  # are free/unlimited regardless.
+  # are free/unlimited regardless. If multi-hour gaps persist even at this
+  # frequency, the next step is an external trigger (cron-job.org, which
+  # this account already uses for KCE/ThriveWorks) calling a secret-gated
+  # Cloudflare Worker route rather than GitHub's own scheduler at all —
+  # deliberately not done here since it adds a new production endpoint, a
+  # new secret, and a new external dependency, and the user chose to try
+  # the free/simple option first.
   schedule:
-    - cron: "7,22,37,52 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 concurrency:
