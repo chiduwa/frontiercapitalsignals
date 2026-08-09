@@ -1053,7 +1053,14 @@ export function selectWorstRecentEvent(events, nowMs, mcap, windowDays = EVENT_S
   return best;
 }
 
-export function evaluateTechniques(m, kind, reliability, marketContext, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents) {
+// `ctx` bundles every param past `reliability` — grew to 7 positional
+// fields across several rounds (swing-time, event-severity, sector
+// lead-lag) and a mis-ordered positional pair was already caught once
+// before running. One object, destructured here and passed through
+// confluence/rankBoards unchanged, so a future new field is one extra
+// destructured name here, not a new position everywhere up the chain.
+export function evaluateTechniques(m, kind, reliability, ctx = {}) {
+  const { marketContext, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents } = ctx;
   const T = [];
   const push = (id, w, dir, note) => T.push({ id, w: w * reliabilityMultiplier(reliability, m.symbol, id), dir, note });
   const cS = m.chgShort, c24 = m.chg24h, c7 = m.chg7d, c30 = m.chg30d;
@@ -1475,8 +1482,9 @@ export function evaluateTechniques(m, kind, reliability, marketContext, todStats
   return T;
 }
 
-export function confluence(m, kind, reliability, marketContext, reliabilityByHorizon, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents) {
-  const T = evaluateTechniques(m, kind, reliability, marketContext, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents);
+export function confluence(m, kind, reliability, ctx = {}) {
+  const { reliabilityByHorizon } = ctx;
+  const T = evaluateTechniques(m, kind, reliability, ctx);
   const applicable = T.filter(t => t.dir !== null);
   const totalW = applicable.reduce((a, t) => a + t.w, 0) || 1;
   let bullW = 0, bearW = 0, bullN = 0, bearN = 0;
@@ -2021,8 +2029,9 @@ export function buildStockMetrics(row, valuation, override, benchCloses) {
 // mismatched horizon between what's logged and what's checked.
 const RANGE_LOG_HORIZONS_DAYS = [1, 7];
 
-function rankBoards(metrics, kind, reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents) {
-  const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, marketContext, reliabilityByHorizon, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents) }));
+function rankBoards(metrics, kind, reliability, ctx = {}) {
+  const { moveStats } = ctx;
+  const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, ctx) }));
   // Full-universe vote log (not just the top-10 shown on each board) so the
   // reliability learning loop sees every asset, not only that hour's winners.
   const votesLog = [];
@@ -2168,6 +2177,9 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     fearGreed: fngR.status === 'fulfilled' && fngR.value ? fngR.value.value : null,
     vixRangePos: idx['^VIX'] ? idx['^VIX'].rangePos : null
   };
+  // Shared by both rankBoards calls below (crypto and stock) — see
+  // evaluateTechniques' docs for why this is one object, not positional args.
+  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents };
 
   let cryptoBoards = { breakout: [], breakdown: [], universe: 0 };
   let btc = null, eth = null;
@@ -2200,7 +2212,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
         return buildCryptoMetrics(c, { funding: funding[sym], fundingHistory: fundingHistory && fundingHistory[sym], sentimentScore: sentimentMap && sentimentMap[sym], trending: trending.has(sym), daily, benchCloses: btcCloses });
       })
       .filter(Boolean);
-    cryptoBoards = rankBoards(metrics, 'crypto', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents);
+    cryptoBoards = rankBoards(metrics, 'crypto', reliability, ctx);
   }
 
   let stockBoards = { breakout: [], breakdown: [], universe: 0 };
@@ -2216,7 +2228,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
         if (m) metrics.push(m);
       } else stockFailures.push(r && r._item);
     }
-    stockBoards = rankBoards(metrics, 'stock', reliability, marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents);
+    stockBoards = rankBoards(metrics, 'stock', reliability, ctx);
   }
 
   // If both primary sources yielded nothing, this is a real outage: throw so

@@ -299,15 +299,15 @@ check('RSI troughed+turning WITH structure confirmation: fires bullish', rWithCo
 check('RSI merely low but still falling (not turned yet): does not fire, even with a confirmation present', rStillFalling.dir !== 1, `dir=${rStillFalling.dir}`);
 check('mirror case: RSI peaked+turning down WITH confirmation fires bearish', rTop.dir === -1, `dir=${rTop.dir}`);
 
-const rNoSentiment = findTech(mod.evaluateTechniques(bottomWithConfirm, 'crypto', undefined, {}), 'reversal');
-const rExtremeFear = findTech(mod.evaluateTechniques(bottomWithConfirm, 'crypto', undefined, { fearGreed: 15 }), 'reversal');
-const rExtremeGreedIrrelevantToBottom = findTech(mod.evaluateTechniques(bottomWithConfirm, 'crypto', undefined, { fearGreed: 90 }), 'reversal');
+const rNoSentiment = findTech(mod.evaluateTechniques(bottomWithConfirm, 'crypto', undefined, { marketContext: {} }), 'reversal');
+const rExtremeFear = findTech(mod.evaluateTechniques(bottomWithConfirm, 'crypto', undefined, { marketContext: { fearGreed: 15 } }), 'reversal');
+const rExtremeGreedIrrelevantToBottom = findTech(mod.evaluateTechniques(bottomWithConfirm, 'crypto', undefined, { marketContext: { fearGreed: 90 } }), 'reversal');
 check('crypto: extreme fear boosts weight on a bottom call', rExtremeFear.w > rNoSentiment.w, `boosted=${rExtremeFear.w} base=${rNoSentiment.w}`);
 check('crypto: extreme greed (misaligned) leaves weight at base for a bottom call', rExtremeGreedIrrelevantToBottom.w === rNoSentiment.w);
 
 const stockBottom = baseMetric({ rsi: 35, rsiPrev: 28, rsiRecentMin: 25, rsiRecentMax: 60, structure: 1 });
-const rStockNoVix = findTech(mod.evaluateTechniques(stockBottom, 'stock', undefined, {}), 'reversal');
-const rStockHighVix = findTech(mod.evaluateTechniques(stockBottom, 'stock', undefined, { vixRangePos: 0.85 }), 'reversal');
+const rStockNoVix = findTech(mod.evaluateTechniques(stockBottom, 'stock', undefined, { marketContext: {} }), 'reversal');
+const rStockHighVix = findTech(mod.evaluateTechniques(stockBottom, 'stock', undefined, { marketContext: { vixRangePos: 0.85 } }), 'reversal');
 check('stock: elevated VIX boosts weight on a bottom call', rStockHighVix.w > rStockNoVix.w, `boosted=${rStockHighVix.w} base=${rStockNoVix.w}`);
 
 console.log('\n== expected timeframe: leading/lagging classification + horizon estimation ==');
@@ -329,21 +329,21 @@ const strongAt24h = {
   24: Object.fromEntries(activeBullIds.map(id => [`${symbol}|${id}`, { correct: 25, total: 25 }])),
   168: {}
 };
-const historicalShort = mod.confluence(bottomWithConfirm, 'crypto', undefined, undefined, strongAt24h);
+const historicalShort = mod.confluence(bottomWithConfirm, 'crypto', undefined, { reliabilityByHorizon: strongAt24h });
 check('this asset\'s own 24h accuracy is strong and 168h has no data: picks the historical 1-day window', historicalShort.longHorizon.basis === 'historical' && historicalShort.longHorizon.label === mod.horizonLabel(1), JSON.stringify(historicalShort.longHorizon));
 
 const strongAt168h = {
   24: {},
   168: Object.fromEntries(activeBullIds.map(id => [`${symbol}|${id}`, { correct: 25, total: 25 }]))
 };
-const historicalLong = mod.confluence(bottomWithConfirm, 'crypto', undefined, undefined, strongAt168h);
+const historicalLong = mod.confluence(bottomWithConfirm, 'crypto', undefined, { reliabilityByHorizon: strongAt168h });
 check('this asset\'s own 7d accuracy is strong and 24h has no data: picks the historical ~1-week window', historicalLong.longHorizon.basis === 'historical' && historicalLong.longHorizon.label === mod.horizonLabel(7), JSON.stringify(historicalLong.longHorizon));
 
 const belowSampleThreshold = {
   24: Object.fromEntries(activeBullIds.map(id => [`${symbol}|${id}`, { correct: 4, total: 5 }])),
   168: {}
 };
-const historicalTooFewSamples = mod.confluence(bottomWithConfirm, 'crypto', undefined, undefined, belowSampleThreshold);
+const historicalTooFewSamples = mod.confluence(bottomWithConfirm, 'crypto', undefined, { reliabilityByHorizon: belowSampleThreshold });
 check('below MIN_RELIABILITY_SAMPLES at both horizons: still falls back to methodology, not overfit', historicalTooFewSamples.longHorizon.basis === 'methodology', JSON.stringify(historicalTooFewSamples.longHorizon));
 
 // Regression test for a real bug found live: several techniques voting on
@@ -358,7 +358,7 @@ const correlatedThinSamples = {
   24: Object.fromEntries(activeBullIds.map(id => [`${symbol}|${id}`, { correct: 5, total: 13 }])), // 13 < 20 each, but sums past 20 with 2+ techniques
   168: {}
 };
-const notFooledByCorrelatedSamples = mod.confluence(bottomWithConfirm, 'crypto', undefined, undefined, correlatedThinSamples);
+const notFooledByCorrelatedSamples = mod.confluence(bottomWithConfirm, 'crypto', undefined, { reliabilityByHorizon: correlatedThinSamples });
 check('several techniques each below threshold: does not sum to false confidence, stays methodology', notFooledByCorrelatedSamples.longHorizon.basis === 'methodology', JSON.stringify(notFooledByCorrelatedSamples.longHorizon));
 
 check('horizonEstimate returns null when nothing voted that direction', mod.horizonEstimate([{ id: 'rsi', w: 1, dir: 1 }], -1, 'X', undefined) === null);
@@ -551,14 +551,14 @@ check('nDayReturnFromBars: not enough bars for the requested lag returns null', 
 console.log('\n== leadlag technique: only votes when a proven leader actually moved ==');
 const llSignalsFixture = { TESTASSET: [{ leaderSymbol: 'BTC', lagDays: 3, corr: 0.7, samples: 200 }, { leaderSymbol: 'ETH', lagDays: 2, corr: -0.9, samples: 200 }] };
 const llReturnsBtcUp = { BTC: [{ date: '2026-01-01', close: 100 }, { date: '2026-01-02', close: 100 }, { date: '2026-01-03', close: 100 }, { date: '2026-01-04', close: 110 }] }; // BTC +10% over 3d
-const llTechFires = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, undefined, undefined, undefined, llSignalsFixture, llReturnsBtcUp), 'leadlag');
+const llTechFires = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, { leadLagSignals: llSignalsFixture, leaderReturns: llReturnsBtcUp }), 'leadlag');
 check('registered leader moved meaningfully: fires in the implied direction (positive corr, leader up -> bullish)', llTechFires.dir === 1, JSON.stringify(llTechFires));
 
 const llReturnsFlat = { BTC: [{ date: '2026-01-01', close: 100 }, { date: '2026-01-02', close: 100 }, { date: '2026-01-03', close: 100 }, { date: '2026-01-04', close: 100.2 }] }; // flat
-const llTechFlat = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, undefined, undefined, undefined, llSignalsFixture, llReturnsFlat), 'leadlag');
+const llTechFlat = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, { leadLagSignals: llSignalsFixture, leaderReturns: llReturnsFlat }), 'leadlag');
 check('registered leader but it did not move meaningfully: neutral, not fabricated', llTechFlat.dir === 0, JSON.stringify(llTechFlat));
 
-const llTechNoSignals = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, undefined, undefined, undefined, undefined, undefined), 'leadlag');
+const llTechNoSignals = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, {}), 'leadlag');
 check('no lead/lag signals loaded at all: abstains (null)', llTechNoSignals.dir === null);
 
 const llSignalsStronger = { TESTASSET: [{ leaderSymbol: 'BTC', lagDays: 3, corr: 0.3, samples: 200 }, { leaderSymbol: 'ETH', lagDays: 3, corr: -0.9, samples: 200 }] };
@@ -567,12 +567,12 @@ const llReturnsBoth = {
   BTC: fourBarsUp, // +10%, weak corr leader (0.3)
   ETH: fourBarsUp  // +10%, strong corr leader (-0.9)
 };
-const llTechPicksStrongest = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, undefined, undefined, undefined, llSignalsStronger, llReturnsBoth), 'leadlag');
+const llTechPicksStrongest = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, { leadLagSignals: llSignalsStronger, leaderReturns: llReturnsBoth }), 'leadlag');
 check('with two qualifying leaders, follows the stronger-correlation one (ETH, negative corr -> bearish) not just the first', llTechPicksStrongest.dir === -1, JSON.stringify(llTechPicksStrongest));
 
 const llSignalsSector = { TESTASSET: [{ leaderSymbol: 'SECTOR:DeFi', lagDays: 2, corr: 0.8, samples: 200 }] };
 const llReturnsSector = { 'SECTOR:DeFi': fourBarsUp };
-const llTechSectorLeader = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, undefined, undefined, undefined, llSignalsSector, llReturnsSector), 'leadlag');
+const llTechSectorLeader = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, { leadLagSignals: llSignalsSector, leaderReturns: llReturnsSector }), 'leadlag');
 check('a SECTOR:<name> pseudo-symbol works as a registered leader with zero special-casing', llTechSectorLeader.dir === 1, JSON.stringify(llTechSectorLeader));
 check('the displayed note prettifies the SECTOR: prefix rather than showing the raw pseudo-symbol', llTechSectorLeader.note.startsWith('the DeFi sector moved'), llTechSectorLeader.note);
 
@@ -753,9 +753,9 @@ check('with multiple qualifying candidates, picks the strongest ratio', stMultiP
 console.log('\n== swingtime technique: only fires when the timing pattern AND current price position both agree ==');
 const stLowPattern = { [`BTC|${stSlotA}|low`]: { count: 30, totalDays: 100 } };
 const stHighPattern = { [`BTC|${stSlotA}|high`]: { count: 30, totalDays: 100 } };
-const stTechBullish = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', rangePos: 0.05 }), 'crypto', undefined, undefined, undefined, stNow, undefined, undefined, stLowPattern), 'swingtime');
-const stTechNoConfirm = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', rangePos: 0.5 }), 'crypto', undefined, undefined, undefined, stNow, undefined, undefined, stLowPattern), 'swingtime');
-const stTechBearish = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', rangePos: 0.95 }), 'crypto', undefined, undefined, undefined, stNow, undefined, undefined, stHighPattern), 'swingtime');
+const stTechBullish = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', rangePos: 0.05 }), 'crypto', undefined, { nowIso: stNow, swingTimeStats: stLowPattern }), 'swingtime');
+const stTechNoConfirm = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', rangePos: 0.5 }), 'crypto', undefined, { nowIso: stNow, swingTimeStats: stLowPattern }), 'swingtime');
+const stTechBearish = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', rangePos: 0.95 }), 'crypto', undefined, { nowIso: stNow, swingTimeStats: stHighPattern }), 'swingtime');
 const stTechNoStats = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', rangePos: 0.05 }), 'crypto'), 'swingtime');
 check('proven low-timing slot + price actually near its low right now: fires bullish', stTechBullish.dir === 1, JSON.stringify(stTechBullish));
 check('same proven pattern, but price is mid-range: does not fire (timing alone is not enough)', stTechNoConfirm.dir === 0, JSON.stringify(stTechNoConfirm));
@@ -788,16 +788,16 @@ check('with multiple events, picks the worst (severity x recency), not just the 
 
 console.log('\n== eventshock technique: a matched recent hack votes bearish, crypto-only, never fabricated ==');
 const esRecentEvents = { BTC: [{ date: '2026-03-10', type: 'hack', severityUsd: 200e6, description: 'Test Protocol Hack' }] };
-const esTechFires = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', mcap: 1e9 }), 'crypto', undefined, undefined, undefined, '2026-03-10T00:00:00.000Z', undefined, undefined, undefined, esRecentEvents), 'eventshock');
+const esTechFires = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', mcap: 1e9 }), 'crypto', undefined, { nowIso: '2026-03-10T00:00:00.000Z', recentEvents: esRecentEvents }), 'eventshock');
 check('a matched recent hack fires bearish', esTechFires.dir === -1, JSON.stringify(esTechFires));
 
-const esTechNoEventForSymbol = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'ETH', mcap: 1e9 }), 'crypto', undefined, undefined, undefined, '2026-03-10T00:00:00.000Z', undefined, undefined, undefined, esRecentEvents), 'eventshock');
+const esTechNoEventForSymbol = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'ETH', mcap: 1e9 }), 'crypto', undefined, { nowIso: '2026-03-10T00:00:00.000Z', recentEvents: esRecentEvents }), 'eventshock');
 check('recentEvents loaded but nothing for this symbol: neutral, not fabricated', esTechNoEventForSymbol.dir === 0, JSON.stringify(esTechNoEventForSymbol));
 
 const esTechNoData = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', mcap: 1e9 }), 'crypto'), 'eventshock');
 check('no recentEvents/nowIso at all: abstains (null)', esTechNoData.dir === null, JSON.stringify(esTechNoData));
 
-const esTechStockGated = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', mcap: 1e9 }), 'stock', undefined, undefined, undefined, '2026-03-10T00:00:00.000Z', undefined, undefined, undefined, esRecentEvents), 'eventshock');
+const esTechStockGated = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC', mcap: 1e9 }), 'stock', undefined, { nowIso: '2026-03-10T00:00:00.000Z', recentEvents: esRecentEvents }), 'eventshock');
 check('crypto-only: stocks never fire this technique even with matching event data', esTechStockGated.dir === null, JSON.stringify(esTechStockGated));
 
 console.log('\n== timeOfDaySignal: only fires with real sample depth AND a real effect size ==');
@@ -826,8 +826,8 @@ const todPicked = mod.timeOfDaySignal(todMultiCandidate, 'BTC', todNow);
 check('picks the strongest-effect candidate among several qualifying slots, not just the first', todPicked && todPicked.dir === -1 && todPicked.meanPct === -3, JSON.stringify(todPicked));
 
 console.log('\n== timeofday technique: wired into evaluateTechniques like every other technique ==');
-const todTechFires = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC' }), 'crypto', undefined, undefined, todStrongBull, todNow), 'timeofday');
-const todTechNoStats = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC' }), 'crypto', undefined, undefined, undefined, todNow), 'timeofday');
+const todTechFires = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC' }), 'crypto', undefined, { todStats: todStrongBull, nowIso: todNow }), 'timeofday');
+const todTechNoStats = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC' }), 'crypto', undefined, { nowIso: todNow }), 'timeofday');
 check('fires through the full technique pipeline when todStats + nowIso are supplied', todTechFires.dir === 1, JSON.stringify(todTechFires));
 check('abstains (null) when todStats/nowIso are not supplied at all', todTechNoStats.dir === null, JSON.stringify(todTechNoStats));
 
@@ -868,19 +868,19 @@ const sentPerAssetBearish = baseMetric({ sentimentScore: -0.6 });
 const sentWeakPerAsset = baseMetric({ sentimentScore: 0.1 });
 const sentNothing = baseMetric({});
 const sentFearOverridesBearishPerAsset = baseMetric({ sentimentScore: -0.5 }); // contradicts the market-wide read
-check('crypto: market-wide extreme fear votes bullish (contrarian)', findTech(mod.evaluateTechniques(sentExtremeFear, 'crypto', undefined, { fearGreed: 15 }), 'sentiment').dir === 1);
-check('crypto: market-wide extreme greed votes bearish (contrarian)', findTech(mod.evaluateTechniques(sentExtremeGreed, 'crypto', undefined, { fearGreed: 88 }), 'sentiment').dir === -1);
-check('crypto: no market-wide extreme, strong bullish per-asset sentiment fires', findTech(mod.evaluateTechniques(sentPerAssetBullish, 'crypto', undefined, { fearGreed: 50 }), 'sentiment').dir === 1);
-check('crypto: no market-wide extreme, strong bearish per-asset sentiment fires', findTech(mod.evaluateTechniques(sentPerAssetBearish, 'crypto', undefined, { fearGreed: 50 }), 'sentiment').dir === -1);
-check('crypto: weak per-asset sentiment (below the 0.3 bar) stays neutral, not fabricated', findTech(mod.evaluateTechniques(sentWeakPerAsset, 'crypto', undefined, { fearGreed: 50 }), 'sentiment').dir === 0);
-check('crypto: neither market-wide nor per-asset data at all: abstains (null)', findTech(mod.evaluateTechniques(sentNothing, 'crypto', undefined, {}), 'sentiment').dir === null);
-check('crypto: a market-wide extreme wins even when per-asset sentiment disagrees', findTech(mod.evaluateTechniques(sentFearOverridesBearishPerAsset, 'crypto', undefined, { fearGreed: 15 }), 'sentiment').dir === 1);
+check('crypto: market-wide extreme fear votes bullish (contrarian)', findTech(mod.evaluateTechniques(sentExtremeFear, 'crypto', undefined, { marketContext: { fearGreed: 15 } }), 'sentiment').dir === 1);
+check('crypto: market-wide extreme greed votes bearish (contrarian)', findTech(mod.evaluateTechniques(sentExtremeGreed, 'crypto', undefined, { marketContext: { fearGreed: 88 } }), 'sentiment').dir === -1);
+check('crypto: no market-wide extreme, strong bullish per-asset sentiment fires', findTech(mod.evaluateTechniques(sentPerAssetBullish, 'crypto', undefined, { marketContext: { fearGreed: 50 } }), 'sentiment').dir === 1);
+check('crypto: no market-wide extreme, strong bearish per-asset sentiment fires', findTech(mod.evaluateTechniques(sentPerAssetBearish, 'crypto', undefined, { marketContext: { fearGreed: 50 } }), 'sentiment').dir === -1);
+check('crypto: weak per-asset sentiment (below the 0.3 bar) stays neutral, not fabricated', findTech(mod.evaluateTechniques(sentWeakPerAsset, 'crypto', undefined, { marketContext: { fearGreed: 50 } }), 'sentiment').dir === 0);
+check('crypto: neither market-wide nor per-asset data at all: abstains (null)', findTech(mod.evaluateTechniques(sentNothing, 'crypto', undefined, { marketContext: {} }), 'sentiment').dir === null);
+check('crypto: a market-wide extreme wins even when per-asset sentiment disagrees', findTech(mod.evaluateTechniques(sentFearOverridesBearishPerAsset, 'crypto', undefined, { marketContext: { fearGreed: 15 } }), 'sentiment').dir === 1);
 
 console.log('\n== sentiment technique (equities): VIX position, same contrarian read as elsewhere in this engine ==');
-check('VIX near a recent extreme (spiking): bullish, fear already priced in', findTech(mod.evaluateTechniques(baseMetric({}), 'stock', undefined, { vixRangePos: 0.9 }), 'sentiment').dir === 1);
-check('VIX complacent near recent lows: bearish', findTech(mod.evaluateTechniques(baseMetric({}), 'stock', undefined, { vixRangePos: 0.05 }), 'sentiment').dir === -1);
-check('VIX mid-range: neutral', findTech(mod.evaluateTechniques(baseMetric({}), 'stock', undefined, { vixRangePos: 0.5 }), 'sentiment').dir === 0);
-check('no VIX data at all: abstains (null)', findTech(mod.evaluateTechniques(baseMetric({}), 'stock', undefined, {}), 'sentiment').dir === null);
+check('VIX near a recent extreme (spiking): bullish, fear already priced in', findTech(mod.evaluateTechniques(baseMetric({}), 'stock', undefined, { marketContext: { vixRangePos: 0.9 } }), 'sentiment').dir === 1);
+check('VIX complacent near recent lows: bearish', findTech(mod.evaluateTechniques(baseMetric({}), 'stock', undefined, { marketContext: { vixRangePos: 0.05 } }), 'sentiment').dir === -1);
+check('VIX mid-range: neutral', findTech(mod.evaluateTechniques(baseMetric({}), 'stock', undefined, { marketContext: { vixRangePos: 0.5 } }), 'sentiment').dir === 0);
+check('no VIX data at all: abstains (null)', findTech(mod.evaluateTechniques(baseMetric({}), 'stock', undefined, { marketContext: {} }), 'sentiment').dir === null);
 
 console.log('\n== compositeCall: one directional read per asset from the long/short pair ==');
 check('a tie (long === short) has no falsifiable direction: null', mod.compositeCall({ long: 60, short: 60 }) === null);
