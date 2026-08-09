@@ -691,11 +691,36 @@ export async function upsertAssetEvents(env, events) {
 // is a precise 1:1 identifier, a stronger guarantee than name-matching
 // (which is what fetchDefiLlamaHacks/matchHacksToUniverse above use,
 // since DeFiLlama's hacks feed has no id field to match on instead).
+// Allowlist, not a blocklist — same conservative "only match what's
+// confirmed, leave the rest out" discipline as matchHacksToUniverse/
+// matchProtocolsToUniverse below. Found live, the hard way: an earlier,
+// category-blind version of this function matched real capital-flow
+// protocols (Aave, Uniswap-style DEXs) but ALSO matched chain/bridge/CEX/
+// foundation entries DeFiLlama tracks under the same generic /protocols
+// endpoint — e.g. BTC matched "bitcoin" (a canonical-bridge tracker) and
+// ETH matched "ethereum-foundation" (foundation treasury holdings),
+// neither of which has anything to do with "capital flowing into a
+// protocol." Checked DeFiLlama's full live category breakdown (2,326
+// gecko_id-bearing protocols, 60 distinct categories) and kept only the
+// ones that are unambiguously "capital locked/deployed in a protocol,"
+// the same concept the tvltrend technique is actually trying to read —
+// excluding Chain/Bridge/Canonical Bridge/Cross Chain Bridge/CEX/
+// Foundation (confirmed-wrong) and a long tail of ambiguous categories
+// (Services, Launchpad, Gaming, AI Agents, etc.) that aren't confidently
+// one or the other.
+const DEFI_TVL_CATEGORIES = new Set([
+  'Dexs', 'Yield', 'Lending', 'Derivatives', 'Farm', 'CDP', 'Algo-Stables',
+  'Yield Aggregator', 'Liquid Staking', 'RWA', 'RWA Lending', 'Prediction Market',
+  'DEX Aggregator', 'Options', 'Synthetics', 'Insurance', 'Liquidity Manager',
+  'NFT Lending', 'Leveraged Farming', 'Staking Pool', 'Basis Trading',
+  'Restaking', 'Liquid Restaking', 'Uncollateralized Lending'
+]);
+
 export async function fetchDefiLlamaProtocols() {
   const j = await fetchJson('https://api.llama.fi/protocols');
   return (Array.isArray(j) ? j : [])
-    .filter((p) => p.slug && p.gecko_id)
-    .map((p) => ({ slug: p.slug, geckoId: p.gecko_id, name: p.name }));
+    .filter((p) => p.slug && p.gecko_id && DEFI_TVL_CATEGORIES.has(p.category))
+    .map((p) => ({ slug: p.slug, geckoId: p.gecko_id, name: p.name, category: p.category }));
 }
 
 // Conservative on purpose, same discipline as matchHacksToUniverse: only
