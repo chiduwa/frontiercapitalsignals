@@ -94,7 +94,7 @@ export const STOCK_WATCHLIST = [
   'ORCL','IBM','CRM','NOW','PLTR',
   'CRWD','PANW','ZS','DDOG','SNOW','NET',
   'DELL','SMCI','UNH','LLY','JNJ','ISRG',
-  'COIN','HOOD','MSTR','DASH','UBER','LCID'
+  'COIN','HOOD','MSTR','DASH','UBER','LCID','SNAP'
 ];
 
 export const OVERVIEW_SYMBOLS = ['SPY', 'QQQ', '^VIX'];
@@ -2340,7 +2340,7 @@ const PAGE_HTML = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Frontier Capital Signals — Hourly confluence screens</title>
-<meta name="description" content="Hourly confluence screens across the top 100 cryptos and 60 US equities. Up to 25 techniques per asset must agree before a signal ranks.">
+<meta name="description" content="Hourly confluence screens across the top 100 cryptos and 61 US equities. Up to 25 techniques per asset must agree before a signal ranks.">
 <!-- Consent Mode v2 defaults, same scheme as the main site (fcs_consent_v1 in
      localStorage, shared across the whole origin since localStorage is
      origin- not path-scoped): respects a prior choice made on the main site,
@@ -2527,7 +2527,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     <div class="mast-grid">
       <div>
         <h1>Frontier Capital<br><span class="amber">Signals</span></h1>
-        <p class="dek">Confluence screens across the <b>top 100 cryptos</b> and <b>60 US equities</b>. Up to <b>25 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to funding-rate percentiles, open interest, Fibonacci retracements, time-of-day/day-of-week bias, intraday swing-timing, hack/exploit severity, market sentiment, and proven cross-asset and cross-sector lead/lag relationships, must point the <b>same direction</b> before a signal ranks — each with an <b>expected timeframe</b> learned from its own track record. Prices, funding, and sentiment archive permanently for deep multi-year pattern analysis. <b>Analysis syncs hourly; price and 24h change tick live</b> in between.</p>
+        <p class="dek">Confluence screens across the <b>top 100 cryptos</b> and <b>61 US equities</b>. Up to <b>25 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to funding-rate percentiles, open interest, Fibonacci retracements, time-of-day/day-of-week bias, intraday swing-timing, hack/exploit severity, market sentiment, and proven cross-asset and cross-sector lead/lag relationships, must point the <b>same direction</b> before a signal ranks — each with an <b>expected timeframe</b> learned from its own track record. Prices, funding, and sentiment archive permanently for deep multi-year pattern analysis. <b>Analysis syncs hourly; price and 24h change tick live</b> in between.</p>
       </div>
       <div class="mast-meta">
         ANALYSIS REFRESH <b>HOURLY</b><br>
