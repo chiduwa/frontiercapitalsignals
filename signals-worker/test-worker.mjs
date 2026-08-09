@@ -239,6 +239,7 @@ check('trefis override applied', built.health.trefis_overrides === 1);
 check('funding fed to crypto', built.crypto.breakout.concat(built.crypto.breakdown).some(r => r.funding != null));
 check('open interest fed to crypto', built.crypto.breakout.concat(built.crypto.breakdown).some(r => r.openInterest != null));
 check('DXY/Gold/Oil macro benchmarks reach payload.overview', built.overview.dxy && built.overview.gold && built.overview.oil, JSON.stringify(built.overview));
+check('UST2Y/UST10Y Treasury yield benchmarks reach payload.overview too', built.overview.ust2y && built.overview.ust10y, JSON.stringify(built.overview));
 check('health counts sane', built.health.stocks_ok === built.health.stocks_total && built.health.valuation_ok > 0);
 check('crypto_daily health reflects the daily-history fetch (3 of 4 succeed, solana has none stubbed)', built.health.crypto_daily_total === 4 && built.health.crypto_daily_ok === 3, `ok=${built.health.crypto_daily_ok} total=${built.health.crypto_daily_total}`);
 check('votesLog/priceLog/rangeLog/allSymbols not leaked into the public payload', built.crypto.votesLog === undefined && built.crypto.priceLog === undefined && built.crypto.rangeLog === undefined && built.crypto.allSymbols === undefined && built.stocks.votesLog === undefined && built.stocks.rangeLog === undefined && built.stocks.allSymbols === undefined);
@@ -651,6 +652,19 @@ check('the appended day continues compounding from the seed close, not from 100'
 const seedAtLatestDate = { TestSector: { date: '2026-01-02', close: 104 } };
 const compositeFullyCaughtUp = mod.computeSectorCompositeSeries(sectorReturnsBySymbol, { TestSector: ['AAA', 'BBB', 'CCC'] }, 3, seedAtLatestDate);
 check('a sector already caught up through the latest available date: empty series, not an error', JSON.stringify(compositeFullyCaughtUp.TestSector) === '[]', JSON.stringify(compositeFullyCaughtUp));
+
+console.log('\n== computeSpreadSeries: direct level subtraction (e.g. UST10Y - UST2Y), no compounding ==');
+const spreadClosesA = { '2026-01-01': 4.66, '2026-01-02': 4.70, '2026-01-03': 4.68 };
+const spreadClosesB = { '2026-01-01': 4.17, '2026-01-02': 4.20 }; // no 2026-01-03 yet
+const enoughOverlapA = Object.fromEntries(Array.from({ length: 35 }, (_, i) => [`2026-02-${String(i + 1).padStart(2, '0')}`, 5]));
+const enoughOverlapB = Object.fromEntries(Array.from({ length: 35 }, (_, i) => [`2026-02-${String(i + 1).padStart(2, '0')}`, 4]));
+check('below the default minPoints (30): empty, not a noisy 2-3-point "spread"', JSON.stringify(mod.computeSpreadSeries(spreadClosesA, spreadClosesB)) === '[]', JSON.stringify(mod.computeSpreadSeries(spreadClosesA, spreadClosesB)));
+const spreadEnough = mod.computeSpreadSeries(enoughOverlapA, enoughOverlapB, 30);
+check('once minPoints is cleared, computes a real point per overlapping date', spreadEnough.length === 35 && spreadEnough.every((p) => Math.abs(p.close - 1) < 1e-9), JSON.stringify(spreadEnough.slice(0, 3)));
+check('a lower explicit minPoints allows a thin overlap through', mod.computeSpreadSeries(spreadClosesA, spreadClosesB, 2).length === 2);
+check('dates present in only one series are excluded, not treated as a zero', mod.computeSpreadSeries(spreadClosesA, spreadClosesB, 2).every((p) => p.date !== '2026-01-03'));
+check('the spread is A - B (UST10Y - UST2Y convention: positive = normal curve, negative = inverted)', mod.computeSpreadSeries(spreadClosesA, spreadClosesB, 2)[0].close === spreadClosesA['2026-01-01'] - spreadClosesB['2026-01-01']);
+check('sorted by date ascending', JSON.stringify(mod.computeSpreadSeries(spreadClosesA, spreadClosesB, 2).map((p) => p.date)) === JSON.stringify(['2026-01-01', '2026-01-02']));
 
 console.log('\n== seasonalAnalog: does this asset\'s own history contain a real analog? ==');
 check('too short a series: returns null, not a guess', mod.seasonalAnalog(Array.from({ length: 100 }, () => 100), 365) === null);

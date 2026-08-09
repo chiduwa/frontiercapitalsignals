@@ -108,10 +108,19 @@ export const OVERVIEW_SYMBOLS = ['SPY', 'QQQ', '^VIX'];
 // often leads crypto/gold weaker, oil leads inflation-sensitive equities,
 // etc.). `yahoo` is the fetch ticker; `symbol` is the stable name used
 // everywhere else in the pipeline (archive rows, payload.overview, D1).
+// UST2Y/UST10Y confirmed live on Yahoo with no auth needed (same no-crumb
+// chart endpoint as yahooDaily): ^TNX is the 10-year yield directly,
+// 2YY=F is 2-year yield futures (no clean ^-prefixed 2Y spot index exists
+// on Yahoo). Their daily spread (UST10Y - UST2Y, the standard "2s10s"
+// convention — negative means an inverted curve, a classic recession
+// signal) is computed separately as a derived SPREAD:2s10s pseudo-symbol,
+// same pattern as the SECTOR:* composites from the prior round.
 export const BENCHMARK_SYMBOLS = [
   { symbol: 'DXY', yahoo: 'DX-Y.NYB', label: 'US Dollar Index' },
   { symbol: 'GOLD', yahoo: 'GC=F', label: 'Gold futures' },
-  { symbol: 'OIL', yahoo: 'CL=F', label: 'WTI crude futures' }
+  { symbol: 'OIL', yahoo: 'CL=F', label: 'WTI crude futures' },
+  { symbol: 'UST2Y', yahoo: '2YY=F', label: '2-Year Treasury yield' },
+  { symbol: 'UST10Y', yahoo: '^TNX', label: '10-Year Treasury yield' }
 ];
 
 const FETCH_TIMEOUT_MS = 9000;
@@ -737,6 +746,22 @@ export function computeSectorCompositeSeries(returnsBySymbol, symbolsBySector, m
     out[sector] = series;
   }
   return out;
+}
+
+// Simple daily difference between two already-loaded { date: close } level
+// series (e.g. UST10Y/UST2Y yields) — unlike computeSectorCompositeSeries
+// above, this is a direct subtraction of levels, not a compounded index of
+// returns, so there's no seed/incremental-append complexity needed: a
+// single bad input value on one date only ever corrupts that one date's
+// spread, it can't compound forward the way the sector-composite bug did.
+// Only dates present in both series produce a point; only computed at all
+// (out.length checked by the caller) once minPoints of overlap exist, so a
+// freshly-added series with almost no history yet doesn't get a
+// one-or-two-point "spread" that looks meaningful but isn't.
+export function computeSpreadSeries(closesA, closesB, minPoints = 30) {
+  const dates = Object.keys(closesA).filter((d) => d in closesB).sort();
+  if (dates.length < minPoints) return [];
+  return dates.map((date) => ({ date, close: closesA[date] - closesB[date] }));
 }
 
 // Does this asset's own price history contain a period that behaved like
@@ -2332,7 +2357,9 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
       vix: idx['^VIX'] || null,
       dxy: idx['DXY'] || null,
       gold: idx['GOLD'] || null,
-      oil: idx['OIL'] || null
+      oil: idx['OIL'] || null,
+      ust2y: idx['UST2Y'] || null,
+      ust10y: idx['UST10Y'] || null
     },
     crypto: cryptoPublic,
     stocks: stockPublic,
@@ -2600,7 +2627,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     <summary>Methodology and data</summary>
     <div class="method">
       <p><b>The confluence model.</b> Every asset is evaluated by up to 25 independent techniques. Each one votes bullish, bearish, or neutral. The breakout score measures how much weighted evidence points up net of evidence pointing down; the breakdown score mirrors it. The small fraction under each score (for example 9/25) is the raw count of techniques agreeing with that direction out of those that had enough data to vote. High score plus high agreement is the strongest read.</p>
-      <p><b>The 25 techniques.</b> Multi-horizon momentum alignment; Wilder RSI(14) regime and direction; MACD(12/26/9) histogram level and direction; moving-average stack (SMA20/50/200, computed from real daily bars for both equities and crypto); Bollinger %B with squeeze-and-expansion detection; stochastic (14,3) crosses; Donchian 20-bar breakout or breakdown proximity; volume confirmation versus baseline; on-balance volume trend; swing structure of higher-highs and higher-lows; a momentum divergence proxy that flags new price extremes without RSI support; a volatility regime read separating coiled compression from climactic expansion; a reversal-pattern read (below); how long an asset has been coiled at its own long-run high or low and whether it's decoupled from the broader market (below); a seasonal-analog read comparing the current pattern against the asset's own history one or more years back (below); a valuation-or-positioning layer, positioning now weighted by this asset's own funding-rate percentile once enough of its own history exists rather than a fixed global threshold; a Fibonacci retracement read off the asset's most recent swing, direction-aware and never firing without independent confirmation; open interest relative to this asset's own recent history, paired with price direction to separate real participation from a thin, untrusted move; a time-of-day and day-of-week behavioral profile (UTC, New York, London, and Tokyo session hours — which alone captures midnight ET and the NYSE's 9am/4pm hours — and day of week), learned per asset once a slot has real sample depth and a real effect size; market sentiment (Fear &amp; Greed for crypto, VIX's position in its own recent range for equities, pooled with per-asset community/news sentiment where available); a swing-timing read that separately learns what time of day this specific asset's own daily high or low tends to land, firing only when that proven timing pattern and the asset's current price position both confirm; a hack/exploit-severity read that turns a recent, matched security incident from a public hacks tracker into a bearish signal sized to the dollar loss relative to this asset's own market cap, decaying over roughly two weeks; and a cross-asset and cross-sector lead/lag read that looks up whichever other assets or curated crypto-sector composites (DeFi, layer-1s, layer-2s, governance tokens, gaming/metaverse, meme, and other baskets) — in either asset class, including the dollar, gold, and oil — have proven, over the full historical archive, to predict this one's moves some number of days later.</p>
+      <p><b>The 25 techniques.</b> Multi-horizon momentum alignment; Wilder RSI(14) regime and direction; MACD(12/26/9) histogram level and direction; moving-average stack (SMA20/50/200, computed from real daily bars for both equities and crypto); Bollinger %B with squeeze-and-expansion detection; stochastic (14,3) crosses; Donchian 20-bar breakout or breakdown proximity; volume confirmation versus baseline; on-balance volume trend; swing structure of higher-highs and higher-lows; a momentum divergence proxy that flags new price extremes without RSI support; a volatility regime read separating coiled compression from climactic expansion; a reversal-pattern read (below); how long an asset has been coiled at its own long-run high or low and whether it's decoupled from the broader market (below); a seasonal-analog read comparing the current pattern against the asset's own history one or more years back (below); a valuation-or-positioning layer, positioning now weighted by this asset's own funding-rate percentile once enough of its own history exists rather than a fixed global threshold; a Fibonacci retracement read off the asset's most recent swing, direction-aware and never firing without independent confirmation; open interest relative to this asset's own recent history, paired with price direction to separate real participation from a thin, untrusted move; a time-of-day and day-of-week behavioral profile (UTC, New York, London, and Tokyo session hours — which alone captures midnight ET and the NYSE's 9am/4pm hours — and day of week), learned per asset once a slot has real sample depth and a real effect size; market sentiment (Fear &amp; Greed for crypto, VIX's position in its own recent range for equities, pooled with per-asset community/news sentiment where available); a swing-timing read that separately learns what time of day this specific asset's own daily high or low tends to land, firing only when that proven timing pattern and the asset's current price position both confirm; a hack/exploit-severity read that turns a recent, matched security incident from a public hacks tracker into a bearish signal sized to the dollar loss relative to this asset's own market cap, decaying over roughly two weeks; and a cross-asset and cross-sector lead/lag read that looks up whichever other assets or curated crypto-sector composites (DeFi, layer-1s, layer-2s, governance tokens, gaming/metaverse, meme, and other baskets) — in either asset class, including the dollar, gold, oil, and the 2-year/10-year Treasury yield spread — have proven, over the full historical archive, to predict this one's moves some number of days later.</p>
       <p><b>Reversal detection.</b> A separate read from plain RSI level: it looks for RSI having actually bottomed or topped over the last ~10 bars and turned back, confirmed by at least one independent signal (a stochastic cross, a Bollinger band extreme, swing structure, on-balance volume, or the divergence proxy) — it never fires on RSI alone. Market-wide sentiment adds confidence on top when it lines up: extreme fear on the Fear &amp; Greed index for a crypto bottom, or VIX sitting high in its own recent range for an equity bottom (and the mirror image — extreme greed or a complacent VIX — for tops).</p>
       <p><b>Dwell time and market correlation.</b> Real 52-week (or as much history as exists) highs and lows, and specifically how many days an asset has been sitting within a few percent of one, not just whether it currently is — a fresh one-day touch and a multi-week base at the same level are different setups. Long dwell at a low is read as stored energy for a bounce, the mirror at a high for a pullback, and it carries extra weight when the asset has also decoupled from its usual correlation with the broader market (BTC for crypto, SPY for equities) over the last 30 days, since a move happening on its own is a different setup than one just riding the market. This is a starting assumption, not a fixed rule — the adaptive weighting above corrects it per asset from what actually happens next.</p>
       <p><b>Seasonal analogs.</b> Where an asset has enough of its own history, the current pattern over the last ~90 days is compared against the same-length window roughly one, two, or more years back, using the same correlation math as the market-correlation read above but against the asset's own past. A real resemblance has to clear a fairly high bar (a correlation of at least 0.5) before it counts at all, since only a handful of candidate years exist to compare against and a looser bar would just be fitting noise. When one clears that bar, what happened in the days right after that historical analog becomes a genuine, data-grounded forward hint. In practice this only applies to equities: CoinGecko's free tier caps crypto history at 365 days, which isn't enough to compare against even one year back, so this abstains for every crypto asset rather than reaching for a shorter, less meaningful comparison.</p>

@@ -15,7 +15,7 @@
 // two are genuinely the same need either way: "what's in the universe" and
 // "what's each coin's live funding right now."
 import { d1, chunk } from './d1-client.mjs';
-import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries } from '../worker.js';
+import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, computeSpreadSeries } from '../worker.js';
 
 const UA = 'Mozilla/5.0 (compatible; FrontierCapitalSignals/2.0)';
 
@@ -472,6 +472,24 @@ export async function computeSectorComposites(env, sectorRows, minConstituents =
     }
   }
   return out;
+}
+
+// Derived SPREAD:<name> pseudo-symbol (see computeSpreadSeries in worker.js
+// for why this needs no seed/incremental logic the way sector composites
+// do): reads two already-archived level series and writes their daily
+// difference back into asset_daily_bars, same "just another symbol" reuse
+// of the lead/lag engine as SECTOR:*. Cheap to recompute in full every
+// call — upsertDailyBars is INSERT OR IGNORE, so only genuinely new dates
+// land, and there's no compounding state to seed from.
+export async function computeYieldSpread(env, symbolA, symbolB, spreadSymbol) {
+  const rows = await d1(env, 'SELECT symbol, date, close FROM asset_daily_bars WHERE symbol IN (?, ?) ORDER BY date', [symbolA, symbolB]);
+  const closesA = {}, closesB = {};
+  for (const r of rows) {
+    if (r.symbol === symbolA) closesA[r.date] = r.close;
+    else if (r.symbol === symbolB) closesB[r.date] = r.close;
+  }
+  const series = computeSpreadSeries(closesA, closesB);
+  return series.map((p) => ({ symbol: spreadSymbol, assetClass: 'benchmark', date: p.date, close: p.close, high: null, low: null, volume: null, source: 'derived' }));
 }
 
 // Most recent `days` closes per symbol from asset_daily_bars, date-sorted

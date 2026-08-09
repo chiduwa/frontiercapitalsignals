@@ -5,8 +5,9 @@
 // that doing it hourly would add real cost for no real benefit. Currently:
 // per-asset sentiment (CoinGecko community votes, CryptoPanic news
 // balance, both optional), CoinMarketCap's Fear & Greed cross-check
-// (optional), the sector-taxonomy + composite recompute, and the
-// cross-asset lead/lag recompute. Invoked once/day by
+// (optional), the sector-taxonomy + composite recompute, the 2s10s
+// Treasury yield spread recompute, and the cross-asset lead/lag recompute.
+// Invoked once/day by
 // .github/workflows/signals-daily.yml, after backfill-history.mjs in the
 // same job (lead/lag needs that step's archive data to already be there).
 //
@@ -20,7 +21,8 @@ import {
   upsertAssetSentiment, upsertMarketSentiment,
   computeLeadLag, replaceLeadLagSignals,
   fetchDefiLlamaHacks, matchHacksToUniverse, upsertAssetEvents,
-  replaceAssetSectors, computeSectorComposites, upsertDailyBars
+  replaceAssetSectors, computeSectorComposites, upsertDailyBars,
+  computeYieldSpread
 } from './archive.mjs';
 import { evaluateYesterdaySwingTimes } from './reliability.mjs';
 
@@ -123,11 +125,23 @@ async function main() {
     console.error('sector taxonomy/composite computation failed:', e.message);
   }
 
-  // Runs AFTER the sector-composite step above so this same pass's
-  // SECTOR:<name> rows are already in asset_daily_bars — computeLeadLag
-  // treats them as just more symbols, so sector-vs-sector and
-  // sector-vs-asset relationships are discovered in this same O(n^2) call,
-  // no separate sector-lead-lag engine needed.
+  try {
+    const spread = await computeYieldSpread(env, 'UST10Y', 'UST2Y', 'SPREAD:2s10s');
+    if (spread.length) {
+      const written = await upsertDailyBars(env, spread);
+      console.log(`2s10s yield spread: ${written} rows attempted (cheap full recompute each run, INSERT OR IGNORE so only new dates land)`);
+    } else {
+      console.log('2s10s yield spread: not enough overlapping UST2Y/UST10Y history yet');
+    }
+  } catch (e) {
+    console.error('2s10s yield spread computation failed:', e.message);
+  }
+
+  // Runs AFTER the sector-composite and yield-spread steps above so this
+  // same pass's SECTOR:<name>/SPREAD:2s10s rows are already in
+  // asset_daily_bars — computeLeadLag treats them as just more symbols, so
+  // those relationships are discovered in this same O(n^2) call, no
+  // separate lead-lag engine needed for either.
   try {
     const started = Date.now();
     const signals = await computeLeadLag(env);
