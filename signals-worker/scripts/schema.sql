@@ -243,3 +243,31 @@ CREATE TABLE IF NOT EXISTS asset_sectors (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (symbol, sector)
 );
+
+-- Nullable, populated only for the synthetic 'composite' technique_id rows
+-- (see compositeCall's docs in worker.js) — the raw 0-100ish confidence
+-- score behind a composite call, not just its direction. Read back inside
+-- evaluateMatured (reliability.mjs) at the exact point that row's
+-- correctness is already being computed, bucketed into score_calibration
+-- below, before the row is pruned by technique_votes' own retention.
+--
+-- Not wrapped in IF NOT EXISTS: D1's SQLite version doesn't support
+-- `ADD COLUMN IF NOT EXISTS` (confirmed live — syntax error). Applied once
+-- directly against production; re-running this file on a database that
+-- already has the column will error on this line specifically, same as
+-- any other non-idempotent ALTER would. Every CREATE TABLE around it stays
+-- safely idempotent.
+ALTER TABLE technique_votes ADD COLUMN score REAL;
+
+-- Calibration curve: does a composite call's own confidence score actually
+-- predict its real-world hit rate? `bucket` is a decile of the 0-100 score
+-- (0-9, covering 0-10% through 90-100%). Permanent aggregate, not pruned —
+-- mirrors technique_reliability's own shape (running correct/total), just
+-- keyed by score bucket instead of (symbol, technique_id).
+CREATE TABLE IF NOT EXISTS score_calibration (
+  bucket INTEGER NOT NULL,
+  correct INTEGER NOT NULL DEFAULT 0,
+  total INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (bucket)
+);

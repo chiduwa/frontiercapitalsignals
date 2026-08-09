@@ -365,6 +365,15 @@ export function reliabilityMultiplier(reliability, symbol, techniqueId) {
   return clamp(0.5 + rec.accuracy, 0.5, 1.5);
 }
 
+// Decile bucket (0-9) of a 0-100 composite score, for the calibration
+// curve (see evaluateMatured/loadCalibration in reliability.mjs) — bucket
+// 0 covers [0,10), bucket 9 covers [90,100]. Clamped, not just floored:
+// score is already clamped to [0,100] by confluence()'s own return, but
+// exactly 100 would otherwise floor-divide to bucket 10, off the end.
+export function scoreBucket(score) {
+  return Math.min(9, Math.max(0, Math.floor(score / 10)));
+}
+
 // Classifies each technique as leading (anticipates a move before it's
 // confirmed) or lagging/confirming (describes a move already underway),
 // plus a typical resolution horizon in days — the fallback estimate below
@@ -2077,7 +2086,9 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
     const cc = compositeCall(c);
     let horizon = null, range = null;
     if (cc) {
-      votesLog.push({ asset_class: kind, symbol: m.symbol, technique_id: 'composite', dir: cc.dir });
+      // score alongside dir, composite rows only — see logRun/evaluateMatured
+      // (reliability.mjs) for where this feeds the calibration curve.
+      votesLog.push({ asset_class: kind, symbol: m.symbol, technique_id: 'composite', dir: cc.dir, score: cc.score });
       for (const horizonDays of RANGE_LOG_HORIZONS_DAYS) {
         const r = predictedRange(m.price, horizonDays, cc.score, cc.dir, moveStats, m.symbol, m.volPct);
         if (r) rangeLog.push({ asset_class: kind, symbol: m.symbol, horizon_hours: horizonDays * 24, low: r.low, high: r.high });

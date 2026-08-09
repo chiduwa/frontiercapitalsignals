@@ -246,6 +246,8 @@ check('log has directional votes for both asset classes', log.votes.some(v => v.
 check('log votes are directional only (no 0/null dir)', log.votes.every(v => v.dir === 1 || v.dir === -1));
 check('log has a price row per universe asset, both classes', log.prices.length === built.crypto.universe + built.stocks.universe);
 check('log has one composite vote per directionally-called asset, both classes', log.votes.some(v => v.technique_id === 'composite' && v.asset_class === 'crypto') && log.votes.some(v => v.technique_id === 'composite' && v.asset_class === 'stock'));
+check('composite votes carry their own 0-100 score, for the calibration curve', log.votes.filter(v => v.technique_id === 'composite').every(v => typeof v.score === 'number' && v.score >= 0 && v.score <= 100));
+check('real (non-composite) technique votes do not carry a score — only composite rows do', log.votes.filter(v => v.technique_id !== 'composite').every(v => v.score === undefined));
 check('log has range predictions at both the 1d (24h) and 7d (168h) horizons', log.ranges.some(r => r.horizon_hours === 24) && log.ranges.some(r => r.horizon_hours === 168));
 check('every logged range prediction is a real band (low < high)', log.ranges.length > 0 && log.ranges.every(r => r.low < r.high));
 check('highAccuracy present as an array even with no reliability data fed in (none qualify yet)', Array.isArray(built.highAccuracy) && built.highAccuracy.length === 0);
@@ -288,6 +290,16 @@ const notSignificantRec = { 'X|y': { accuracy: 0.7, correct: 14, total: 20 } }; 
 const significantRec = { 'X|y': { accuracy: 0.8, correct: 16, total: 20 } };
 check('14/20 clears the sample-count floor but not significance: multiplier stays neutral (1), not boosted to 1.2', mod.reliabilityMultiplier(notSignificantRec, 'X', 'y') === 1, mod.reliabilityMultiplier(notSignificantRec, 'X', 'y'));
 check('16/20 clears both bars: multiplier actually reflects the measured accuracy', mod.reliabilityMultiplier(significantRec, 'X', 'y') === mod.clamp(0.5 + 0.8, 0.5, 1.5), mod.reliabilityMultiplier(significantRec, 'X', 'y'));
+
+console.log('\n== scoreBucket: decile bucketing for the calibration curve ==');
+check('0 -> bucket 0', mod.scoreBucket(0) === 0);
+check('9 -> bucket 0 (still in [0,10))', mod.scoreBucket(9) === 0);
+check('10 -> bucket 1 (first value in [10,20))', mod.scoreBucket(10) === 1);
+check('85 -> bucket 8', mod.scoreBucket(85) === 8);
+check('90 -> bucket 9', mod.scoreBucket(90) === 9);
+check('99 -> bucket 9', mod.scoreBucket(99) === 9);
+check('100 -> bucket 9, not 10 (clamped, not just floored)', mod.scoreBucket(100) === 9);
+check('negative input clamps to bucket 0 rather than going negative (defensive, should not happen given confluence already clamps)', mod.scoreBucket(-5) === 0);
 
 console.log('\n== rsiSeries / rsiRecentRange ==');
 check('rsiSeries final value matches the scalar rsi()', mod.rsiSeries(dailyClose)[mod.rsiSeries(dailyClose).length - 1] === mod.rsi(dailyClose));

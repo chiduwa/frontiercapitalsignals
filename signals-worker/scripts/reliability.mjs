@@ -4,7 +4,7 @@
 // Talks to Cloudflare's D1 HTTP API directly via d1-client.mjs, shared with
 // the archive/backfill scripts so there's one D1 client, not a hand-copied
 // duplicate that could drift.
-import { MIN_RELIABILITY_SAMPLES, slotsForTimestamp, assetPredictionScore } from '../worker.js';
+import { MIN_RELIABILITY_SAMPLES, slotsForTimestamp, assetPredictionScore, scoreBucket } from '../worker.js';
 import { d1, chunk } from './d1-client.mjs';
 import { computeSwingTimeTallies, upsertSwingTimeStats } from './archive.mjs';
 
@@ -78,6 +78,17 @@ export async function loadRangeReliability(env) {
   return out;
 }
 
+// { bucket: { correct, total, accuracy } } for bucket 0-9 (decile of the
+// composite call's own 0-100 score) — does a score of e.g. 85 (bucket 8)
+// actually land correct roughly 80-90% of the time? See evaluateMatured
+// for how this gets populated.
+export async function loadCalibration(env) {
+  const rows = await d1(env, 'SELECT bucket, correct, total FROM score_calibration WHERE total > 0');
+  const out = {};
+  for (const r of rows) out[r.bucket] = { correct: r.correct, total: r.total, accuracy: r.total ? r.correct / r.total : 0 };
+  return out;
+}
+
 // Persists this run's per-asset price and per-technique directional votes,
 // to be scored once they mature (see evaluateMatured).
 export async function logRun(env, runAt, log) {
@@ -87,9 +98,14 @@ export async function logRun(env, runAt, log) {
     await d1(env, `INSERT OR REPLACE INTO asset_price_log (run_at, asset_class, symbol, price) VALUES ${placeholders}`, params);
   }
   for (const batch of chunk(log.votes, CHUNK)) {
-    const placeholders = batch.map(() => '(?,?,?,?,?)').join(',');
-    const params = batch.flatMap((v) => [runAt, v.asset_class, v.symbol, v.technique_id, v.dir]);
-    await d1(env, `INSERT OR REPLACE INTO technique_votes (run_at, asset_class, symbol, technique_id, dir) VALUES ${placeholders}`, params);
+    // score is nullable and only ever set on the synthetic 'composite' rows
+    // (see rankBoards' push-site, worker.js) — null for every real
+    // technique vote. 15 rows x 6 cols = 90 params, the same margin
+    // range_log's own 6-column insert already runs at safely (D1's real
+    // cap is 100 bound params/query, confirmed live once before).
+    const placeholders = batch.map(() => '(?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap((v) => [runAt, v.asset_class, v.symbol, v.technique_id, v.dir, v.score ?? null]);
+    await d1(env, `INSERT OR REPLACE INTO technique_votes (run_at, asset_class, symbol, technique_id, dir, score) VALUES ${placeholders}`, params);
   }
   for (const batch of chunk(log.ranges || [], CHUNK)) {
     const placeholders = batch.map(() => '(?,?,?,?,?,?)').join(',');
@@ -133,7 +149,7 @@ export async function evaluateMatured(env, nowIso) {
   for (const h of HORIZONS_HOURS) {
     const cutoff = new Date(now - h * 3600 * 1000).toISOString();
     const col = EVAL_COLUMN[h];
-    const due = await d1(env, `SELECT run_at, asset_class, symbol, technique_id, dir FROM technique_votes WHERE run_at <= ? AND ${col} = 0`, [cutoff]);
+    const due = await d1(env, `SELECT run_at, asset_class, symbol, technique_id, dir, score FROM technique_votes WHERE run_at <= ? AND ${col} = 0`, [cutoff]);
     // Range predictions logged at this same horizon (see RANGE_LOG_HORIZONS_DAYS
     // in worker.js) — each row matures once, at its own horizon_hours, so
     // there's no evaluated flag to filter on here, just the cutoff.
@@ -187,6 +203,12 @@ export async function evaluateMatured(env, nowIso) {
 
     const deltas = {}; // "symbol|technique_id" -> { correct, total, asset_class }
     const moveDeltas = {}; // "symbol" -> { n, sumPct, sumPctSq } — one realized move per (symbol, run_at), deduped across techniques
+    // Decile of the composite call's own 0-100 score -> {correct, total} —
+    // pooled across both horizons here, same "blend, don't split" choice
+    // loadReliability already makes for technique_reliability. Piggybacks
+    // on this same due-rows pass (zero extra D1 reads): a composite row's
+    // score is already in hand exactly when its correctness is computed.
+    const calibDeltas = {};
     const seenMoves = new Set();
     const evaluatedSymbolsByRunAt = {}; // only mark rows we could actually score
     for (const r of due) {
@@ -201,6 +223,13 @@ export async function evaluateMatured(env, nowIso) {
       if (r.dir === actualDir) deltas[key].correct += 1;
       (evaluatedSymbolsByRunAt[r.run_at] ??= new Set()).add(r.symbol);
 
+      if (r.technique_id === 'composite' && r.score != null) {
+        const bucket = scoreBucket(r.score);
+        if (!calibDeltas[bucket]) calibDeltas[bucket] = { correct: 0, total: 0 };
+        calibDeltas[bucket].total += 1;
+        if (r.dir === actualDir) calibDeltas[bucket].correct += 1;
+      }
+
       const moveKey = `${r.run_at}|${r.symbol}`;
       if (!seenMoves.has(moveKey)) {
         seenMoves.add(moveKey);
@@ -209,6 +238,17 @@ export async function evaluateMatured(env, nowIso) {
         moveDeltas[r.symbol].sumPct += pct;
         moveDeltas[r.symbol].sumPctSq += pct * pct;
       }
+    }
+
+    for (const [bucket, d] of Object.entries(calibDeltas)) {
+      await d1(env, `
+        INSERT INTO score_calibration (bucket, correct, total, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT (bucket) DO UPDATE SET
+          correct = score_calibration.correct + excluded.correct,
+          total = score_calibration.total + excluded.total,
+          updated_at = excluded.updated_at
+      `, [Number(bucket), d.correct, d.total, nowIso]);
     }
 
     for (const [key, d] of Object.entries(deltas)) {
