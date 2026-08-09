@@ -944,6 +944,19 @@ check('thin participation on a big move: left neutral, not fabricated into a dir
 check('rally backed by elevated OI: bullish (real participation)', findTech(mod.evaluateTechniques(oiElevatedOnRally, 'crypto'), 'openinterest').dir === 1);
 check('selloff with crowded OI: bearish (liquidation risk)', findTech(mod.evaluateTechniques(oiElevatedOnSelloff, 'crypto'), 'openinterest').dir === -1);
 
+console.log('\n== impliedvol technique: Deribit DVOL percentile, contrarian, never fires without a price-extreme too ==');
+const ivNoData = baseMetric({ rangePos: 0.5 });
+const ivLowPercentileAtExtreme = baseMetric({ ivPercentile: 0.3, rangePos: 0.05 }); // low IV percentile, even though price IS at an extreme
+const ivHighPercentileMidRange = baseMetric({ ivPercentile: 0.9, rangePos: 0.5 }); // elevated IV, but price not stretched either way
+const ivHighPercentileNearLow = baseMetric({ ivPercentile: 0.9, rangePos: 0.1 });
+const ivHighPercentileNearHigh = baseMetric({ ivPercentile: 0.9, rangePos: 0.9 });
+check('no ivPercentile/rangePos data at all: abstains (null)', findTech(mod.evaluateTechniques(ivNoData, 'crypto'), 'impliedvol').dir === null);
+check('price at an extreme but IV percentile unremarkable: neutral, not fabricated', findTech(mod.evaluateTechniques(ivLowPercentileAtExtreme, 'crypto'), 'impliedvol').dir === 0);
+check('elevated IV but price mid-range: neutral (never fires on IV alone)', findTech(mod.evaluateTechniques(ivHighPercentileMidRange, 'crypto'), 'impliedvol').dir === 0);
+check('elevated IV + price near a recent low: fires bullish (fear priced in, contrarian)', findTech(mod.evaluateTechniques(ivHighPercentileNearLow, 'crypto'), 'impliedvol').dir === 1);
+check('elevated IV + price near a recent high: fires bearish (euphoria priced in, contrarian)', findTech(mod.evaluateTechniques(ivHighPercentileNearHigh, 'crypto'), 'impliedvol').dir === -1);
+check('crypto-only: stocks never fire this technique even with matching IV data', findTech(mod.evaluateTechniques(ivHighPercentileNearLow, 'stock'), 'impliedvol').dir === null);
+
 console.log('\n== sentiment technique: market-wide extremes take priority over per-asset noise ==');
 const sentExtremeFear = baseMetric({});
 const sentExtremeGreed = baseMetric({});

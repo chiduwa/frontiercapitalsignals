@@ -405,6 +405,29 @@ export async function loadFundingHistory(env) {
   return out;
 }
 
+// { [symbol]: { dvols: sortedAscending[], current: number } } from the
+// permanent iv_daily archive — same percentileRank consumption pattern as
+// loadFundingHistory, adapted for a source with no separate "live" fetch:
+// unlike funding (a true live-per-hour value ranked against archived
+// history), DVOL's only source IS the archived daily history, so its own
+// most-recent point doubles as "today's" reading, ranked against the full
+// sorted series including itself.
+export async function loadIvHistory(env) {
+  const rows = await d1(env, 'SELECT symbol, date, dvol FROM iv_daily ORDER BY date ASC');
+  const bySymbol = {};
+  for (const r of rows) {
+    const rec = (bySymbol[r.symbol] ??= { dvols: [], current: null });
+    rec.dvols.push(r.dvol);
+    rec.current = r.dvol; // last write wins, ascending date order -> most recent
+  }
+  const out = {};
+  for (const [symbol, rec] of Object.entries(bySymbol)) {
+    if (rec.dvols.length < FUNDING_HISTORY_MIN_DAYS) continue;
+    out[symbol] = { dvols: rec.dvols.slice().sort((a, b) => a - b), current: rec.current };
+  }
+  return out;
+}
+
 // { [symbol]: number (-1..1) } pooling CoinGecko's community up-vote %
 // (rescaled from 0-100 to -1..1) and CryptoPanic's already -1..1 news
 // score, from the MOST RECENT sentiment_daily row per symbol — "today's

@@ -123,6 +123,22 @@ CREATE TABLE IF NOT EXISTS funding_rate_daily (
   PRIMARY KEY (symbol, date)
 );
 
+-- Daily options-implied-volatility archive (Deribit's DVOL index — BTC/ETH
+-- only, the two currencies Deribit actually publishes it for). Same shape
+-- and same job as funding_rate_daily: lets a technique ask "is implied
+-- vol high *for this asset specifically, relative to its own history*,"
+-- not against a fixed global number. Confirmed live: real daily history
+-- back to 2023-11-14 available in a single call (Deribit caps each
+-- request at 1000 points), so the first daily-refresh run bootstraps
+-- ~2.75 years at once rather than accumulating forward one day at a time.
+CREATE TABLE IF NOT EXISTS iv_daily (
+  symbol TEXT NOT NULL,
+  date TEXT NOT NULL,
+  dvol REAL NOT NULL,
+  source TEXT NOT NULL,
+  PRIMARY KEY (symbol, date)
+);
+
 -- Daily sentiment archive, market-wide and per-asset. Market-wide fields
 -- (Fear & Greed from both alternative.me and CoinMarketCap, VIX range
 -- position) are carried on the symbol='' sentinel row for that date;

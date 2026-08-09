@@ -153,6 +153,36 @@ export async function upsertFundingDaily(env, rows) {
   return attempted;
 }
 
+// --------------------------- IMPLIED VOLATILITY -----------------------------
+// Deribit's DVOL index — confirmed live keyless/free, BTC and ETH only (the
+// only two currencies Deribit publishes it for; a longer tail of altcoins
+// has no equivalent). One call per currency returns real daily history
+// back to 2023-11-14 already (capped at 1000 points/request), so a
+// symbol's first write bootstraps ~2.75 years at once. `[timestamp_ms,
+// open, high, low, close]` per point (unlike DeFiLlama's unix-SECONDS
+// convention above) — close (index 4) is this function's own "today's
+// implied vol" reading.
+export async function fetchDeribitDvolHistory(currency) {
+  const url = `https://www.deribit.com/api/v2/public/get_volatility_index_data?currency=${encodeURIComponent(currency)}&start_timestamp=0&end_timestamp=${Date.now()}&resolution=86400`;
+  const j = await fetchJson(url);
+  const points = (j && j.result && j.result.data) || [];
+  return points
+    .filter((p) => Array.isArray(p) && p.length >= 5 && typeof p[4] === 'number')
+    .map((p) => ({ date: new Date(p[0]).toISOString().slice(0, 10), dvol: p[4] }));
+}
+
+export async function upsertIvDaily(env, symbol, rows) {
+  if (!rows.length) return 0;
+  let written = 0;
+  for (const batch of chunk(rows, 20)) {
+    const placeholders = batch.map(() => '(?,?,?,?)').join(',');
+    const params = batch.flatMap((r) => [symbol, r.date, r.dvol, 'deribit']);
+    await d1(env, `INSERT OR IGNORE INTO iv_daily (symbol, date, dvol, source) VALUES ${placeholders}`, params);
+    written += batch.length;
+  }
+  return written;
+}
+
 // ----------------------------- SENTIMENT ------------------------------------
 // Four sources, three of them free-and-keyless, combined into one daily
 // archive row per date (market-wide fields) or (date, symbol) (per-asset

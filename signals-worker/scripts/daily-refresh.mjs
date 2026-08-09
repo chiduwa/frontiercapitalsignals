@@ -6,10 +6,11 @@
 // per-asset sentiment (CoinGecko community votes, CryptoPanic news
 // balance, both optional), CoinMarketCap's Fear & Greed cross-check
 // (optional), the sector-taxonomy + composite recompute, the 2s10s
-// Treasury yield spread recompute, the DeFiLlama TVL fetch, and the
-// cross-asset lead/lag recompute. Invoked once/day by
-// .github/workflows/signals-daily.yml, after backfill-history.mjs in the
-// same job (lead/lag needs that step's archive data to already be there).
+// Treasury yield spread recompute, the DeFiLlama TVL fetch, the Deribit
+// DVOL (implied vol) fetch, and the cross-asset lead/lag recompute.
+// Invoked once/day by .github/workflows/signals-daily.yml, after
+// backfill-history.mjs in the same job (lead/lag needs that step's
+// archive data to already be there).
 //
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID
 // Optional env: CMC_API_KEY, CRYPTOPANIC_API_TOKEN — both sources simply
@@ -23,7 +24,8 @@ import {
   fetchDefiLlamaHacks, matchHacksToUniverse, upsertAssetEvents,
   replaceAssetSectors, computeSectorComposites, upsertDailyBars,
   computeYieldSpread,
-  fetchDefiLlamaProtocols, matchProtocolsToUniverse, defiLlamaProtocolTvlHistory
+  fetchDefiLlamaProtocols, matchProtocolsToUniverse, defiLlamaProtocolTvlHistory,
+  fetchDeribitDvolHistory, upsertIvDaily
 } from './archive.mjs';
 import { evaluateYesterdaySwingTimes } from './reliability.mjs';
 
@@ -198,6 +200,19 @@ async function main() {
     console.log(`hack/exploit events: ${hacks.length} fetched, ${linked} matched to a tracked symbol, ${written} rows attempted (INSERT OR IGNORE, so re-runs are cheap)`);
   } catch (e) {
     console.error('DeFiLlama hacks fetch failed:', e.message);
+  }
+
+  // BTC/ETH only — the only two currencies Deribit publishes DVOL for.
+  // One call each; a symbol's first write bootstraps its full available
+  // history (~2.75 years), every run after that adds only the latest day.
+  for (const currency of ['BTC', 'ETH']) {
+    try {
+      const history = await fetchDeribitDvolHistory(currency);
+      const written = await upsertIvDaily(env, currency, history);
+      console.log(`Deribit DVOL (${currency}): ${history.length} daily points fetched, ${written} rows attempted`);
+    } catch (e) {
+      console.error(`Deribit DVOL fetch failed for ${currency}:`, e.message);
+    }
   }
 
   console.log('daily-refresh complete');

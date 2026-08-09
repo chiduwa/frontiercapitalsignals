@@ -419,7 +419,8 @@ export const TECHNIQUE_META = {
   leadlag:     { leading: true,  horizonDays: 3 },
   swingtime:   { leading: true,  horizonDays: 0.3 },
   eventshock:  { leading: true,  horizonDays: 3 },
-  tvltrend:    { leading: true,  horizonDays: 5 }
+  tvltrend:    { leading: true,  horizonDays: 5 },
+  impliedvol:  { leading: true,  horizonDays: 3 }
 };
 
 export function horizonLabel(days) {
@@ -1562,6 +1563,26 @@ export function evaluateTechniques(m, kind, reliability, ctx = {}) {
     push('tvltrend', 0.7, null, null);
   }
 
+  // T24 implied vol: Deribit's DVOL (options-implied volatility, forward-
+  // looking — distinct from the REALIZED-vol regime the 'volatility'
+  // technique reads via volReg) at an extreme relative to THIS asset's own
+  // history, same percentile-vs-own-history pattern as funding/OI. Same
+  // contrarian "fear priced in" read already proven for VIX in the
+  // sentiment technique (elevated implied vol often precedes reversion,
+  // not continuation) — but unlike VIX/sentiment, this only fires paired
+  // with the asset's own price actually being stretched toward a recent
+  // extreme (rangePos), same "never fire on one signal alone" discipline
+  // as reversal/fibonacci. Crypto-only in this round (Deribit only
+  // publishes DVOL for BTC/ETH; a stock half via Yahoo's options chain is
+  // a candidate follow-up, not built here).
+  if (kind === 'crypto' && m.ivPercentile != null && m.rangePos != null) {
+    if (m.ivPercentile >= 0.8 && m.rangePos <= 0.15) push('impliedvol', 0.7, 1, `implied vol at its own ${(m.ivPercentile * 100).toFixed(0)}th pct near a recent low, fear priced in`);
+    else if (m.ivPercentile >= 0.8 && m.rangePos >= 0.85) push('impliedvol', 0.7, -1, `implied vol at its own ${(m.ivPercentile * 100).toFixed(0)}th pct near a recent high, euphoria priced in`);
+    else push('impliedvol', 0.7, 0, null);
+  } else {
+    push('impliedvol', 0.7, null, null);
+  }
+
   return T;
 }
 
@@ -2020,6 +2041,13 @@ export function buildCryptoMetrics(item, extras = {}) {
       ? percentileRank(extras.fundingHistory.fundingRates, extras.funding.fundingRate) : null,
     oiPercentile: (extras.fundingHistory && extras.fundingHistory.openInterests && extras.funding != null)
       ? percentileRank(extras.fundingHistory.openInterests, extras.funding.openInterest) : null,
+    // dvol/ivPercentile: Deribit-only (BTC/ETH), see loadIvHistory's docs
+    // for why "today's value" is just the archive's own most recent point
+    // rather than a separate live fetch the way funding/OI's `extras.funding`
+    // is.
+    dvol: extras.ivHistory ? extras.ivHistory.current : null,
+    ivPercentile: (extras.ivHistory && extras.ivHistory.dvols)
+      ? percentileRank(extras.ivHistory.dvols, extras.ivHistory.current) : null,
     sentimentScore: extras.sentimentScore != null ? extras.sentimentScore : null,
     trending: !!extras.trending
   };
@@ -2210,7 +2238,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -2294,7 +2322,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
         const sym = (c.symbol || '').toUpperCase();
         const h = histories[i];
         const daily = h && !h._error ? h : null;
-        return buildCryptoMetrics(c, { funding: funding[sym], fundingHistory: fundingHistory && fundingHistory[sym], sentimentScore: sentimentMap && sentimentMap[sym], trending: trending.has(sym), daily, benchCloses: btcCloses });
+        return buildCryptoMetrics(c, { funding: funding[sym], fundingHistory: fundingHistory && fundingHistory[sym], ivHistory: ivHistory && ivHistory[sym], sentimentScore: sentimentMap && sentimentMap[sym], trending: trending.has(sym), daily, benchCloses: btcCloses });
       })
       .filter(Boolean);
     cryptoBoards = rankBoards(metrics, 'crypto', reliability, ctx);
