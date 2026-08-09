@@ -944,7 +944,7 @@ check('thin participation on a big move: left neutral, not fabricated into a dir
 check('rally backed by elevated OI: bullish (real participation)', findTech(mod.evaluateTechniques(oiElevatedOnRally, 'crypto'), 'openinterest').dir === 1);
 check('selloff with crowded OI: bearish (liquidation risk)', findTech(mod.evaluateTechniques(oiElevatedOnSelloff, 'crypto'), 'openinterest').dir === -1);
 
-console.log('\n== impliedvol technique: Deribit DVOL percentile, contrarian, never fires without a price-extreme too ==');
+console.log('\n== impliedvol technique: DVOL/options IV percentile, contrarian, never fires without a price-extreme too ==');
 const ivNoData = baseMetric({ rangePos: 0.5 });
 const ivLowPercentileAtExtreme = baseMetric({ ivPercentile: 0.3, rangePos: 0.05 }); // low IV percentile, even though price IS at an extreme
 const ivHighPercentileMidRange = baseMetric({ ivPercentile: 0.9, rangePos: 0.5 }); // elevated IV, but price not stretched either way
@@ -955,7 +955,30 @@ check('price at an extreme but IV percentile unremarkable: neutral, not fabricat
 check('elevated IV but price mid-range: neutral (never fires on IV alone)', findTech(mod.evaluateTechniques(ivHighPercentileMidRange, 'crypto'), 'impliedvol').dir === 0);
 check('elevated IV + price near a recent low: fires bullish (fear priced in, contrarian)', findTech(mod.evaluateTechniques(ivHighPercentileNearLow, 'crypto'), 'impliedvol').dir === 1);
 check('elevated IV + price near a recent high: fires bearish (euphoria priced in, contrarian)', findTech(mod.evaluateTechniques(ivHighPercentileNearHigh, 'crypto'), 'impliedvol').dir === -1);
-check('crypto-only: stocks never fire this technique even with matching IV data', findTech(mod.evaluateTechniques(ivHighPercentileNearLow, 'stock'), 'impliedvol').dir === null);
+// Phase 4b: same field/technique now covers stocks too (Yahoo options-chain
+// ATM IV lands in the same m.ivPercentile buildStockMetrics computes), so
+// this is a data-gated technique, not a kind-gated one — a stock with
+// matching IV data fires exactly like a crypto asset would.
+check('stocks fire identically once they have matching IV data (data-gated, not crypto-only)', findTech(mod.evaluateTechniques(ivHighPercentileNearLow, 'stock'), 'impliedvol').dir === 1);
+check('stock with no IV data yet (still bootstrapping iv_daily): abstains, same as crypto', findTech(mod.evaluateTechniques(ivNoData, 'stock'), 'impliedvol').dir === null);
+
+console.log('\n== earningsrisk technique: neutral flag (not directional), fires only inside its own horizon window ==');
+const earnNoData = baseMetric({});
+const earnFarOut = baseMetric({ daysToEarnings: 20 });
+const earnTomorrow = baseMetric({ daysToEarnings: 1 });
+const earnToday = baseMetric({ daysToEarnings: 0.2 });
+const earnAtWindowEdge = baseMetric({ daysToEarnings: 3 });
+const earnJustPastWindow = baseMetric({ daysToEarnings: 3.5 });
+const earnAlreadyPassed = baseMetric({ daysToEarnings: -2 }); // stale estimate, not yet rolled forward by Yahoo
+check('no earnings-date data at all: abstains (null)', findTech(mod.evaluateTechniques(earnNoData, 'stock'), 'earningsrisk').dir === null);
+check('earnings far outside the horizon window: abstains, not scored as a non-event', findTech(mod.evaluateTechniques(earnFarOut, 'stock'), 'earningsrisk').dir === null);
+check('earnings tomorrow: fires neutral (0), flags elevated gap risk, never directional', findTech(mod.evaluateTechniques(earnTomorrow, 'stock'), 'earningsrisk').dir === 0);
+check('earnings today: fires neutral (0)', findTech(mod.evaluateTechniques(earnToday, 'stock'), 'earningsrisk').dir === 0);
+check('earnings right at the window edge: still fires neutral (inclusive boundary)', findTech(mod.evaluateTechniques(earnAtWindowEdge, 'stock'), 'earningsrisk').dir === 0);
+check('earnings just past the window: abstains', findTech(mod.evaluateTechniques(earnJustPastWindow, 'stock'), 'earningsrisk').dir === null);
+check('stale past-due estimate (negative days): abstains, not treated as imminent', findTech(mod.evaluateTechniques(earnAlreadyPassed, 'stock'), 'earningsrisk').dir === null);
+check('crypto always abstains (no earnings calendar)', findTech(mod.evaluateTechniques(baseMetric({ daysToEarnings: 1 }), 'crypto'), 'earningsrisk').dir === null);
+check('neutral vote dilutes conviction without asserting direction', findTech(mod.evaluateTechniques(earnTomorrow, 'stock'), 'earningsrisk').note.includes('gap risk'));
 
 console.log('\n== sentiment technique: market-wide extremes take priority over per-asset noise ==');
 const sentExtremeFear = baseMetric({});

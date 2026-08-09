@@ -420,7 +420,8 @@ export const TECHNIQUE_META = {
   swingtime:   { leading: true,  horizonDays: 0.3 },
   eventshock:  { leading: true,  horizonDays: 3 },
   tvltrend:    { leading: true,  horizonDays: 5 },
-  impliedvol:  { leading: true,  horizonDays: 3 }
+  impliedvol:  { leading: true,  horizonDays: 3 },
+  earningsrisk:{ leading: true,  horizonDays: 3 }
 };
 
 export function horizonLabel(days) {
@@ -1563,24 +1564,49 @@ export function evaluateTechniques(m, kind, reliability, ctx = {}) {
     push('tvltrend', 0.7, null, null);
   }
 
-  // T24 implied vol: Deribit's DVOL (options-implied volatility, forward-
-  // looking — distinct from the REALIZED-vol regime the 'volatility'
-  // technique reads via volReg) at an extreme relative to THIS asset's own
-  // history, same percentile-vs-own-history pattern as funding/OI. Same
-  // contrarian "fear priced in" read already proven for VIX in the
-  // sentiment technique (elevated implied vol often precedes reversion,
-  // not continuation) — but unlike VIX/sentiment, this only fires paired
-  // with the asset's own price actually being stretched toward a recent
-  // extreme (rangePos), same "never fire on one signal alone" discipline
-  // as reversal/fibonacci. Crypto-only in this round (Deribit only
-  // publishes DVOL for BTC/ETH; a stock half via Yahoo's options chain is
-  // a candidate follow-up, not built here).
-  if (kind === 'crypto' && m.ivPercentile != null && m.rangePos != null) {
+  // T24 implied vol: options-implied volatility (forward-looking — distinct
+  // from the REALIZED-vol regime the 'volatility' technique reads via
+  // volReg) at an extreme relative to THIS asset's own history, same
+  // percentile-vs-own-history pattern as funding/OI. Same contrarian "fear
+  // priced in" read already proven for VIX in the sentiment technique
+  // (elevated implied vol often precedes reversion, not continuation) —
+  // but unlike VIX/sentiment, this only fires paired with the asset's own
+  // price actually being stretched toward a recent extreme (rangePos),
+  // same "never fire on one signal alone" discipline as reversal/fibonacci.
+  // Source differs by kind (Deribit DVOL for crypto — BTC/ETH only, the
+  // only two currencies it publishes; Yahoo's front-month ATM-ish options
+  // IV for stocks) but both land in the same iv_daily archive and the same
+  // m.ivPercentile field (buildCryptoMetrics/buildStockMetrics), so no
+  // kind-specific branching is needed here at all.
+  if (m.ivPercentile != null && m.rangePos != null) {
     if (m.ivPercentile >= 0.8 && m.rangePos <= 0.15) push('impliedvol', 0.7, 1, `implied vol at its own ${(m.ivPercentile * 100).toFixed(0)}th pct near a recent low, fear priced in`);
     else if (m.ivPercentile >= 0.8 && m.rangePos >= 0.85) push('impliedvol', 0.7, -1, `implied vol at its own ${(m.ivPercentile * 100).toFixed(0)}th pct near a recent high, euphoria priced in`);
     else push('impliedvol', 0.7, 0, null);
   } else {
     push('impliedvol', 0.7, null, null);
+  }
+
+  // T25 earnings risk: not a directional call — a flag. When this stock's
+  // next reported earnings date falls inside the technique's own horizon
+  // window (below), an active call in that window is exposed to gap risk
+  // an ordinary technical read doesn't price in, so this votes neutral
+  // (dir 0) rather than staying silent, which dilutes confluence's total
+  // weight and pulls conviction down without asserting a direction — the
+  // same "suppress false confidence" idea as the significance guardrail,
+  // applied per-event instead of per-sample. Stocks only (crypto has no
+  // earnings calendar); always abstains outside the window or when Yahoo
+  // has no estimate on file for this symbol (common for thinner names).
+  if (kind === 'stock') {
+    const earningsWindowDays = 3;
+    const d = m.daysToEarnings;
+    if (d != null && d >= 0 && d <= earningsWindowDays) {
+      const daysLabel = d < 1 ? 'today' : `in ${Math.round(d)} day${Math.round(d) === 1 ? '' : 's'}`;
+      push('earningsrisk', 0.6, 0, `earnings ${daysLabel} — elevated gap risk`);
+    } else {
+      push('earningsrisk', 0.6, null, null);
+    }
+  } else {
+    push('earningsrisk', 0.6, null, null);
   }
 
   return T;
@@ -1891,7 +1917,7 @@ async function getStock(symbol) {
 // ---- Yahoo analyst targets (quoteSummary needs a crumb + cookie handshake).
 let _crumbCache = null; // { cookie, crumb, at } persists across warm invocations
 
-async function getCrumb() {
+export async function getCrumb() {
   if (_crumbCache && Date.now() - _crumbCache.at < 6 * 3600 * 1000) return _crumbCache;
   const r1 = await fetchWithTimeout('https://fc.yahoo.com/', { redirect: 'manual' });
   let cookie = '';
@@ -1908,15 +1934,33 @@ async function getCrumb() {
   return _crumbCache;
 }
 
+// calendarEvents added to the SAME request as financialData/
+// defaultKeyStatistics (comma-separated `modules`, a documented feature of
+// this endpoint) rather than a second fetch loop — same "reuse the call
+// already happening" discipline as TVL reusing the sentiment call's
+// categories field. Response shape for calendarEvents (earnings.earningsDate
+// as an array of {raw, fmt} — Yahoo sometimes gives a 2-date estimated
+// window, not one exact day) is well-documented/stable but, unlike
+// financialData/defaultKeyStatistics on this same endpoint (proven live all
+// session via this exact function), could not get a fresh live response to
+// confirm during this round's research — Yahoo's crumb endpoint stayed
+// rate-limited against the testing IP for hours. Defensive parsing
+// throughout (never assume a field exists), so a shape mismatch degrades to
+// "no earnings date," not a crash — first real confirmation is production
+// log output/D1 data after this ships, same as every other live source
+// this session.
 async function getValuation(symbol, auth) {
   const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}`
-    + `?modules=financialData%2CdefaultKeyStatistics&crumb=${encodeURIComponent(auth.crumb)}`;
+    + `?modules=financialData%2CdefaultKeyStatistics%2CcalendarEvents&crumb=${encodeURIComponent(auth.crumb)}`;
   const j = await fetchJson(url, { headers: { Cookie: auth.cookie } });
   const r = j && j.quoteSummary && j.quoteSummary.result && j.quoteSummary.result[0];
   if (!r) throw new Error(`no summary for ${symbol}`);
   const raw = (x) => (x && typeof x.raw === 'number') ? x.raw : null;
   const fd = r.financialData || {};
   const ks = r.defaultKeyStatistics || {};
+  const earningsDates = (r.calendarEvents && r.calendarEvents.earnings && Array.isArray(r.calendarEvents.earnings.earningsDate))
+    ? r.calendarEvents.earnings.earningsDate.map((d) => raw(d)).filter((n) => n != null)
+    : [];
   return {
     symbol,
     target: raw(fd.targetMeanPrice),
@@ -1925,7 +1969,11 @@ async function getValuation(symbol, auth) {
     analysts: raw(fd.numberOfAnalystOpinions),
     recMean: raw(fd.recommendationMean),
     recKey: fd.recommendationKey || null,
-    fwdPE: raw(ks.forwardPE)
+    fwdPE: raw(ks.forwardPE),
+    // Earliest of the (possibly 2-date estimated-window) array — unix
+    // seconds, converted by the caller. null when Yahoo has no estimate on
+    // file (common for smaller/less-covered names).
+    nextEarningsEpoch: earningsDates.length ? Math.min(...earningsDates) : null
   };
 }
 
@@ -2053,7 +2101,7 @@ export function buildCryptoMetrics(item, extras = {}) {
   };
 }
 
-export function buildStockMetrics(row, valuation, override, benchCloses) {
+export function buildStockMetrics(row, valuation, override, benchCloses, ivHist) {
   const { symbol, price, closes, volumes, highs, lows } = row;
   if (!closes || closes.length < 60) return null;
 
@@ -2092,6 +2140,15 @@ export function buildStockMetrics(row, valuation, override, benchCloses) {
     };
   }
 
+  // Independent of `val`/target above — earnings dates flow even for
+  // symbols the valuation layer has no analyst target for (e.g. a TREFIS
+  // override with no Yahoo target). Unix seconds -> days-from-now; negative
+  // means Yahoo's estimate hasn't rolled forward past a since-reported date
+  // yet, handled by the earningsrisk technique itself, not filtered here.
+  const daysToEarnings = (valuation && valuation.nextEarningsEpoch != null)
+    ? (valuation.nextEarningsEpoch * 1000 - Date.now()) / 86400000
+    : null;
+
   return {
     symbol,
     name: symbol,
@@ -2129,6 +2186,13 @@ export function buildStockMetrics(row, valuation, override, benchCloses) {
     volReg: volRegime(closes, 20, 100),
     distHigh52w: hi52 ? ((price / hi52) - 1) * 100 : null,
     val,
+    daysToEarnings,
+    // ATM-ish IV percentile vs. this stock's OWN history (iv_daily, source
+    // 'yahoo' — see fetchStockAtmIv/archive.mjs), same shape and same
+    // percentileRank helper buildCryptoMetrics already uses for Deribit
+    // DVOL, so the impliedvol technique block needs zero kind-specific
+    // branching to read it.
+    ivPercentile: (ivHist && ivHist.dvols) ? percentileRank(ivHist.dvols, ivHist.current) : null,
     source: row.source
   };
 }
@@ -2210,6 +2274,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       range: horizon ? predictedRange(x.m.price, horizon.days, score, dir, moveStats, x.m.symbol, x.m.volPct) : null,
       topIndicator: topIndicator(reliability, x.m.symbol),
       ...(x.m.val ? { val: { target: x.m.val.target, upside: x.m.val.upside, recKey: x.m.val.recKey, source: x.m.val.source } } : {}),
+      ...(x.m.daysToEarnings != null ? { daysToEarnings: Math.round(x.m.daysToEarnings * 10) / 10 } : {}),
       ...(x.m.funding != null ? { funding: x.m.funding } : {}),
       ...(x.m.openInterest != null ? { openInterest: x.m.openInterest } : {}),
       ...(x.m.distHigh52w != null ? { distHigh52w: x.m.distHigh52w } : {}),
@@ -2337,7 +2402,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     const metrics = [];
     for (const r of stocksR.value) {
       if (r && !r._error) {
-        const m = buildStockMetrics(r, valMap[r.symbol], overrides[r.symbol], spyCloses);
+        const m = buildStockMetrics(r, valMap[r.symbol], overrides[r.symbol], spyCloses, ivHistory && ivHistory[r.symbol]);
         if (m) metrics.push(m);
       } else stockFailures.push(r && r._item);
     }

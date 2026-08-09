@@ -171,16 +171,49 @@ export async function fetchDeribitDvolHistory(currency) {
     .map((p) => ({ date: new Date(p[0]).toISOString().slice(0, 10), dvol: p[4] }));
 }
 
-export async function upsertIvDaily(env, symbol, rows) {
+export async function upsertIvDaily(env, symbol, rows, source = 'deribit') {
   if (!rows.length) return 0;
   let written = 0;
   for (const batch of chunk(rows, 20)) {
     const placeholders = batch.map(() => '(?,?,?,?)').join(',');
-    const params = batch.flatMap((r) => [symbol, r.date, r.dvol, 'deribit']);
+    const params = batch.flatMap((r) => [symbol, r.date, r.dvol, source]);
     await d1(env, `INSERT OR IGNORE INTO iv_daily (symbol, date, dvol, source) VALUES ${placeholders}`, params);
     written += batch.length;
   }
   return written;
+}
+
+// Yahoo options chain, one stock at a time — unlike Deribit's DVOL or
+// DeFiLlama's TVL (both return a full backfillable history in one call),
+// this endpoint is a live snapshot only, so iv_daily for stocks builds up
+// one point per symbol per day. loadIvHistory's existing
+// FUNDING_HISTORY_MIN_DAYS gate (reliability.mjs) already handles "not
+// enough days yet" with zero changes needed here — same gradual-bootstrap
+// shape funding history itself went through. Distilled to the front-month
+// (soonest expiration — Yahoo's default when no `date` param is passed)
+// call option whose strike sits closest to the live underlying price: one
+// ATM-ish IV number, not the full per-strike chain, same "distilled
+// signal" discipline as DVOL/TVL. Reuses the exact crumb/cookie handshake
+// already proven live in production via getValuation's quoteSummary calls
+// (getCrumb, worker.js) — same auth, a genuinely separate endpoint/fetch
+// with no existing call to fold this into.
+export async function fetchStockAtmIv(symbol, auth) {
+  const url = `https://query1.finance.yahoo.com/v7/finance/options/${encodeURIComponent(symbol)}?crumb=${encodeURIComponent(auth.crumb)}`;
+  const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json,text/plain,*/*', Cookie: auth.cookie } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const j = await res.json();
+  const r = j && j.optionChain && j.optionChain.result && j.optionChain.result[0];
+  const price = (r && r.quote && typeof r.quote.regularMarketPrice === 'number') ? r.quote.regularMarketPrice : null;
+  const chain = r && Array.isArray(r.options) ? r.options[0] : null;
+  const calls = (chain && Array.isArray(chain.calls)) ? chain.calls : [];
+  if (price == null || !calls.length) return null;
+  let best = null, bestDist = Infinity;
+  for (const c of calls) {
+    if (typeof c.strike !== 'number' || typeof c.impliedVolatility !== 'number') continue;
+    const dist = Math.abs(c.strike - price);
+    if (dist < bestDist) { bestDist = dist; best = c; }
+  }
+  return best ? best.impliedVolatility : null;
 }
 
 // ----------------------------- SENTIMENT ------------------------------------

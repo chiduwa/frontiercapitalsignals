@@ -7,7 +7,8 @@
 // balance, both optional), CoinMarketCap's Fear & Greed cross-check
 // (optional), the sector-taxonomy + composite recompute, the 2s10s
 // Treasury yield spread recompute, the DeFiLlama TVL fetch, the Deribit
-// DVOL (implied vol) fetch, and the cross-asset lead/lag recompute.
+// DVOL (implied vol) fetch, the stock ATM IV fetch (Yahoo options chain),
+// and the cross-asset lead/lag recompute.
 // Invoked once/day by .github/workflows/signals-daily.yml, after
 // backfill-history.mjs in the same job (lead/lag needs that step's
 // archive data to already be there).
@@ -16,7 +17,7 @@
 // Optional env: CMC_API_KEY, CRYPTOPANIC_API_TOKEN — both sources simply
 //   produce nothing (not an error) when their key is unset, same pattern
 //   as TREFIS_OVERRIDES elsewhere in this pipeline.
-import { getCryptoMarkets, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, mapCategoriesToSectors } from '../worker.js';
+import { getCryptoMarkets, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, mapCategoriesToSectors, STOCK_WATCHLIST, getCrumb } from '../worker.js';
 import {
   coingeckoSentiment, cryptoPanicSentiment, cmcFearGreed,
   upsertAssetSentiment, upsertMarketSentiment,
@@ -25,7 +26,7 @@ import {
   replaceAssetSectors, computeSectorComposites, upsertDailyBars,
   computeYieldSpread,
   fetchDefiLlamaProtocols, matchProtocolsToUniverse, defiLlamaProtocolTvlHistory,
-  fetchDeribitDvolHistory, upsertIvDaily
+  fetchDeribitDvolHistory, upsertIvDaily, fetchStockAtmIv
 } from './archive.mjs';
 import { evaluateYesterdaySwingTimes } from './reliability.mjs';
 
@@ -213,6 +214,37 @@ async function main() {
     } catch (e) {
       console.error(`Deribit DVOL fetch failed for ${currency}:`, e.message);
     }
+  }
+
+  // Front-month ATM-ish IV for the stock half of the impliedvol technique
+  // (Phase 3c built the crypto half via Deribit DVOL above; this extends
+  // the same technique/table to equities rather than creating a parallel
+  // one). One crumb handshake shared across the whole loop — same 6h
+  // in-memory cache getValuation's own calls already rely on, just reused
+  // here via the freshly exported getCrumb. Paced like the TVL loop above:
+  // no observed rate-limiting against this host in production (unlike this
+  // same host's crumb endpoint against a residential/testing IP earlier
+  // this session), but 61 stocks is cheap enough that a moderate pace
+  // costs nothing real.
+  try {
+    const auth = await getCrumb();
+    let ivOk = 0, ivFailed = 0;
+    for (const symbol of STOCK_WATCHLIST) {
+      try {
+        const iv = await fetchStockAtmIv(symbol, auth);
+        if (iv != null) {
+          await upsertIvDaily(env, symbol, [{ date: today, dvol: iv }], 'yahoo');
+          ivOk++;
+        }
+      } catch (e) {
+        ivFailed++;
+        console.error(`fetchStockAtmIv failed for ${symbol}:`, e.message);
+      }
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    console.log(`stock ATM IV: ${ivOk} ok, ${ivFailed} failed (of ${STOCK_WATCHLIST.length})`);
+  } catch (e) {
+    console.error('stock ATM IV pass failed (crumb handshake):', e.message);
   }
 
   console.log('daily-refresh complete');
