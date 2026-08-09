@@ -50,7 +50,17 @@ async function main() {
   // (scripts/daily-refresh.mjs), same as any other asset. Yahoo-only, no
   // CoinGecko fallback applicable (these aren't crypto).
   const benchmarkUniverse = BENCHMARK_SYMBOLS.map((b) => ({ symbol: b.symbol, assetClass: 'benchmark', yahooTicker: b.yahoo }));
-  const universe = [...cryptoUniverse, ...stockUniverse, ...benchmarkUniverse];
+  // Benchmarks first, not last: found live — the crypto leg alone can burn
+  // an entire run's row budget on deep-history assets (see PRICE_ROW_BUDGET's
+  // own docs above), so a benchmark placed at the end of the universe could
+  // wait indefinitely if crypto/stock churn (new coins rotating into the
+  // top-N, needing a fresh full pull) keeps consuming the budget first
+  // every single run. Benchmarks are a small, fixed, one-time-per-symbol
+  // cost (5 symbols, full history pulled once each) — putting them first
+  // means they always complete on the very next run regardless of
+  // whatever's happening with the much larger, recurring crypto/stock cost
+  // behind them.
+  const universe = [...benchmarkUniverse, ...cryptoUniverse, ...stockUniverse];
   console.log(`universe: ${cryptoUniverse.length} crypto + ${stockUniverse.length} stock + ${benchmarkUniverse.length} benchmark = ${universe.length}`);
 
   const coverage = await getExistingCoverage(env, universe.map((u) => u.symbol));
