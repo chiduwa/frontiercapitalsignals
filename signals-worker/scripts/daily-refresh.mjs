@@ -6,8 +6,8 @@
 // per-asset sentiment (CoinGecko community votes, CryptoPanic news
 // balance, both optional), CoinMarketCap's Fear & Greed cross-check
 // (optional), the sector-taxonomy + composite recompute, the 2s10s
-// Treasury yield spread recompute, and the cross-asset lead/lag recompute.
-// Invoked once/day by
+// Treasury yield spread recompute, the DeFiLlama TVL fetch, and the
+// cross-asset lead/lag recompute. Invoked once/day by
 // .github/workflows/signals-daily.yml, after backfill-history.mjs in the
 // same job (lead/lag needs that step's archive data to already be there).
 //
@@ -22,7 +22,8 @@ import {
   computeLeadLag, replaceLeadLagSignals,
   fetchDefiLlamaHacks, matchHacksToUniverse, upsertAssetEvents,
   replaceAssetSectors, computeSectorComposites, upsertDailyBars,
-  computeYieldSpread
+  computeYieldSpread,
+  fetchDefiLlamaProtocols, matchProtocolsToUniverse, defiLlamaProtocolTvlHistory
 } from './archive.mjs';
 import { evaluateYesterdaySwingTimes } from './reliability.mjs';
 
@@ -137,11 +138,42 @@ async function main() {
     console.error('2s10s yield spread computation failed:', e.message);
   }
 
-  // Runs AFTER the sector-composite and yield-spread steps above so this
-  // same pass's SECTOR:<name>/SPREAD:2s10s rows are already in
-  // asset_daily_bars — computeLeadLag treats them as just more symbols, so
-  // those relationships are discovered in this same O(n^2) call, no
-  // separate lead-lag engine needed for either.
+  try {
+    const protocols = await fetchDefiLlamaProtocols();
+    const matched = matchProtocolsToUniverse(protocols, fullUniverse);
+    console.log(`TVL: ${protocols.length} DeFiLlama protocols fetched, ${matched.length} matched to a tracked symbol by gecko_id`);
+    let tvlOk = 0, tvlFailed = 0;
+    const tvlRows = [];
+    for (const p of matched) {
+      try {
+        const history = await defiLlamaProtocolTvlHistory(p.slug);
+        for (const point of history) tvlRows.push({ symbol: `TVL:${p.symbol}`, assetClass: 'tvl', date: point.date, close: point.close, high: null, low: null, volume: null, source: 'defillama' });
+        tvlOk++;
+      } catch (e) {
+        tvlFailed++;
+        console.error(`defiLlamaProtocolTvlHistory failed for ${p.symbol} (${p.slug}):`, e.message);
+      }
+      // 500ms: no rate-limit issues observed against this host so far this
+      // session (unlike Yahoo's crumb endpoint or CoinGecko's per-coin
+      // detail call), but matched is typically small (a fraction of the
+      // universe — TVL is a DeFi-specific concept, not every asset has a
+      // protocol) so a moderate pace here is cheap insurance, not a real
+      // time cost.
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    if (tvlRows.length) {
+      const written = await upsertDailyBars(env, tvlRows);
+      console.log(`TVL history: ${tvlOk} protocols ok, ${tvlFailed} failed, ${written} rows attempted (full history on a symbol's first run, INSERT OR IGNORE means only new dates land after that)`);
+    }
+  } catch (e) {
+    console.error('TVL fetch/match failed:', e.message);
+  }
+
+  // Runs AFTER the sector-composite, yield-spread, and TVL steps above so
+  // this same pass's SECTOR:<name>/SPREAD:2s10s/TVL:<symbol> rows are
+  // already in asset_daily_bars — computeLeadLag treats them as just more
+  // symbols, so those relationships are discovered in this same O(n^2)
+  // call, no separate lead-lag engine needed for any of them.
   try {
     const started = Date.now();
     const signals = await computeLeadLag(env);

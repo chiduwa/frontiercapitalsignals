@@ -418,7 +418,8 @@ export const TECHNIQUE_META = {
   sentiment:   { leading: true,  horizonDays: 4 },
   leadlag:     { leading: true,  horizonDays: 3 },
   swingtime:   { leading: true,  horizonDays: 0.3 },
-  eventshock:  { leading: true,  horizonDays: 3 }
+  eventshock:  { leading: true,  horizonDays: 3 },
+  tvltrend:    { leading: true,  horizonDays: 5 }
 };
 
 export function horizonLabel(days) {
@@ -1118,7 +1119,7 @@ export function selectWorstRecentEvent(events, nowMs, mcap, windowDays = EVENT_S
 // confluence/rankBoards unchanged, so a future new field is one extra
 // destructured name here, not a new position everywhere up the chain.
 export function evaluateTechniques(m, kind, reliability, ctx = {}) {
-  const { marketContext, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents } = ctx;
+  const { marketContext, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries } = ctx;
   const T = [];
   const push = (id, w, dir, note) => T.push({ id, w: w * reliabilityMultiplier(reliability, m.symbol, id), dir, note });
   const cS = m.chgShort, c24 = m.chg24h, c7 = m.chg7d, c30 = m.chg30d;
@@ -1535,6 +1536,30 @@ export function evaluateTechniques(m, kind, reliability, ctx = {}) {
     }
   } else {
     push('eventshock', 0.6, null, null);
+  }
+
+  // T23 TVL trend: sustained capital flowing into or out of a matched
+  // DeFiLlama protocol (see matchProtocolsToUniverse, archive.mjs — exact
+  // gecko_id match only), reusing nDayReturnFromBars over the archived
+  // TVL:<symbol> series the same way the leadlag technique reads a
+  // registered leader's own recent bars. TVL alone doesn't prove
+  // causation for price (it can rise just from the price appreciation of
+  // already-locked collateral, not new capital), so this pairs with price
+  // direction before firing — same "real participation, not fabricated
+  // from one signal" discipline as openinterest/positioning. Crypto-only
+  // (TVL is a DeFi-specific concept; no stock equivalent).
+  if (kind === 'crypto' && tvlSeries && tvlSeries[m.symbol]) {
+    const trend = nDayReturnFromBars(tvlSeries[m.symbol], 7);
+    if (trend != null) {
+      const tvlBigMove = 15;
+      if (trend > tvlBigMove && (c7 ?? 0) > 0) push('tvltrend', 0.7, 1, `TVL up ${trend.toFixed(0)}% over 7d, capital flowing in`);
+      else if (trend < -tvlBigMove && (c7 ?? 0) < 0) push('tvltrend', 0.7, -1, `TVL down ${trend.toFixed(0)}% over 7d, capital flowing out`);
+      else push('tvltrend', 0.7, 0, null);
+    } else {
+      push('tvltrend', 0.7, null, null);
+    }
+  } else {
+    push('tvltrend', 0.7, null, null);
   }
 
   return T;
@@ -2185,7 +2210,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -2239,7 +2264,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   };
   // Shared by both rankBoards calls below (crypto and stock) — see
   // evaluateTechniques' docs for why this is one object, not positional args.
-  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents };
+  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries };
 
   let cryptoBoards = { breakout: [], breakdown: [], universe: 0 };
   let btc = null, eth = null;

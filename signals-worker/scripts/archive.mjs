@@ -653,3 +653,56 @@ export async function upsertAssetEvents(env, events) {
   }
   return written;
 }
+
+// --------------------------- TVL (DeFiLlama) --------------------------------
+// Bulk protocol listing — confirmed live: 8,004 protocols, one call, no
+// per-protocol cost. `gecko_id` is what makes conservative matching cheap
+// and reliable (see matchProtocolsToUniverse below): a real CoinGecko id
+// is a precise 1:1 identifier, a stronger guarantee than name-matching
+// (which is what fetchDefiLlamaHacks/matchHacksToUniverse above use,
+// since DeFiLlama's hacks feed has no id field to match on instead).
+export async function fetchDefiLlamaProtocols() {
+  const j = await fetchJson('https://api.llama.fi/protocols');
+  return (Array.isArray(j) ? j : [])
+    .filter((p) => p.slug && p.gecko_id)
+    .map((p) => ({ slug: p.slug, geckoId: p.gecko_id, name: p.name }));
+}
+
+// Conservative on purpose, same discipline as matchHacksToUniverse: only
+// an exact gecko_id match counts. `universe` entries need an `id` field
+// (the CoinGecko id — see fullUniverse in daily-refresh.mjs).
+export function matchProtocolsToUniverse(protocols, universe) {
+  const byGeckoId = new Map(universe.map((a) => [a.id, a.symbol]));
+  return protocols
+    .map((p) => ({ ...p, symbol: byGeckoId.get(p.geckoId) || null }))
+    .filter((p) => p.symbol);
+}
+
+// Full daily TVL history for one protocol — confirmed live: Aave, 2,273
+// points back to 2020-05-19, already one point per calendar day (no
+// dedup needed). `date` arrives as unix seconds; converted to the same
+// 'YYYY-MM-DD' + close shape upsertDailyBars expects everywhere else.
+export async function defiLlamaProtocolTvlHistory(slug) {
+  const j = await fetchJson(`https://api.llama.fi/protocol/${encodeURIComponent(slug)}`);
+  const series = Array.isArray(j && j.tvl) ? j.tvl : [];
+  return series
+    .filter((p) => p.date && typeof p.totalLiquidityUSD === 'number' && p.totalLiquidityUSD > 0)
+    .map((p) => ({ date: new Date(p.date * 1000).toISOString().slice(0, 10), close: p.totalLiquidityUSD }));
+}
+
+// Read-back for the hourly build: whichever TVL:<symbol> pseudo-rows exist
+// in asset_daily_bars (however many protocols matched on the most recent
+// daily-refresh run), most recent `days` bars each — reuses loadRecentBars
+// unmodified, same as leaderReturns does for lead/lag leaders. Keys the
+// returned map by the real asset symbol, not the TVL: prefix, so the
+// tvltrend technique can look it up the same way every other per-symbol
+// context map already does (ctx.tvlSeries[m.symbol]).
+export async function loadTvlSeries(env, days = 15) {
+  const rows = await d1(env, "SELECT DISTINCT symbol FROM asset_daily_bars WHERE symbol LIKE 'TVL:%'");
+  if (!rows.length) return {};
+  const pseudoSymbols = rows.map((r) => r.symbol);
+  const bars = await loadRecentBars(env, pseudoSymbols, days);
+  const out = {};
+  for (const [pseudo, series] of Object.entries(bars)) out[pseudo.slice(4)] = series;
+  return out;
+}

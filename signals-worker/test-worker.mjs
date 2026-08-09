@@ -10,7 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { computeSwingTimeTallies, barsRowsToReturnsBySymbol } from './scripts/archive.mjs';
+import { computeSwingTimeTallies, barsRowsToReturnsBySymbol, matchProtocolsToUniverse } from './scripts/archive.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -665,6 +665,48 @@ check('a lower explicit minPoints allows a thin overlap through', mod.computeSpr
 check('dates present in only one series are excluded, not treated as a zero', mod.computeSpreadSeries(spreadClosesA, spreadClosesB, 2).every((p) => p.date !== '2026-01-03'));
 check('the spread is A - B (UST10Y - UST2Y convention: positive = normal curve, negative = inverted)', mod.computeSpreadSeries(spreadClosesA, spreadClosesB, 2)[0].close === spreadClosesA['2026-01-01'] - spreadClosesB['2026-01-01']);
 check('sorted by date ascending', JSON.stringify(mod.computeSpreadSeries(spreadClosesA, spreadClosesB, 2).map((p) => p.date)) === JSON.stringify(['2026-01-01', '2026-01-02']));
+
+console.log('\n== matchProtocolsToUniverse: conservative gecko_id-only matching (never fuzzy) ==');
+const tvlUniverse = [
+  { id: 'aave', symbol: 'AAVE', name: 'Aave' },
+  { id: 'uniswap', symbol: 'UNI', name: 'Uniswap' }
+];
+const tvlProtocols = [
+  { slug: 'aave-v3', geckoId: 'aave', name: 'Aave V3' },
+  { slug: 'some-other-protocol', geckoId: 'not-in-our-universe', name: 'Some Other Protocol' },
+  { slug: 'no-gecko-id-protocol', geckoId: null, name: 'CEX With No Token' }
+];
+const tvlMatched = matchProtocolsToUniverse(tvlProtocols, tvlUniverse);
+check('a real gecko_id match resolves to OUR symbol, not DeFiLlama\'s own name/slug', tvlMatched.length === 1 && tvlMatched[0].symbol === 'AAVE' && tvlMatched[0].slug === 'aave-v3', JSON.stringify(tvlMatched));
+check('a gecko_id not in our tracked universe is dropped entirely, not left with a null symbol', tvlMatched.every((p) => p.geckoId !== 'not-in-our-universe'));
+check('a protocol with no gecko_id at all (common for CEXs) is dropped, never fuzzy-matched by name', tvlMatched.every((p) => p.geckoId !== null));
+check('an empty protocol list: empty result, not an error', matchProtocolsToUniverse([], tvlUniverse).length === 0);
+
+console.log('\n== tvltrend technique: TVL momentum paired with price direction, never fires alone ==');
+const tvlBarsUp = [{ date: '2026-01-01', close: 100 }, { date: '2026-01-02', close: 100 }, { date: '2026-01-03', close: 100 }, { date: '2026-01-04', close: 100 }, { date: '2026-01-05', close: 100 }, { date: '2026-01-06', close: 100 }, { date: '2026-01-07', close: 100 }, { date: '2026-01-08', close: 120 }]; // +20% over 7d
+const tvlBarsDown = [{ date: '2026-01-01', close: 100 }, { date: '2026-01-02', close: 100 }, { date: '2026-01-03', close: 100 }, { date: '2026-01-04', close: 100 }, { date: '2026-01-05', close: 100 }, { date: '2026-01-06', close: 100 }, { date: '2026-01-07', close: 100 }, { date: '2026-01-08', close: 80 }]; // -20% over 7d
+const tvlBarsFlat = [{ date: '2026-01-01', close: 100 }, { date: '2026-01-02', close: 100 }, { date: '2026-01-03', close: 100 }, { date: '2026-01-04', close: 100 }, { date: '2026-01-05', close: 100 }, { date: '2026-01-06', close: 100 }, { date: '2026-01-07', close: 100 }, { date: '2026-01-08', close: 105 }]; // +5%, below the 15% bar
+
+const tvlTechConfirmed = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'AAVE', chg7d: 10 }), 'crypto', undefined, { tvlSeries: { AAVE: tvlBarsUp } }), 'tvltrend');
+check('TVL up 20% over 7d + price already up: fires bullish', tvlTechConfirmed.dir === 1, JSON.stringify(tvlTechConfirmed));
+
+const tvlTechNoConfirm = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'AAVE', chg7d: -5 }), 'crypto', undefined, { tvlSeries: { AAVE: tvlBarsUp } }), 'tvltrend');
+check('TVL up 20% but price is actually down: does not fire (TVL alone does not prove causation)', tvlTechNoConfirm.dir === 0, JSON.stringify(tvlTechNoConfirm));
+
+const tvlTechBearish = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'AAVE', chg7d: -10 }), 'crypto', undefined, { tvlSeries: { AAVE: tvlBarsDown } }), 'tvltrend');
+check('TVL down 20% + price already down: fires bearish', tvlTechBearish.dir === -1, JSON.stringify(tvlTechBearish));
+
+const tvlTechBelowBar = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'AAVE', chg7d: 10 }), 'crypto', undefined, { tvlSeries: { AAVE: tvlBarsFlat } }), 'tvltrend');
+check('TVL move below the 15% bar: neutral, not fabricated into a direction', tvlTechBelowBar.dir === 0, JSON.stringify(tvlTechBelowBar));
+
+const tvlTechNoMatch = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'SOMEOTHERCOIN' }), 'crypto', undefined, { tvlSeries: { AAVE: tvlBarsUp } }), 'tvltrend');
+check('this asset has no matched TVL series at all: abstains (null)', tvlTechNoMatch.dir === null, JSON.stringify(tvlTechNoMatch));
+
+const tvlTechNoData = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'AAVE' }), 'crypto'), 'tvltrend');
+check('no tvlSeries loaded at all: abstains (null)', tvlTechNoData.dir === null, JSON.stringify(tvlTechNoData));
+
+const tvlTechStockGated = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'AAVE', chg7d: 10 }), 'stock', undefined, { tvlSeries: { AAVE: tvlBarsUp } }), 'tvltrend');
+check('crypto-only: stocks never fire this technique even with matching TVL data', tvlTechStockGated.dir === null, JSON.stringify(tvlTechStockGated));
 
 console.log('\n== seasonalAnalog: does this asset\'s own history contain a real analog? ==');
 check('too short a series: returns null, not a guess', mod.seasonalAnalog(Array.from({ length: 100 }, () => 100), 365) === null);
