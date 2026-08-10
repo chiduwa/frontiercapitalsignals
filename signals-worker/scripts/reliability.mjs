@@ -211,6 +211,14 @@ export async function evaluateMatured(env, nowIso) {
     const calibDeltas = {};
     const seenMoves = new Set();
     const evaluatedSymbolsByRunAt = {}; // only mark rows we could actually score
+    // Phase 5: which technique pairs agreed on direction this (run_at,
+    // symbol), grouped here for free off rows already in hand — the actual
+    // pairing/tally happens in one pass after this loop, once actualDir is
+    // known for every group. 'composite' is excluded (it's the aggregate
+    // call, not an individual technique) and only genuinely directional
+    // votes count (dir 1/-1) — a neutral flag like earningsrisk's has
+    // nothing to "agree" on a direction with.
+    const comboGroups = {}; // "run_at|symbol" -> { symbol, actualDir, votes: [{technique_id, dir}] }
     for (const r of due) {
       const before = priceBefore[`${r.run_at}|${r.symbol}`];
       const after = priceNow[r.symbol];
@@ -230,6 +238,11 @@ export async function evaluateMatured(env, nowIso) {
         if (r.dir === actualDir) calibDeltas[bucket].correct += 1;
       }
 
+      if (r.technique_id !== 'composite' && (r.dir === 1 || r.dir === -1)) {
+        const gk = `${r.run_at}|${r.symbol}`;
+        (comboGroups[gk] ??= { symbol: r.symbol, actualDir, votes: [] }).votes.push({ technique_id: r.technique_id, dir: r.dir });
+      }
+
       const moveKey = `${r.run_at}|${r.symbol}`;
       if (!seenMoves.has(moveKey)) {
         seenMoves.add(moveKey);
@@ -238,6 +251,39 @@ export async function evaluateMatured(env, nowIso) {
         moveDeltas[r.symbol].sumPct += pct;
         moveDeltas[r.symbol].sumPctSq += pct * pct;
       }
+    }
+
+    // One pass over each group's votes, pairing techniques that voted the
+    // SAME direction (disagreeing pairs aren't a "combo" — there's no
+    // shared call to score). O(k^2) in the number of techniques that voted
+    // directionally that hour for that symbol (k is typically small — most
+    // techniques sit at 0/null most of the time, see evaluateTechniques'
+    // own "never fire alone" discipline throughout), not O(k^2) over the
+    // full technique roster.
+    const comboDeltas = {}; // "symbol|a|b" -> { symbol, a, b, correct, total }
+    for (const g of Object.values(comboGroups)) {
+      const votes = g.votes;
+      for (let i = 0; i < votes.length; i++) {
+        for (let j = i + 1; j < votes.length; j++) {
+          if (votes[i].dir !== votes[j].dir) continue;
+          const [a, b] = [votes[i].technique_id, votes[j].technique_id].sort();
+          const ck = `${g.symbol}|${a}|${b}`;
+          if (!comboDeltas[ck]) comboDeltas[ck] = { symbol: g.symbol, a, b, correct: 0, total: 0 };
+          comboDeltas[ck].total += 1;
+          if (votes[i].dir === g.actualDir) comboDeltas[ck].correct += 1;
+        }
+      }
+    }
+    for (const d of Object.values(comboDeltas)) {
+      await d1(env, `
+        INSERT INTO technique_combo_reliability (symbol, technique_a, technique_b, horizon_hours, correct, total, accuracy, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (symbol, technique_a, technique_b, horizon_hours) DO UPDATE SET
+          correct = technique_combo_reliability.correct + excluded.correct,
+          total = technique_combo_reliability.total + excluded.total,
+          accuracy = CAST(technique_combo_reliability.correct + excluded.correct AS REAL) / (technique_combo_reliability.total + excluded.total),
+          updated_at = excluded.updated_at
+      `, [d.symbol, d.a, d.b, h, d.correct, d.total, d.total ? d.correct / d.total : 0, nowIso]);
     }
 
     for (const [bucket, d] of Object.entries(calibDeltas)) {

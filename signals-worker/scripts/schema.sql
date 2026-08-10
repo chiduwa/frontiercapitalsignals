@@ -287,3 +287,24 @@ CREATE TABLE IF NOT EXISTS score_calibration (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (bucket)
 );
+
+-- Phase 5: which technique PAIRS agreed on direction (both fired the same
+-- dir, in the same run, on the same symbol) and how often that pair's
+-- shared call was actually right — mined for free inside evaluateMatured's
+-- existing due-rows pass over technique_votes, zero extra D1 reads.
+-- technique_a/technique_b are canonicalized (alphabetically sorted) so a
+-- given pair only ever accumulates under one key, never double-counted as
+-- both A+B and B+A. Read-only for now (see evaluateMatured's comments) —
+-- consuming a proven-strong pair's weight in evaluateTechniques/confluence
+-- is a deliberate v2, not built in this phase.
+CREATE TABLE IF NOT EXISTS technique_combo_reliability (
+  symbol TEXT NOT NULL,
+  technique_a TEXT NOT NULL,
+  technique_b TEXT NOT NULL,
+  horizon_hours INTEGER NOT NULL,
+  correct INTEGER NOT NULL DEFAULT 0,
+  total INTEGER NOT NULL DEFAULT 0,
+  accuracy REAL NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (symbol, technique_a, technique_b, horizon_hours)
+);
