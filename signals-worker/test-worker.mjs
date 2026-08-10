@@ -292,6 +292,22 @@ const significantRec = { 'X|y': { accuracy: 0.8, correct: 16, total: 20 } };
 check('14/20 clears the sample-count floor but not significance: multiplier stays neutral (1), not boosted to 1.2', mod.reliabilityMultiplier(notSignificantRec, 'X', 'y') === 1, mod.reliabilityMultiplier(notSignificantRec, 'X', 'y'));
 check('16/20 clears both bars: multiplier actually reflects the measured accuracy', mod.reliabilityMultiplier(significantRec, 'X', 'y') === mod.clamp(0.5 + 0.8, 0.5, 1.5), mod.reliabilityMultiplier(significantRec, 'X', 'y'));
 
+console.log('\n== regimeOf: trend/chop classification off swing structure ==');
+check('structure 1 (higher-highs/higher-lows): trending', mod.regimeOf(1) === 'trending');
+check('structure -1 (lower-highs/lower-lows): trending (either direction counts)', mod.regimeOf(-1) === 'trending');
+check('structure 0 (neither): choppy', mod.regimeOf(0) === 'choppy');
+check('null (not enough history to compute structure): null, not fabricated into a bucket', mod.regimeOf(null) === null);
+
+console.log('\n== reliabilityMultiplier: regime-specific track record preferred over blended once it clears the same bar ==');
+const blendedOnly = { 'X|y': { accuracy: 0.6, correct: 12, total: 20 } }; // clears MIN_RELIABILITY_SAMPLES but not significance on its own
+const byRegimeStrong = { trending: { 'X|y': { accuracy: 0.85, correct: 17, total: 20 } }, choppy: {} };
+const byRegimeThin = { trending: { 'X|y': { accuracy: 0.9, correct: 9, total: 10 } }, choppy: {} }; // regime-specific but below MIN_RELIABILITY_SAMPLES
+check('no regime passed at all: behaves exactly like the pre-Phase-6 call (blended only)', mod.reliabilityMultiplier(blendedOnly, 'X', 'y') === 1);
+check('regime passed but no byRegime data: falls back to blended', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', undefined, 'trending') === 1);
+check('significant regime-specific record: overrides blended with the regime-specific accuracy', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', byRegimeStrong, 'trending') === mod.clamp(0.5 + 0.85, 0.5, 1.5));
+check('regime-specific sample too thin (below MIN_RELIABILITY_SAMPLES): falls back to blended rather than trusting it anyway', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', byRegimeThin, 'trending') === 1);
+check('asset currently choppy but only trending data exists for it: falls back to blended, not cross-regime data', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', byRegimeStrong, 'choppy') === 1);
+
 console.log('\n== scoreBucket: decile bucketing for the calibration curve ==');
 check('0 -> bucket 0', mod.scoreBucket(0) === 0);
 check('9 -> bucket 0 (still in [0,10))', mod.scoreBucket(9) === 0);
@@ -979,6 +995,14 @@ check('earnings just past the window: abstains', findTech(mod.evaluateTechniques
 check('stale past-due estimate (negative days): abstains, not treated as imminent', findTech(mod.evaluateTechniques(earnAlreadyPassed, 'stock'), 'earningsrisk').dir === null);
 check('crypto always abstains (no earnings calendar)', findTech(mod.evaluateTechniques(baseMetric({ daysToEarnings: 1 }), 'crypto'), 'earningsrisk').dir === null);
 check('neutral vote dilutes conviction without asserting direction', findTech(mod.evaluateTechniques(earnTomorrow, 'stock'), 'earningsrisk').note.includes('gap risk'));
+
+console.log('\n== evaluateTechniques wiring: ctx.reliabilityByRegime reaches reliabilityMultiplier through push(), keyed off m.structure ==');
+const regimeMetric = baseMetric({ val: { upside: 20, recMean: 2, target: 120, source: 'street' }, structure: 1 }); // structure 1 -> regimeOf -> 'trending'
+const withRegimeCtx = { reliabilityByRegime: { trending: { [`${regimeMetric.symbol}|valuation`]: { accuracy: 0.9, correct: 18, total: 20 } }, choppy: {} } };
+const wNoRegime = findTech(mod.evaluateTechniques(regimeMetric, 'stock', {}, {}), 'valuation').w;
+const wWithRegime = findTech(mod.evaluateTechniques(regimeMetric, 'stock', {}, withRegimeCtx), 'valuation').w;
+check('a significant trending-regime record for this asset changes the technique weight vs. no regime data at all', wWithRegime !== wNoRegime, `${wNoRegime} vs ${wWithRegime}`);
+check('the regime-boosted weight matches the expected multiplier exactly (1.1 base weight * clamp(0.5+0.9))', Math.abs(wWithRegime - 1.1 * mod.clamp(0.5 + 0.9, 0.5, 1.5)) < 1e-9, wWithRegime);
 
 console.log('\n== sentiment technique: market-wide extremes take priority over per-asset noise ==');
 const sentExtremeFear = baseMetric({});

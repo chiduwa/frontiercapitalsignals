@@ -366,8 +366,37 @@ export function isReliabilitySignificant(correct, total) {
   return Math.abs(z) >= RELIABILITY_SIGNIFICANCE_Z;
 }
 
-export function reliabilityMultiplier(reliability, symbol, techniqueId) {
+// 'trending' when this asset's own swing-structure read is clearly
+// higher-highs/higher-lows or lower-highs/lower-lows (m.structure 1 or
+// -1), 'choppy' when it found neither (0), null when there wasn't enough
+// history yet to compute structure at all. One shared label space for both
+// sides of the regime split: the write path (rankBoards' votesLog, frozen
+// at the moment a vote is cast) and the read path (reliabilityMultiplier
+// below, evaluated fresh against the asset's CURRENT regime every call).
+export function regimeOf(structure) {
+  if (structure == null) return null;
+  return structure !== 0 ? 'trending' : 'choppy';
+}
+
+// byRegime/regime: optional (Phase 6) — { trending: {...}, choppy: {...} },
+// each shaped exactly like `reliability` itself (loadRegimeReliability,
+// reliability.mjs), plus the asset's OWN current regime. Prefers the
+// asset's regime-specific track record when one exists and clears the
+// exact same MIN_RELIABILITY_SAMPLES + significance bar blended does —
+// falls back to blended whenever regime-specific samples are too thin
+// (a fresh regime split starts empty for every asset) or the current
+// regime is unknown (m.structure hasn't got enough history yet). Never a
+// stricter bar for regime than blended: this is a more specific answer to
+// the same question, not a new one, so it shouldn't need to work harder to
+// be trusted.
+export function reliabilityMultiplier(reliability, symbol, techniqueId, byRegime, regime) {
   if (!reliability) return 1;
+  if (regime && byRegime && byRegime[regime]) {
+    const rrec = byRegime[regime][`${symbol}|${techniqueId}`];
+    if (rrec && rrec.total >= MIN_RELIABILITY_SAMPLES && isReliabilitySignificant(rrec.correct, rrec.total)) {
+      return clamp(0.5 + rrec.accuracy, 0.5, 1.5);
+    }
+  }
   const rec = reliability[`${symbol}|${techniqueId}`];
   if (!rec || rec.total < MIN_RELIABILITY_SAMPLES) return 1;
   if (!isReliabilitySignificant(rec.correct, rec.total)) return 1;
@@ -1121,9 +1150,10 @@ export function selectWorstRecentEvent(events, nowMs, mcap, windowDays = EVENT_S
 // confluence/rankBoards unchanged, so a future new field is one extra
 // destructured name here, not a new position everywhere up the chain.
 export function evaluateTechniques(m, kind, reliability, ctx = {}) {
-  const { marketContext, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries } = ctx;
+  const { marketContext, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime } = ctx;
   const T = [];
-  const push = (id, w, dir, note) => T.push({ id, w: w * reliabilityMultiplier(reliability, m.symbol, id), dir, note });
+  const regime = regimeOf(m.structure);
+  const push = (id, w, dir, note) => T.push({ id, w: w * reliabilityMultiplier(reliability, m.symbol, id, reliabilityByRegime, regime), dir, note });
   const cS = m.chgShort, c24 = m.chg24h, c7 = m.chg7d, c30 = m.chg30d;
 
   // T1 multi-horizon momentum
@@ -2221,7 +2251,15 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
   // to it, not just a bare score.
   const allSymbols = [];
   for (const { m, c } of scored) {
-    for (const v of c.votes) votesLog.push({ asset_class: kind, symbol: m.symbol, technique_id: v.id, dir: v.dir });
+    // regime frozen at cast time (see regimeOf's docs) — the SAME value
+    // every technique's push() used to weight itself this run, since
+    // reliabilityMultiplier reads it fresh off m.structure inside
+    // evaluateTechniques; recomputed here rather than threaded out of
+    // confluence()'s return only because votesLog is assembled here, not
+    // there. Composite gets it too (below) — a composite call is itself
+    // regime-conditional in the sense that the votes feeding it were.
+    const regime = regimeOf(m.structure);
+    for (const v of c.votes) votesLog.push({ asset_class: kind, symbol: m.symbol, technique_id: v.id, dir: v.dir, regime });
     // One composite directional vote per asset per run — reuses the exact
     // same technique_votes/technique_reliability machinery as every other
     // technique (see compositeCall's docs), just keyed 'composite'.
@@ -2230,7 +2268,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
     if (cc) {
       // score alongside dir, composite rows only — see logRun/evaluateMatured
       // (reliability.mjs) for where this feeds the calibration curve.
-      votesLog.push({ asset_class: kind, symbol: m.symbol, technique_id: 'composite', dir: cc.dir, score: cc.score });
+      votesLog.push({ asset_class: kind, symbol: m.symbol, technique_id: 'composite', dir: cc.dir, score: cc.score, regime });
       for (const horizonDays of RANGE_LOG_HORIZONS_DAYS) {
         const r = predictedRange(m.price, horizonDays, cc.score, cc.dir, moveStats, m.symbol, m.volPct);
         if (r) rangeLog.push({ asset_class: kind, symbol: m.symbol, horizon_hours: horizonDays * 24, low: r.low, high: r.high });
@@ -2303,7 +2341,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -2357,7 +2395,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   };
   // Shared by both rankBoards calls below (crypto and stock) — see
   // evaluateTechniques' docs for why this is one object, not positional args.
-  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries };
+  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime };
 
   let cryptoBoards = { breakout: [], breakdown: [], universe: 0 };
   let btc = null, eth = null;

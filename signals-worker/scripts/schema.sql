@@ -275,6 +275,15 @@ CREATE TABLE IF NOT EXISTS asset_sectors (
 -- safely idempotent.
 ALTER TABLE technique_votes ADD COLUMN score REAL;
 
+-- Nullable, populated on every real technique vote (not just composite) —
+-- the asset's own swing-structure regime ('trending' when m.structure is
+-- 1 or -1, 'choppy' when 0, null when there wasn't enough history yet to
+-- compute structure at all) AT THE MOMENT the vote was cast, not
+-- recomputed later — regime can (and does) change between when a call is
+-- made and when it matures, so evaluateMatured needs the frozen value, not
+-- a fresh one. Same non-idempotent-ALTER caveat as the score column above.
+ALTER TABLE technique_votes ADD COLUMN regime TEXT;
+
 -- Calibration curve: does a composite call's own confidence score actually
 -- predict its real-world hit rate? `bucket` is a decile of the 0-100 score
 -- (0-9, covering 0-10% through 90-100%). Permanent aggregate, not pruned —
@@ -307,4 +316,23 @@ CREATE TABLE IF NOT EXISTS technique_combo_reliability (
   accuracy REAL NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL,
   PRIMARY KEY (symbol, technique_a, technique_b, horizon_hours)
+);
+
+-- Phase 6: a technique's own accuracy split by market regime (trending vs.
+-- choppy, via the asset's own swing-structure read — see the `regime`
+-- column added to technique_votes above) rather than one blended number
+-- across both. Same shape as technique_reliability plus the regime column;
+-- a separate table rather than widening technique_reliability itself so
+-- the existing blended rows/primary key never need to change — loadReliability
+-- keeps working exactly as before, this is purely additive.
+CREATE TABLE IF NOT EXISTS technique_regime_reliability (
+  symbol TEXT NOT NULL,
+  technique_id TEXT NOT NULL,
+  horizon_hours INTEGER NOT NULL,
+  regime TEXT NOT NULL,
+  correct INTEGER NOT NULL DEFAULT 0,
+  total INTEGER NOT NULL DEFAULT 0,
+  accuracy REAL NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (symbol, technique_id, horizon_hours, regime)
 );

@@ -33,6 +33,9 @@ const OUTCOME_DEADBAND_PCT = 0.5;
 // well under it too, at the cost of a few more round trips, which D1's
 // free tier has plenty of headroom for.
 const CHUNK = 15;
+// technique_votes' own insert is wider than CHUNK was sized for (7 columns
+// now, after score + regime) — see its own comment at the write site.
+const VOTES_CHUNK = 14;
 // A bit past the longer 168h horizon, for the price-log join plus buffer.
 const RETENTION_HOURS = 200;
 // Hard cap regardless of evaluated status, so a symbol that drops out of
@@ -66,6 +69,36 @@ export async function loadReliability(env) {
   return { blended, byHorizon };
 }
 
+// { trending: { "symbol|technique_id": {correct, accuracy, total} }, choppy:
+// {...} } — same blended-across-horizons shape loadReliability's own
+// `blended` uses, just grouped by regime instead of pooling everything.
+// Consumed by reliabilityMultiplier (worker.js) as the regime-specific
+// alternative to blended, with the exact same MIN_RELIABILITY_SAMPLES +
+// significance bar applied there before it's ever preferred over blended.
+export async function loadRegimeReliability(env) {
+  const rows = await d1(env, 'SELECT symbol, technique_id, regime, correct, total FROM technique_regime_reliability WHERE total > 0');
+  // Pool across horizon_hours (two rows per symbol|technique|regime, one
+  // per HORIZONS_HOURS entry) exactly the way loadReliability's own
+  // `blended` pools across horizons — accumulate first, compute accuracy
+  // once totals are final, not per-row (a per-row overwrite would silently
+  // drop whichever horizon's row got processed first).
+  const acc = { trending: {}, choppy: {} };
+  for (const r of rows) {
+    if (!acc[r.regime]) continue; // defensive: regime is a free-text column, only these two values are ever written
+    const key = `${r.symbol}|${r.technique_id}`;
+    if (!acc[r.regime][key]) acc[r.regime][key] = { correct: 0, total: 0 };
+    acc[r.regime][key].correct += r.correct;
+    acc[r.regime][key].total += r.total;
+  }
+  const out = { trending: {}, choppy: {} };
+  for (const regime of ['trending', 'choppy']) {
+    for (const [key, v] of Object.entries(acc[regime])) {
+      out[regime][key] = { correct: v.correct, accuracy: v.total ? v.correct / v.total : 0.5, total: v.total };
+    }
+  }
+  return out;
+}
+
 // Range-prediction hit rate (was realized price actually inside the
 // predicted band), pooled across both horizons per symbol — mirrors how
 // `blended` above pools technique_reliability across horizons. Consumed
@@ -97,15 +130,20 @@ export async function logRun(env, runAt, log) {
     const params = batch.flatMap((p) => [runAt, p.asset_class, p.symbol, p.price]);
     await d1(env, `INSERT OR REPLACE INTO asset_price_log (run_at, asset_class, symbol, price) VALUES ${placeholders}`, params);
   }
-  for (const batch of chunk(log.votes, CHUNK)) {
+  // VOTES_CHUNK, not the shared CHUNK: this insert is now 7 columns
+  // (score + regime both added after CHUNK=15 was sized for the original
+  // 4-5 column shape). 15 x 7 = 105 would exceed D1's real 100-bound-param
+  // cap (confirmed live once already, see CHUNK's own docs above); 14 x 7
+  // = 98 stays under it.
+  for (const batch of chunk(log.votes, VOTES_CHUNK)) {
     // score is nullable and only ever set on the synthetic 'composite' rows
     // (see rankBoards' push-site, worker.js) — null for every real
-    // technique vote. 15 rows x 6 cols = 90 params, the same margin
-    // range_log's own 6-column insert already runs at safely (D1's real
-    // cap is 100 bound params/query, confirmed live once before).
-    const placeholders = batch.map(() => '(?,?,?,?,?,?)').join(',');
-    const params = batch.flatMap((v) => [runAt, v.asset_class, v.symbol, v.technique_id, v.dir, v.score ?? null]);
-    await d1(env, `INSERT OR REPLACE INTO technique_votes (run_at, asset_class, symbol, technique_id, dir, score) VALUES ${placeholders}`, params);
+    // technique vote. regime is nullable too — null whenever the asset
+    // didn't have enough history yet to compute swing structure at cast
+    // time (see regimeOf, worker.js).
+    const placeholders = batch.map(() => '(?,?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap((v) => [runAt, v.asset_class, v.symbol, v.technique_id, v.dir, v.score ?? null, v.regime ?? null]);
+    await d1(env, `INSERT OR REPLACE INTO technique_votes (run_at, asset_class, symbol, technique_id, dir, score, regime) VALUES ${placeholders}`, params);
   }
   for (const batch of chunk(log.ranges || [], CHUNK)) {
     const placeholders = batch.map(() => '(?,?,?,?,?,?)').join(',');
@@ -149,7 +187,7 @@ export async function evaluateMatured(env, nowIso) {
   for (const h of HORIZONS_HOURS) {
     const cutoff = new Date(now - h * 3600 * 1000).toISOString();
     const col = EVAL_COLUMN[h];
-    const due = await d1(env, `SELECT run_at, asset_class, symbol, technique_id, dir, score FROM technique_votes WHERE run_at <= ? AND ${col} = 0`, [cutoff]);
+    const due = await d1(env, `SELECT run_at, asset_class, symbol, technique_id, dir, score, regime FROM technique_votes WHERE run_at <= ? AND ${col} = 0`, [cutoff]);
     // Range predictions logged at this same horizon (see RANGE_LOG_HORIZONS_DAYS
     // in worker.js) — each row matures once, at its own horizon_hours, so
     // there's no evaluated flag to filter on here, just the cutoff.
@@ -219,6 +257,12 @@ export async function evaluateMatured(env, nowIso) {
     // votes count (dir 1/-1) — a neutral flag like earningsrisk's has
     // nothing to "agree" on a direction with.
     const comboGroups = {}; // "run_at|symbol" -> { symbol, actualDir, votes: [{technique_id, dir}] }
+    // Phase 6: same due-rows pass, bucketed by the regime frozen on the row
+    // at cast time (see the `regime` column/regimeOf, worker.js) — null
+    // regime (not enough history to compute structure when the vote was
+    // cast, or a row written before this column existed) is simply skipped
+    // here, same as it already is everywhere else.
+    const regimeDeltas = {}; // "symbol|technique_id|regime" -> { symbol, technique_id, regime, correct, total }
     for (const r of due) {
       const before = priceBefore[`${r.run_at}|${r.symbol}`];
       const after = priceNow[r.symbol];
@@ -236,6 +280,13 @@ export async function evaluateMatured(env, nowIso) {
         if (!calibDeltas[bucket]) calibDeltas[bucket] = { correct: 0, total: 0 };
         calibDeltas[bucket].total += 1;
         if (r.dir === actualDir) calibDeltas[bucket].correct += 1;
+      }
+
+      if (r.regime) {
+        const rk = `${r.symbol}|${r.technique_id}|${r.regime}`;
+        if (!regimeDeltas[rk]) regimeDeltas[rk] = { symbol: r.symbol, technique_id: r.technique_id, regime: r.regime, correct: 0, total: 0 };
+        regimeDeltas[rk].total += 1;
+        if (r.dir === actualDir) regimeDeltas[rk].correct += 1;
       }
 
       if (r.technique_id !== 'composite' && (r.dir === 1 || r.dir === -1)) {
@@ -284,6 +335,18 @@ export async function evaluateMatured(env, nowIso) {
           accuracy = CAST(technique_combo_reliability.correct + excluded.correct AS REAL) / (technique_combo_reliability.total + excluded.total),
           updated_at = excluded.updated_at
       `, [d.symbol, d.a, d.b, h, d.correct, d.total, d.total ? d.correct / d.total : 0, nowIso]);
+    }
+
+    for (const d of Object.values(regimeDeltas)) {
+      await d1(env, `
+        INSERT INTO technique_regime_reliability (symbol, technique_id, horizon_hours, regime, correct, total, accuracy, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (symbol, technique_id, horizon_hours, regime) DO UPDATE SET
+          correct = technique_regime_reliability.correct + excluded.correct,
+          total = technique_regime_reliability.total + excluded.total,
+          accuracy = CAST(technique_regime_reliability.correct + excluded.correct AS REAL) / (technique_regime_reliability.total + excluded.total),
+          updated_at = excluded.updated_at
+      `, [d.symbol, d.technique_id, h, d.regime, d.correct, d.total, d.total ? d.correct / d.total : 0, nowIso]);
     }
 
     for (const [bucket, d] of Object.entries(calibDeltas)) {
