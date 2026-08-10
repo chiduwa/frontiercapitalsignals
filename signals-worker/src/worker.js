@@ -1805,7 +1805,7 @@ export async function getCryptoDailyHistory(id, days = CRYPTO_HISTORY_DAYS) {
 // from getCryptoMarkets (which the hourly build uses for the full metrics
 // set). Never throws on a bad/missing id: just omits it from the result,
 // since one delisted or renamed id shouldn't take down every other price.
-async function coingeckoSimplePrice(ids) {
+export async function coingeckoSimplePrice(ids) {
   if (!ids.length) return {};
   const url = 'https://api.coingecko.com/api/v3/simple/price'
     + `?ids=${ids.map(encodeURIComponent).join(',')}&vs_currencies=usd&include_24hr_change=true`;
@@ -1904,7 +1904,7 @@ async function yahooDaily(symbol, range = '1y') {
 // fresh meta.regularMarketPrice (no need for a year of daily bars just to
 // read today's tick). Used by /api/prices, called once per displayed
 // symbol in parallel (see pool() at the call site), not per build.
-async function yahooQuote(symbol) {
+export async function yahooQuote(symbol) {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d`;
   const j = await fetchJson(url);
   const r = j && j.chart && j.chart.result && j.chart.result[0];

@@ -11,7 +11,7 @@
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID
 // Optional env: TREFIS_OVERRIDES
 // Optional (enables reliability weighting when set): FCS_D1_DATABASE_ID
-import { buildPayload, CACHE_KEY } from '../worker.js';
+import { buildPayload, CACHE_KEY, coingeckoSimplePrice, yahooQuote } from '../worker.js';
 import { loadReliability, loadMoveStats, loadRangeReliability, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, loadSwingTimeStats, loadRecentEvents, loadIvHistory, loadRegimeReliability, logRun, evaluateMatured, evaluateTimeOfDay, snapshotAssetScores } from './reliability.mjs';
 import { upsertMarketSentiment, loadRecentBars, loadTvlSeries } from './archive.mjs';
 
@@ -37,6 +37,52 @@ const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID };
 // verify a just-shipped change) always forces a real rebuild regardless of
 // how recent the last one was.
 const FRESH_ENOUGH_MINUTES = Number(process.env.SIGNALS_FRESH_ENOUGH_MINUTES || 50);
+
+// Phase 7 (event-driven refresh): a fresh-by-the-clock cache can still be
+// stale in the sense that actually matters if the market just moved hard.
+// Deliberately NOT built on /api/prices (the Worker's own live-price
+// route) — that route only runs while a dashboard tab is actively polling
+// it, so detection would go silent exactly when an unattended move is most
+// likely (overnight/weekend), the opposite of what this needs. Instead
+// this runs right here, inside the already-unconditionally-firing 5-minute
+// cron, using the same two cheap no-auth calls /api/prices itself uses
+// (coingeckoSimplePrice, yahooQuote) — a handful of requests, not the full
+// ~130-fetch engine — against a small, liquid, already-tracked watchlist
+// (BTC/ETH/SPY/QQQ, all already present in every cached payload's
+// `overview`, so there's a "last known price" to compare against with no
+// extra storage). Any single leg failing (a bad quote, a rate limit) just
+// skips that one symbol, never blocks the real freshness decision.
+const BIG_MOVE_PCT = { crypto: 3, equity: 1.5 };
+async function checkForBigMove(cachedOverview) {
+  if (!cachedOverview) return null;
+  const watchlist = [
+    { kind: 'crypto', id: 'bitcoin', label: 'BTC', cached: cachedOverview.btc },
+    { kind: 'crypto', id: 'ethereum', label: 'ETH', cached: cachedOverview.eth },
+    { kind: 'equity', symbol: 'SPY', label: 'SPY', cached: cachedOverview.spy },
+    { kind: 'equity', symbol: 'QQQ', label: 'QQQ', cached: cachedOverview.qqq }
+  ].filter((w) => w.cached && w.cached.price);
+  if (!watchlist.length) return null;
+
+  const cryptoIds = watchlist.filter((w) => w.kind === 'crypto').map((w) => w.id);
+  const equitySymbols = watchlist.filter((w) => w.kind === 'equity').map((w) => w.symbol);
+  const [cryptoLive, equityLive] = await Promise.all([
+    cryptoIds.length
+      ? coingeckoSimplePrice(cryptoIds).catch((e) => { console.error('big-move check: coingeckoSimplePrice failed:', e.message); return {}; })
+      : Promise.resolve({}),
+    Promise.all(equitySymbols.map((s) => yahooQuote(s).catch((e) => { console.error(`big-move check: yahooQuote failed for ${s}:`, e.message); return null; })))
+  ]);
+  const equityBySymbol = Object.fromEntries(equitySymbols.map((s, i) => [s, equityLive[i]]));
+
+  for (const w of watchlist) {
+    const live = w.kind === 'crypto' ? (cryptoLive[w.id] && cryptoLive[w.id].price) : (equityBySymbol[w.symbol] && equityBySymbol[w.symbol].price);
+    if (live == null) continue;
+    const movePct = Math.abs((live / w.cached.price - 1) * 100);
+    const threshold = BIG_MOVE_PCT[w.kind];
+    if (movePct >= threshold) return `${w.label} moved ${movePct.toFixed(1)}% since the last build (>= ${threshold}% threshold)`;
+  }
+  return null;
+}
+
 if (GITHUB_EVENT_NAME === 'schedule') {
   try {
     const checkUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${FCS_KV_NAMESPACE_ID}/values/${encodeURIComponent(CACHE_KEY)}`;
@@ -45,10 +91,19 @@ if (GITHUB_EVENT_NAME === 'schedule') {
       const existing = await existingRes.json().catch(() => null);
       const ageMinutes = existing && existing.generated_at ? (Date.now() - new Date(existing.generated_at).getTime()) / 60000 : Infinity;
       if (ageMinutes < FRESH_ENOUGH_MINUTES) {
-        console.log(`skip: last build is only ${ageMinutes.toFixed(1)}min old (< ${FRESH_ENOUGH_MINUTES}min) — this scheduled slot is just extra insurance against a delayed/dropped firing, not a real gap to fill`);
-        process.exit(0);
+        const bigMove = await checkForBigMove(existing && existing.overview).catch((e) => {
+          console.error('big-move check failed unexpectedly, falling back to the normal time-based skip:', e.message);
+          return null;
+        });
+        if (bigMove) {
+          console.log(`proceeding despite a fresh cache (${ageMinutes.toFixed(1)}min old): ${bigMove} — a real gap to fill, not just insurance`);
+        } else {
+          console.log(`skip: last build is only ${ageMinutes.toFixed(1)}min old (< ${FRESH_ENOUGH_MINUTES}min) and no watchlist symbol has moved enough to force an early rebuild — this scheduled slot is just extra insurance against a delayed/dropped firing, not a real gap to fill`);
+          process.exit(0);
+        }
+      } else {
+        console.log(`proceeding: last build is ${ageMinutes === Infinity ? 'unknown age' : ageMinutes.toFixed(1) + 'min old'} (>= ${FRESH_ENOUGH_MINUTES}min)`);
       }
-      console.log(`proceeding: last build is ${ageMinutes === Infinity ? 'unknown age' : ageMinutes.toFixed(1) + 'min old'} (>= ${FRESH_ENOUGH_MINUTES}min)`);
     } else {
       console.log(`proceeding: could not read existing KV value (HTTP ${existingRes.status}), building fresh`);
     }
