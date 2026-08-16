@@ -10,7 +10,7 @@
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID,
 //   FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID
 import { coingeckoSimplePrice, yahooQuote, pool } from '../worker.js';
-import { upsertIntradayTicks, pruneIntradayTicks, loadRecentIntradayTicks, castIntradaySignals, evaluateIntradayMatured } from './intraday.mjs';
+import { upsertIntradayTicks, pruneIntradayTicks, loadRecentIntradayTicks, castIntradaySignals, evaluateIntradayMatured, openPaperTrades, closePaperTrades, pruneClosedPaperTrades } from './intraday.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID })) {
@@ -76,10 +76,14 @@ async function main() {
   // Cast + evaluate every tick, not on a separate cadence — both are
   // cheap D1-only operations once ticks already exist (no upstream
   // fetches), and running them here means the signal/reliability data is
-  // never staler than this tick's own price data.
+  // never staler than this tick's own price data. ticksBySymbol is
+  // declared outside this try on purpose — the paper-trade block below
+  // reuses it too (same tick pass, no re-query), so it can't be scoped
+  // to just this block.
+  let ticksBySymbol = {};
   try {
     const allSymbols = watchlist.map((w) => w.symbol);
-    const ticksBySymbol = await loadRecentIntradayTicks(env, allSymbols);
+    ticksBySymbol = await loadRecentIntradayTicks(env, allSymbols);
     const castCount = await castIntradaySignals(env, ticksBySymbol, tickAt);
     console.log(`cast ${castCount} signal rows across ${Object.keys(ticksBySymbol).length} symbols with enough tick history`);
   } catch (e) {
@@ -91,6 +95,24 @@ async function main() {
     console.log(`scored ${evaluatedCount} matured intraday outcomes`);
   } catch (e) {
     console.error('intraday maturity evaluation failed:', e.message || e);
+  }
+
+  // Runs off THIS pass's own just-cast signal rows (no re-query of
+  // upstream data) and THIS pass's own just-loaded ticksBySymbol — the
+  // background-experiment loop the user asked for, tied to the exact same
+  // signals the reliability loop above is already scoring.
+  try {
+    const opened = await openPaperTrades(env, tickAt);
+    const closedCount = await closePaperTrades(env, ticksBySymbol, tickAt);
+    console.log(`paper trades: opened ${opened}, closed ${closedCount}`);
+  } catch (e) {
+    console.error('paper-trade open/close failed:', e.message || e);
+  }
+
+  try {
+    await pruneClosedPaperTrades(env);
+  } catch (e) {
+    console.error('paper-trade retention prune failed:', e.message || e);
   }
 }
 

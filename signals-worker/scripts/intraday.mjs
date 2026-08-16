@@ -13,6 +13,31 @@
 import { d1, chunk } from './d1-client.mjs';
 import { intradaySignal, nearestTick, INTRADAY_DEADBAND_PCT, INTRADAY_TICK_TOLERANCE_MIN } from '../worker.js';
 
+// No user-facing leverage/liquidation/position-size numbers ever leave
+// this module — see scripts/intraday-tick.mjs's assembled display object
+// (Phase 4) and the approved plan's design note on why: this is a
+// self-experiment/transparency mechanism, not individualized trading
+// advice. These constants are internal bookkeeping only.
+const PAPER_TRADE_MARGIN_USD = 100;
+// Matches the shortest logged horizon — most representative of the
+// user's actual day-trading cadence, and the same horizon
+// castIntradaySignals already writes a row for, so no new signal-log
+// shape is needed to trigger an entry.
+const PAPER_TRADE_HOLD_MINUTES = 15;
+// 4x for stocks, not a blind reuse of the crypto figure: 30x isn't a real
+// retail equities-margin number (this codebase's own valuation/earnings
+// techniques already draw this same crypto/equity distinction elsewhere),
+// so bookkeeping "as if" 30x on a stock would be dishonest, not just
+// imprecise.
+const PAPER_TRADE_LEVERAGE = { crypto: 30, stock: 4 };
+// Adverse move (in the LOSING direction, leverage-independent — this is
+// the RAW price move) that simulates a liquidation. An approximation of
+// 1/leverage minus a maintenance-margin haircut, not a specific
+// exchange's exact formula (real liquidation price depends on margin
+// mode, funding, and venue) — documented as an approximation because it
+// is one.
+const PAPER_TRADE_LIQUIDATION_PCT = { crypto: 2.8, stock: 20 };
+
 // Top N by open interest, not by market cap — cap and perp-market depth
 // diverge (a large mostly-spot-held cap can have a thin perp; a mid-cap can
 // have deep perp OI), and open interest is the more honest proxy for
@@ -214,4 +239,107 @@ export async function evaluateIntradayMatured(env, nowIso) {
   await d1(env, 'DELETE FROM intraday_signal_log WHERE tick_at < ?', [retentionCutoff]);
 
   return evaluatedCount;
+}
+
+// ------------------------- PAPER-TRADING SIMULATOR --------------------------
+// The "run background experiments off the system's own signals, track
+// outcomes" mechanism — every trade is tied back to the intraday_signal_log
+// row that triggered it (signal_log_id), so this feeds the same underlying
+// track record the reliability loop above already builds, not a separate
+// disconnected feature.
+
+// Opens a simulated $100-margin position for every freshly-cast 15-minute
+// directional call that doesn't already have an open trade on that symbol
+// — one open position per symbol at a time, so a fresh signal while one's
+// already running is ignored rather than queued or averaged in.
+export async function openPaperTrades(env, tickAt) {
+  const candidates = await d1(env, 'SELECT id, asset_class, symbol, dir, entry_price FROM intraday_signal_log WHERE tick_at = ? AND horizon_minutes = ?', [tickAt, PAPER_TRADE_HOLD_MINUTES]);
+  if (!candidates.length) return 0;
+
+  const openRows = await d1(env, "SELECT DISTINCT symbol FROM paper_trades WHERE status = 'open'");
+  const openSymbols = new Set(openRows.map((r) => r.symbol));
+
+  const rows = candidates
+    .filter((c) => !openSymbols.has(c.symbol))
+    .map((c) => ({
+      signal_log_id: c.id, asset_class: c.asset_class, symbol: c.symbol, dir: c.dir,
+      horizon_minutes: PAPER_TRADE_HOLD_MINUTES, entry_at: tickAt, entry_price: c.entry_price
+    }));
+  if (!rows.length) return 0;
+
+  let written = 0;
+  // 8 cols x 12 rows = 96 params, under D1's 100 ceiling.
+  for (const batch of chunk(rows, 12)) {
+    const placeholders = batch.map(() => "(?,?,?,?,?,?,?,'open')").join(',');
+    const params = batch.flatMap((r) => [r.signal_log_id, r.asset_class, r.symbol, r.dir, r.horizon_minutes, r.entry_at, r.entry_price]);
+    await d1(env, `INSERT INTO paper_trades (signal_log_id, asset_class, symbol, dir, horizon_minutes, entry_at, entry_price, status) VALUES ${placeholders}`, params);
+    written += batch.length;
+  }
+  return written;
+}
+
+// Closes every open trade whose horizon has elapsed OR whose adverse move
+// has crossed the simulated liquidation threshold, whichever comes first
+// — checked against ticksBySymbol's freshest price for that symbol this
+// pass (a symbol with no fresh tick this particular run just gets
+// rechecked next tick, not force-closed on stale data).
+export async function closePaperTrades(env, ticksBySymbol, nowIso) {
+  const open = await d1(env, "SELECT id, asset_class, symbol, dir, horizon_minutes, entry_at, entry_price FROM paper_trades WHERE status = 'open'");
+  if (!open.length) return 0;
+
+  const now = new Date(nowIso).getTime();
+  const today = nowIso.slice(0, 10);
+  const statsDeltas = {}; // "assetClass|today" -> {wins, losses, total, sumReturnPct}
+  let closed = 0;
+
+  for (const t of open) {
+    const symTicks = (ticksBySymbol[t.symbol] && ticksBySymbol[t.symbol].ticks) || [];
+    if (!symTicks.length) continue; // no fresh price this pass — recheck next tick
+    const current = symTicks.reduce((a, b) => (new Date(b.tick_at).getTime() > new Date(a.tick_at).getTime() ? b : a));
+
+    const rawReturnPct = ((current.price / t.entry_price) - 1) * t.dir * 100; // positive = favorable in the called direction
+    const liqPct = PAPER_TRADE_LIQUIDATION_PCT[t.asset_class] ?? PAPER_TRADE_LIQUIDATION_PCT.crypto;
+    const leverage = PAPER_TRADE_LEVERAGE[t.asset_class] ?? PAPER_TRADE_LEVERAGE.crypto;
+    const liquidated = rawReturnPct <= -liqPct;
+    const horizonElapsed = now >= new Date(t.entry_at).getTime() + t.horizon_minutes * 60 * 1000;
+    if (!liquidated && !horizonElapsed) continue;
+
+    const leveragedReturnPct = liquidated ? -100 : Math.max(-100, rawReturnPct * leverage);
+    const pnlUsd = (leveragedReturnPct / 100) * PAPER_TRADE_MARGIN_USD;
+
+    await d1(env, `
+      UPDATE paper_trades SET exit_at = ?, exit_price = ?, status = 'closed', closed_reason = ?, leveraged_return_pct = ?, pnl_usd = ?
+      WHERE id = ?
+    `, [nowIso, current.price, liquidated ? 'liquidated' : 'horizon_elapsed', leveragedReturnPct, pnlUsd, t.id]);
+    closed++;
+
+    const key = `${t.asset_class}|${today}`;
+    if (!statsDeltas[key]) statsDeltas[key] = { assetClass: t.asset_class, wins: 0, losses: 0, total: 0, sumReturnPct: 0 };
+    statsDeltas[key].total += 1;
+    statsDeltas[key].sumReturnPct += leveragedReturnPct;
+    if (leveragedReturnPct > 0) statsDeltas[key].wins += 1; else statsDeltas[key].losses += 1;
+  }
+
+  for (const d of Object.values(statsDeltas)) {
+    await d1(env, `
+      INSERT INTO paper_trade_stats (asset_class, bucket, wins, losses, total, sum_return_pct, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (asset_class, bucket) DO UPDATE SET
+        wins = paper_trade_stats.wins + excluded.wins,
+        losses = paper_trade_stats.losses + excluded.losses,
+        total = paper_trade_stats.total + excluded.total,
+        sum_return_pct = paper_trade_stats.sum_return_pct + excluded.sum_return_pct,
+        updated_at = excluded.updated_at
+    `, [d.assetClass, today, d.wins, d.losses, d.total, d.sumReturnPct, nowIso]);
+  }
+
+  return closed;
+}
+
+// Closed trades don't need to stick around once rolled into
+// paper_trade_stats — that table already holds the permanent aggregate.
+const PAPER_TRADE_RETENTION_DAYS = 90;
+export async function pruneClosedPaperTrades(env, nowMs = Date.now(), retentionDays = PAPER_TRADE_RETENTION_DAYS) {
+  const cutoff = new Date(nowMs - retentionDays * 24 * 3600 * 1000).toISOString();
+  await d1(env, "DELETE FROM paper_trades WHERE status = 'closed' AND exit_at < ?", [cutoff]);
 }

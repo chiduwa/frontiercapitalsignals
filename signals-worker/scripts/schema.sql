@@ -398,3 +398,48 @@ CREATE TABLE IF NOT EXISTS intraday_reliability (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (symbol, horizon_minutes)
 );
+
+-- Simulated $100-margin position, opened off this pipeline's own
+-- directional calls (the 15-minute-horizon intraday_signal_log row —
+-- signal_log_id is that row's FK) and closed on liquidation or the
+-- horizon elapsing, whichever comes first. One open trade per symbol at a
+-- time (see openPaperTrades, scripts/intraday.mjs) — a fresh signal while
+-- one's already open is ignored, not queued. status/closed_reason are
+-- separate columns rather than one combined enum so "how did it end" is
+-- always queryable even while still open (both null).
+CREATE TABLE IF NOT EXISTS paper_trades (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  signal_log_id INTEGER NOT NULL,
+  asset_class TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  dir INTEGER NOT NULL,
+  horizon_minutes INTEGER NOT NULL,
+  entry_at TEXT NOT NULL,
+  entry_price REAL NOT NULL,
+  exit_at TEXT,
+  exit_price REAL,
+  status TEXT NOT NULL DEFAULT 'open',
+  closed_reason TEXT,
+  leveraged_return_pct REAL,
+  pnl_usd REAL
+);
+CREATE INDEX IF NOT EXISTS idx_paper_trades_open ON paper_trades(status, symbol);
+
+-- Aggregate track record, rolled up incrementally (ON CONFLICT DO UPDATE,
+-- same pattern as technique_reliability) so raw paper_trades rows can be
+-- pruned on a retention window without losing the history. `bucket` is the
+-- UTC close date (YYYY-MM-DD) — mirrors asset_score_snapshots' per-day
+-- shape rather than one eternally-blended lifetime row, so a future pass
+-- can see whether performance is drifting, not just what it's ever been.
+-- The all-time transparency number shown on the dashboard (Phase 4) sums
+-- across every bucket for the asset_class.
+CREATE TABLE IF NOT EXISTS paper_trade_stats (
+  asset_class TEXT NOT NULL,
+  bucket TEXT NOT NULL,
+  wins INTEGER NOT NULL DEFAULT 0,
+  losses INTEGER NOT NULL DEFAULT 0,
+  total INTEGER NOT NULL DEFAULT 0,
+  sum_return_pct REAL NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (asset_class, bucket)
+);
