@@ -11,9 +11,10 @@
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID
 // Optional env: TREFIS_OVERRIDES
 // Optional (enables reliability weighting when set): FCS_D1_DATABASE_ID
-import { buildPayload, CACHE_KEY, coingeckoSimplePrice, yahooQuote } from '../worker.js';
+import { buildPayload, CACHE_KEY, coingeckoSimplePrice, yahooQuote, getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST } from '../worker.js';
 import { loadReliability, loadMoveStats, loadRangeReliability, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, loadSwingTimeStats, loadRecentEvents, loadIvHistory, loadRegimeReliability, logRun, evaluateMatured, evaluateTimeOfDay, snapshotAssetScores } from './reliability.mjs';
 import { upsertMarketSentiment, loadRecentBars, loadTvlSeries } from './archive.mjs';
+import { selectIntradayWatchlist } from './intraday.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES, GITHUB_EVENT_NAME } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID })) {
@@ -217,4 +218,38 @@ if (FCS_D1_DATABASE_ID) {
   } catch (e) {
     console.error('score snapshotting failed (KV already updated, dashboard unaffected):', e.message || e);
   }
+}
+
+// Recomputes the curated day-trading watchlist and hands it to
+// scripts/intraday-tick.mjs (a separate, much-higher-frequency job) via a
+// small KV key — see scripts/intraday.mjs for why this pipeline is
+// decoupled from the engine above. Two fresh, cheap bulk calls (not
+// per-coin) rather than threading the values out of buildPayload's
+// internals, keeping this genuinely independent of the core engine's
+// return shape. KV-only (no D1 dependency), so this runs unconditionally,
+// not gated behind FCS_D1_DATABASE_ID like the reliability-loop block
+// above. Not fatal on failure — the tick job just skips ticking until the
+// next successful write.
+try {
+  const cryptoRaw = await getCryptoMarkets();
+  const funding = await getFundingMap();
+  const qualifying = cryptoRaw
+    .filter((c) => !CRYPTO_BLOCKLIST.has((c.symbol || '').toLowerCase()))
+    .filter((c) => (c.market_cap || 0) >= CRYPTO_MIN_MCAP && (c.total_volume || 0) >= CRYPTO_MIN_VOLUME)
+    .map((c) => ({ symbol: (c.symbol || '').toUpperCase(), id: c.id }));
+  const watchlist = selectIntradayWatchlist(qualifying, funding, STOCK_WATCHLIST);
+  const watchlistUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${FCS_KV_NAMESPACE_ID}/values/${encodeURIComponent('signals:intraday-watchlist')}`;
+  const wlRes = await fetch(watchlistUrl, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(watchlist)
+  });
+  const wlBody = await wlRes.json().catch(() => null);
+  if (!wlRes.ok || !wlBody || wlBody.success !== true) {
+    console.error(`intraday watchlist KV write failed: HTTP ${wlRes.status}`, JSON.stringify(wlBody));
+  } else {
+    console.log(`wrote intraday watchlist: ${watchlist.filter((w) => w.assetClass === 'crypto').length} crypto, ${watchlist.filter((w) => w.assetClass === 'stock').length} stock`);
+  }
+} catch (e) {
+  console.error('intraday watchlist computation/write failed (dashboard unaffected, next tick just reuses the last written watchlist):', e.message || e);
 }

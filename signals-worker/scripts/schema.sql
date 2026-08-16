@@ -336,3 +336,27 @@ CREATE TABLE IF NOT EXISTS technique_regime_reliability (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (symbol, technique_id, horizon_hours, regime)
 );
+
+-- ------------------------- INTRADAY DAY-TRADING SIGNAL ----------------------
+-- A separate, higher-frequency pipeline for short (minutes-to-hours)
+-- horizons — everything above this line runs on the hourly-ish buildPayload
+-- cadence (asset_price_log is written once per build, real-world gap
+-- confirmed live at 20-90+ minutes even on a 5-minute cron), which is too
+-- sparse for intraday day-trading calls. scripts/intraday.mjs and the
+-- dedicated signals-intraday.yml workflow write and read these tables;
+-- worker.js's buildPayload/evaluateTechniques engine never touches them.
+
+-- One row per (tick_at, symbol): a cheap live price sample for the curated
+-- day-trading watchlist (see selectIntradayWatchlist, scripts/intraday.mjs —
+-- top crypto by open interest among symbols with a real USDT perpetual,
+-- plus a fixed handful of mega-cap equities). Pruned aggressively by the
+-- tick job itself (~30h retention, 48h hard cap) since nothing here needs
+-- depth beyond a rolling day.
+CREATE TABLE IF NOT EXISTS intraday_price_ticks (
+  tick_at TEXT NOT NULL,
+  asset_class TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  price REAL NOT NULL,
+  PRIMARY KEY (tick_at, symbol)
+);
+CREATE INDEX IF NOT EXISTS idx_intraday_ticks_symbol_time ON intraday_price_ticks(symbol, tick_at);

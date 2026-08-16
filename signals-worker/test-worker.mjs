@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { computeSwingTimeTallies, barsRowsToReturnsBySymbol, matchProtocolsToUniverse } from './scripts/archive.mjs';
+import { selectIntradayWatchlist, CRYPTO_WATCHLIST_SIZE } from './scripts/intraday.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -1149,6 +1150,34 @@ check('the 41st request from the same IP within the window is rate-limited (429)
 check('rate-limit response includes Retry-After', rl41st.headers.get('retry-after') === '60');
 const rlDifferentIp = await worker.fetch(rlRequest('203.0.113.9'), d1Env, ctx);
 check('a different IP is not affected by another IP\'s rate limit', rlDifferentIp.status === 200, rlDifferentIp.status);
+
+console.log('\n== selectIntradayWatchlist: curated day-trading watchlist, liquidity-proxied by open interest ==');
+const wlCrypto = [
+  { symbol: 'BTC', id: 'bitcoin' },
+  { symbol: 'ETH', id: 'ethereum' },
+  { symbol: 'SOL', id: 'solana' },
+  { symbol: 'NOFUNDING', id: 'no-funding-coin' } // qualifying crypto, but no matched perp market
+];
+const wlFunding = {
+  BTC: { openInterest: 7000e6 },
+  ETH: { openInterest: 4400e6 },
+  SOL: { openInterest: 650e6 }
+  // NOFUNDING deliberately absent — no real USDT perpetual for it
+};
+const wlStocks = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'TSLA', 'AVGO', 'JPM', 'GS'];
+const watchlist = selectIntradayWatchlist(wlCrypto, wlFunding, wlStocks);
+const wlCryptoOut = watchlist.filter(w => w.assetClass === 'crypto');
+const wlStockOut = watchlist.filter(w => w.assetClass === 'stock');
+check('crypto without a matched funding-map entry (no real perp market) is excluded', !wlCryptoOut.find(w => w.symbol === 'NOFUNDING'));
+check('crypto sorted by open interest, highest first', wlCryptoOut.map(w => w.symbol).join(',') === 'BTC,ETH,SOL');
+check('crypto entries carry the CoinGecko id (needed for coingeckoSimplePrice, not just the symbol)', wlCryptoOut[0].id === 'bitcoin');
+check('equities: fixed 10 — SPY/QQQ plus the first 8 of the given stock watchlist, JPM/GS excluded (past the cap)', wlStockOut.map(w => w.symbol).join(',') === 'SPY,QQQ,AAPL,MSFT,NVDA,GOOGL,AMZN,META,TSLA,AVGO');
+check('crypto watchlist respects CRYPTO_WATCHLIST_SIZE even with fewer qualifying coins than the cap (no padding/fabrication)', wlCryptoOut.length === 3 && wlCryptoOut.length <= CRYPTO_WATCHLIST_SIZE);
+const manyCrypto = Array.from({ length: 40 }, (_, i) => ({ symbol: 'C' + i, id: 'coin' + i }));
+const manyFunding = Object.fromEntries(manyCrypto.map((c, i) => [c.symbol, { openInterest: 40 - i }]));
+const cappedWatchlist = selectIntradayWatchlist(manyCrypto, manyFunding, []);
+check('crypto watchlist caps at CRYPTO_WATCHLIST_SIZE when more than enough qualify', cappedWatchlist.filter(w => w.assetClass === 'crypto').length === CRYPTO_WATCHLIST_SIZE);
+check('empty funding map: no crypto qualifies, equities still populate', selectIntradayWatchlist(wlCrypto, {}, wlStocks).filter(w => w.assetClass === 'crypto').length === 0);
 
 console.log(failures === 0 ? '\nWORKER INTEGRATION OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);
