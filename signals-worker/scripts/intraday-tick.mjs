@@ -10,7 +10,7 @@
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID,
 //   FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID
 import { coingeckoSimplePrice, yahooQuote, pool } from '../worker.js';
-import { upsertIntradayTicks, pruneIntradayTicks, loadRecentIntradayTicks, castIntradaySignals, evaluateIntradayMatured, openPaperTrades, closePaperTrades, pruneClosedPaperTrades } from './intraday.mjs';
+import { upsertIntradayTicks, pruneIntradayTicks, loadRecentIntradayTicks, castIntradaySignals, evaluateIntradayMatured, openPaperTrades, closePaperTrades, pruneClosedPaperTrades, buildIntradayDisplayPayload } from './intraday.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID })) {
@@ -113,6 +113,24 @@ async function main() {
     await pruneClosedPaperTrades(env);
   } catch (e) {
     console.error('paper-trade retention prune failed:', e.message || e);
+  }
+
+  try {
+    const displayPayload = await buildIntradayDisplayPayload(env, watchlist, ticksBySymbol, tickAt);
+    const kvWriteUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${FCS_KV_NAMESPACE_ID}/values/${encodeURIComponent('signals:intraday')}`;
+    const putRes = await fetch(kvWriteUrl, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(displayPayload)
+    });
+    const putBody = await putRes.json().catch(() => null);
+    if (!putRes.ok || !putBody || putBody.success !== true) {
+      console.error(`intraday display payload KV write failed: HTTP ${putRes.status}`, JSON.stringify(putBody));
+    } else {
+      console.log(`wrote intraday display payload: ${displayPayload.watchlist.length} symbols`);
+    }
+  } catch (e) {
+    console.error('intraday display payload build/write failed:', e.message || e);
   }
 }
 

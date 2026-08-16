@@ -42,6 +42,13 @@ export const CACHE_KEY = 'signals:latest';
 // allows anyway.
 export const LIVE_PRICE_CACHE_KEY = 'signals:live-prices';
 const LIVE_PRICE_CACHE_SECONDS = 60;
+// Written by scripts/intraday-tick.mjs (its own ~5-minute cron, not this
+// Worker) — a single pre-computed KV read here, same "Worker never
+// computes, only serves" shape as CACHE_KEY/getCached below, just a
+// separate key and a shorter freshness window (the intraday pipeline is
+// meant to be far fresher than the hourly-ish engine).
+export const INTRADAY_CACHE_KEY = 'signals:intraday';
+const INTRADAY_FRESH_SECONDS = 45 * 60;
 
 // ----------------------------- CONFIG ---------------------------------------
 
@@ -2641,6 +2648,19 @@ function isFresh(payload) {
   return (Date.now() - new Date(payload.generated_at).getTime()) < CACHE_SECONDS * 1000;
 }
 
+async function getCachedIntraday(env) {
+  if (!env || !env.FCS_CACHE) return null;
+  try {
+    const raw = await env.FCS_CACHE.get(INTRADAY_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function isIntradayFresh(payload) {
+  if (!payload || !payload.generated_at) return false;
+  return (Date.now() - new Date(payload.generated_at).getTime()) < INTRADAY_FRESH_SECONDS * 1000;
+}
+
 async function getCachedLivePrices(env) {
   if (!env || !env.FCS_CACHE) return null;
   try {
@@ -2797,6 +2817,23 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .tr-score{color:var(--up);font-weight:700;min-width:48px;text-align:right}
   .tr-samples{color:var(--dim);font-size:10.5px;min-width:76px;text-align:right;white-space:nowrap}
 
+  .intraday{background:var(--ink-1);border:1px solid var(--line);border-top:2px solid var(--up);margin:0 0 44px;padding:18px 18px 16px}
+  .id-head{margin-bottom:14px}
+  .id-empty{color:var(--muted);font-size:12.5px;line-height:1.75;max-width:760px;font-family:var(--mono);padding:2px 0 4px}
+  .id-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line)}
+  .id-card{background:var(--ink-1);padding:10px 12px;min-width:0}
+  .id-sym{font-family:var(--mono);font-weight:700;font-size:12.5px;letter-spacing:.03em}
+  .id-price{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:2px}
+  .id-dir{font-size:20px;line-height:1;margin:6px 0 4px}
+  .id-meta{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+  .id-conf{font-family:var(--mono);font-size:10px;color:var(--dim)}
+  .id-flag{font-family:var(--mono);font-size:9px;letter-spacing:.1em;padding:1px 5px;border-radius:3px;font-weight:700}
+  .id-flag.id-peaked{color:var(--down);border:1px solid rgba(255,122,133,.35)}
+  .id-flag.id-bottomed{color:var(--up);border:1px solid rgba(61,220,151,.35)}
+  .id-track{margin-top:14px;font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.7}
+  .id-track.dim{color:var(--dim)}
+  .id-tr-item{margin-right:18px}
+
   @keyframes rise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
   tbody tr.in{animation:rise .35s ease both}
   @keyframes flashtick{0%{background:rgba(255,178,36,.4)}100%{background:transparent}}
@@ -2855,7 +2892,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         ANALYSIS REFRESH <b>HOURLY</b><br>
         PRICE TICKS <b>LIVE</b><br>
         UNIVERSE <b id="metaUniverse">—</b><br>
-        TECHNIQUES PER ASSET <b>UP TO 23</b>
+        TECHNIQUES PER ASSET <b>UP TO 28</b>
       </div>
     </div>
     <div class="mast-rule"></div>
@@ -2863,6 +2900,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
 
   <section class="overview" id="overview" aria-label="Market overview">
   </section>
+
+  <section class="intraday" id="intraday" aria-label="Day-trading intraday signal"></section>
 
   <div id="stateBox"></div>
 
@@ -2915,6 +2954,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   var BASE = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/';
   var DATA_URL = BASE + 'api/signals';
   var PRICES_URL = BASE + 'api/prices';
+  var INTRADAY_URL = BASE + 'api/intraday';
 
   var $ = function(id){ return document.getElementById(id); };
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -2968,6 +3008,55 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     html+=tile('SPY', o.spy?fmtPrice(o.spy.price):'—', o.spy?'<span class="'+pctCls(o.spy.chg24h)+'">'+fmtPct(o.spy.chg24h)+' 1d</span>':'');
     html+=tile('VIX', o.vix?o.vix.price.toFixed(2):'—', o.vix?'<span class="'+pctCls(o.vix.chg24h)+'">'+fmtPct(o.vix.chg24h)+' 1d</span>':'');
     $('overview').innerHTML=html;
+  }
+
+  // Day-trading intraday signal: a separate, much-higher-frequency read
+  // than everything above (see /api/intraday's own docs) — its own render
+  // function and its own poll loop (loadIntraday/INTRADAY_MS below) so a
+  // missed or slow intraday tick never blocks or disturbs the main
+  // hourly-cadence dashboard.
+  function dirArrow(dir){ return dir===1?'▲':dir===-1?'▼':'●'; }
+  function dirCls(dir){ return dir===1?'up':dir===-1?'down':'flat'; }
+  function renderIntraday(d){
+    var el=$('intraday');
+    if(!el) return;
+    if(!d||!d.watchlist||!d.watchlist.length){
+      el.innerHTML='<div class="eyebrow">DAY-TRADING SIGNAL</div><div class="id-empty">Intraday signals are still warming up — the first tick history needs to accumulate before a call can be made.</div>';
+      return;
+    }
+    var head='<div class="id-head"><div><div class="eyebrow">DAY-TRADING SIGNAL</div><div class="board-title">Intraday direction, refreshed every few minutes</div></div></div>';
+    var cards=d.watchlist.map(function(w){
+      var flag = w.peaked?'<span class="id-flag id-peaked">PEAKED</span>':w.bottomed?'<span class="id-flag id-bottomed">BOTTOMED</span>':'';
+      var horizonTitle = w.basis==='historical'
+        ? "This asset's own measured accuracy at this horizon"
+        : "Not enough of this asset's own history yet to measure — shortest horizon shown as a default, not a claim";
+      var horizon='<span class="horizon '+(w.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+horizonTitle+'">'+esc(w.horizonLabel)+(w.basis==='historical'?' ✓':'')+'</span>';
+      var conf = w.confidence!=null ? '<span class="id-conf">'+Math.round(w.confidence*100)+'%</span>' : '';
+      return '<div class="id-card" data-symbol="'+esc(w.symbol)+'" data-class="'+esc(w.assetClass)+'">'
+        +'<div class="id-sym">'+esc(w.symbol)+'</div>'
+        +'<div class="id-price">'+fmtPrice(w.price)+'</div>'
+        +'<div class="id-dir '+dirCls(w.dir)+'">'+dirArrow(w.dir)+'</div>'
+        +'<div class="id-meta">'+horizon+conf+flag+'</div>'
+        +'</div>';
+    }).join('');
+    var tr=d.trackRecord||{};
+    var trLine=['crypto','stock'].map(function(cls){
+      var t=tr[cls];
+      if(!t||!t.total) return '';
+      var label=cls==='crypto'?'CRYPTO':'EQUITY';
+      var avg=t.avgReturnPct==null?'—':((t.avgReturnPct>=0?'+':'')+t.avgReturnPct.toFixed(1)+'%');
+      return '<span class="id-tr-item">'+label+' self-experiment: '+t.wins+'W&ndash;'+t.losses+'L ('+Math.round((t.winRate||0)*100)+'%), '+t.total+' closed, avg '+avg+' return</span>';
+    }).filter(Boolean).join(' &middot; ');
+    var trBlock = trLine
+      ? '<div class="id-track">'+trLine+'</div>'
+      : '<div class="id-track dim">No paper trades have closed yet &mdash; the self-experiment track record fills in as signals mature.</div>';
+    el.innerHTML=head+'<div class="id-grid">'+cards+'</div>'+trBlock;
+  }
+  function loadIntraday(){
+    fetch(INTRADAY_URL,{cache:'no-store'})
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(d){ if(d&&!d.error) renderIntraday(d); })
+      .catch(function(){ /* silent: a missed intraday tick isn't a feed error, same reasoning as updateLivePrices */ });
   }
 
   function meter(score){
@@ -3154,6 +3243,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   }
 
   var LIVE_MS = 20*1000;
+  var INTRADAY_MS = 60*1000;
   function flashCell(el){
     if(!el) return;
     el.classList.remove('flash');
@@ -3225,6 +3315,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       .finally(function(){ nextCheckAt = Date.now()+REFETCH_MS; });
   }
   load();
+  loadIntraday();
   setTimeout(updateLivePrices, 2000); // small delay so the boards exist to patch into
   var methodologyEl=document.querySelector('details');
   if(methodologyEl) methodologyEl.addEventListener('toggle',function(){
@@ -3232,6 +3323,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   });
   setInterval(load, REFETCH_MS);
   setInterval(updateLivePrices, LIVE_MS);
+  setInterval(loadIntraday, INTRADAY_MS);
 })();
 </script>
 </body>
@@ -3331,6 +3423,20 @@ export default {
         return json(cached, { 'X-FCS-Cache': isFresh(cached) ? 'hit' : 'stale' });
       }
       return json({ error: 'signals not yet built — waiting on the first scheduled build to populate the cache' }, { 'X-FCS-Cache': 'empty' });
+    }
+
+    // Day-trading intraday read: single KV read, same "Worker only ever
+    // serves a pre-computed payload" shape as /api/signals above, just a
+    // separate pipeline/key (scripts/intraday-tick.mjs, its own 5-minute
+    // cron) with a much shorter expected freshness window. Deliberately
+    // no leverage, liquidation price, or position-size figures in this
+    // payload — see scripts/intraday.mjs's paper-trading section for why.
+    if (path === '/api/intraday' || path === 'api/intraday') {
+      const cached = await getCachedIntraday(env);
+      if (cached) {
+        return json(cached, { 'X-FCS-Cache': isIntradayFresh(cached) ? 'hit' : 'stale' });
+      }
+      return json({ error: 'intraday signals not yet built — waiting on the first tick to populate the cache' }, { 'X-FCS-Cache': 'empty' });
     }
 
     // Live price ticks between hourly rebuilds — deliberately the one

@@ -11,7 +11,7 @@
 // job — casts signals and evaluates maturity every tick, since both are
 // cheap D1-only operations once ticks already exist).
 import { d1, chunk } from './d1-client.mjs';
-import { intradaySignal, nearestTick, INTRADAY_DEADBAND_PCT, INTRADAY_TICK_TOLERANCE_MIN } from '../worker.js';
+import { intradaySignal, nearestTick, INTRADAY_DEADBAND_PCT, INTRADAY_TICK_TOLERANCE_MIN, MIN_RELIABILITY_SAMPLES, isReliabilitySignificant } from '../worker.js';
 
 // No user-facing leverage/liquidation/position-size numbers ever leave
 // this module — see scripts/intraday-tick.mjs's assembled display object
@@ -342,4 +342,66 @@ const PAPER_TRADE_RETENTION_DAYS = 90;
 export async function pruneClosedPaperTrades(env, nowMs = Date.now(), retentionDays = PAPER_TRADE_RETENTION_DAYS) {
   const cutoff = new Date(nowMs - retentionDays * 24 * 3600 * 1000).toISOString();
   await d1(env, "DELETE FROM paper_trades WHERE status = 'closed' AND exit_at < ?", [cutoff]);
+}
+
+// ------------------------- DISPLAY PAYLOAD ASSEMBLY --------------------------
+const HORIZON_LABELS = { 15: '15m', 30: '30m', 60: '1h' };
+
+// Assembles the exact JSON scripts/intraday-tick.mjs writes to
+// signals:intraday (served as-is by the Worker's /api/intraday route —
+// see worker.js). Deliberately excludes leverage, liquidation price, and
+// position size: this is an informational signal display, not
+// individualized trading advice (the paper-trading module above uses
+// those numbers internally for its own bookkeeping only). The adaptive
+// horizon (try 15min, fall back to 30, then 60) uses the exact same
+// MIN_RELIABILITY_SAMPLES + isReliabilitySignificant gate every other
+// confidence number in this codebase already uses — falls back to the
+// shortest horizon with 'methodology' basis and no confidence number
+// (never a fabricated one) when nothing has cleared the bar yet.
+export async function buildIntradayDisplayPayload(env, watchlist, ticksBySymbol, nowIso) {
+  const symbols = watchlist.map((w) => w.symbol);
+  if (!symbols.length) return { generated_at: nowIso, watchlist: [], trackRecord: {} };
+
+  const placeholders = symbols.map(() => '?').join(',');
+  const relRows = await d1(env, `SELECT symbol, horizon_minutes, correct, total, accuracy FROM intraday_reliability WHERE symbol IN (${placeholders})`, symbols);
+  const relBySymbol = {};
+  for (const r of relRows) (relBySymbol[r.symbol] ??= {})[r.horizon_minutes] = r;
+
+  const statsRows = await d1(env, 'SELECT asset_class, SUM(wins) AS wins, SUM(losses) AS losses, SUM(total) AS total, SUM(sum_return_pct) AS sum_return_pct FROM paper_trade_stats GROUP BY asset_class');
+  const trackRecord = {};
+  for (const r of statsRows) {
+    trackRecord[r.asset_class] = {
+      wins: r.wins, losses: r.losses, total: r.total,
+      winRate: r.total ? r.wins / r.total : null,
+      avgReturnPct: r.total ? r.sum_return_pct / r.total : null
+    };
+  }
+
+  const displayList = [];
+  for (const w of watchlist) {
+    const entry = ticksBySymbol[w.symbol];
+    const ticks = entry ? entry.ticks : [];
+    if (!ticks.length) continue; // never ticked yet (a symbol just added to the watchlist)
+    const current = ticks.reduce((a, b) => (new Date(b.tick_at).getTime() > new Date(a.tick_at).getTime() ? b : a));
+    const sig = intradaySignal(ticks, nowIso, w.assetClass);
+
+    let horizonMinutes = null, basis = 'methodology', confidence = null;
+    for (const h of INTRADAY_HORIZONS_MIN) {
+      const rec = relBySymbol[w.symbol] && relBySymbol[w.symbol][h];
+      if (rec && rec.total >= MIN_RELIABILITY_SAMPLES && isReliabilitySignificant(rec.correct, rec.total)) {
+        horizonMinutes = h; basis = 'historical'; confidence = rec.accuracy;
+        break;
+      }
+    }
+    if (horizonMinutes == null) horizonMinutes = INTRADAY_HORIZONS_MIN[0];
+
+    displayList.push({
+      symbol: w.symbol, assetClass: w.assetClass, price: current.price,
+      dir: sig.dir ?? 0, peaked: !!sig.peaked, bottomed: !!sig.bottomed,
+      horizonMinutes, horizonLabel: HORIZON_LABELS[horizonMinutes] || `${horizonMinutes}m`,
+      basis, confidence
+    });
+  }
+
+  return { generated_at: nowIso, watchlist: displayList, trackRecord };
 }

@@ -1063,6 +1063,34 @@ const stale = await worker.fetch(new Request('https://x.com/signals/api/signals'
 check('serves stale cache, marked "stale"', stale.headers.get('x-fcs-cache') === 'stale', stale.headers.get('x-fcs-cache'));
 check('stale response body still has real data', (await stale.json()).crypto.breakout.length > 0);
 
+console.log('\n== api: /api/intraday — day-trading signal, separate KV key, no leverage/liquidation/sizing fields ==');
+const intradayEmptyEnv = { FCS_CACHE: new MockKV() };
+const intradayEmpty = await worker.fetch(new Request('https://x.com/signals/api/intraday'), intradayEmptyEnv, ctx);
+check('no tick yet: still 200 with an error body, not a crash', intradayEmpty.status === 200 && typeof (await intradayEmpty.json()).error === 'string');
+
+const intradayPayload = {
+  generated_at: new Date().toISOString(),
+  watchlist: [
+    { symbol: 'BTC', assetClass: 'crypto', price: 65000, dir: 1, peaked: false, bottomed: false, horizonMinutes: 15, horizonLabel: '15m', basis: 'methodology', confidence: null }
+  ],
+  trackRecord: { crypto: { wins: 6, losses: 4, total: 10, winRate: 0.6, avgReturnPct: 3.2 } }
+};
+const intradayWarmEnv = { FCS_CACHE: new MockKV() };
+await intradayWarmEnv.FCS_CACHE.put(mod.INTRADAY_CACHE_KEY, JSON.stringify(intradayPayload));
+const intradayWarm = await worker.fetch(new Request('https://x.com/signals/api/intraday'), intradayWarmEnv, ctx);
+check('warm marked hit', intradayWarm.headers.get('x-fcs-cache') === 'hit', intradayWarm.headers.get('x-fcs-cache'));
+const intradayBody = await intradayWarm.json();
+check('returns the stored watchlist', intradayBody.watchlist.length === 1 && intradayBody.watchlist[0].symbol === 'BTC');
+const intradayBodyStr = JSON.stringify(intradayBody).toLowerCase();
+check('no leverage field anywhere in the served payload', !intradayBodyStr.includes('leverage'));
+check('no liquidation field anywhere in the served payload', !intradayBodyStr.includes('liquidat'));
+check('no position-size/margin field anywhere in the served payload', !intradayBodyStr.includes('margin') && !intradayBodyStr.includes('positionsize') && !intradayBodyStr.includes('position_size'));
+
+const intradayStaleEnv = { FCS_CACHE: new MockKV() };
+await intradayStaleEnv.FCS_CACHE.put(mod.INTRADAY_CACHE_KEY, JSON.stringify({ ...intradayPayload, generated_at: new Date(Date.now() - 60 * 60 * 1000).toISOString() }));
+const intradayStale = await worker.fetch(new Request('https://x.com/signals/api/intraday'), intradayStaleEnv, ctx);
+check('stale (past the 45min intraday freshness window) marked stale', intradayStale.headers.get('x-fcs-cache') === 'stale', intradayStale.headers.get('x-fcs-cache'));
+
 console.log('\n== api: live prices (between-build ticks, real fetch, symbols only from KV) ==');
 const pricesEmptyEnv = { FCS_CACHE: new MockKV() };
 const pricesEmpty = await worker.fetch(new Request('https://x.com/signals/api/prices'), pricesEmptyEnv, ctx);
