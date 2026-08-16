@@ -1179,5 +1179,62 @@ const cappedWatchlist = selectIntradayWatchlist(manyCrypto, manyFunding, []);
 check('crypto watchlist caps at CRYPTO_WATCHLIST_SIZE when more than enough qualify', cappedWatchlist.filter(w => w.assetClass === 'crypto').length === CRYPTO_WATCHLIST_SIZE);
 check('empty funding map: no crypto qualifies, equities still populate', selectIntradayWatchlist(wlCrypto, {}, wlStocks).filter(w => w.assetClass === 'crypto').length === 0);
 
+console.log('\n== nearestTick: nearest-within-tolerance lookup for irregularly-spaced ticks ==');
+const T0 = new Date('2026-08-16T12:00:00Z').getTime();
+const irregularTicks = [
+  { tick_at: new Date(T0 - 42 * 60000).toISOString(), price: 100 },
+  { tick_at: new Date(T0 - 31 * 60000).toISOString(), price: 101 }, // nearest to the -30min target below
+  { tick_at: new Date(T0 - 12 * 60000).toISOString(), price: 105 },
+  { tick_at: new Date(T0 - 3 * 60000).toISOString(), price: 108 }
+];
+check('finds the nearest tick within tolerance, not just the first candidate', mod.nearestTick(irregularTicks, T0 - 30 * 60000, 10 * 60000).price === 101);
+check('a target with nothing within tolerance returns null, not a distant fallback', mod.nearestTick(irregularTicks, T0 - 90 * 60000, 10 * 60000) === null);
+check('empty tick array: null, not a crash', mod.nearestTick([], T0, 10 * 60000) === null);
+check('exact match wins over a slightly-off one', mod.nearestTick(irregularTicks, T0 - 3 * 60000, 10 * 60000).price === 108);
+
+console.log('\n== intradaySignal: 2-of-2 momentum confluence off price-only ticks, deadband + day-extreme aware ==');
+const mkTicks = (pricesAgoMin) => pricesAgoMin.map(([minAgo, price]) => ({ tick_at: new Date(T0 - minAgo * 60000).toISOString(), price }));
+const upTrend = mkTicks([[65, 100], [60, 100], [16, 100], [15, 100], [1, 103]]); // +3% over both windows, clears the 0.3% crypto deadband, agrees in sign
+const sigUp = mod.intradaySignal(upTrend, new Date(T0).toISOString(), 'crypto');
+check('sustained up move over both windows: fires bullish', sigUp.dir === 1, JSON.stringify(sigUp));
+const downTrend = mkTicks([[65, 100], [60, 100], [16, 100], [15, 100], [1, 97]]);
+const sigDown = mod.intradaySignal(downTrend, new Date(T0).toISOString(), 'crypto');
+check('sustained down move over both windows: fires bearish', sigDown.dir === -1, JSON.stringify(sigDown));
+const disagreeing = mkTicks([[65, 100], [60, 100], [16, 100], [15, 97], [1, 100]]); // down over 15min, flat over 60min: windows disagree
+const sigDisagree = mod.intradaySignal(disagreeing, new Date(T0).toISOString(), 'crypto');
+check('windows disagree in sign: neutral (0), not a fabricated direction', sigDisagree.dir === 0, JSON.stringify(sigDisagree));
+const tinyMove = mkTicks([[65, 100], [60, 100], [16, 100], [15, 100.1], [1, 100.15]]); // real but under the crypto deadband
+const sigTiny = mod.intradaySignal(tinyMove, new Date(T0).toISOString(), 'crypto');
+check('move too small to clear the deadband: neutral (0), not noise treated as signal', sigTiny.dir === 0, JSON.stringify(sigTiny));
+const missingWindow = mkTicks([[16, 100], [1, 103]]); // no tick near -60min at all
+const sigMissing = mod.intradaySignal(missingWindow, new Date(T0).toISOString(), 'crypto');
+check('missing a momentum window entirely: abstains (null), not a guess off partial data', sigMissing.dir === null && sigMissing.peaked === null && sigMissing.bottomed === null, JSON.stringify(sigMissing));
+check('empty ticks array: abstains, not a crash', mod.intradaySignal([], new Date(T0).toISOString(), 'crypto').dir === null);
+const sigEquityTiny = mod.intradaySignal(mkTicks([[65, 100], [60, 100], [16, 100], [15, 100.05], [1, 100.08]]), new Date(T0).toISOString(), 'stock');
+check('equities use a tighter deadband than crypto (same-sized move that would fire for crypto does not for a stock)', sigEquityTiny.dir === 0, JSON.stringify(sigEquityTiny));
+
+// Peaked/bottomed: current price sits within INTRADAY_EXTREME_PROXIMITY_PCT
+// of the rolling day high/low AND the directional call agrees (bearish
+// near the high = peaked, bullish near the low = bottomed). Each case
+// includes a far-outside-the-momentum-windows anchor tick that sets the
+// OPPOSITE day extreme unambiguously, so the proximity check can't pass
+// by degenerate accident (e.g. the current tick happening to also be the
+// dataset's min/max just because the array is short).
+const peakedCase = [
+  { tick_at: new Date(T0 - 300 * 60000).toISOString(), price: 85 }, // unambiguous day low, far outside both momentum windows
+  ...mkTicks([[65, 100.5], [60, 100.5], [16, 100.3], [15, 100.2], [1, 99.8]]) // downtrend ending near the day high (100.5)
+];
+const sigPeaked = mod.intradaySignal(peakedCase, new Date(T0).toISOString(), 'crypto');
+check('bearish call landing within the day-high proximity band: flags peaked', sigPeaked.dir === -1 && sigPeaked.peaked === true, JSON.stringify(sigPeaked));
+check('a peaked call does not also claim bottomed', sigPeaked.bottomed === false, JSON.stringify(sigPeaked));
+const bottomedCase = [
+  { tick_at: new Date(T0 - 300 * 60000).toISOString(), price: 115 }, // unambiguous day high, far outside both momentum windows
+  ...mkTicks([[65, 89.5], [60, 89.5], [16, 89.8], [15, 89.9], [1, 90.2]]) // uptrend ending near the day low (89.5)
+];
+const sigBottomed = mod.intradaySignal(bottomedCase, new Date(T0).toISOString(), 'crypto');
+check('bullish call landing within the day-low proximity band: flags bottomed', sigBottomed.dir === 1 && sigBottomed.bottomed === true, JSON.stringify(sigBottomed));
+check('a bottomed call does not also claim peaked', sigBottomed.peaked === false, JSON.stringify(sigBottomed));
+check('a directional call far from either day extreme flags neither', sigUp.peaked === false && sigUp.bottomed === false, JSON.stringify(sigUp));
+
 console.log(failures === 0 ? '\nWORKER INTEGRATION OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

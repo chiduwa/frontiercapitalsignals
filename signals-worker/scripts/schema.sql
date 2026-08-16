@@ -360,3 +360,41 @@ CREATE TABLE IF NOT EXISTS intraday_price_ticks (
   PRIMARY KEY (tick_at, symbol)
 );
 CREATE INDEX IF NOT EXISTS idx_intraday_ticks_symbol_time ON intraday_price_ticks(symbol, tick_at);
+
+-- One row per (tick_at, symbol, horizon_minutes): intradaySignal (worker.js)
+-- computed once per symbol per tick, logged simultaneously against three
+-- candidate horizons (15/30/60 min) — the same "compute once, log at
+-- several horizons" shape range_log already uses for the 1-day/7-day
+-- range predictions. `evaluated` flips once evaluateIntradayMatured has
+-- scored the row against the realized price at tick_at + horizon_minutes.
+CREATE TABLE IF NOT EXISTS intraday_signal_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tick_at TEXT NOT NULL,
+  asset_class TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  horizon_minutes INTEGER NOT NULL,
+  dir INTEGER NOT NULL,
+  entry_price REAL NOT NULL,
+  peaked INTEGER NOT NULL DEFAULT 0,
+  bottomed INTEGER NOT NULL DEFAULT 0,
+  evaluated INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_intraday_signal_log_unique ON intraday_signal_log(tick_at, symbol, horizon_minutes);
+CREATE INDEX IF NOT EXISTS idx_intraday_signal_log_due ON intraday_signal_log(horizon_minutes, evaluated, tick_at);
+
+-- Mirrors technique_reliability's shape, keyed by (symbol, horizon_minutes)
+-- instead of (symbol, technique_id, horizon_hours) — this is one
+-- purpose-built calculation, not competing techniques, so there's no
+-- technique-id dimension. reliabilityMultiplier's exact significance gate
+-- (worker.js) is reused to decide when a horizon's accuracy is trustworthy
+-- enough to display, same as everywhere else.
+CREATE TABLE IF NOT EXISTS intraday_reliability (
+  asset_class TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  horizon_minutes INTEGER NOT NULL,
+  correct INTEGER NOT NULL DEFAULT 0,
+  total INTEGER NOT NULL DEFAULT 0,
+  accuracy REAL NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (symbol, horizon_minutes)
+);

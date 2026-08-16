@@ -796,6 +796,98 @@ export function computeSpreadSeries(closesA, closesB, minPoints = 30) {
   return dates.map((date) => ({ date, close: closesA[date] - closesB[date] }));
 }
 
+// ------------------------- INTRADAY DAY-TRADING SIGNAL ---------------------
+// Purpose-built, not a re-skin of evaluateTechniques/TECHNIQUE_META/push():
+// that machinery's "never fire on one signal alone" confluence discipline
+// is meaningful because its ~28 techniques are genuinely different reads
+// (RSI, OBV, valuation, funding, sentiment...). At the 5-90 minute
+// resolution scripts/intraday-tick.mjs's price-only ticks provide, the
+// only real input is price — manufacturing several "techniques" off one
+// series would fake diversity, not add it. Used by scripts/intraday.mjs
+// (signal casting, maturity scoring), never by buildPayload/the confluence
+// engine — see scripts/intraday.mjs's top comment for the full "why a
+// separate pipeline" reasoning.
+
+// Nearest tick to a target instant, within a tolerance — the same
+// "irregular real-world sampling, not clean N-minutes-ago" pattern
+// evaluateTimeOfDay (reliability.mjs) already uses for hour-scale
+// horizons, just at minute scale. `ticks`: [{tick_at, price}] for ONE
+// symbol, any order. Returns null (not a guess) if nothing falls within
+// tolerance — a genuinely missed window should abstain, not fabricate a
+// stale match.
+export function nearestTick(ticks, targetMs, toleranceMs) {
+  let best = null, bestDiff = Infinity;
+  for (const t of ticks) {
+    const diff = Math.abs(new Date(t.tick_at).getTime() - targetMs);
+    if (diff <= toleranceMs && diff < bestDiff) { bestDiff = diff; best = t; }
+  }
+  return best;
+}
+
+// Asset-class-keyed: crypto is naturally more volatile intraday than
+// equities, so a move that's meaningful signal for AAPL would be routine
+// noise for a mid-cap coin, and a bar loose enough for crypto would almost
+// never clear for a mega-cap stock.
+export const INTRADAY_DEADBAND_PCT = { crypto: 0.3, stock: 0.15 };
+// How close to the rolling 24h high/low counts as "at the extreme" for the
+// peaked/bottomed flag — a scaled-down version of the same "near a recent
+// extreme" idea the Donchian/range technique already uses, just over a 24h
+// rolling window instead of a 20-daily-bar one (a different enough
+// timeframe that reusing an exact existing constant wouldn't transfer any
+// real information).
+const INTRADAY_EXTREME_PROXIMITY_PCT = 1.5;
+// How far a matched tick is allowed to sit from the ideal target instant —
+// generous relative to the 15/60-min lookback windows themselves because
+// the real achieved tick cadence is irregular (confirmed live: GitHub's
+// scheduler doesn't deliver clean 5-minute firings even on a 5-minute
+// cron), not because a looser match is desirable on its own. Exported and
+// reused by evaluateIntradayMatured (scripts/intraday.mjs) for the exact
+// same reason at maturity-check time, not just at casting time.
+export const INTRADAY_TICK_TOLERANCE_MIN = 10;
+const INTRADAY_DAY_WINDOW_HOURS = 24;
+
+// ticks: all recent ticks for ONE symbol (ideally covering the last ~24h,
+// for the day-high/low read below) — [{tick_at, price}], any order.
+// Returns { dir, peaked, bottomed }, all null when there isn't enough data
+// to say anything (a missing momentum window) — this codebase's "abstain,
+// don't fabricate" discipline, same as every technique in evaluateTechniques.
+// dir is 0 (not null) when data exists but the two momentum windows
+// disagree or neither clears its deadband — a real "no signal," not
+// missing data. Two independent time-windowed momentum reads (now vs.
+// ~15 min ago, now vs. ~60 min ago) must agree in sign and both clear the
+// deadband before dir fires — a minimal, honest 2-of-2 rule sized to the
+// only real information price-only ticks actually carry.
+export function intradaySignal(ticks, nowIso, assetClass) {
+  if (!ticks || !ticks.length) return { dir: null, peaked: null, bottomed: null };
+  const now = new Date(nowIso).getTime();
+  const toleranceMs = INTRADAY_TICK_TOLERANCE_MIN * 60 * 1000;
+
+  const current = ticks.reduce((a, b) => (new Date(b.tick_at).getTime() > new Date(a.tick_at).getTime() ? b : a));
+  const ref15 = nearestTick(ticks, now - 15 * 60 * 1000, toleranceMs);
+  const ref60 = nearestTick(ticks, now - 60 * 60 * 1000, toleranceMs);
+  if (!ref15 || !ref60 || !current.price) return { dir: null, peaked: null, bottomed: null };
+
+  const pct15 = ((current.price / ref15.price) - 1) * 100;
+  const pct60 = ((current.price / ref60.price) - 1) * 100;
+  const deadband = INTRADAY_DEADBAND_PCT[assetClass] ?? INTRADAY_DEADBAND_PCT.crypto;
+  const sign15 = pct15 > deadband ? 1 : pct15 < -deadband ? -1 : 0;
+  const sign60 = pct60 > deadband ? 1 : pct60 < -deadband ? -1 : 0;
+  const dir = (sign15 !== 0 && sign15 === sign60) ? sign15 : 0;
+
+  const dayCutoff = now - INTRADAY_DAY_WINDOW_HOURS * 3600 * 1000;
+  const dayTicks = ticks.filter((t) => new Date(t.tick_at).getTime() >= dayCutoff);
+  const dayHigh = dayTicks.length ? Math.max(...dayTicks.map((t) => t.price)) : current.price;
+  const dayLow = dayTicks.length ? Math.min(...dayTicks.map((t) => t.price)) : current.price;
+  const nearHigh = dayHigh > 0 && ((dayHigh - current.price) / dayHigh) * 100 <= INTRADAY_EXTREME_PROXIMITY_PCT;
+  const nearLow = dayLow > 0 && ((current.price - dayLow) / dayLow) * 100 <= INTRADAY_EXTREME_PROXIMITY_PCT;
+
+  return {
+    dir,
+    peaked: dir === -1 && nearHigh,
+    bottomed: dir === 1 && nearLow
+  };
+}
+
 // Does this asset's own price history contain a period that behaved like
 // its last `windowDays`, roughly one or more "years" (cycleLength bars —
 // 365 for continuously-traded crypto, ~252 trading days for equities) ago?
