@@ -496,11 +496,19 @@ CREATE TABLE IF NOT EXISTS correlation_research_findings (
   notes TEXT
 );
 
+-- wrong_opposite/wrong_flat (added alongside the intraday polarity check,
+-- correlation-research.mjs's intraday_reversal_* findings): splits what
+-- used to be a single "wrong" bucket into a genuine reversal (the market
+-- moved, just not the way the call predicted) vs. a flat market (the
+-- market never moved enough either way) — the distinction the polarity
+-- check itself is built on. See replayIntradaySignal's own docs.
 CREATE TABLE IF NOT EXISTS intraday_backtest_reliability (
   asset_class TEXT NOT NULL,
   symbol TEXT NOT NULL,
   horizon_minutes INTEGER NOT NULL,
   correct INTEGER NOT NULL DEFAULT 0,
+  wrong_opposite INTEGER NOT NULL DEFAULT 0,
+  wrong_flat INTEGER NOT NULL DEFAULT 0,
   total INTEGER NOT NULL DEFAULT 0,
   accuracy REAL NOT NULL DEFAULT 0,
   window_start TEXT NOT NULL,

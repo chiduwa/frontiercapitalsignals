@@ -923,17 +923,33 @@ const REPLAY_FORWARD_WINDOW_TICKS = 12; // ~3h at 15-min spacing — comfortably
 // order. horizonsMin: which forward horizons to score (the caller passes
 // INTRADAY_HORIZONS_MIN from scripts/intraday.mjs — not imported directly
 // here, since that module already imports FROM this file; the reverse
-// would be circular). Returns { [horizonMinutes]: {correct, total} }.
+// would be circular). Returns
+// { [horizonMinutes]: {correct, wrongOpposite, wrongFlat, total, observations} }.
 // Only genuinely directional casts are scored (same "nothing to score for
 // a call that was never made" convention castIntradaySignals already
 // uses), and only when a real future tick exists within tolerance of the
 // target horizon — a call near the end of the series with no future data
 // yet is left out, not scored as a loss.
+//
+// A "wrong" call is split into two very different outcomes, not lumped
+// together: wrongOpposite (the market moved past the deadband in the
+// OPPOSITE direction from the call — a genuine reversal) vs. wrongFlat
+// (the market just never cleared the deadband either way — no real move
+// to have been right or wrong about). This distinction is the whole
+// point: an aggregate accuracy number alone can't tell you whether a low
+// score means "the signal has the direction backwards" (wrongOpposite-
+// heavy, fixable by flipping dir) or "the signal fires into mostly flat
+// markets" (wrongFlat-heavy, not fixable by a sign flip at all). Each
+// scored observation also carries its cast date, so a caller can pool
+// observations across the whole watchlist and run them through
+// chronologicalHalfSplit — the same train/test discipline every other
+// finding in this project (see correlation-research.mjs) has to clear
+// before being trusted.
 export function replayIntradaySignal(ticks, assetClass, horizonsMin) {
   const sorted = ticks.slice().sort((a, b) => new Date(a.tick_at).getTime() - new Date(b.tick_at).getTime());
   const toleranceMs = INTRADAY_TICK_TOLERANCE_MIN * 60 * 1000;
   const results = {};
-  for (const h of horizonsMin) results[h] = { correct: 0, total: 0 };
+  for (const h of horizonsMin) results[h] = { correct: 0, wrongOpposite: 0, wrongFlat: 0, total: 0, observations: [] };
 
   for (let i = 0; i < sorted.length; i++) {
     const windowStart = Math.max(0, i - REPLAY_TRAILING_WINDOW_TICKS);
@@ -953,7 +969,9 @@ export function replayIntradaySignal(ticks, assetClass, horizonsMin) {
       const deadband = INTRADAY_DEADBAND_PCT[assetClass] ?? INTRADAY_DEADBAND_PCT.crypto;
       const actualDir = pct > deadband ? 1 : pct < -deadband ? -1 : 0;
       results[h].total += 1;
-      if (sig.dir === actualDir) results[h].correct += 1;
+      const outcome = sig.dir === actualDir ? 'correct' : actualDir === -sig.dir ? 'wrongOpposite' : 'wrongFlat';
+      results[h][outcome] += 1;
+      results[h].observations.push({ date: nowIso.slice(0, 10), outcome });
     }
   }
   return results;

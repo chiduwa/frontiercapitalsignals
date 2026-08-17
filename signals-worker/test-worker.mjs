@@ -1356,6 +1356,19 @@ const oscTicks = mkReplayTicks('2026-01-01T00:00:00.000Z', oscPrices);
 const oscResults = mod.replayIntradaySignal(oscTicks, 'crypto', [60]);
 check('an oscillation shorter than the scoring horizon: fires plenty of scoreable calls', oscResults[60].total > 20, JSON.stringify(oscResults[60]));
 check('a genuine reversal right after signal produces sharply worse accuracy than clean continuation (proves wrong calls are penalized, not just counted)', (oscResults[60].correct / oscResults[60].total) < 0.15, JSON.stringify(oscResults[60]));
+check('a genuine reversal is bucketed as wrongOpposite, not wrongFlat — the whole point of the 3-way split (the market DID move, just not the way the signal called)', oscResults[60].wrongOpposite / oscResults[60].total > 0.8, JSON.stringify(oscResults[60]));
+check('correct + wrongOpposite + wrongFlat always sums to total', oscResults[60].correct + oscResults[60].wrongOpposite + oscResults[60].wrongFlat === oscResults[60].total);
+check('every scored call is recorded as an {date, outcome} observation for later pooling/half-split', oscResults[60].observations.length === oscResults[60].total && oscResults[60].observations.every(o => /^\d{4}-\d{2}-\d{2}$/.test(o.date) && ['correct', 'wrongOpposite', 'wrongFlat'].includes(o.outcome)), JSON.stringify(oscResults[60].observations.slice(0, 3)));
+
+// A single sharp jump (well clear of both momentum windows, so a call
+// genuinely fires) followed by a long flat plateau: the call is real, but
+// the market never moves again — must land in wrongFlat, not wrongOpposite.
+const stepPrices = [...Array(60).fill(100), 102, ...Array(60).fill(102)];
+const stepTicks = mkReplayTicks('2026-01-01T00:00:00.000Z', stepPrices);
+const stepResults = mod.replayIntradaySignal(stepTicks, 'crypto', [60]);
+check('a genuine call scored against a subsequently flat market lands in wrongFlat, not wrongOpposite or correct', stepResults[60].total > 0 && stepResults[60].wrongFlat === stepResults[60].total, JSON.stringify(stepResults[60]));
+
+check('steadily rising series: correct calls dominate wrongOpposite (continuation genuinely wins here)', risingResults[15].correct > risingResults[15].wrongOpposite, JSON.stringify(risingResults[15]));
 
 check('empty ticks: every horizon returns {correct:0, total:0}, not a crash', Object.values(mod.replayIntradaySignal([], 'crypto', [15, 30, 60])).every(r => r.correct === 0 && r.total === 0));
 check('a single tick: nothing to score', Object.values(mod.replayIntradaySignal([{ tick_at: '2026-01-01T00:00:00.000Z', price: 100 }], 'crypto', [15])).every(r => r.total === 0));
