@@ -1,0 +1,36 @@
+name: Signals Intraday Backtest
+
+# Occasional research pass, not a forward-accumulating daily job — backtest-
+# seeds intraday_backtest_reliability by replaying the live intradaySignal
+# function (via replayIntradaySignal, worker.js) against ~2 years of real
+# Binance.US 15-minute history for the day-trading watchlist. Re-run
+# manually whenever a fresh read is wanted (e.g. after tuning
+# intradaySignal's deadband/proximity constants) — each run replaces the
+# aggregate row per (symbol, horizon) with a fresh computation over the
+# current window, nothing to resume across runs.
+on:
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    # ~1775 requests at 300ms pacing (~71/symbol x 25 symbols) is ~9
+    # minutes of fetch time alone, plus the replay computation itself —
+    # generous headroom above that estimate.
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Backtest the intraday signal against Binance.US history
+        working-directory: signals-worker
+        run: node scripts/backtest-intraday.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}

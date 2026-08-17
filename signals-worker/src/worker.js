@@ -895,6 +895,66 @@ export function intradaySignal(ticks, nowIso, assetClass) {
   };
 }
 
+// ------------------------- INTRADAY BACKTEST REPLAY -------------------------
+// Backtest-seeds intraday_backtest_reliability (scripts/backtest-intraday.mjs)
+// by walking historical ticks through this exact intradaySignal function —
+// zero new signal-computation logic, just a driver that scores what the
+// SAME live function would have called at each point in history. Kept
+// separate from the live intraday_reliability table (not wired into
+// buildIntradayDisplayPayload's adaptive-horizon selection) — backtested
+// accuracy on dense, regular Binance candles isn't automatically
+// comparable to live accuracy on genuinely irregular real-world ticks
+// without its own scrutiny first.
+
+// intradaySignal only ever looks back ~25h from "now" (its own day-window
+// plus the 60-min momentum lookback) — passing the WHOLE historical array
+// at every index would be O(n) per call, O(n^2) total (~4.9B ops for a
+// year of 15-min bars), when only a small trailing slice is ever actually
+// read. Bounding both the trailing (casting) and forward (scoring)
+// windows to small constants keeps the whole replay O(n).
+const REPLAY_TRAILING_WINDOW_TICKS = 120; // ~30h at 15-min spacing, with slack for irregular real-world gaps
+const REPLAY_FORWARD_WINDOW_TICKS = 12; // ~3h at 15-min spacing — comfortably covers the longest (60-min) horizon plus tolerance
+
+// ticks: one symbol's full historical series, [{tick_at, price}], any
+// order. horizonsMin: which forward horizons to score (the caller passes
+// INTRADAY_HORIZONS_MIN from scripts/intraday.mjs — not imported directly
+// here, since that module already imports FROM this file; the reverse
+// would be circular). Returns { [horizonMinutes]: {correct, total} }.
+// Only genuinely directional casts are scored (same "nothing to score for
+// a call that was never made" convention castIntradaySignals already
+// uses), and only when a real future tick exists within tolerance of the
+// target horizon — a call near the end of the series with no future data
+// yet is left out, not scored as a loss.
+export function replayIntradaySignal(ticks, assetClass, horizonsMin) {
+  const sorted = ticks.slice().sort((a, b) => new Date(a.tick_at).getTime() - new Date(b.tick_at).getTime());
+  const toleranceMs = INTRADAY_TICK_TOLERANCE_MIN * 60 * 1000;
+  const results = {};
+  for (const h of horizonsMin) results[h] = { correct: 0, total: 0 };
+
+  for (let i = 0; i < sorted.length; i++) {
+    const windowStart = Math.max(0, i - REPLAY_TRAILING_WINDOW_TICKS);
+    const window = sorted.slice(windowStart, i + 1);
+    const nowIso = sorted[i].tick_at;
+    const sig = intradaySignal(window, nowIso, assetClass);
+    if (!sig.dir) continue; // abstain or neutral: nothing to score
+
+    const entryPrice = sorted[i].price;
+    const nowMs = new Date(nowIso).getTime();
+    const future = sorted.slice(i + 1, i + 1 + REPLAY_FORWARD_WINDOW_TICKS);
+    for (const h of horizonsMin) {
+      const targetMs = nowMs + h * 60 * 1000;
+      const match = nearestTick(future, targetMs, toleranceMs);
+      if (!match) continue; // no future tick within tolerance yet (near the end of the series) — not scoreable
+      const pct = ((match.price / entryPrice) - 1) * 100;
+      const deadband = INTRADAY_DEADBAND_PCT[assetClass] ?? INTRADAY_DEADBAND_PCT.crypto;
+      const actualDir = pct > deadband ? 1 : pct < -deadband ? -1 : 0;
+      results[h].total += 1;
+      if (sig.dir === actualDir) results[h].correct += 1;
+    }
+  }
+  return results;
+}
+
 // Does this asset's own price history contain a period that behaved like
 // its last `windowDays`, roughly one or more "years" (cycleLength bars —
 // 365 for continuously-traded crypto, ~252 trading days for equities) ago?

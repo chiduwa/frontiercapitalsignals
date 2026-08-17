@@ -464,3 +464,26 @@ CREATE TABLE IF NOT EXISTS asset_hourly_bars (
   PRIMARY KEY (symbol, bar_at)
 );
 CREATE INDEX IF NOT EXISTS idx_asset_hourly_bars_symbol ON asset_hourly_bars(symbol, bar_at);
+
+-- Backtest-seeds the live intraday_reliability table's own numbers by
+-- replaying replayIntradaySignal (worker.js) against ~2 years of Binance
+-- 15-minute klines (scripts/backtest-intraday.mjs) — deliberately a
+-- SEPARATE table, not merged into intraday_reliability or wired into
+-- buildIntradayDisplayPayload's adaptive-horizon selection: backtested
+-- accuracy on dense, regular candles isn't automatically comparable to
+-- live accuracy on genuinely irregular real-world ticks without its own
+-- scrutiny first. Replaced (not accumulated) on each run — see
+-- backtest-intraday.mjs for why an appending/incrementing shape doesn't
+-- fit an occasional re-run over a shifting historical window.
+CREATE TABLE IF NOT EXISTS intraday_backtest_reliability (
+  asset_class TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  horizon_minutes INTEGER NOT NULL,
+  correct INTEGER NOT NULL DEFAULT 0,
+  total INTEGER NOT NULL DEFAULT 0,
+  accuracy REAL NOT NULL DEFAULT 0,
+  window_start TEXT NOT NULL,
+  window_end TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (symbol, horizon_minutes)
+);

@@ -1320,5 +1320,45 @@ check('bullish call landing within the day-low proximity band: flags bottomed', 
 check('a bottomed call does not also claim peaked', sigBottomed.peaked === false, JSON.stringify(sigBottomed));
 check('a directional call far from either day extreme flags neither', sigUp.peaked === false && sigUp.bottomed === false, JSON.stringify(sigUp));
 
+console.log('\n== replayIntradaySignal: backtests intradaySignal against history, bounded windows, no live pipeline changes ==');
+const mkReplayTicks = (startIso, prices) => {
+  const startMs = new Date(startIso).getTime();
+  return prices.map((price, i) => ({ tick_at: new Date(startMs + i * 15 * 60000).toISOString(), price }));
+};
+
+const risingPrices = Array.from({ length: 200 }, (_, i) => 100 * Math.pow(1.005, i)); // +0.5%/15min tick, well clear of the 0.3% crypto deadband even one tick at a time
+const risingTicks = mkReplayTicks('2026-01-01T00:00:00.000Z', risingPrices);
+const risingResults = mod.replayIntradaySignal(risingTicks, 'crypto', [15, 30, 60]);
+check('steadily rising series: fires plenty of scoreable bullish calls', risingResults[15].total > 50, JSON.stringify(risingResults[15]));
+check('steadily rising series: high accuracy at 15min (correctly predicts continuation)', (risingResults[15].correct / risingResults[15].total) > 0.9, JSON.stringify(risingResults[15]));
+check('steadily rising series: high accuracy at 60min too', (risingResults[60].correct / risingResults[60].total) > 0.9, JSON.stringify(risingResults[60]));
+
+const flatPrices = Array.from({ length: 200 }, (_, i) => 100 + 0.05 * Math.sin(i)); // deterministic, tiny oscillation well under the 0.3% deadband
+const flatTicks = mkReplayTicks('2026-01-01T00:00:00.000Z', flatPrices);
+const flatResults = mod.replayIntradaySignal(flatTicks, 'crypto', [15, 30, 60]);
+check('flat/noisy series under the deadband: mostly abstains, very few scoreable calls', flatResults[15].total < 10, JSON.stringify(flatResults[15]));
+
+// Oscillating (period 6: 3 ticks up +0.6%, 3 ticks down -0.6%, repeating):
+// the 60-min horizon (4 ticks ahead) is longer than half the cycle, so a
+// call fired mid-trend is almost always scored against the OPPOSITE
+// phase — a genuine, reliably-reproducible reversal-right-after-signal
+// scenario (a single one-off reversal in an otherwise long trending
+// series gets diluted by all the correctly-scored calls either side of
+// it; a short, repeating cycle doesn't have that escape hatch). Proves
+// the scoring genuinely penalizes a call that turned out wrong, not just
+// counts how many calls fired.
+const oscPrices = [100];
+for (let cycle = 0; cycle < 40; cycle++) {
+  for (let i = 0; i < 3; i++) oscPrices.push(oscPrices[oscPrices.length - 1] * 1.006);
+  for (let i = 0; i < 3; i++) oscPrices.push(oscPrices[oscPrices.length - 1] * 0.994);
+}
+const oscTicks = mkReplayTicks('2026-01-01T00:00:00.000Z', oscPrices);
+const oscResults = mod.replayIntradaySignal(oscTicks, 'crypto', [60]);
+check('an oscillation shorter than the scoring horizon: fires plenty of scoreable calls', oscResults[60].total > 20, JSON.stringify(oscResults[60]));
+check('a genuine reversal right after signal produces sharply worse accuracy than clean continuation (proves wrong calls are penalized, not just counted)', (oscResults[60].correct / oscResults[60].total) < 0.15, JSON.stringify(oscResults[60]));
+
+check('empty ticks: every horizon returns {correct:0, total:0}, not a crash', Object.values(mod.replayIntradaySignal([], 'crypto', [15, 30, 60])).every(r => r.correct === 0 && r.total === 0));
+check('a single tick: nothing to score', Object.values(mod.replayIntradaySignal([{ tick_at: '2026-01-01T00:00:00.000Z', price: 100 }], 'crypto', [15])).every(r => r.total === 0));
+
 console.log(failures === 0 ? '\nWORKER INTEGRATION OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);
