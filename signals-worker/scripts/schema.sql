@@ -443,3 +443,24 @@ CREATE TABLE IF NOT EXISTS paper_trade_stats (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (asset_class, bucket)
 );
+
+-- ------------------------- DEEP HISTORICAL BACKFILL --------------------------
+-- Sub-daily OHLCV+volume history — asset_daily_bars above is daily-grain
+-- only. Crypto-only this round, sourced from Binance.US (binance.com is
+-- geo-blocked from this project's US-based infrastructure; Binance.US
+-- confirmed live and reachable instead — see backfill-history.mjs's
+-- Binance leg). Feeds two things: the time-of-day bootstrap (deeper/more
+-- regime-diverse than the Yahoo-hourly leg above, which already covers
+-- the whole universe for free) and the correlation-research phases.
+CREATE TABLE IF NOT EXISTS asset_hourly_bars (
+  symbol TEXT NOT NULL,
+  asset_class TEXT NOT NULL,
+  bar_at TEXT NOT NULL,
+  close REAL NOT NULL,
+  high REAL,
+  low REAL,
+  volume REAL,
+  source TEXT NOT NULL,
+  PRIMARY KEY (symbol, bar_at)
+);
+CREATE INDEX IF NOT EXISTS idx_asset_hourly_bars_symbol ON asset_hourly_bars(symbol, bar_at);

@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { computeSwingTimeTallies, barsRowsToReturnsBySymbol, matchProtocolsToUniverse } from './scripts/archive.mjs';
 import { selectIntradayWatchlist, CRYPTO_WATCHLIST_SIZE } from './scripts/intraday.mjs';
+import { parseBinanceKlines } from './scripts/archive.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -1244,6 +1245,23 @@ const manyFunding = Object.fromEntries(manyCrypto.map((c, i) => [c.symbol, { ope
 const cappedWatchlist = selectIntradayWatchlist(manyCrypto, manyFunding, []);
 check('crypto watchlist caps at CRYPTO_WATCHLIST_SIZE when more than enough qualify', cappedWatchlist.filter(w => w.assetClass === 'crypto').length === CRYPTO_WATCHLIST_SIZE);
 check('empty funding map: no crypto qualifies, equities still populate', selectIntradayWatchlist(wlCrypto, {}, wlStocks).filter(w => w.assetClass === 'crypto').length === 0);
+
+console.log('\n== parseBinanceKlines: real response shape, no network ==');
+// Real Binance klines shape (confirmed live against api.binance.us):
+// [openTime, open, high, low, close, volume, closeTime, quoteAssetVolume,
+// trades, takerBuyBaseVol, takerBuyQuoteVol, ignore] — price/volume fields
+// as strings, times as epoch ms.
+const rawKlineFixture = [
+  [1700000000000, '50000.00', '50500.50', '49800.25', '50250.75', '123.456', 1700003599999, '6180000.00', 5000, '60.0', '3020000.0', '0'],
+  [1700003600000, '50250.75', '50900.00', '50100.00', '50800.10', '98.765', 1700007199999, '4980000.00', 4200, '45.0', '2260000.0', '0']
+];
+const parsedKlines = parseBinanceKlines(rawKlineFixture);
+check('parses every row', parsedKlines.length === 2);
+check('ts is a real ISO string derived from openTime (ms)', parsedKlines[0].ts === new Date(1700000000000).toISOString(), parsedKlines[0].ts);
+check('close/high/low/volume parsed as real numbers, not strings', parsedKlines[0].close === 50250.75 && parsedKlines[0].high === 50500.50 && parsedKlines[0].low === 49800.25 && parsedKlines[0].volume === 123.456);
+check('second row parses independently and correctly', parsedKlines[1].close === 50800.10 && parsedKlines[1].ts === new Date(1700003600000).toISOString());
+check('non-array input: empty array, not a crash', parseBinanceKlines(null).length === 0 && parseBinanceKlines(undefined).length === 0 && parseBinanceKlines({}).length === 0);
+check('empty array input: empty output', parseBinanceKlines([]).length === 0);
 
 console.log('\n== nearestTick: nearest-within-tolerance lookup for irregularly-spaced ticks ==');
 const T0 = new Date('2026-08-16T12:00:00Z').getTime();

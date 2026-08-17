@@ -7,15 +7,18 @@
 //
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID
 // Optional env: BACKFILL_ROW_BUDGET (default 15000 — free-D1-tier-safe;
-//   raise once Workers Paid is confirmed active, see the plan)
+//   raise once Workers Paid is confirmed active, see the plan),
+//   BINANCE_ROW_BUDGET (default 15000, same reasoning)
 import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, BENCHMARK_SYMBOLS, computeTimeOfDayTallies } from '../worker.js';
 import {
   yahooFullHistory, coingeckoDailyBars, getExistingCoverage,
   upsertDailyBars, fundingSnapshotToRows, upsertFundingDaily,
   fearGreedHistory, insertFearGreedHistory,
   yahooHourlyBars, computeSwingTimeTallies, upsertSwingTimeStats, getSwingTimeCoverage,
-  upsertTimeOfDayStats
+  upsertTimeOfDayStats,
+  binanceUsExchangeInfo, binanceUsKlines, getExistingHourlyCoverage, upsertHourlyBars
 } from './archive.mjs';
+import { selectIntradayWatchlist } from './intraday.mjs';
 import { d1 } from './d1-client.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
@@ -33,6 +36,12 @@ const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID };
 // gets to make some progress every invocation.
 const PRICE_ROW_BUDGET = Number(process.env.BACKFILL_ROW_BUDGET || 15000);
 const FUNDING_ROW_BUDGET = Number(process.env.BACKFILL_FUNDING_ROW_BUDGET || 4000);
+// Own budget, not shared with the price leg above — same reasoning: a
+// symbol's own full-depth pull shouldn't be able to starve every other
+// symbol's turn. Binance.US's own history floor (~2019-09-23, confirmed
+// live — see binanceUsKlines' docs, archive.mjs).
+const BINANCE_ROW_BUDGET = Number(process.env.BINANCE_ROW_BUDGET || 15000);
+const BINANCE_US_FLOOR_MS = new Date('2019-09-23T00:00:00Z').getTime();
 let rowsWrittenThisRun = 0;
 let priceRowsWritten = 0;
 const priceBudgetLeft = () => PRICE_ROW_BUDGET - priceRowsWritten;
@@ -202,6 +211,73 @@ async function main() {
     if (swingFailed.length) console.log(`  failures: ${swingFailed.slice(0, 10).join('; ')}${swingFailed.length > 10 ? ` (+${swingFailed.length - 10} more)` : ''}`);
   } catch (e) {
     console.error('swing-time backfill failed:', e.message);
+  }
+
+  // Binance.US sub-daily crypto backfill: deep 1h OHLCV+volume for the
+  // day-trading watchlist specifically (selectIntradayWatchlist's own
+  // liquidity-proxied ~25-symbol subset, not the full ~130-asset
+  // universe — see its docs, scripts/intraday.mjs, for why that's the
+  // right scope for a 30x-leverage use case). This is also the first
+  // real PRODUCTION check of Binance.US reachability — local testing
+  // confirmed binance.com is geo-blocked (HTTP 451) and binance.us works,
+  // but GitHub Actions runners are a different network than local
+  // testing; if binanceOk stays at 0 across every symbol here, that's a
+  // reachability gate failing, not a per-symbol data problem — check the
+  // logged error pattern before trusting Phase 3 (backtest replay) or the
+  // correlation-research phases, both of which depend on this table.
+  let binanceRowsWritten = 0;
+  try {
+    const fundingMap = await getFundingMap();
+    const watchlist = selectIntradayWatchlist(cryptoUniverse, fundingMap, STOCK_WATCHLIST).filter((w) => w.assetClass === 'crypto');
+    const tradablePairs = await binanceUsExchangeInfo();
+    const hourlyCoverage = await getExistingHourlyCoverage(env, watchlist.map((w) => w.symbol));
+    console.log(`Binance.US: ${tradablePairs.size} tradable USDT pairs found, checking against ${watchlist.length} watchlist symbols`);
+
+    let binanceOk = 0, binanceSkippedNoPair = 0, binanceCaughtUp = 0;
+    const binanceFailed = [];
+    for (const w of watchlist) {
+      if (binanceRowsWritten >= BINANCE_ROW_BUDGET) { console.log('Binance row budget exhausted — stopping early, resume next run'); break; }
+      const pairSymbol = `${w.symbol}USDT`;
+      if (!tradablePairs.has(pairSymbol)) { binanceSkippedNoPair++; continue; }
+      const existing = hourlyCoverage[w.symbol];
+      const startMs = existing ? new Date(existing.maxBar).getTime() + 1 : BINANCE_US_FLOOR_MS;
+      const nowMs = Date.now();
+      if (startMs >= nowMs) { binanceCaughtUp++; continue; }
+      // Bound the fetch range to roughly the remaining row budget's worth
+      // of hours — binanceUsKlines paginates forward with no internal cap
+      // by design (so Phase 3's backtest replay can request its own fixed
+      // window in one clean call), so an unbounded range here on a
+      // symbol's very first run would pull its ENTIRE ~6-year history in
+      // one shot before this loop ever got to apply the budget.
+      const remainingBudget = BINANCE_ROW_BUDGET - binanceRowsWritten;
+      const boundedEndMs = Math.min(nowMs, startMs + remainingBudget * 3600 * 1000);
+      try {
+        const bars = await binanceUsKlines(pairSymbol, '1h', startMs, boundedEndMs);
+        if (bars.length) {
+          const toWrite = bars.map((b) => ({ symbol: w.symbol, assetClass: 'crypto', bar_at: b.ts, close: b.close, high: b.high, low: b.low, volume: b.volume, source: 'binance_us' }));
+          const written = await upsertHourlyBars(env, toWrite);
+          binanceRowsWritten += written;
+          rowsWrittenThisRun += written;
+          // Same zero-extra-fetch time-of-day bootstrap as the Yahoo-hourly
+          // leg above, just against Binance's deeper, more regime-diverse
+          // history (spans the 2020 crash, 2021 top, 2022 bear — Yahoo's
+          // 700-day window sits entirely inside one recent stretch).
+          const todTallies = computeTimeOfDayTallies(toWrite.map((b) => ({ ts: b.bar_at, close: b.close })));
+          if (Object.keys(todTallies).length) await upsertTimeOfDayStats(env, w.symbol, 'crypto', todTallies, new Date().toISOString());
+        }
+        binanceOk++;
+      } catch (e) {
+        binanceFailed.push(`${w.symbol} (${e.message})`);
+      }
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    console.log(`Binance.US hourly backfill: ok ${binanceOk}, no pair ${binanceSkippedNoPair}, already caught up ${binanceCaughtUp}, failed ${binanceFailed.length}, rows written ${binanceRowsWritten}/${BINANCE_ROW_BUDGET}`);
+    if (binanceOk === 0 && binanceFailed.length > 0) {
+      console.error(`REACHABILITY GATE: every Binance.US attempt failed (${binanceFailed.length}) — check for a geo-block or outage in this environment before trusting this leg, Phase 3, or correlation research`);
+    }
+    if (binanceFailed.length) console.log(`  failures: ${binanceFailed.slice(0, 10).join('; ')}${binanceFailed.length > 10 ? ` (+${binanceFailed.length - 10} more)` : ''}`);
+  } catch (e) {
+    console.error('Binance.US backfill failed:', e.message);
   }
 
   const finalCoverage = await getExistingCoverage(env, universe.map((u) => u.symbol));

@@ -48,6 +48,7 @@ jobs:
           # Workers Paid is confirmed active on the account.
           BACKFILL_ROW_BUDGET: ${{ vars.BACKFILL_ROW_BUDGET || '15000' }}
           BACKFILL_FUNDING_ROW_BUDGET: ${{ vars.BACKFILL_FUNDING_ROW_BUDGET || '4000' }}
+          BINANCE_ROW_BUDGET: ${{ vars.BINANCE_ROW_BUDGET || '15000' }}
 
       - name: Refresh per-asset sentiment
         working-directory: signals-worker

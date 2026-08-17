@@ -18,6 +18,10 @@ on:
         description: "Max funding/OI rows to write this run"
         required: false
         default: "4000"
+      binance_row_budget:
+        description: "Max Binance.US hourly-bar rows to write this run"
+        required: false
+        default: "15000"
 
 jobs:
   backfill:
@@ -41,3 +45,4 @@ jobs:
           FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
           BACKFILL_ROW_BUDGET: ${{ inputs.row_budget }}
           BACKFILL_FUNDING_ROW_BUDGET: ${{ inputs.funding_row_budget }}
+          BINANCE_ROW_BUDGET: ${{ inputs.binance_row_budget }}

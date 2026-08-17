@@ -824,3 +824,93 @@ export async function loadTvlSeries(env, days = 15) {
   for (const [pseudo, series] of Object.entries(bars)) out[pseudo.slice(4)] = series;
   return out;
 }
+
+// ------------------------- BINANCE.US (SUB-DAILY CRYPTO HISTORY) -----------
+// Binance.com is geo-blocked (HTTP 451, "Service unavailable from a
+// restricted location according to 'b. Eligibility' in binance.com/en/terms")
+// from this project's infrastructure — confirmed live. Binance.US is the
+// compliant, reachable alternative, confirmed live too, but its own history
+// only reaches back to ~2019-09-23 (the platform's own launch — confirmed
+// live as the same floor for every symbol tested, not each coin's real
+// individual listing date), not Binance.com's deeper 2017 start.
+const BINANCE_US_BASE = 'https://api.binance.us/api/v3';
+
+// Which USDT pairs actually exist and are tradable on Binance.US right
+// now — checked against the current crypto watchlist before fetching
+// anything, so an uncovered symbol is skipped and logged, not silently
+// retried forever or routed through a shallower fallback (see
+// backfill-history.mjs's Binance leg for why no CoinGecko-hourly
+// fallback: it would be shallower than what the Yahoo-hourly leg already
+// gives that symbol for free).
+export async function binanceUsExchangeInfo() {
+  const j = await fetchJson(`${BINANCE_US_BASE}/exchangeInfo`);
+  const pairs = new Set();
+  for (const s of (j && j.symbols) || []) {
+    if (s.status === 'TRADING' && typeof s.symbol === 'string' && s.symbol.endsWith('USDT')) pairs.add(s.symbol);
+  }
+  return pairs;
+}
+
+// Pure — separated from the paginating fetch loop below so the response
+// shape can be unit-tested against a synthetic fixture without a network
+// call. `rawRows`: Binance's raw klines array-of-arrays, confirmed live —
+// [openTime, open, high, low, close, volume, closeTime, ...], price/volume
+// fields as strings, openTime/closeTime as epoch ms.
+export function parseBinanceKlines(rawRows) {
+  if (!Array.isArray(rawRows)) return [];
+  return rawRows.map((r) => ({
+    ts: new Date(r[0]).toISOString(),
+    close: parseFloat(r[4]),
+    high: parseFloat(r[2]),
+    low: parseFloat(r[3]),
+    volume: parseFloat(r[5])
+  }));
+}
+
+// Paginated forward from startMs to endMs, 1000 candles/request (Binance's
+// documented cap). Advances the cursor by the last candle's own openTime
+// + 1ms rather than a fixed interval-duration step, so this works
+// correctly for any interval without the caller needing to know its
+// exact ms length. No internal row/request cap by design — a caller that
+// needs a bounded fetch (e.g. a resumable per-run budget) should bound
+// startMs/endMs itself rather than this function silently truncating.
+export async function binanceUsKlines(pairSymbol, interval, startMs, endMs) {
+  const bars = [];
+  let cursor = startMs;
+  while (cursor < endMs) {
+    const url = `${BINANCE_US_BASE}/klines?symbol=${encodeURIComponent(pairSymbol)}&interval=${interval}&startTime=${cursor}&endTime=${endMs}&limit=1000`;
+    const rawRows = await fetchJson(url);
+    if (!Array.isArray(rawRows) || !rawRows.length) break;
+    bars.push(...parseBinanceKlines(rawRows));
+    const lastOpenTime = rawRows[rawRows.length - 1][0];
+    if (rawRows.length < 1000 || lastOpenTime < cursor) break; // exhausted the range, or no forward progress (defensive)
+    cursor = lastOpenTime + 1;
+  }
+  return bars;
+}
+
+// Per-symbol (minBar, maxBar, count) already in asset_hourly_bars — same
+// "only fetch/write what's missing" shape as getExistingCoverage above,
+// just keyed by bar_at (a timestamp) instead of date.
+export async function getExistingHourlyCoverage(env, symbols) {
+  if (!symbols.length) return {};
+  const rows = await d1(env, 'SELECT symbol, MIN(bar_at) AS minBar, MAX(bar_at) AS maxBar, COUNT(*) AS count FROM asset_hourly_bars GROUP BY symbol');
+  const want = new Set(symbols);
+  const out = {};
+  for (const r of rows) if (want.has(r.symbol)) out[r.symbol] = { minBar: r.minBar, maxBar: r.maxBar, count: r.count };
+  return out;
+}
+
+// INSERT OR IGNORE keyed by (symbol, bar_at) — same repeat-safe shape as
+// upsertDailyBars. 8 cols x 10 rows = 80 params, comfortably under D1's
+// confirmed 100-bound-param ceiling.
+export async function upsertHourlyBars(env, rows) {
+  let attempted = 0;
+  for (const batch of chunk(rows, 10)) {
+    const placeholders = batch.map(() => '(?,?,?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap((b) => [b.symbol, b.assetClass, b.bar_at, b.close, b.high ?? null, b.low ?? null, b.volume ?? null, b.source]);
+    await d1(env, `INSERT OR IGNORE INTO asset_hourly_bars (symbol, asset_class, bar_at, close, high, low, volume, source) VALUES ${placeholders}`, params);
+    attempted += batch.length;
+  }
+  return attempted;
+}
