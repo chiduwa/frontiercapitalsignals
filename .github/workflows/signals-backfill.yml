@@ -22,6 +22,10 @@ on:
         description: "Max Binance.US hourly-bar rows to write this run"
         required: false
         default: "15000"
+      binance_per_symbol_row_cap:
+        description: "Max Binance.US hourly-bar rows any one symbol can consume this run"
+        required: false
+        default: "3000"
 
 jobs:
   backfill:
@@ -46,3 +50,4 @@ jobs:
           BACKFILL_ROW_BUDGET: ${{ inputs.row_budget }}
           BACKFILL_FUNDING_ROW_BUDGET: ${{ inputs.funding_row_budget }}
           BINANCE_ROW_BUDGET: ${{ inputs.binance_row_budget }}
+          BINANCE_PER_SYMBOL_ROW_CAP: ${{ inputs.binance_per_symbol_row_cap }}

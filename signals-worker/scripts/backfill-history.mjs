@@ -41,6 +41,14 @@ const FUNDING_ROW_BUDGET = Number(process.env.BACKFILL_FUNDING_ROW_BUDGET || 400
 // symbol's turn. Binance.US's own history floor (~2019-09-23, confirmed
 // live — see binanceUsKlines' docs, archive.mjs).
 const BINANCE_ROW_BUDGET = Number(process.env.BINANCE_ROW_BUDGET || 15000);
+// Caps how much of the shared budget any ONE symbol can consume in a
+// single run — confirmed live this was a real problem, not a theoretical
+// one: the watchlist is sorted by open interest descending, and BTC's own
+// full ~6-year depth (~60,000 hourly bars) alone consumed 14,962 of a
+// 15,000-row run on its own, leaving every other symbol untouched. At
+// ~3,000/symbol, one run makes real progress on ~5 symbols instead of
+// fully draining the budget on the single largest one.
+const BINANCE_PER_SYMBOL_ROW_CAP = Number(process.env.BINANCE_PER_SYMBOL_ROW_CAP || 3000);
 const BINANCE_US_FLOOR_MS = new Date('2019-09-23T00:00:00Z').getTime();
 let rowsWrittenThisRun = 0;
 let priceRowsWritten = 0;
@@ -243,13 +251,15 @@ async function main() {
       const startMs = existing ? new Date(existing.maxBar).getTime() + 1 : BINANCE_US_FLOOR_MS;
       const nowMs = Date.now();
       if (startMs >= nowMs) { binanceCaughtUp++; continue; }
-      // Bound the fetch range to roughly the remaining row budget's worth
-      // of hours — binanceUsKlines paginates forward with no internal cap
-      // by design (so Phase 3's backtest replay can request its own fixed
-      // window in one clean call), so an unbounded range here on a
-      // symbol's very first run would pull its ENTIRE ~6-year history in
-      // one shot before this loop ever got to apply the budget.
-      const remainingBudget = BINANCE_ROW_BUDGET - binanceRowsWritten;
+      // Bound the fetch range to roughly the smaller of the remaining run
+      // budget or the per-symbol cap — binanceUsKlines paginates forward
+      // with no internal cap by design (so Phase 3's backtest replay can
+      // request its own fixed window in one clean call), so an unbounded
+      // range here on a symbol's very first run would pull its ENTIRE
+      // ~6-year history in one shot, and without the per-symbol cap
+      // specifically, that first symbol alone would drain the whole run's
+      // budget before any other symbol got a turn (confirmed live).
+      const remainingBudget = Math.min(BINANCE_ROW_BUDGET - binanceRowsWritten, BINANCE_PER_SYMBOL_ROW_CAP);
       const boundedEndMs = Math.min(nowMs, startMs + remainingBudget * 3600 * 1000);
       try {
         const bars = await binanceUsKlines(pairSymbol, '1h', startMs, boundedEndMs);

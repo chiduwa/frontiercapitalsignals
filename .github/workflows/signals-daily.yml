@@ -49,6 +49,7 @@ jobs:
           BACKFILL_ROW_BUDGET: ${{ vars.BACKFILL_ROW_BUDGET || '15000' }}
           BACKFILL_FUNDING_ROW_BUDGET: ${{ vars.BACKFILL_FUNDING_ROW_BUDGET || '4000' }}
           BINANCE_ROW_BUDGET: ${{ vars.BINANCE_ROW_BUDGET || '15000' }}
+          BINANCE_PER_SYMBOL_ROW_CAP: ${{ vars.BINANCE_PER_SYMBOL_ROW_CAP || '3000' }}
 
       - name: Refresh per-asset sentiment
         working-directory: signals-worker
