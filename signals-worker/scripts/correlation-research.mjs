@@ -16,7 +16,7 @@
 // the deliverable as the D1 rows.
 //
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID
-import { twoSampleZTest, volumeSurgeSeries, forwardReturns, chronologicalHalfSplit, RELIABILITY_SIGNIFICANCE_Z } from '../worker.js';
+import { twoSampleZTest, volumeSurgeSeries, forwardReturns, chronologicalHalfSplit, sentimentExtremeForwardReturns, timeOfDaySentimentSplit, RELIABILITY_SIGNIFICANCE_Z } from '../worker.js';
 import { d1 } from './d1-client.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
@@ -30,16 +30,36 @@ const SURGE_THRESHOLD = 2.0; // at least double the trailing 20-day baseline vol
 const VOLUME_LOOKBACK_DAYS = 20;
 const MIN_SAMPLE_PER_BUCKET = 30; // a sanity floor distinct from the z-test's own sample-size handling — just "don't bother testing on a handful of points"
 const MIN_MARKET_SURGE_SAMPLE = 10; // market-wide (summed-universe) surges are rarer, more extreme events than any single symbol's own — a lower floor for that bucket specifically
+// Bonferroni-corrected significance bar for the compound time-of-day x
+// sentiment family below, which deliberately tests a SET of slots (not
+// one) and would otherwise inherit the same multiple-testing risk this
+// whole module exists to guard against. Family size 4 (hour_et_00 plus
+// hour_utc_00/08/16), overall alpha 0.01 to match RELIABILITY_SIGNIFICANCE_Z's
+// own two-tailed 0.01 -> per-test alpha 0.0025 -> z = NormalDist().inv_cdf(1 - 0.00125)
+// = 3.0233 (computed once via Python's statistics module, not re-derived
+// at runtime). Applies only to the initial pooled test across the family
+// — the half-split follow-up re-check on a candidate that's already
+// cleared this bar uses the standard RELIABILITY_SIGNIFICANCE_Z, since
+// that's a single confirmatory check on one already-selected candidate,
+// not another multiple-comparison scan.
+const TOD_SENTIMENT_BONFERRONI_Z = 3.0233;
+const TOD_SENTIMENT_SLOTS = ['hour_et_00', 'hour_utc_00', 'hour_utc_08', 'hour_utc_16'];
+const TOD_SENTIMENT_HORIZON_HOURS = 4; // "after some hours," per the user's own framing — not the 1h slice
 
 // Runs the pooled test, and only if it clears the bar, the chronological
 // half-split re-check — returns a finding object only when BOTH
-// guardrails pass, logging the full methodology either way.
-function runGuardedTest(hypothesis, assetClass, horizonDays, surgeSample, normalSample) {
+// guardrails pass, logging the full methodology either way. `pooledZBar`
+// lets a caller apply a stricter (e.g. Bonferroni-corrected) bar to the
+// pooled stage specifically, for a hypothesis family that scans several
+// candidates at once — the half-split stage always uses the standard
+// RELIABILITY_SIGNIFICANCE_Z, since it's a single confirmatory re-check
+// on one already-selected candidate, not another multi-candidate scan.
+function runGuardedTest(hypothesis, assetClass, horizonDays, surgeSample, normalSample, pooledZBar = RELIABILITY_SIGNIFICANCE_Z) {
   const surgeValues = surgeSample.map((p) => p.value);
   const normalValues = normalSample.map((p) => p.value);
   const pooledResult = twoSampleZTest(surgeValues, normalValues);
-  console.log(`[${hypothesis}] pooled: n=${pooledResult.n}, meanSurge=${pooledResult.meanA?.toFixed(3)}, meanNormal=${pooledResult.meanB?.toFixed(3)}, z=${pooledResult.z?.toFixed(3) ?? 'n/a'}`);
-  if (pooledResult.z == null || Math.abs(pooledResult.z) < RELIABILITY_SIGNIFICANCE_Z) {
+  console.log(`[${hypothesis}] pooled: n=${pooledResult.n}, meanSurge=${pooledResult.meanA?.toFixed(3)}, meanNormal=${pooledResult.meanB?.toFixed(3)}, z=${pooledResult.z?.toFixed(3) ?? 'n/a'} (bar=${pooledZBar})`);
+  if (pooledResult.z == null || Math.abs(pooledResult.z) < pooledZBar) {
     console.log(`[${hypothesis}] does not clear the pooled significance bar — no finding`);
     return null;
   }
@@ -155,6 +175,71 @@ async function main() {
     }
     const finding = runGuardedTest(hypothesis, 'crypto', h, surgeSample, normalSample);
     if (finding) findings.push(finding);
+  }
+
+  // Sentiment-extreme forward returns: crypto only, matching the live
+  // `sentiment` technique's own scoping — evaluateTechniques gates
+  // marketContext.fearGreed on kind === 'crypto' (alternative.me's Fear &
+  // Greed Index is itself a crypto-market gauge, not a general-market
+  // one, so a stock-side version of this hypothesis wouldn't mean
+  // anything). Same >=75/<=25 extreme thresholds the live technique uses.
+  const sentimentRows = await d1(env, "SELECT date, fear_greed_altme FROM sentiment_daily WHERE symbol = '' AND fear_greed_altme IS NOT NULL");
+  const sentimentByDate = Object.fromEntries(sentimentRows.map((r) => [r.date, r.fear_greed_altme]));
+  console.log(`loaded ${sentimentRows.length} days of Fear & Greed history`);
+
+  const sentimentPooled = Object.fromEntries(HORIZONS_DAYS.map((h) => [h, { low: [], high: [], normal: [] }]));
+  for (const [, { assetClass, bars }] of Object.entries(bySymbol)) {
+    if (assetClass !== 'crypto' || bars.length < 30) continue;
+    const buckets = sentimentExtremeForwardReturns(bars, sentimentByDate, HORIZONS_DAYS);
+    for (const h of HORIZONS_DAYS) {
+      sentimentPooled[h].low.push(...buckets[h].low);
+      sentimentPooled[h].high.push(...buckets[h].high);
+      sentimentPooled[h].normal.push(...buckets[h].normal);
+    }
+  }
+  for (const h of HORIZONS_DAYS) {
+    const { low, high, normal } = sentimentPooled[h];
+    for (const [label, sample] of [['low', low], ['high', high]]) {
+      const hypothesis = `sentiment_extreme_${label}_${h}d`;
+      if (sample.length < MIN_SAMPLE_PER_BUCKET || normal.length < MIN_SAMPLE_PER_BUCKET) {
+        console.log(`[${hypothesis}] too few samples (extreme=${sample.length}, normal=${normal.length}) — skipped`);
+        continue;
+      }
+      const finding = runGuardedTest(hypothesis, 'crypto', h, sample, normal);
+      if (finding) findings.push(finding);
+    }
+  }
+
+  // Compound: does a SPECIFIC clock slot's forward-return behavior differ
+  // between sentiment-extreme and sentiment-normal days — the question
+  // behind the user's own "00:00 EST" example. Restricted to a small
+  // named set of slots (not all ~50 possible) with a Bonferroni-corrected
+  // pooled bar — see TOD_SENTIMENT_BONFERRONI_Z's own docs. Uses the raw
+  // Binance-sourced asset_hourly_bars from Phase 2, not the pre-aggregated
+  // time_of_day_stats (a running sum that can't be retroactively split by
+  // sentiment regime).
+  const hourlyRows = await d1(env, 'SELECT symbol, bar_at AS ts, close FROM asset_hourly_bars ORDER BY symbol, bar_at');
+  const hourlyBySymbol = {};
+  for (const r of hourlyRows) (hourlyBySymbol[r.symbol] ??= []).push({ ts: r.ts, close: r.close });
+  console.log(`loaded ${hourlyRows.length} hourly bars across ${Object.keys(hourlyBySymbol).length} crypto symbols for the compound time-of-day x sentiment pass`);
+
+  for (const slot of TOD_SENTIMENT_SLOTS) {
+    const extreme = [], normal = [];
+    for (const bars of Object.values(hourlyBySymbol)) {
+      const split = timeOfDaySentimentSplit(bars, sentimentByDate, slot, TOD_SENTIMENT_HORIZON_HOURS);
+      extreme.push(...split.extreme);
+      normal.push(...split.normal);
+    }
+    const hypothesis = `tod_x_sentiment_${slot}`;
+    if (extreme.length < MIN_SAMPLE_PER_BUCKET || normal.length < MIN_SAMPLE_PER_BUCKET) {
+      console.log(`[${hypothesis}] too few samples (extreme=${extreme.length}, normal=${normal.length}) — skipped`);
+      continue;
+    }
+    const finding = runGuardedTest(hypothesis, 'crypto', null, extreme, normal, TOD_SENTIMENT_BONFERRONI_Z);
+    if (finding) {
+      finding.notes += ` (horizon=${TOD_SENTIMENT_HORIZON_HOURS}h, Bonferroni pooled bar=${TOD_SENTIMENT_BONFERRONI_Z})`;
+      findings.push(finding);
+    }
   }
 
   console.log(`correlation-research: ${findings.length} validated finding(s)`);

@@ -162,13 +162,18 @@ async function main() {
   // single call gets genuinely deep history in one shot (confirmed live —
   // alternative.me's limit=0 returns all 3,101+ daily points back to
   // 2018-02-01) — no pagination, no per-symbol loop, nothing to spread
-  // across multiple runs. Checked-and-skipped once it's already in: no
-  // point re-fetching+re-inserting thousands of already-stored rows every
-  // single day this script runs.
+  // across multiple runs. Freshness-gated the same way the price leg
+  // gates re-fetches (daysSinceMax above): skip only while the stored
+  // MAX(date) is recent. A fixed MIN(date) <= 2018-03-01 check used to
+  // gate this instead — since that's permanently true after the first
+  // successful run, it silently stopped this leg from ever running again
+  // (harmless in practice only because build-signals.mjs separately keeps
+  // today's row fresh via its own independent hourly write).
   try {
-    const [{ oldest } = {}] = await d1(env, "SELECT MIN(date) AS oldest FROM sentiment_daily WHERE symbol = '' AND fear_greed_altme IS NOT NULL");
-    if (oldest && oldest <= '2018-03-01') {
-      console.log(`Fear & Greed history already backfilled (earliest stored: ${oldest})`);
+    const [{ newest } = {}] = await d1(env, "SELECT MAX(date) AS newest FROM sentiment_daily WHERE symbol = '' AND fear_greed_altme IS NOT NULL");
+    const daysSinceNewest = newest ? (Date.now() - new Date(newest).getTime()) / 86400000 : Infinity;
+    if (newest && daysSinceNewest < 3) {
+      console.log(`Fear & Greed history already fresh (latest stored: ${newest})`);
     } else {
       const fg = await fearGreedHistory(0);
       const written = await insertFearGreedHistory(env, fg);

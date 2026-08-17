@@ -1431,5 +1431,55 @@ const signalNormalSample = signalSurges.filter(s => s.surgeRatio < 2).map(s => s
 const signalTest = mod.twoSampleZTest(signalSurgeSample, signalNormalSample);
 check('a real, deliberately injected relationship DOES trigger significance', signalTest.z !== null && Math.abs(signalTest.z) >= mod.RELIABILITY_SIGNIFICANCE_Z, JSON.stringify(signalTest));
 
+console.log('\n== sentimentExtremeForwardReturns: buckets forward returns by that day\'s Fear & Greed reading ==');
+const sefrBars = [
+  { date: '2026-01-01', close: 100 },
+  { date: '2026-01-02', close: 110 }, // +10% from day1 (extreme-low sentiment day)
+  { date: '2026-01-03', close: 99 },  // -10% from day2 (extreme-high sentiment day)
+  { date: '2026-01-04', close: 103 }  // from day3 (normal sentiment day)
+];
+const sefrSentiment = { '2026-01-01': 15, '2026-01-02': 90, '2026-01-03': 50 };
+const sefrResult = mod.sentimentExtremeForwardReturns(sefrBars, sefrSentiment, [1]);
+check('extreme-low day (fg=15) bucketed with the correct forward return', sefrResult[1].low.length === 1 && Math.abs(sefrResult[1].low[0].value - 10) < 1e-9, JSON.stringify(sefrResult[1].low));
+check('extreme-high day (fg=90) bucketed with the correct forward return', sefrResult[1].high.length === 1 && Math.abs(sefrResult[1].high[0].value - (-10)) < 1e-9, JSON.stringify(sefrResult[1].high));
+check('normal-range day (fg=50) bucketed separately from the extremes', sefrResult[1].normal.length === 1 && sefrResult[1].normal[0].date === '2026-01-03', JSON.stringify(sefrResult[1].normal));
+check('a date missing from sentimentByDate is skipped entirely, not fabricated into a bucket', sefrResult[1].low.length + sefrResult[1].high.length + sefrResult[1].normal.length === 3);
+
+console.log('\n== timeOfDaySentimentSplit: the compound "00:00 EST"-style question — same clock slot, split by that day\'s sentiment ==');
+const todsBars = [];
+const todsSentiment = {};
+for (let d = 0; d < 10; d++) {
+  const date = addDays('2026-02-01', d);
+  const fg = d % 2 === 0 ? 10 : 50; // alternating extreme-low / normal sentiment days
+  todsSentiment[date] = fg;
+  const base = 100 + d;
+  const moveFactor = fg === 10 ? 1.02 + (d % 3) * 0.001 : 1.001 + (d % 3) * 0.0003; // deliberately bigger move on extreme days, tiny jitter so variance isn't exactly zero
+  todsBars.push({ ts: `${date}T00:00:00.000Z`, close: base });
+  todsBars.push({ ts: `${date}T01:00:00.000Z`, close: base * moveFactor });
+  todsBars.push({ ts: `${date}T12:00:00.000Z`, close: base }); // off-slot bar — must be ignored entirely
+}
+const todsResult = mod.timeOfDaySentimentSplit(todsBars, todsSentiment, 'hour_utc_00', 1);
+check('only bars in the target slot are scored, split 5 extreme / 5 normal', todsResult.extreme.length === 5 && todsResult.normal.length === 5, JSON.stringify(todsResult));
+check('extreme-sentiment days show the larger injected move (~2%)', todsResult.extreme.every(p => p.value > 1.5), JSON.stringify(todsResult.extreme));
+check('normal-sentiment days show the smaller injected move (~0.1%)', todsResult.normal.every(p => p.value < 0.5), JSON.stringify(todsResult.normal));
+const todsSignalTest = mod.twoSampleZTest(todsResult.extreme.map(p => p.value), todsResult.normal.map(p => p.value));
+check('a real injected sentiment-conditional time-of-day difference DOES trigger significance', todsSignalTest.z !== null && Math.abs(todsSignalTest.z) >= mod.RELIABILITY_SIGNIFICANCE_Z, JSON.stringify(todsSignalTest));
+
+// Noise: same slot, but the move is an unrelated deterministic wiggle with
+// no real connection to that day's sentiment bucket.
+const todsNoiseBars = [];
+const todsNoiseSentiment = {};
+for (let d = 0; d < 60; d++) {
+  const date = addDays('2026-03-01', d);
+  const fg = d % 2 === 0 ? 10 : 50;
+  todsNoiseSentiment[date] = fg;
+  const move = 1 + Math.sin(d) * 0.005;
+  todsNoiseBars.push({ ts: `${date}T00:00:00.000Z`, close: 100 });
+  todsNoiseBars.push({ ts: `${date}T01:00:00.000Z`, close: 100 * move });
+}
+const todsNoiseResult = mod.timeOfDaySentimentSplit(todsNoiseBars, todsNoiseSentiment, 'hour_utc_00', 1);
+const todsNoiseTest = mod.twoSampleZTest(todsNoiseResult.extreme.map(p => p.value), todsNoiseResult.normal.map(p => p.value));
+check('no real sentiment-conditional difference: does NOT trigger a significant result', todsNoiseTest.z === null || Math.abs(todsNoiseTest.z) < mod.RELIABILITY_SIGNIFICANCE_Z, JSON.stringify(todsNoiseTest));
+
 console.log(failures === 0 ? '\nWORKER INTEGRATION OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

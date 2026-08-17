@@ -1035,6 +1035,32 @@ export function chronologicalHalfSplit(dates) {
   return { firstHalf: new Set(sorted.slice(0, mid)), secondHalf: new Set(sorted.slice(mid)) };
 }
 
+// Buckets each bar's forward return by that DAY's Fear & Greed reading,
+// using the same >=75/<=25 "extreme" thresholds the live `sentiment`
+// technique already acts on (evaluateTechniques, marketContext.fearGreed)
+// — not new arbitrary cutoffs. `sentimentByDate` is a plain {date: value}
+// map (alternative.me's daily fear_greed_altme reading). Returns
+// {[horizonDays]: {low: [{date,value}], high: [{date,value}], normal: [{date,value}]}}
+// for the caller to pool across symbols and hand to twoSampleZTest — same
+// pooled-not-per-symbol discipline as every other correlation-research
+// hypothesis here.
+export function sentimentExtremeForwardReturns(bars, sentimentByDate, horizonsDays = [1, 5]) {
+  const fwd = forwardReturns(bars, horizonsDays);
+  const out = Object.fromEntries(horizonsDays.map((h) => [h, { low: [], high: [], normal: [] }]));
+  for (const bar of bars) {
+    const fg = sentimentByDate[bar.date];
+    if (fg == null) continue;
+    const entry = fwd[bar.date];
+    if (!entry) continue;
+    const bucket = fg <= 25 ? 'low' : fg >= 75 ? 'high' : 'normal';
+    for (const h of horizonsDays) {
+      if (entry[h] == null) continue;
+      out[h][bucket].push({ date: bar.date, value: entry[h] });
+    }
+  }
+  return out;
+}
+
 // Does this asset's own price history contain a period that behaved like
 // its last `windowDays`, roughly one or more "years" (cycleLength bars —
 // 365 for continuously-traded crypto, ~252 trading days for equities) ago?
@@ -1371,6 +1397,49 @@ export function computeTimeOfDayTallies(hourlyBars, horizons = TOD_HORIZONS_HOUR
     }
   }
   return tallies;
+}
+
+// The compound question behind the user's own "00:00 EST" example: does a
+// SPECIFIC clock slot's forward-return behavior differ between
+// sentiment-extreme and sentiment-normal days, not just "is there a
+// time-of-day effect" in isolation? Given one symbol's raw hourly bars
+// (same shape as above) and a day-level Fear & Greed reading per date,
+// isolates every bar whose timestamp falls in `slot` (matching
+// slotsForTimestamp's own naming), matches forward to `horizonHours`
+// ahead via the same nearest-bar-within-tolerance logic
+// computeTimeOfDayTallies uses just above (real gaps in equity hourly
+// bars make a fixed index offset wrong), and buckets the resulting %
+// moves by that day's sentiment reading (same >=75/<=25 extreme
+// thresholds as sentimentExtremeForwardReturns). Returns
+// {extreme: [{date,value}], normal: [{date,value}]} for the caller to
+// twoSampleZTest. Deliberately restricted by the caller to a small named
+// set of headline slots (hour_et_00 plus UTC 00/08/16), not all ~50
+// possible slots — see correlation-research.mjs for the Bonferroni
+// correction across that small set.
+export function timeOfDaySentimentSplit(hourlyBars, sentimentByDate, slot, horizonHours) {
+  const sorted = hourlyBars.slice().sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+  const toleranceMs = TOD_TALLY_TOLERANCE_MIN * 60 * 1000;
+  const out = { extreme: [], normal: [] };
+  for (let i = 0; i < sorted.length; i++) {
+    const before = sorted[i];
+    if (!before.close || !slotsForTimestamp(before.ts).includes(slot)) continue;
+    const beforeMs = new Date(before.ts).getTime();
+    const targetMs = beforeMs + horizonHours * 3600 * 1000;
+    let best = null, bestDiff = Infinity;
+    for (let j = i + 1; j < sorted.length; j++) {
+      const diff = new Date(sorted[j].ts).getTime() - targetMs;
+      if (diff > toleranceMs) break; // sorted ascending — nothing further out can be closer
+      if (Math.abs(diff) <= toleranceMs && Math.abs(diff) < bestDiff) { bestDiff = Math.abs(diff); best = sorted[j]; }
+    }
+    if (!best) continue;
+    const date = before.ts.slice(0, 10);
+    const fg = sentimentByDate[date];
+    if (fg == null) continue;
+    const pct = ((best.close / before.close) - 1) * 100;
+    const bucket = fg <= 25 || fg >= 75 ? 'extreme' : 'normal';
+    out[bucket].push({ date, value: pct });
+  }
+  return out;
 }
 
 // Below this many observed days, a slot's tallied high/low probability is
