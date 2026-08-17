@@ -1,0 +1,20 @@
+[Unit]
+Description=FrontierCapitalSignals trading bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/fcs-trading-bot
+EnvironmentFile=/opt/fcs-trading-bot/.env
+ExecStart=/usr/bin/node /opt/fcs-trading-bot/src/index.mjs
+Restart=always
+RestartSec=15
+# Existing open positions keep their exchange-side stop/take-profit orders
+# regardless of whether this process is running (see src/index.mjs's top
+# comment) — a restart or brief downtime doesn't leave a position exposed.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

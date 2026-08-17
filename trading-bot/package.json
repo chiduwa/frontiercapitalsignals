@@ -1,0 +1,12 @@
+{
+  "name": "fcs-trading-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Autonomous Binance Futures trading bot driven by FrontierCapitalSignals' live signals",
+  "main": "src/index.mjs",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node test.mjs"
+  }
+}
