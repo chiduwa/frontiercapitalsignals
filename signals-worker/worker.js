@@ -364,7 +364,11 @@ export const MIN_RELIABILITY_SAMPLES = 20;
 // destabilize, the bar every time a technique is added or removed, and
 // would over-penalize thinner-history assets far more than the noise
 // problem it's meant to solve justifies.
-const RELIABILITY_SIGNIFICANCE_Z = 2.576;
+// Exported so scripts/correlation-research.mjs can reuse the exact same
+// significance bar for its own two-sample tests (twoSampleZTest below) —
+// one shared threshold, not two independently-chosen ones that could
+// quietly drift apart.
+export const RELIABILITY_SIGNIFICANCE_Z = 2.576;
 
 export function isReliabilitySignificant(correct, total) {
   if (!total) return false;
@@ -953,6 +957,82 @@ export function replayIntradaySignal(ticks, assetClass, horizonsMin) {
     }
   }
   return results;
+}
+
+// ------------------------- CORRELATION RESEARCH -----------------------------
+// Pure, composable building blocks for scripts/correlation-research.mjs —
+// pooled hypothesis tests against data already archived (asset_daily_bars,
+// sentiment_daily), no new data collection. Deliberately pooled across the
+// full universe, not tested per-symbol: per-symbol correlation-hunting
+// across dozens of assets is exactly the multiple-testing trap
+// isReliabilitySignificant's own docs (above) warn about.
+
+// Same normal-approximation z-test philosophy as isReliabilitySignificant,
+// generalized to a two-SAMPLE comparison (is sampleA's mean meaningfully
+// different from sampleB's) rather than a one-sample test against a fixed
+// null of 0.5. Welch's approximation (unequal variances assumed — no
+// reason two different day-buckets would share variance). Returns
+// z: null when either sample is too small or has zero variance to say
+// anything (not a fabricated 0).
+export function twoSampleZTest(sampleA, sampleB) {
+  if (!sampleA || !sampleB || sampleA.length < 2 || sampleB.length < 2) return { z: null, meanA: null, meanB: null, effectSize: null, n: (sampleA?.length || 0) + (sampleB?.length || 0) };
+  const mean = (arr) => arr.reduce((a, b) => a + b, 0) / arr.length;
+  const variance = (arr, m) => arr.reduce((a, b) => a + (b - m) * (b - m), 0) / (arr.length - 1);
+  const meanA = mean(sampleA), meanB = mean(sampleB);
+  const varA = variance(sampleA, meanA), varB = variance(sampleB, meanB);
+  const se = Math.sqrt(varA / sampleA.length + varB / sampleB.length);
+  const z = se > 0 ? (meanA - meanB) / se : null;
+  return { z, meanA, meanB, effectSize: meanA - meanB, n: sampleA.length + sampleB.length };
+}
+
+// Trailing-baseline surge ratio: today's volume relative to the mean of
+// the PRECEDING lookbackDays — never including today, so this never looks
+// ahead. bars: [{date, volume}], any order (sorts internally). Skips the
+// first lookbackDays entries (not enough trailing history to compute a
+// baseline yet) and any day whose trailing window has too many gaps to
+// trust (more than half missing).
+export function volumeSurgeSeries(bars, lookbackDays = 20) {
+  const sorted = bars.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const out = [];
+  for (let i = lookbackDays; i < sorted.length; i++) {
+    const trailing = sorted.slice(i - lookbackDays, i).map((b) => b.volume).filter((v) => v != null && v > 0);
+    if (trailing.length < lookbackDays * 0.5) continue;
+    const baseline = trailing.reduce((a, b) => a + b, 0) / trailing.length;
+    if (!baseline || sorted[i].volume == null) continue;
+    out.push({ date: sorted[i].date, surgeRatio: sorted[i].volume / baseline });
+  }
+  return out;
+}
+
+// Forward % return from each bar's close to the close `horizonDays` bars
+// later — bar-index-based (this archive already stores one row per real
+// trading/calendar day, no weekend/holiday gaps to bridge). Returns
+// { [date]: { [horizonDays]: pct } }.
+export function forwardReturns(bars, horizonsDays = [1, 5]) {
+  const sorted = bars.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const out = {};
+  for (let i = 0; i < sorted.length; i++) {
+    const entry = {};
+    for (const h of horizonsDays) {
+      const future = sorted[i + h];
+      if (!future || !sorted[i].close) continue;
+      entry[h] = ((future.close / sorted[i].close) - 1) * 100;
+    }
+    if (Object.keys(entry).length) out[sorted[i].date] = entry;
+  }
+  return out;
+}
+
+// Splits a list of dates at the chronological midpoint — the train/test
+// re-check every correlation-research hypothesis must independently clear
+// before counting as a validated finding: a candidate that clears the
+// pooled significance bar but doesn't hold up with the same sign in BOTH
+// halves of history separately is much more likely a fluke of this
+// specific historical window than a real, durable effect.
+export function chronologicalHalfSplit(dates) {
+  const sorted = [...new Set(dates)].sort();
+  const mid = Math.floor(sorted.length / 2);
+  return { firstHalf: new Set(sorted.slice(0, mid)), secondHalf: new Set(sorted.slice(mid)) };
 }
 
 // Does this asset's own price history contain a period that behaved like

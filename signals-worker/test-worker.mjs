@@ -1360,5 +1360,76 @@ check('a genuine reversal right after signal produces sharply worse accuracy tha
 check('empty ticks: every horizon returns {correct:0, total:0}, not a crash', Object.values(mod.replayIntradaySignal([], 'crypto', [15, 30, 60])).every(r => r.correct === 0 && r.total === 0));
 check('a single tick: nothing to score', Object.values(mod.replayIntradaySignal([{ tick_at: '2026-01-01T00:00:00.000Z', price: 100 }], 'crypto', [15])).every(r => r.total === 0));
 
+console.log('\n== twoSampleZTest: two-sample mean comparison, same normal-approximation philosophy as isReliabilitySignificant ==');
+check('too few samples: z is null, not a fabricated number', mod.twoSampleZTest([1], [1, 2, 3]).z === null);
+check('empty samples: z is null, not a crash', mod.twoSampleZTest([], []).z === null);
+const identicalA = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const identicalB = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+check('identical distributions: z is essentially 0 (no real difference)', Math.abs(mod.twoSampleZTest(identicalA, identicalB).z) < 0.01, mod.twoSampleZTest(identicalA, identicalB).z);
+const shiftedA = identicalA.map(v => v + 100); // huge, unambiguous mean shift, same variance
+const zResult = mod.twoSampleZTest(shiftedA, identicalB);
+check('a clear, large mean shift: z clears the significance bar', Math.abs(zResult.z) >= mod.RELIABILITY_SIGNIFICANCE_Z, zResult.z);
+check('effectSize reflects the real mean difference (100)', Math.abs(zResult.effectSize - 100) < 0.01);
+
+console.log('\n== volumeSurgeSeries: trailing baseline, never looks ahead ==');
+const volBars = Array.from({ length: 30 }, (_, i) => ({ date: `2026-01-${String(i + 1).padStart(2, '0')}`, volume: 1000 }));
+volBars[25].volume = 3000; // a real surge on day 26
+const surges = mod.volumeSurgeSeries(volBars, 20);
+check('too little trailing history: the first `lookbackDays` entries are skipped', !surges.find(s => s.date === '2026-01-05'));
+const surgeDay = surges.find(s => s.date === volBars[25].date);
+check('a real volume surge computes the correct ratio vs the trailing baseline', surgeDay && Math.abs(surgeDay.surgeRatio - 3) < 0.01, JSON.stringify(surgeDay));
+const normalDay = surges.find(s => s.date === volBars[21].date);
+check('a normal day (no surge) has a ratio near 1', normalDay && Math.abs(normalDay.surgeRatio - 1) < 0.01, JSON.stringify(normalDay));
+
+console.log('\n== forwardReturns: bar-index-based forward % return, multiple horizons ==');
+const retBars = [
+  { date: '2026-01-01', close: 100 },
+  { date: '2026-01-02', close: 102 },
+  { date: '2026-01-03', close: 105 },
+  { date: '2026-01-04', close: 99 }
+];
+const fwd = mod.forwardReturns(retBars, [1, 3]);
+check('1-day forward return computed correctly', Math.abs(fwd['2026-01-01'][1] - 2) < 0.01, JSON.stringify(fwd['2026-01-01']));
+check('3-day forward return computed correctly', Math.abs(fwd['2026-01-01'][3] - (-1)) < 0.01, JSON.stringify(fwd['2026-01-01']));
+check('a horizon with no future bar available is simply omitted, not fabricated', fwd['2026-01-03'] && fwd['2026-01-03'][3] === undefined, JSON.stringify(fwd['2026-01-03']));
+check('a date with no horizon reachable at all is omitted from the output entirely', fwd['2026-01-04'] === undefined);
+
+console.log('\n== chronologicalHalfSplit: even split at the midpoint, deduped ==');
+const splitResult = mod.chronologicalHalfSplit(['2026-01-03', '2026-01-01', '2026-01-01', '2026-01-02', '2026-01-04']);
+check('deduplicates repeated dates before splitting', splitResult.firstHalf.size + splitResult.secondHalf.size === 4, JSON.stringify([...splitResult.firstHalf, ...splitResult.secondHalf]));
+check('splits chronologically, not by input order', splitResult.firstHalf.has('2026-01-01') && splitResult.secondHalf.has('2026-01-04'));
+
+console.log('\n== correlation-research guardrail: the actual point of this phase — noise must not look significant, a real injected relationship must ==');
+const addDays = (startIso, n) => new Date(new Date(startIso).getTime() + n * 86400000).toISOString().slice(0, 10);
+
+// Noise: volume follows one deterministic pattern, forward returns follow
+// a completely unrelated deterministic pattern — no real relationship.
+const noiseDates = Array.from({ length: 300 }, (_, i) => addDays('2026-01-01', i));
+const noiseBars = noiseDates.map((date, i) => ({ date, close: 100 + Math.sin(i / 3) * 2, volume: 1000 + (i % 7) * 200 }));
+const noiseSurges = mod.volumeSurgeSeries(noiseBars, 20);
+const noiseFwd = mod.forwardReturns(noiseBars, [1]);
+const noiseSurgeSample = noiseSurges.filter(s => s.surgeRatio >= 2).map(s => noiseFwd[s.date]?.[1]).filter(v => v != null);
+const noiseNormalSample = noiseSurges.filter(s => s.surgeRatio < 2).map(s => noiseFwd[s.date]?.[1]).filter(v => v != null);
+const noiseTest = mod.twoSampleZTest(noiseSurgeSample, noiseNormalSample);
+check('pure noise: does NOT trigger a significant result (the actual guardrail this phase exists to prove)', noiseTest.z === null || Math.abs(noiseTest.z) < mod.RELIABILITY_SIGNIFICANCE_Z, JSON.stringify(noiseTest));
+
+// Signal: a real volume surge every 15 days, deliberately followed by a
+// real +5% next-day return; tiny deterministic noise (+-0.1%) otherwise.
+const signalDates = Array.from({ length: 300 }, (_, i) => addDays('2026-01-01', i));
+const signalVolumes = signalDates.map((_, i) => (i % 15 === 0 && i >= 20) ? 3000 : 1000);
+const signalCloses = [100];
+for (let i = 1; i < 300; i++) {
+  const wasSurgeYesterday = signalVolumes[i - 1] === 3000;
+  const move = wasSurgeYesterday ? 1.05 : (1 + (i % 3 === 0 ? 0.001 : -0.001));
+  signalCloses.push(signalCloses[i - 1] * move);
+}
+const signalBars = signalDates.map((date, i) => ({ date, close: signalCloses[i], volume: signalVolumes[i] }));
+const signalSurges = mod.volumeSurgeSeries(signalBars, 20);
+const signalFwd = mod.forwardReturns(signalBars, [1]);
+const signalSurgeSample = signalSurges.filter(s => s.surgeRatio >= 2).map(s => signalFwd[s.date]?.[1]).filter(v => v != null);
+const signalNormalSample = signalSurges.filter(s => s.surgeRatio < 2).map(s => signalFwd[s.date]?.[1]).filter(v => v != null);
+const signalTest = mod.twoSampleZTest(signalSurgeSample, signalNormalSample);
+check('a real, deliberately injected relationship DOES trigger significance', signalTest.z !== null && Math.abs(signalTest.z) >= mod.RELIABILITY_SIGNIFICANCE_Z, JSON.stringify(signalTest));
+
 console.log(failures === 0 ? '\nWORKER INTEGRATION OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

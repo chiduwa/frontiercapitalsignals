@@ -1,0 +1,33 @@
+name: Signals Correlation Research
+
+# One-time-ish research pass, not a forward-accumulating daily job — runs
+# pooled, guarded volume/forward-return hypothesis tests against data
+# already archived in asset_daily_bars (zero new fetch). Re-run manually
+# whenever a fresh read is wanted (e.g. after more history has
+# accumulated). Each run re-evaluates every hypothesis from scratch and
+# only inserts newly-validated findings; it does not delete prior rows.
+on:
+  workflow_dispatch:
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    # Pure in-memory analysis over already-archived data, one D1 read plus
+    # a handful of writes — generous headroom above the realistic runtime.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Run pooled volume/forward-return correlation research
+        working-directory: signals-worker
+        run: node scripts/correlation-research.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}

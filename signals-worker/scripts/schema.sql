@@ -475,6 +475,27 @@ CREATE INDEX IF NOT EXISTS idx_asset_hourly_bars_symbol ON asset_hourly_bars(sym
 -- scrutiny first. Replaced (not accumulated) on each run — see
 -- backtest-intraday.mjs for why an appending/incrementing shape doesn't
 -- fit an occasional re-run over a shifting historical window.
+-- Pooled hypothesis-test findings from scripts/correlation-research.mjs —
+-- volume-surge and (Phase 5) sentiment-extreme correlations against
+-- forward returns, tested pooled across the universe (not per-symbol —
+-- see the module's own docs for why that avoids the multiple-testing
+-- trap) and only recorded once a candidate has independently cleared the
+-- significance bar in BOTH chronological halves of history, not just the
+-- pooled whole. Empty is a complete, valid research outcome — this table
+-- is a log of what was FOUND, not a queue of things still to search for.
+CREATE TABLE IF NOT EXISTS correlation_research_findings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  hypothesis TEXT NOT NULL,
+  asset_class TEXT,
+  horizon_days INTEGER,
+  n INTEGER NOT NULL,
+  effect_size REAL,
+  z REAL,
+  split_consistent INTEGER NOT NULL DEFAULT 0,
+  computed_at TEXT NOT NULL,
+  notes TEXT
+);
+
 CREATE TABLE IF NOT EXISTS intraday_backtest_reliability (
   asset_class TEXT NOT NULL,
   symbol TEXT NOT NULL,
