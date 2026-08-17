@@ -1160,11 +1160,18 @@ const TOD_MIN_EFFECT = 0.4;
 // supported one. Returns null (abstain) until a slot has both real sample
 // depth and a real effect size, same "no data yet" pattern as every other
 // technique here.
+// Shared with scripts/reliability.mjs's evaluateTimeOfDay (imports this
+// instead of declaring its own copy) — previously duplicated independently
+// in two places (a bare [1, 4] literal here, a separate const there),
+// which is exactly the kind of drift risk a positional-arg mismatch
+// elsewhere in this codebase already got caught for once.
+export const TOD_HORIZONS_HOURS = [1, 4];
+
 export function timeOfDaySignal(todStats, symbol, nowIso) {
   if (!todStats) return null;
   let best = null;
   for (const slot of slotsForTimestamp(nowIso)) {
-    for (const h of [1, 4]) {
+    for (const h of TOD_HORIZONS_HOURS) {
       const rec = todStats[`${symbol}|${slot}|${h}`];
       if (!rec || rec.n < TOD_MIN_SAMPLES || !(rec.stdevPct > 0)) continue;
       const effect = Math.abs(rec.meanPct) / rec.stdevPct;
@@ -1174,6 +1181,56 @@ export function timeOfDaySignal(todStats, symbol, nowIso) {
   }
   if (!best) return null;
   return { dir: best.meanPct > 0 ? 1 : -1, slot: best.slot, horizonHours: best.horizonHours, meanPct: best.meanPct, n: best.n };
+}
+
+// How far a matched bar is allowed to sit from the ideal "h hours ahead"
+// target instant — mirrors reliability.mjs's TOD_MATCH_TOLERANCE_MIN (40)
+// exactly (same reasoning: builds run on an imperfect cadence, small
+// jitter shouldn't reject an otherwise-good match), duplicated as a value
+// rather than imported since reliability.mjs already imports FROM this
+// file — the reverse direction would be circular.
+const TOD_TALLY_TOLERANCE_MIN = 40;
+
+// Historical bootstrap for time_of_day_stats: given one symbol's hourly
+// bars (`{ts, close}`, any order — the exact shape yahooHourlyBars/
+// computeSwingTimeTallies already produce, and what a Binance-klines
+// mapper produces too), computes the same running (sumPct, sumPctSq, n)
+// aggregate evaluateTimeOfDay (reliability.mjs) tallies live off
+// asset_price_log, just from deep history in one pass instead of one
+// sample at a time. Bucketed by the slot of the EARLIER bar (the one h
+// hours before the move), not the later one — matches evaluateTimeOfDay's
+// own semantics exactly: "did this clock-time historically precede a
+// move," not "what time did the move land at." Nearest-bar-within-
+// tolerance matching (not a fixed array-index offset) because hourly bars
+// for equities have real gaps (market hours only) that a naive index
+// offset would misread as consecutive real hours.
+export function computeTimeOfDayTallies(hourlyBars, horizons = TOD_HORIZONS_HOURS) {
+  const sorted = hourlyBars.slice().sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+  const toleranceMs = TOD_TALLY_TOLERANCE_MIN * 60 * 1000;
+  const tallies = {}; // "slot|h" -> { sumPct, sumPctSq, n }
+  for (let i = 0; i < sorted.length; i++) {
+    const before = sorted[i];
+    const beforeMs = new Date(before.ts).getTime();
+    for (const h of horizons) {
+      const targetMs = beforeMs + h * 3600 * 1000;
+      let best = null, bestDiff = Infinity;
+      for (let j = i + 1; j < sorted.length; j++) {
+        const diff = new Date(sorted[j].ts).getTime() - targetMs;
+        if (diff > toleranceMs) break; // sorted ascending — nothing further out can be closer
+        if (Math.abs(diff) <= toleranceMs && Math.abs(diff) < bestDiff) { bestDiff = Math.abs(diff); best = sorted[j]; }
+      }
+      if (!best || !before.close) continue;
+      const pct = ((best.close / before.close) - 1) * 100;
+      for (const slot of slotsForTimestamp(before.ts)) {
+        const key = `${slot}|${h}`;
+        if (!tallies[key]) tallies[key] = { sumPct: 0, sumPctSq: 0, n: 0 };
+        tallies[key].sumPct += pct;
+        tallies[key].sumPctSq += pct * pct;
+        tallies[key].n += 1;
+      }
+    }
+  }
+  return tallies;
 }
 
 // Below this many observed days, a slot's tallied high/low probability is
@@ -2751,6 +2808,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .mast-meta b{color:var(--amber);font-weight:600}
   .mast-rule{height:2px;background:linear-gradient(90deg,var(--amber) 0,var(--amber) 180px,var(--line) 180px);margin-top:26px}
 
+  .xp-banner{background:rgba(255,178,36,.07);border:1px solid rgba(255,178,36,.35);border-left:3px solid var(--amber);padding:12px 16px;margin:22px 0;font-family:var(--mono);font-size:11.5px;line-height:1.7;color:var(--muted)}
+  .xp-banner b{color:var(--amber);text-transform:uppercase;letter-spacing:.03em}
+
   .overview{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line);border:1px solid var(--line);margin:26px 0 40px}
   .tile{background:var(--ink-1);padding:14px 14px 12px;min-width:0}
   .tile .lbl{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:7px}
@@ -2898,6 +2958,10 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     <div class="mast-rule"></div>
   </header>
 
+  <div class="xp-banner" role="note">
+    <b>Experimental research project — not financial advice.</b> Every score, range, timeframe, and the day-trading signal below are mechanical outputs from an ongoing, evolving model, not recommendations. Nothing here has been reviewed by a financial professional. Trading — especially with leverage — risks losing more than you put in. Do your own research and never rely on this page alone.
+  </div>
+
   <section class="overview" id="overview" aria-label="Market overview">
   </section>
 
@@ -2932,7 +2996,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   </details>
 
   <footer>
-    <p class="legal">Frontier Capital Signals is an informational research tool. Nothing on this page is investment advice, a recommendation, or a solicitation to buy or sell any asset. Scores are mechanical indicator composites with no knowledge of news, fundamentals beyond analyst consensus, token unlocks or earnings. Crypto and equity markets involve substantial risk of loss. Data is provided by third-party feeds without warranty and may be delayed or incomplete. Do your own research.</p>
+    <p class="legal">Frontier Capital Signals is an experimental, ongoing research project — an informational tool, not a finished or audited product. Nothing on this page is investment advice, a recommendation, or a solicitation to buy or sell any asset. Scores are mechanical indicator composites with no knowledge of news, fundamentals beyond analyst consensus, token unlocks or earnings. The day-trading intraday signal is a further experimental layer on top of that, back-tested and continuously re-scored against its own real-world outcomes rather than a proven method; its paper-trading track record is a transparency readout of the model's own simulated performance, never a projection of real returns. Crypto and equity markets involve substantial risk of loss, and leveraged trading specifically can lose more than the amount put in. Data is provided by third-party feeds without warranty and may be delayed or incomplete. Do your own research, and do not treat any output on this page as a substitute for professional financial advice.</p>
     <div class="cols">
       <span>© <span id="yr"></span> Frontier Capital Signals</span>
       <span>Data: CoinGecko · alternative.me · Bybit · Yahoo Finance / Stooq</span>

@@ -668,6 +668,36 @@ export async function upsertSwingTimeStats(env, symbol, assetClass, tallies, tot
   return written;
 }
 
+// Historical-bootstrap counterpart to evaluateTimeOfDay's own live upsert
+// (reliability.mjs) — identical ON CONFLICT DO UPDATE SQL, so a symbol's
+// deep-history bootstrap and its subsequent daily live tallies accumulate
+// into the exact same running total, not two different numbers under the
+// same key. tallies: computeTimeOfDayTallies' return shape, "slot|h" ->
+// {sumPct, sumPctSq, n}.
+export async function upsertTimeOfDayStats(env, symbol, assetClass, tallies, updatedAt) {
+  const entries = Object.entries(tallies);
+  if (!entries.length) return 0;
+  let written = 0;
+  for (const batch of chunk(entries, 12)) {
+    const placeholders = batch.map(() => '(?,?,?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap(([key, t]) => {
+      const [slot, h] = key.split('|');
+      return [symbol, assetClass, slot, Number(h), t.n, t.sumPct, t.sumPctSq, updatedAt];
+    });
+    await d1(env, `
+      INSERT INTO time_of_day_stats (symbol, asset_class, slot, horizon_hours, n, sum_pct, sum_pct_sq, updated_at)
+      VALUES ${placeholders}
+      ON CONFLICT (symbol, slot, horizon_hours) DO UPDATE SET
+        n = time_of_day_stats.n + excluded.n,
+        sum_pct = time_of_day_stats.sum_pct + excluded.sum_pct,
+        sum_pct_sq = time_of_day_stats.sum_pct_sq + excluded.sum_pct_sq,
+        updated_at = excluded.updated_at
+    `, params);
+    written += batch.length;
+  }
+  return written;
+}
+
 // Existing coverage check so the (one-time-ish) backfill doesn't re-fetch
 // and re-tally a symbol that's already been bootstrapped — checks the
 // symbol's own max total_days across its rows (same value on every row

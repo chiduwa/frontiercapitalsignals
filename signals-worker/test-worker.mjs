@@ -932,6 +932,44 @@ const todTechNoStats = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'BTC
 check('fires through the full technique pipeline when todStats + nowIso are supplied', todTechFires.dir === 1, JSON.stringify(todTechFires));
 check('abstains (null) when todStats/nowIso are not supplied at all', todTechNoStats.dir === null, JSON.stringify(todTechNoStats));
 
+console.log('\n== computeTimeOfDayTallies: historical bootstrap for time_of_day_stats, zero new fetches ==');
+const ctBeforeTs = '2026-01-01T00:00:00.000Z';
+const ctAfterTs = '2026-01-01T01:00:00.000Z';
+const ctSlotsBefore = mod.slotsForTimestamp(ctBeforeTs);
+const ctBasicBars = [{ ts: ctBeforeTs, close: 100 }, { ts: ctAfterTs, close: 102 }];
+const ctBasic = mod.computeTimeOfDayTallies(ctBasicBars, [1]);
+check('tallies every slot the EARLIER bar belongs to', ctSlotsBefore.every(slot => ctBasic[`${slot}|1`] && ctBasic[`${slot}|1`].n === 1), JSON.stringify(ctBasic));
+check('sumPct matches the real 2% move', Math.abs(ctBasic[`${ctSlotsBefore[0]}|1`].sumPct - 2) < 1e-9, ctBasic[`${ctSlotsBefore[0]}|1`]);
+check('sumPctSq matches pct^2 (4)', Math.abs(ctBasic[`${ctSlotsBefore[0]}|1`].sumPctSq - 4) < 1e-9);
+check('bucketed by the slot of the EARLIER bar (hour_utc_00), not the later one (hour_utc_01)', ctBasic['hour_utc_00|1'] != null && ctBasic['hour_utc_01|1'] == null, JSON.stringify(Object.keys(ctBasic)));
+
+const ctGapBars = [{ ts: '2026-01-01T00:00:00.000Z', close: 100 }, { ts: '2026-01-01T03:00:00.000Z', close: 110 }]; // 3h later, well outside the 40min tolerance for h=1
+const ctGap = mod.computeTimeOfDayTallies(ctGapBars, [1]);
+check('no bar within tolerance of the h=1 target: no fabricated tally', Object.keys(ctGap).length === 0, JSON.stringify(ctGap));
+
+const ctNearBars = [{ ts: '2026-01-01T00:00:00.000Z', close: 100 }, { ts: '2026-01-01T01:15:00.000Z', close: 105 }]; // 75min later, 15min past the h=1 target, within the 40min tolerance
+const ctNear = mod.computeTimeOfDayTallies(ctNearBars, [1]);
+check('a bar within the 40-min tolerance window still matches', ctNear['hour_utc_00|1'] && ctNear['hour_utc_00|1'].n === 1, JSON.stringify(ctNear));
+
+const ctMultiBars = [{ ts: '2026-01-01T00:00:00.000Z', close: 100 }, { ts: '2026-01-01T01:00:00.000Z', close: 101 }, { ts: '2026-01-01T04:00:00.000Z', close: 104 }];
+const ctMulti = mod.computeTimeOfDayTallies(ctMultiBars, [1, 4]);
+check('multiple horizons tallied independently off the same before-bar', Math.abs(ctMulti['hour_utc_00|1'].sumPct - 1) < 1e-9 && Math.abs(ctMulti['hour_utc_00|4'].sumPct - 4) < 1e-9, JSON.stringify(ctMulti));
+
+const ctUnsorted = [{ ts: '2026-01-01T01:00:00.000Z', close: 102 }, { ts: '2026-01-01T00:00:00.000Z', close: 100 }];
+const ctUnsortedResult = mod.computeTimeOfDayTallies(ctUnsorted, [1]);
+check('unsorted input order still computes correctly (sorts internally)', ctUnsortedResult['hour_utc_00|1'] && Math.abs(ctUnsortedResult['hour_utc_00|1'].sumPct - 2) < 1e-9, JSON.stringify(ctUnsortedResult));
+
+const ctTwoDays = [
+  { ts: '2026-01-01T00:00:00.000Z', close: 100 }, { ts: '2026-01-01T01:00:00.000Z', close: 102 }, // day 1: +2%
+  { ts: '2026-01-02T00:00:00.000Z', close: 200 }, { ts: '2026-01-02T01:00:00.000Z', close: 194 }  // day 2: -3%
+];
+const ctTwoDaysResult = mod.computeTimeOfDayTallies(ctTwoDays, [1]);
+check('accumulates n=2 across two days at the same hour-of-day slot', ctTwoDaysResult['hour_utc_00|1'].n === 2, JSON.stringify(ctTwoDaysResult['hour_utc_00|1']));
+check('sumPct sums both days\' moves (2 + -3 = -1)', Math.abs(ctTwoDaysResult['hour_utc_00|1'].sumPct - (-1)) < 1e-6, ctTwoDaysResult['hour_utc_00|1'].sumPct);
+
+check('empty input: empty tallies, not a crash', Object.keys(mod.computeTimeOfDayTallies([], [1])).length === 0);
+check('a single bar with nothing to compare against: empty tallies', Object.keys(mod.computeTimeOfDayTallies([{ ts: ctBeforeTs, close: 100 }], [1])).length === 0);
+
 console.log('\n== percentileRank: asset-relative reading, not an absolute one ==');
 check('no history at all: returns null', mod.percentileRank(null, 5) === null);
 check('empty history: returns null', mod.percentileRank([], 5) === null);

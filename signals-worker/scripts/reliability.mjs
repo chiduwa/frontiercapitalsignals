@@ -4,12 +4,11 @@
 // Talks to Cloudflare's D1 HTTP API directly via d1-client.mjs, shared with
 // the archive/backfill scripts so there's one D1 client, not a hand-copied
 // duplicate that could drift.
-import { MIN_RELIABILITY_SAMPLES, slotsForTimestamp, assetPredictionScore, scoreBucket } from '../worker.js';
+import { MIN_RELIABILITY_SAMPLES, slotsForTimestamp, assetPredictionScore, scoreBucket, TOD_HORIZONS_HOURS } from '../worker.js';
 import { d1, chunk } from './d1-client.mjs';
 import { computeSwingTimeTallies, upsertSwingTimeStats } from './archive.mjs';
 
 // Matches the horizons timeOfDaySignal (worker.js) checks.
-const TOD_HORIZONS_HOURS = [1, 4];
 // How far a logged asset_price_log row is allowed to sit from the ideal
 // "horizon hours ago" instant and still count as that horizon's
 // observation — the hourly cadence isn't perfectly on-the-hour (see

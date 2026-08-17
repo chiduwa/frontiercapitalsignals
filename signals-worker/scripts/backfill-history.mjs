@@ -8,12 +8,13 @@
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID
 // Optional env: BACKFILL_ROW_BUDGET (default 15000 — free-D1-tier-safe;
 //   raise once Workers Paid is confirmed active, see the plan)
-import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, BENCHMARK_SYMBOLS } from '../worker.js';
+import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, BENCHMARK_SYMBOLS, computeTimeOfDayTallies } from '../worker.js';
 import {
   yahooFullHistory, coingeckoDailyBars, getExistingCoverage,
   upsertDailyBars, fundingSnapshotToRows, upsertFundingDaily,
   fearGreedHistory, insertFearGreedHistory,
-  yahooHourlyBars, computeSwingTimeTallies, upsertSwingTimeStats, getSwingTimeCoverage
+  yahooHourlyBars, computeSwingTimeTallies, upsertSwingTimeStats, getSwingTimeCoverage,
+  upsertTimeOfDayStats
 } from './archive.mjs';
 import { d1 } from './d1-client.mjs';
 
@@ -171,7 +172,7 @@ async function main() {
   // already well-bootstrapped rather than re-fetching 700 days every time.
   try {
     const swingCoverage = await getSwingTimeCoverage(env);
-    let swingOk = 0, swingSkipped = 0;
+    let swingOk = 0, swingSkipped = 0, todBootstrapped = 0;
     const swingFailed = [];
     for (const a of universe) {
       if (a.assetClass === 'benchmark') continue; // no swing-timing story for macro benchmarks — nothing trades them directly
@@ -180,6 +181,16 @@ async function main() {
         const bars = await yahooHourlyBars(a.yahooTicker);
         const { tallies, totalDays } = computeSwingTimeTallies(bars);
         if (totalDays > 0) await upsertSwingTimeStats(env, a.symbol, a.assetClass, tallies, totalDays, new Date().toISOString());
+        // Reuses the exact same already-fetched `bars` — this is the
+        // "zero new fetches" time-of-day bootstrap (see computeTimeOfDayTallies's
+        // docs in worker.js): everywhere this loop already gives a symbol
+        // real hourly depth for swing-timing also feeds time_of_day_stats,
+        // the table the live timeOfDaySignal technique reads.
+        const todTallies = computeTimeOfDayTallies(bars);
+        if (Object.keys(todTallies).length) {
+          await upsertTimeOfDayStats(env, a.symbol, a.assetClass, todTallies, new Date().toISOString());
+          todBootstrapped++;
+        }
         swingOk++;
       } catch (e) {
         swingFailed.push(`${a.symbol} (${e.message})`);
@@ -187,6 +198,7 @@ async function main() {
       await new Promise((r) => setTimeout(r, 500));
     }
     console.log(`swing-time backfill: ok ${swingOk}, already covered ${swingSkipped}, failed ${swingFailed.length}`);
+    console.log(`time-of-day bootstrap (same fetch, no new cost): ${todBootstrapped} symbols tallied`);
     if (swingFailed.length) console.log(`  failures: ${swingFailed.slice(0, 10).join('; ')}${swingFailed.length > 10 ? ` (+${swingFailed.length - 10} more)` : ''}`);
   } catch (e) {
     console.error('swing-time backfill failed:', e.message);
