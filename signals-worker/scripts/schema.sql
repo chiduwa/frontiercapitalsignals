@@ -516,3 +516,33 @@ CREATE TABLE IF NOT EXISTS intraday_backtest_reliability (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (symbol, horizon_minutes)
 );
+
+-- trading-bot/ (../trading-bot/src/*) — a separate deployable, run as a
+-- one-shot script every N minutes by .github/workflows/trading-bot-cycle.yml
+-- rather than a persistent daemon, so it has no local disk to persist
+-- state on between runs. These three tables are its entire state layer
+-- (see trading-bot/src/state.mjs) — everything else (balance, open
+-- positions) is always re-read fresh from Binance each cycle, never
+-- trusted from here, so stale/lost state here can't cause a double-open.
+CREATE TABLE IF NOT EXISTS trading_bot_equity_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1), -- single row, upsert-only
+  peak_equity REAL,
+  day_start_equity REAL,
+  day_start_date TEXT
+);
+
+CREATE TABLE IF NOT EXISTS trading_bot_last_closed (
+  symbol TEXT PRIMARY KEY,
+  closed_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS trading_bot_open_orders (
+  symbol TEXT PRIMARY KEY,
+  side TEXT NOT NULL,
+  entry_price REAL NOT NULL,
+  margin_used REAL NOT NULL,
+  leverage INTEGER NOT NULL,
+  range_low REAL,
+  range_high REAL,
+  opened_at TEXT NOT NULL
+);

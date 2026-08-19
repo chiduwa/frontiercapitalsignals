@@ -1,12 +1,16 @@
-// Main loop. One cycle = fetch real account state + live signals -> decide
-// -> execute (or log-only, if DRY_RUN) -> protect every open position with
-// a real exchange-side stop/take-profit -> persist state -> sleep.
+// Runs ONE cycle and exits: fetch real account state + live signals ->
+// decide -> execute (or log-only, if DRY_RUN) -> protect every open
+// position with a real exchange-side stop/take-profit -> persist state
+// to D1 -> exit. Fired on a cron schedule by
+// .github/workflows/trading-bot-cycle.yml's cron schedule — this process
+// does NOT loop or sleep itself, since a GitHub Actions runner is
+// stateless/ephemeral between invocations (see state.mjs).
 //
 // Protective orders are placed on the EXCHANGE (via the Algo Order API,
 // see binance.mjs), not simulated in this process — so a position stays
-// protected even if this bot crashes or the VM reboots. That's the single
-// most important safety property of this design for an unattended
-// leveraged system.
+// protected even between runs, or if a run fails outright. That's the
+// single most important safety property of this design for an
+// unattended leveraged system.
 import { config } from './config.mjs';
 import { log } from './logger.mjs';
 import { loadState, saveState, recordEquity } from './state.mjs';
@@ -91,7 +95,7 @@ async function executeOpen(decision, state, nowIso) {
 
 async function runCycle() {
   const nowIso = new Date().toISOString();
-  const state = loadState();
+  const state = await loadState();
 
   const account = await getAccount();
   const equity = Number(account.totalMarginBalance);
@@ -135,20 +139,17 @@ async function runCycle() {
     else await executeOpen(d, state, nowIso);
   }
 
-  saveState(state);
+  await saveState(state);
   log('cycle_end', {});
 }
 
 async function main() {
-  log('bot_starting', { dryRun: config.dryRun, cycleMinutes: config.cycleMinutes });
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    try {
-      await runCycle();
-    } catch (e) {
-      log('error_cycle', { error: e.message, stack: e.stack });
-    }
-    await new Promise((r) => setTimeout(r, config.cycleMinutes * 60000));
+  log('bot_starting', { dryRun: config.dryRun });
+  try {
+    await runCycle();
+  } catch (e) {
+    log('error_cycle', { error: e.message, stack: e.stack });
+    process.exitCode = 1;
   }
 }
 

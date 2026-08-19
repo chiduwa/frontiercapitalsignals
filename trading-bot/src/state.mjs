@@ -1,40 +1,67 @@
-// Local JSON-file-backed state — a single-VM bot doesn't need a database,
-// just something that survives a process restart. Tracks what this bot
-// itself has done (equity curve for drawdown/circuit-breaker math,
-// per-symbol cooldown timestamps); actual position/balance truth always
+// D1-backed state — this bot runs as a one-shot script fired every N
+// minutes by .github/workflows/trading-bot-cycle.yml, not a persistent
+// daemon, so there's no local disk that survives between runs. Reuses
+// the same d1-client.mjs (and D1 database) the rest of this repo's
+// scripts already use — one source of truth for how to talk to D1,
+// not a hand-copied duplicate. Actual position/balance truth always
 // comes fresh from Binance each cycle (binance.mjs), never trusted from
-// this file, so a stale or lost state file can't cause a double-open.
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { dirname } from 'node:path';
+// here, so a stale or lost row here can't cause a double-open.
+import { d1 } from '../../signals-worker/scripts/d1-client.mjs';
 import { config } from './config.mjs';
 
-const DEFAULT_STATE = {
-  peakEquity: null,
-  dayStartEquity: null,
-  dayStartDate: null,
-  equityHistory: [], // [{ts, equity}], trimmed to the last 30 days
-  lastClosedAt: {}, // symbol -> ISO timestamp of last position close, for cooldown
-  openOrders: {} // symbol -> {side, entryPrice, marginUsed, leverage, stopOrderId, tpOrderId, openedAt} — bot's own record of what it opened, for logging/reconciliation only
-};
+const env = { CLOUDFLARE_API_TOKEN: config.cloudflareApiToken, CLOUDFLARE_ACCOUNT_ID: config.cloudflareAccountId, FCS_D1_DATABASE_ID: config.d1DatabaseId };
 
-mkdirSync(dirname(config.stateFile), { recursive: true });
+export async function loadState() {
+  const [equityRow] = await d1(env, 'SELECT peak_equity, day_start_equity, day_start_date FROM trading_bot_equity_state WHERE id = 1');
+  const lastClosedRows = await d1(env, 'SELECT symbol, closed_at FROM trading_bot_last_closed');
+  const openOrderRows = await d1(env, 'SELECT symbol, side, entry_price, margin_used, leverage, range_low, range_high, opened_at FROM trading_bot_open_orders');
 
-export function loadState() {
-  if (!existsSync(config.stateFile)) return structuredClone(DEFAULT_STATE);
-  try {
-    return { ...structuredClone(DEFAULT_STATE), ...JSON.parse(readFileSync(config.stateFile, 'utf8')) };
-  } catch {
-    return structuredClone(DEFAULT_STATE);
+  return {
+    peakEquity: equityRow?.peak_equity ?? null,
+    dayStartEquity: equityRow?.day_start_equity ?? null,
+    dayStartDate: equityRow?.day_start_date ?? null,
+    lastClosedAt: Object.fromEntries(lastClosedRows.map((r) => [r.symbol, r.closed_at])),
+    openOrders: Object.fromEntries(openOrderRows.map((r) => [r.symbol, {
+      side: r.side, entryPrice: r.entry_price, marginUsed: r.margin_used, leverage: r.leverage,
+      range: r.range_low != null ? { low: r.range_low, high: r.range_high } : null,
+      openedAt: r.opened_at
+    }]))
+  };
+}
+
+// Called once at the end of a cycle. Diffs against nothing — just
+// upserts the current in-memory state wholesale, since a single cycle's
+// worth of changes is always small (at most a few symbols touched).
+export async function saveState(state) {
+  await d1(env, `
+    INSERT INTO trading_bot_equity_state (id, peak_equity, day_start_equity, day_start_date) VALUES (1, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET peak_equity = excluded.peak_equity, day_start_equity = excluded.day_start_equity, day_start_date = excluded.day_start_date
+  `, [state.peakEquity, state.dayStartEquity, state.dayStartDate]);
+
+  for (const [symbol, closedAt] of Object.entries(state.lastClosedAt)) {
+    await d1(env, 'INSERT INTO trading_bot_last_closed (symbol, closed_at) VALUES (?, ?) ON CONFLICT(symbol) DO UPDATE SET closed_at = excluded.closed_at', [symbol, closedAt]);
+  }
+
+  const stillOpenSymbols = Object.keys(state.openOrders);
+  for (const [symbol, o] of Object.entries(state.openOrders)) {
+    await d1(env, `
+      INSERT INTO trading_bot_open_orders (symbol, side, entry_price, margin_used, leverage, range_low, range_high, opened_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(symbol) DO UPDATE SET side = excluded.side, entry_price = excluded.entry_price, margin_used = excluded.margin_used, leverage = excluded.leverage, range_low = excluded.range_low, range_high = excluded.range_high, opened_at = excluded.opened_at
+    `, [symbol, o.side, o.entryPrice, o.marginUsed, o.leverage, o.range?.low ?? null, o.range?.high ?? null, o.openedAt]);
+  }
+  // Positions this cycle detected as closed (see index.mjs) were already
+  // deleted from state.openOrders in-memory before this is called —
+  // remove their D1 rows too, otherwise they'd linger forever.
+  const existing = await d1(env, 'SELECT symbol FROM trading_bot_open_orders');
+  for (const row of existing) {
+    if (!stillOpenSymbols.includes(row.symbol)) {
+      await d1(env, 'DELETE FROM trading_bot_open_orders WHERE symbol = ?', [row.symbol]);
+    }
   }
 }
 
-export function saveState(state) {
-  writeFileSync(config.stateFile, JSON.stringify(state, null, 2));
-}
-
-// Called once per cycle with the REAL current equity from Binance.
-// Rolls the day-start marker at UTC midnight and appends to the trimmed
-// history the drawdown/circuit-breaker check reads.
+// Called once per cycle with the REAL current equity from Binance. Rolls
+// the day-start marker at UTC midnight.
 export function recordEquity(state, equity, nowIso) {
   const today = nowIso.slice(0, 10);
   if (state.dayStartDate !== today) {
@@ -42,8 +69,5 @@ export function recordEquity(state, equity, nowIso) {
     state.dayStartEquity = equity;
   }
   if (state.peakEquity == null || equity > state.peakEquity) state.peakEquity = equity;
-  state.equityHistory.push({ ts: nowIso, equity });
-  const cutoffMs = Date.now() - 30 * 86400000;
-  state.equityHistory = state.equityHistory.filter((e) => new Date(e.ts).getTime() >= cutoffMs);
   return state;
 }

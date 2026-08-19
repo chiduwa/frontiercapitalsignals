@@ -2,6 +2,9 @@
 // style. Covers the pure risk/strategy math only (no live Binance calls).
 process.env.BINANCE_API_KEY = 'test';
 process.env.BINANCE_API_SECRET = 'test';
+process.env.CLOUDFLARE_API_TOKEN = 'test';
+process.env.CLOUDFLARE_ACCOUNT_ID = 'test';
+process.env.FCS_D1_DATABASE_ID = 'test';
 
 const { config } = await import('./src/config.mjs');
 const { combinedConfidence, sizePosition, currentExposurePct, wouldExceedExposure, circuitBreakerTripped, dailyLossLimitHit, inCooldown, fundingUnfavorable, stopLossPrice, takeProfitPrice } = await import('./src/risk.mjs');

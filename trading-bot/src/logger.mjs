@@ -1,19 +1,9 @@
-// Structured JSON-lines logging to both stdout (systemd/journald picks
-// this up) and a local file — every decision this bot makes, including
-// SKIPPED candidates and why, gets a record. An autonomous system moving
-// real leveraged money needs a full audit trail, not just its trades.
-import { appendFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { config } from './config.mjs';
-
-mkdirSync(dirname(config.logFile), { recursive: true });
-
+// Structured JSON-lines logging to stdout — this bot runs as a one-shot
+// GitHub Actions script (see .github/workflows/trading-bot-cycle.yml)
+// with no local disk that survives between runs, so the job's own log
+// output IS the audit trail, same as every other scheduled script in
+// this repo. Read it via the Actions tab or the GitHub API, not a local
+// file.
 export function log(event, data = {}) {
-  const record = { ts: new Date().toISOString(), event, ...data };
-  console.log(JSON.stringify(record));
-  try {
-    appendFileSync(config.logFile, JSON.stringify(record) + '\n');
-  } catch (e) {
-    console.error('failed to write log file:', e.message);
-  }
+  console.log(JSON.stringify({ ts: new Date().toISOString(), event, ...data }));
 }

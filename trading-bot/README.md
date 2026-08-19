@@ -2,18 +2,28 @@
 
 Autonomous Binance USDS-M Futures bot, driven by the live signals at
 [frontiercapitalsignals.com/signals](https://frontiercapitalsignals.com/signals).
-Built to run unattended on the Oracle Cloud VM ("Ben 10" region,
-af-casablanca-1) alongside the existing personal-account bot — this is a
-**separate process, targeting the Lead Trader futures account**, and does
-not touch or depend on the existing bot in any way.
+Runs as a one-shot script fired every 5 minutes by GitHub Actions
+(`.github/workflows/trading-bot-cycle.yml`), not a persistent daemon —
+there's no VM. This is a **separate process, targeting the Lead Trader
+futures account**, and does not touch or depend on the existing
+personal-account "Ben 10" bot in any way. All state that needs to
+survive between runs (equity curve, per-symbol cooldowns, this bot's own
+record of open orders) lives in the same D1 database the rest of this
+repo already writes to (`trading_bot_*` tables, `signals-worker/scripts/schema.sql`)
+— see `src/state.mjs`. Actual balance/positions are always re-read fresh
+from Binance every cycle, never trusted from D1.
 
 **This connects to a real account with real leverage. Read this whole
 file before setting `DRY_RUN=false`.**
 
 ## What it does, mapped to what was asked for
 
-- **Fully autonomous.** Runs in a loop (default every 5 minutes), no
-  manual intervention required.
+- **Fully autonomous.** Fired every 5 minutes by a GitHub Actions cron
+  schedule, no manual intervention required. (GitHub's documented cron
+  minimum is 5 minutes; actual firing can lag a few minutes under
+  platform load — this cadence doesn't need to be exact to be safe,
+  since protection lives on the exchange, not in this process — see
+  below.)
 - **5-20% of the portfolio per trade, 3-20x leverage, scaled to
   confidence.** Confidence = the *lower* of the live confluence engine's
   technique-agreement ratio and that asset's own best-performing
@@ -42,8 +52,10 @@ file before setting `DRY_RUN=false`.**
 - **"Include other instructions to make it more profitable."** Added on
   top of your spec, all in `src/risk.mjs` / `src/strategy.mjs`:
   - Real exchange-side stop-loss AND take-profit on every position
-    (protection survives a bot crash or VM reboot — it isn't enforced by
-    this process staying alive).
+    (protection survives a run failing outright, or a cycle being
+    skipped entirely — it isn't enforced by this process staying alive,
+    which matters even more here than on a VM since this process never
+    stays alive between cycles by design).
   - Take-profit target = the opposite end of the same predicted range the
     entry was gated on.
   - Stop-loss sized so max loss per trade is a consistent fraction of the
@@ -56,44 +68,68 @@ file before setting `DRY_RUN=false`.**
     protected) if equity drawdown from peak hits 15%.
   - Daily loss limit: pauses new entries for the rest of the day past
     10% loss since day-start.
-  - Every decision is logged, including every skip and why
-    (`state/decisions.jsonl`) — full audit trail for an unattended system
-    moving real money.
+  - Every decision is logged, including every skip and why — printed as
+    structured JSON to stdout, which is that job run's log in the
+    Actions tab. No local log file: there's no disk that survives
+    between runs, so the job log IS the audit trail (same pattern as
+    every other scheduled script in this repo).
 
 ## Security — non-negotiable
 
 Generate a **trade-only** API key on Binance: enable **Futures** +
-**Reading**, leave **Withdrawals off**. Restrict it to the VM's public IP
-in Binance's API management page. This bot never needs withdrawal
+**Reading**, leave **Withdrawals off**. This bot never needs withdrawal
 permission for anything it does, and a compromised trade-only key can't
 drain the account.
 
-`.env` (real keys) is gitignored and must never be committed. On the VM,
-create it by hand from `.env.example` — don't sync it from a laptop.
+**No IP restriction is possible.** GitHub-hosted runners use a large,
+changing pool of IPs (GitHub publishes ranges, but they rotate and
+aren't practical to allowlist on Binance's side) — unlike the original
+VM design, this key cannot be locked to a fixed IP. The trade-only /
+no-withdrawal scope is doing the real security work here; treat the key
+as the sole thing standing between a leaked secret and unauthorized
+trades, and rotate it if this repo (or its GitHub secrets) is ever
+suspected compromised.
+
+Store the real key as GitHub repo secrets (`BINANCE_API_KEY`,
+`BINANCE_API_SECRET`) — Settings → Secrets and variables → Actions.
+Never put real keys in `.env.example`, `.env` is only for local dry-run
+testing and is gitignored.
 
 ## Setup
 
 ```bash
-cp .env.example .env    # fill in BINANCE_API_KEY / BINANCE_API_SECRET, leave DRY_RUN=true
 npm test                 # runs the pure risk/strategy logic tests, no network needed
-node src/index.mjs       # starts the loop
+```
+
+For **local** testing only (not how it runs in production):
+
+```bash
+cp .env.example .env    # fill in BINANCE_API_KEY / BINANCE_API_SECRET / Cloudflare D1 creds, leave DRY_RUN=true
+node src/index.mjs       # runs ONE cycle and exits — no internal loop
 ```
 
 With `DRY_RUN=true` (the default), it does REAL reads (account balance,
 positions, live prices) so the simulation is realistic, but every order
 placement is logged as `dry_run_would_*` instead of actually sent. Watch
-`state/decisions.jsonl` for at least a few days before considering
-`DRY_RUN=false`.
+several days of job logs (Actions tab → Trading Bot Cycle) before
+considering `DRY_RUN=false`.
 
-## Deploy to the Oracle VM
+## Running in production
 
-```bash
-./deploy/deploy.sh ubuntu@<vm-ip>
-```
+There's nothing to deploy — the code runs directly from this repo via
+`.github/workflows/trading-bot-cycle.yml`, same as the rest of this
+repo's scheduled scripts. To go live:
 
-Copies the code (never `.env`) and installs it as a systemd service
-(`deploy/trading-bot.service`) so it survives reboots and restarts on
-crash. First time on the VM: `ssh` in once and create `.env` by hand.
+1. Add repo secrets `BINANCE_API_KEY` / `BINANCE_API_SECRET` (trade-only,
+   see above). `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` and the
+   `FCS_D1_DATABASE_ID` variable are already set for this repo and are
+   reused as-is — nothing to add there.
+2. Push to `main` (or use "Run workflow" in the Actions tab to fire one
+   cycle on demand without waiting for the cron).
+3. Leave the `TRADING_BOT_DRY_RUN` repo variable unset (defaults to
+   `true`) until satisfied with several days of dry-run job logs. Set it
+   to `false` (Settings → Secrets and variables → Actions → Variables)
+   only when ready to place real orders.
 
 ## What I verified vs. what still needs your own verification before going live
 
@@ -111,7 +147,7 @@ exact field names in `getAccount()`'s response (`totalMarginBalance`,
 names, but this should still be watched closely during your first dry-run
 sessions — if a field is ever `undefined` where a number is expected, the
 logs will show it plainly rather than silently computing garbage, but
-this is exactly the kind of thing to check via `decisions.jsonl` before
+this is exactly the kind of thing to check via the job logs before
 flipping to live, not to assume works.
 
 ## Not financial advice

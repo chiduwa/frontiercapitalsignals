@@ -5,7 +5,15 @@
 const num = (v, d) => (v == null || v === '' ? d : Number(v));
 const bool = (v, d) => (v == null || v === '' ? d : v === 'true' || v === '1');
 
-const { BINANCE_API_KEY, BINANCE_API_SECRET } = process.env;
+const { BINANCE_API_KEY, BINANCE_API_SECRET, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
+
+// Same D1 database the rest of this repo's scripts already write to —
+// state.mjs uses it since this bot runs as a one-shot GitHub Actions
+// script with no local disk that survives between cycles (see
+// .github/workflows/trading-bot-cycle.yml).
+for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
+  if (!v) { console.error(`Missing required env var: ${name}`); process.exit(1); }
+}
 
 // DRY_RUN defaults true on purpose: this is an autonomous, leveraged,
 // real-money system. It should never place a real order until someone
@@ -28,9 +36,11 @@ export const config = {
   binanceApiSecret: BINANCE_API_SECRET,
   binanceBase: process.env.BINANCE_FAPI_BASE || 'https://fapi.binance.com',
 
-  signalsBase: process.env.SIGNALS_API_BASE || 'https://frontiercapitalsignals.com/signals',
+  cloudflareApiToken: CLOUDFLARE_API_TOKEN,
+  cloudflareAccountId: CLOUDFLARE_ACCOUNT_ID,
+  d1DatabaseId: FCS_D1_DATABASE_ID,
 
-  cycleMinutes: num(process.env.CYCLE_MINUTES, 5),
+  signalsBase: process.env.SIGNALS_API_BASE || 'https://frontiercapitalsignals.com/signals',
 
   // Position sizing: margin committed per trade, as a fraction of account
   // balance. User: "trade a percentage of the portfolio (5 to 20%) per
@@ -81,8 +91,5 @@ export const config = {
   cooldownMinutes: num(process.env.COOLDOWN_MINUTES, 60), // minimum gap after closing a symbol before re-entering it — avoids fee/slippage churn
   circuitBreakerDrawdownPct: num(process.env.CIRCUIT_BREAKER_DRAWDOWN_PCT, 0.15), // pause NEW entries (existing positions still managed) if equity drawdown from peak exceeds this
   dailyLossLimitPct: num(process.env.DAILY_LOSS_LIMIT_PCT, 0.10), // pause new entries for the rest of the day if realized+unrealized loss since day-start exceeds this
-  maxFundingRateAbs: num(process.env.MAX_FUNDING_RATE_ABS, 0.001), // skip entry if funding is this unfavorable or worse against the intended direction (0.001 = 0.1% per 8h)
-
-  stateFile: process.env.STATE_FILE || new URL('../state/state.json', import.meta.url).pathname,
-  logFile: process.env.LOG_FILE || new URL('../state/decisions.jsonl', import.meta.url).pathname
+  maxFundingRateAbs: num(process.env.MAX_FUNDING_RATE_ABS, 0.001) // skip entry if funding is this unfavorable or worse against the intended direction (0.001 = 0.1% per 8h)
 };
