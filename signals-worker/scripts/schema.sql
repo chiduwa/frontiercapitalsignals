@@ -546,3 +546,57 @@ CREATE TABLE IF NOT EXISTS trading_bot_open_orders (
   range_high REAL,
   opened_at TEXT NOT NULL
 );
+
+-- ------------------------- SUPPORT/RESISTANCE (srbreak) ---------------------
+-- Added 2026-08-20 after a post-mortem on the 08-19 crypto pump: BTC's
+-- composite score sat at 10-19 through the entire ~7% breakout because
+-- every technique voting bullish that day (macd, momentum, range, rsi,
+-- sentiment) carries badly subpar *blended* accuracy specifically on BTC
+-- from a long prior chop (technique_reliability), and BTC had zero logged
+-- `trending`-regime samples for technique_regime_reliability's escape hatch
+-- to fall back on. Rather than touch that weighting (it's working as
+-- designed — see reliabilityMultiplier's docs, worker.js), this adds a
+-- technique with no chop-era baggage: a fresh technique_id starts at
+-- baseline weight and earns its own track record from real level-break
+-- outcomes, computed daily by archive.mjs off asset_daily_bars.
+
+-- Current key levels per symbol, recomputed daily (see
+-- computeSrLevels/archive.mjs) from swing-pivot highs/lows in
+-- asset_daily_bars — a level only lands here once price has reversed off
+-- it more than once (touches >= 2), which is what makes it "key" rather
+-- than an arbitrary N-bar high/low (the existing `range` technique's plain
+-- 20-bar Donchian channel, worker.js, stays as-is and unrelated). Replaced
+-- wholesale each run per symbol (a level that's since been invalidated —
+-- e.g. superseded by a fresher, closer pivot — should disappear, not
+-- linger), same rationale as lead_lag_signals' own replace-not-append shape.
+CREATE TABLE IF NOT EXISTS asset_sr_levels (
+  symbol TEXT NOT NULL,
+  level REAL NOT NULL,
+  level_type TEXT NOT NULL, -- 'support' | 'resistance'
+  touches INTEGER NOT NULL DEFAULT 2,
+  first_seen TEXT NOT NULL,
+  last_touched TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (symbol, level_type, level)
+);
+
+-- Realized move size following a confirmed break of a tracked level —
+-- same running mean/stdev accumulator shape as asset_move_stats, just
+-- conditioned on "this specific kind of event" instead of every hour.
+-- bucket_key is `symbol` once that symbol has enough of its own break
+-- history (>= MIN_RELIABILITY_SAMPLES, worker.js), else a pooled
+-- `<asset_class>|<level_type>` key so the calibration is usable long
+-- before any single symbol has broken enough of its own levels — the same
+-- historical-if-enough-samples-else-pooled-fallback discipline
+-- bestVolLookback/horizonEstimate/predictedRange already use elsewhere in
+-- this engine, needed here because per-symbol break events are inherently
+-- sparse for a long time.
+CREATE TABLE IF NOT EXISTS sr_break_stats (
+  bucket_key TEXT NOT NULL,
+  horizon_hours INTEGER NOT NULL,
+  n INTEGER NOT NULL DEFAULT 0,
+  sum_pct REAL NOT NULL DEFAULT 0,
+  sum_pct_sq REAL NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (bucket_key, horizon_hours)
+);

@@ -27,7 +27,17 @@ concurrency:
 jobs:
   archive:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Was 30 — confirmed live via the GitHub API this had been silently
+    # cancelling this job every day 08-17 through 08-20 (real run history:
+    # "Refresh per-asset sentiment" alone took 1508s on the last full
+    # success, 08-16, leaving ~1.7min of the 1800s budget; it and everything
+    # after it in that step — lead/lag, sector composites, swing-time,
+    # score snapshots — has been silently skipped since). 55 gives real
+    # headroom as the tracked universe and archive depth keep growing;
+    # every individual outbound call already has its own bound via
+    # fetchWithTimeout/FETCH_TIMEOUT_MS, so this ceiling is about total
+    # aggregate time, not an unbounded-hang risk.
+    timeout-minutes: 55
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

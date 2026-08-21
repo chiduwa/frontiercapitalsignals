@@ -10,7 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { computeSwingTimeTallies, barsRowsToReturnsBySymbol, matchProtocolsToUniverse } from './scripts/archive.mjs';
+import { computeSwingTimeTallies, barsRowsToReturnsBySymbol, matchProtocolsToUniverse, findPivots, walkSrLevels } from './scripts/archive.mjs';
 import { selectIntradayWatchlist, CRYPTO_WATCHLIST_SIZE } from './scripts/intraday.mjs';
 import { parseBinanceKlines } from './scripts/archive.mjs';
 
@@ -84,6 +84,24 @@ function stubbedFetch(url) {
       prices: cryptoDailyClose.map((c, i) => [1600000000000 + i * 86400000, c]),
       total_volumes: cryptoDailyVol.map((v, i) => [1600000000000 + i * 86400000, v])
     });
+  }
+  // Binance.US live-price split (/api/prices) — BTC/ETH resolve here
+  // instead of CoinGecko's /simple/price below; chainlink is deliberately
+  // left off this fixture so at least one displayed symbol still exercises
+  // the CoinGecko path, same "one symbol proves the fallback still works"
+  // discipline the solana omission uses for the hourly-build-price fallback.
+  if (u.includes('/exchangeInfo')) {
+    return ok({ symbols: [
+      { symbol: 'BTCUSDT', status: 'TRADING', baseAsset: 'BTC', quoteAsset: 'USDT' },
+      { symbol: 'ETHUSDT', status: 'TRADING', baseAsset: 'ETH', quoteAsset: 'USDT' },
+      { symbol: 'LINKBUSD', status: 'TRADING', baseAsset: 'LINK', quoteAsset: 'BUSD' } // non-USDT quote, must NOT count
+    ] });
+  }
+  if (u.includes('/ticker/24hr')) {
+    return ok([
+      { symbol: 'BTCUSDT', lastPrice: '64000.50', priceChangePercent: '3.2' },
+      { symbol: 'ETHUSDT', lastPrice: '1900.10', priceChangePercent: '-1.1' }
+    ]);
   }
   if (u.includes('/global')) return ok({ data: { total_market_cap: { usd: 2.3e12 }, market_cap_change_percentage_24h_usd: 1.5, market_cap_percentage: { btc: 52.1 } } });
   if (u.includes('alternative.me/fng')) return ok({ data: [{ value: '38', value_classification: 'Fear' }] });
@@ -726,6 +744,106 @@ check('no tvlSeries loaded at all: abstains (null)', tvlTechNoData.dir === null,
 const tvlTechStockGated = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'AAVE', chg7d: 10 }), 'stock', undefined, { tvlSeries: { AAVE: tvlBarsUp } }), 'tvltrend');
 check('crypto-only: stocks never fire this technique even with matching TVL data', tvlTechStockGated.dir === null, JSON.stringify(tvlTechStockGated));
 
+console.log('\n== findPivots / walkSrLevels: swing-pivot detection, clustering, and no-lookahead break simulation ==');
+// A clean double-touch of support at ~100 (idx 5 and idx 15, both real
+// local lows — confirmed via bars on both sides, not just a rolling
+// window), then a genuine break below it at idx 25 with real future bars
+// to measure the realized 24h/168h move against.
+const srBars = [
+  { close: 130 }, { close: 125 }, { close: 120 }, { close: 115 }, { close: 110 }, { close: 100 },
+  { close: 108 }, { close: 112 }, { close: 116 }, { close: 120 }, { close: 124 }, { close: 118 },
+  { close: 114 }, { close: 110 }, { close: 105 }, { close: 100.5 }, { close: 106 }, { close: 110 },
+  { close: 114 }, { close: 118 }, { close: 122 }, { close: 118 }, { close: 114 }, { close: 110 },
+  { close: 105 }, { close: 90 }, { close: 88 }, { close: 87 }, { close: 86 }, { close: 85 },
+  { close: 84 }, { close: 83 }, { close: 82 }, { close: 81 }, { close: 80 }, { close: 79 },
+  { close: 78 }, { close: 77 }, { close: 76 }, { close: 75 }
+].map((b, i) => ({ ...b, date: `2026-01-${String(i + 1).padStart(2, '0')}`, high: b.close, low: b.close }));
+
+const srPivots = findPivots(srBars);
+const supportPivots = srPivots.filter((p) => p.type === 'support' && Math.abs(p.price - 100) < 1);
+check('finds both support touches at ~100 as real pivots (confirmed by bars on both sides)', supportPivots.length === 2, JSON.stringify(supportPivots));
+
+const srBarsNoBreak = srBars.slice(0, 25); // stops before the break — the level should still be "open"
+const { levels: srLevelsNoBreak } = walkSrLevels('TESTASSET', 'crypto', srBarsNoBreak);
+check('the twice-touched ~100 support clusters into exactly one key level, not two', srLevelsNoBreak.filter((l) => l.levelType === 'support').length === 1, JSON.stringify(srLevelsNoBreak));
+const srSupportLevel = srLevelsNoBreak.find((l) => l.levelType === 'support');
+check('touches counted correctly (2, from the two real pivots, not 1 or 4)', srSupportLevel && srSupportLevel.touches === 2, JSON.stringify(srSupportLevel));
+check('a level with only a single pivot (the ~124 high) never reaches "key" (needs 2+ touches)', !srLevelsNoBreak.some((l) => l.levelType === 'resistance'), JSON.stringify(srLevelsNoBreak));
+
+const { levels: srLevelsAfterBreak, breaks: srWalkBreaks } = walkSrLevels('TESTASSET', 'crypto', srBars);
+check('the level retires (drops out of the returned key-levels list) once it has actually broken', !srLevelsAfterBreak.some((l) => l.levelType === 'support'), JSON.stringify(srLevelsAfterBreak));
+check('the break event itself was recorded at both calibration horizons', srWalkBreaks.some((b) => b.bucketKey === 'TESTASSET' && b.horizonHours === 24) && srWalkBreaks.some((b) => b.bucketKey === 'TESTASSET' && b.horizonHours === 168), JSON.stringify(srWalkBreaks));
+const srBreak24 = srWalkBreaks.find((b) => b.bucketKey === 'TESTASSET' && b.horizonHours === 24);
+check('24h break magnitude matches the real forward move (90 -> 88)', Math.abs(srBreak24.pct - ((88 / 90 - 1) * 100)) < 0.01, JSON.stringify(srBreak24));
+const srBreak168 = srWalkBreaks.find((b) => b.bucketKey === 'TESTASSET' && b.horizonHours === 168);
+check('168h break magnitude matches the real 7-bar-later move (90 -> 82)', Math.abs(srBreak168.pct - ((82 / 90 - 1) * 100)) < 0.01, JSON.stringify(srBreak168));
+check('every break event is logged under both the per-symbol AND pooled asset_class|level_type bucket', srWalkBreaks.some((b) => b.bucketKey === 'crypto|support'), JSON.stringify(srWalkBreaks));
+
+check('a too-short series finds no pivots at all, not a crash', findPivots([{ date: 'x', close: 100, high: 100, low: 100 }]).length === 0);
+const srEmpty = walkSrLevels('X', 'crypto', []);
+check('walkSrLevels on an empty array: no levels, no breaks, not a crash', srEmpty.levels.length === 0 && srEmpty.breaks.length === 0);
+
+console.log('\n== srbreak technique: fires on a real close through a key (touched >=2) level, sized by calibration ==');
+const srLevelsFixture = { TESTASSET: [
+  { level: 100, levelType: 'support', touches: 3 },
+  { level: 120, levelType: 'resistance', touches: 2 }
+] };
+
+const srBreakDown = findTech(mod.evaluateTechniques(baseMetric({ price: 98 }), 'crypto', undefined, { srLevels: srLevelsFixture }), 'srbreak');
+check('close decisively below a key support level: fires bearish', srBreakDown.dir === -1, JSON.stringify(srBreakDown));
+check('note names the broken level', srBreakDown.note.includes('support') && srBreakDown.note.includes('100'), srBreakDown.note);
+
+const srBreakUp = findTech(mod.evaluateTechniques(baseMetric({ price: 122 }), 'crypto', undefined, { srLevels: srLevelsFixture }), 'srbreak');
+check('close decisively above a key resistance level: fires bullish', srBreakUp.dir === 1, JSON.stringify(srBreakUp));
+
+const srNoBreak = findTech(mod.evaluateTechniques(baseMetric({ price: 110 }), 'crypto', undefined, { srLevels: srLevelsFixture }), 'srbreak');
+check('price sitting between tracked levels: neutral, not fabricated into a direction', srNoBreak.dir === 0, JSON.stringify(srNoBreak));
+
+const srWickThrough = findTech(mod.evaluateTechniques(baseMetric({ price: 99.7 }), 'crypto', undefined, { srLevels: srLevelsFixture }), 'srbreak');
+check('a close only just past the level, inside the buffer: not counted as a real break', srWickThrough.dir === 0, JSON.stringify(srWickThrough));
+
+const srNoLevels = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'SOMEOTHERCOIN', price: 98 }), 'crypto', undefined, { srLevels: srLevelsFixture }), 'srbreak');
+check('this asset has no tracked levels at all: abstains (null)', srNoLevels.dir === null, JSON.stringify(srNoLevels));
+
+const srNoCtx = findTech(mod.evaluateTechniques(baseMetric({ price: 98 }), 'crypto'), 'srbreak');
+check('no srLevels loaded at all: abstains (null)', srNoCtx.dir === null, JSON.stringify(srNoCtx));
+
+const srBreakStatsFixture = { 'TESTASSET|24': { meanPct: -3.1, stdevPct: 1.2, n: 18 }, 'crypto|support|24': { meanPct: -1.5, stdevPct: 0.9, n: 40 } };
+const srWithSymbolCalib = findTech(mod.evaluateTechniques(baseMetric({ price: 98 }), 'crypto', undefined, { srLevels: srLevelsFixture, srBreakStats: srBreakStatsFixture }), 'srbreak');
+check('per-symbol break calibration exists: note carries this asset\'s own historical move and sample count', srWithSymbolCalib.note.includes('-3.1%') && srWithSymbolCalib.note.includes('18 prior breaks'), srWithSymbolCalib.note);
+
+const pooledOnlyStats = { 'crypto|support|24': { meanPct: -1.5, stdevPct: 0.9, n: 40 } };
+const srWithPooledCalib = findTech(mod.evaluateTechniques(baseMetric({ price: 98 }), 'crypto', undefined, { srLevels: srLevelsFixture, srBreakStats: pooledOnlyStats }), 'srbreak');
+check('no per-symbol calibration yet: falls back to the pooled asset_class|level_type figure', srWithPooledCalib.note.includes('-1.5%') && srWithPooledCalib.note.includes('40 prior breaks'), srWithPooledCalib.note);
+
+const srNoCalibAtAll = findTech(mod.evaluateTechniques(baseMetric({ price: 98 }), 'crypto', undefined, { srLevels: srLevelsFixture }), 'srbreak');
+check('no calibration data at all yet: still fires with a plain touches-based note, not blocked on it', srNoCalibAtAll.dir === -1 && srNoCalibAtAll.note.includes('prior touches'), srNoCalibAtAll.note);
+
+console.log('\n== accum technique: fires on a coiled range with an OBV lean, before price itself confirms ==');
+const coiledBullish = baseMetric({ chg7d: 1, obv: 0.8, bb: { squeezed: true, expanding: false }, volReg: 0.9 });
+const accumBullish = findTech(mod.evaluateTechniques(coiledBullish, 'crypto'), 'accum');
+check('Bollinger squeeze + rising OBV + flat price: fires bullish (leading, no price confirmation needed)', accumBullish.dir === 1, JSON.stringify(accumBullish));
+
+const coiledBearish = baseMetric({ chg7d: -1, obv: -0.9, bb: { squeezed: true, expanding: false }, volReg: 0.9 });
+const accumBearish = findTech(mod.evaluateTechniques(coiledBearish, 'crypto'), 'accum');
+check('Bollinger squeeze + falling OBV + flat price: fires bearish', accumBearish.dir === -1, JSON.stringify(accumBearish));
+
+const notCoiled = baseMetric({ chg7d: 1, obv: 0.8, bb: { squeezed: false, expanding: true }, volReg: 1.2 });
+const accumNotCoiled = findTech(mod.evaluateTechniques(notCoiled, 'crypto'), 'accum');
+check('bands already expanding (not coiled): neutral, this is the release, not the base', accumNotCoiled.dir === 0, JSON.stringify(accumNotCoiled));
+
+const coiledButTrending = baseMetric({ chg7d: 8, obv: 0.8, bb: { squeezed: true, expanding: false } });
+const accumTrending = findTech(mod.evaluateTechniques(coiledButTrending, 'crypto'), 'accum');
+check('bands squeezed but price already moved 8% over 7d: neutral, not a real base', accumTrending.dir === 0, JSON.stringify(accumTrending));
+
+const volRegOnlyCoil = baseMetric({ chg7d: 0.5, obv: 0.7, volReg: 0.5 });
+const accumViaVolReg = findTech(mod.evaluateTechniques(volRegOnlyCoil, 'crypto'), 'accum');
+check('no Bollinger data, but realized vol well under baseline: the volReg path alone is enough to count as coiled', accumViaVolReg.dir === 1, JSON.stringify(accumViaVolReg));
+
+const noObv = baseMetric({ chg7d: 1, bb: { squeezed: true, expanding: false } });
+const accumNoObv = findTech(mod.evaluateTechniques(noObv, 'crypto'), 'accum');
+check('no OBV data at all: abstains (null), nothing to read a lean from', accumNoObv.dir === null, JSON.stringify(accumNoObv));
+
 console.log('\n== seasonalAnalog: does this asset\'s own history contain a real analog? ==');
 check('too short a series: returns null, not a guess', mod.seasonalAnalog(Array.from({ length: 100 }, () => 100), 365) === null);
 function patternWindow(offset) { return Array.from({ length: 90 }, (_, i) => 100 + Math.sin((i + offset) / 10) * 8 + i * 0.1); }
@@ -1147,6 +1265,12 @@ check('crypto live prices keyed by ticker symbol, not CoinGecko id', [...display
 const solRow = built.crypto.breakout.concat(built.crypto.breakdown).find(r => r.symbol === 'SOL');
 check('a coin with no live quote (solana, not in the CoinGecko fixture) falls back to the hourly build\'s own price rather than a gap', !!solRow && pricesBody.crypto.SOL && pricesBody.crypto.SOL.price === solRow.price);
 check('stock live prices keyed by symbol with numeric price + chg24h', [...displayedStockSymbols].every(sym => pricesBody.stocks[sym] && typeof pricesBody.stocks[sym].price === 'number' && typeof pricesBody.stocks[sym].chg24h === 'number'));
+
+console.log('\n== api: live prices split across two providers (Binance.US + CoinGecko), see binanceUsTradablePairs ==');
+check('build-time Binance.US discovery only counts actively-trading USDT pairs, not a BUSD-quoted one', built.binanceUsSymbols.includes('BTC') && built.binanceUsSymbols.includes('ETH') && !built.binanceUsSymbols.includes('LINK'), JSON.stringify(built.binanceUsSymbols));
+check('health flags whether the Binance.US discovery call actually succeeded', built.health.binance_us === true);
+if (pricesBody.crypto.BTC) check('BTC live price came from the Binance.US ticker fixture, not CoinGecko\'s', pricesBody.crypto.BTC.price === 64000.5, JSON.stringify(pricesBody.crypto.BTC));
+if (pricesBody.crypto.LINK) check('LINK (no Binance.US pair in this fixture) still resolves via the CoinGecko fallback path', typeof pricesBody.crypto.LINK.price === 'number', JSON.stringify(pricesBody.crypto.LINK));
 
 console.log('\n== api: live prices, second call within the window reuses the cache (CoinGecko/Yahoo rate-limit guard) ==');
 const pricesResp2 = await worker.fetch(new Request('https://x.com/signals/api/prices'), pricesEnv, ctx);

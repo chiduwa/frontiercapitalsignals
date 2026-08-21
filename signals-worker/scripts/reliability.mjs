@@ -667,4 +667,32 @@ export async function loadRecentEvents(env, nowIso, withinDays = 14) {
   return out;
 }
 
+// Current key support/resistance levels per symbol (see
+// computeSrLevelsAndBreaks/replaceSrLevels, archive.mjs, run daily off the
+// permanent archive). Grouped by symbol so the 'srbreak' technique
+// (worker.js) can look up one asset's levels with a plain property read,
+// same shape loadRecentEvents uses.
+export async function loadSrLevels(env) {
+  const rows = await d1(env, 'SELECT symbol, level, level_type, touches FROM asset_sr_levels');
+  const out = {};
+  for (const r of rows) (out[r.symbol] ??= []).push({ level: r.level, levelType: r.level_type, touches: r.touches });
+  return out;
+}
+
+// Calibrated move size following a break of a tracked level — same
+// mean/stdev-from-running-sums shape loadMoveStats uses, just keyed by
+// sr_break_stats' bucket_key (a symbol once it has enough of its own break
+// history, else a pooled `asset_class|level_type` key — see
+// replaceSrBreakStats' docs) instead of a plain symbol.
+export async function loadSrBreakStats(env) {
+  const rows = await d1(env, 'SELECT bucket_key, horizon_hours, n, sum_pct, sum_pct_sq FROM sr_break_stats WHERE n > 0');
+  const out = {};
+  for (const r of rows) {
+    const mean = r.sum_pct / r.n;
+    const variance = Math.max(0, r.sum_pct_sq / r.n - mean * mean);
+    out[`${r.bucket_key}|${r.horizon_hours}`] = { meanPct: mean, stdevPct: Math.sqrt(variance), n: r.n };
+  }
+  return out;
+}
+
 export { MIN_RELIABILITY_SAMPLES };

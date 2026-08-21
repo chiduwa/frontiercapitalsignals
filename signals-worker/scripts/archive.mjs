@@ -473,6 +473,196 @@ export async function replaceLeadLagSignals(env, signals, computedAt) {
   return written;
 }
 
+// ------------------------- SUPPORT/RESISTANCE (srbreak) ---------------------
+// Added after a post-mortem on the 2026-08-19 crypto pump found BTC's
+// composite score suppressed through the entire ~7% move by chop-era
+// blended technique_reliability (see schema.sql's docs on
+// asset_sr_levels/sr_break_stats for the full finding). Rather than touch
+// that weighting — it's working as designed — this gives a fresh
+// technique_id (worker.js's 'srbreak') no chop-era baggage: it earns its
+// own weight from real level-break outcomes computed here.
+const SR_PIVOT_LOOKBACK = 5;          // bars each side a pivot must beat to count
+const SR_CLUSTER_TOLERANCE_PCT = 1.5; // how close two pivots must be to count as "the same level"
+const SR_BREAK_BUFFER_PCT = 0.75;     // close must clear a level by this much — a wick through isn't a break
+const SR_MIN_BARS = 60;               // need a real amount of history before trusting any pivot
+const SR_MIN_TOUCHES = 2;             // not "key" until price has reversed off it more than once
+const SR_MAX_LEVELS_PER_SIDE = 4;     // keep only the strongest few per symbol
+const SR_HORIZONS_HOURS = [24, 168];  // matches HORIZONS_HOURS in reliability.mjs; daily bars, so +1/+7 index steps
+
+// Local high/low pivots in a date-sorted, already-return-filtered bars
+// array. Uses real high/low where the archive has them (the ~71% of
+// crypto sourced from Yahoo, plus all equities); falls back to close for
+// the CoinGecko-fallback minority (high/low NULL) — same quality split
+// bestVolLookback/seasonalAnalog already accept via their haveDaily gate
+// elsewhere in this engine. Strict inequality against every other bar in
+// the window, so a flat top/bottom correctly produces no pivot at all
+// rather than an arbitrary tie-break.
+export function findPivots(bars) {
+  const pivots = [];
+  const n = bars.length;
+  for (let i = SR_PIVOT_LOOKBACK; i < n - SR_PIVOT_LOOKBACK; i++) {
+    const hi = bars[i].high ?? bars[i].close;
+    const lo = bars[i].low ?? bars[i].close;
+    let isHigh = true, isLow = true;
+    for (let j = i - SR_PIVOT_LOOKBACK; j <= i + SR_PIVOT_LOOKBACK; j++) {
+      if (j === i) continue;
+      if ((bars[j].high ?? bars[j].close) >= hi) isHigh = false;
+      if ((bars[j].low ?? bars[j].close) <= lo) isLow = false;
+    }
+    if (isHigh) pivots.push({ i, type: 'resistance', price: hi });
+    if (isLow) pivots.push({ i, type: 'support', price: lo });
+  }
+  return pivots;
+}
+
+// Walk-forward, no-lookahead: clusters pivots into levels as they're
+// discovered in chronological order (a level only becomes "key" once a
+// SECOND pivot lands within SR_CLUSTER_TOLERANCE_PCT of the first — never
+// before that point in history), then watches every subsequent bar for a
+// decisive close through an already-key level. Each break fires once per
+// level (marked broken and retired — the same "don't double-count the same
+// underlying event" discipline evaluateMatured's seenMoves uses) and
+// records the realized move SR_HORIZONS_HOURS later for calibration.
+// Returns the still-open (unbroken) key levels for the live payload, plus
+// every historical break event found, for sr_break_stats.
+export function walkSrLevels(symbol, assetClass, bars) {
+  const clusters = []; // { type, price, touches, firstIdx, lastIdx, broken }
+  const breaks = [];
+
+  // findPivots needs SR_PIVOT_LOOKBACK bars on BOTH sides to confirm a
+  // pivot, so bar i isn't actually knowable as a pivot until i+LOOKBACK —
+  // indexed here by that confirmation bar, not the pivot's own bar, so the
+  // walk-forward break simulation below never credits a level with a
+  // touch, or checks it for a break, using information that wouldn't
+  // really have been available yet at the time (the same no-lookahead
+  // discipline bestVolLookback's own backtest already holds itself to).
+  const pivotsByConfirmIdx = new Map();
+  for (const p of findPivots(bars)) {
+    const confirmIdx = p.i + SR_PIVOT_LOOKBACK;
+    if (!pivotsByConfirmIdx.has(confirmIdx)) pivotsByConfirmIdx.set(confirmIdx, []);
+    pivotsByConfirmIdx.get(confirmIdx).push(p);
+  }
+
+  for (let i = 0; i < bars.length; i++) {
+    for (const p of pivotsByConfirmIdx.get(i) || []) {
+      const match = clusters.find((c) => c.type === p.type && !c.broken
+        && Math.abs(p.price - c.price) / c.price * 100 <= SR_CLUSTER_TOLERANCE_PCT);
+      if (match) { match.touches++; match.lastIdx = p.i; }
+      else clusters.push({ type: p.type, price: p.price, touches: 1, firstIdx: p.i, lastIdx: p.i, broken: false });
+    }
+
+    const close = bars[i].close;
+    for (const c of clusters) {
+      if (c.broken || c.touches < SR_MIN_TOUCHES) continue;
+      const brokeDown = c.type === 'support' && close < c.price * (1 - SR_BREAK_BUFFER_PCT / 100);
+      const brokeUp = c.type === 'resistance' && close > c.price * (1 + SR_BREAK_BUFFER_PCT / 100);
+      if (!brokeDown && !brokeUp) continue;
+      c.broken = true;
+      for (const h of SR_HORIZONS_HOURS) {
+        const future = bars[i + (h === 24 ? 1 : 7)];
+        if (!future) continue;
+        const pct = (future.close / close - 1) * 100;
+        breaks.push({ bucketKey: symbol, horizonHours: h, pct });
+        breaks.push({ bucketKey: `${assetClass}|${c.type}`, horizonHours: h, pct });
+      }
+    }
+  }
+
+  const keyClusters = clusters.filter((c) => !c.broken && c.touches >= SR_MIN_TOUCHES);
+  const bySide = { support: [], resistance: [] };
+  for (const c of keyClusters) bySide[c.type].push(c);
+  const pickTop = (arr) => arr
+    .sort((a, b) => (b.touches - a.touches) || (b.lastIdx - a.lastIdx))
+    .slice(0, SR_MAX_LEVELS_PER_SIDE)
+    .map((c) => ({ level: c.price, levelType: c.type, touches: c.touches, firstSeen: bars[c.firstIdx].date, lastTouched: bars[c.lastIdx].date }));
+
+  return { levels: [...pickTop(bySide.support), ...pickTop(bySide.resistance)], breaks };
+}
+
+// Bulk-reads the full archive once (same cost profile as computeLeadLag's
+// own full-table read, cheap relative to D1's daily read budget), drops
+// pseudo-symbols (SECTOR:/TVL:/SPREAD:, which have no tradable level to
+// break through), and drops implausible single-day moves the same way
+// barsRowsToReturnsBySymbol does for lead/lag — so a Yahoo stuck-price-
+// then-jump artifact (see IMPLAUSIBLE_DAILY_RETURN_PCT's docs) can't
+// fabricate a fake level or a fake break.
+export async function computeSrLevelsAndBreaks(env) {
+  const rows = await d1(env, `
+    SELECT symbol, asset_class, date, close, high, low FROM asset_daily_bars
+    WHERE symbol NOT LIKE 'SECTOR:%' AND symbol NOT LIKE 'TVL:%' AND symbol NOT LIKE 'SPREAD:%'
+    ORDER BY symbol, date
+  `);
+  const barsBySymbol = {};
+  for (const r of rows) (barsBySymbol[r.symbol] ??= []).push(r);
+
+  const levelsBySymbol = {};
+  const allBreaks = [];
+  for (const [symbol, rawBars] of Object.entries(barsBySymbol)) {
+    if (rawBars.length < SR_MIN_BARS) continue;
+    const assetClass = rawBars[0].asset_class;
+    const clean = [rawBars[0]];
+    for (let i = 1; i < rawBars.length; i++) {
+      const prev = clean[clean.length - 1];
+      if (!prev.close || Math.abs(rawBars[i].close / prev.close - 1) * 100 > IMPLAUSIBLE_DAILY_RETURN_PCT) continue;
+      clean.push(rawBars[i]);
+    }
+    if (clean.length < SR_MIN_BARS) continue;
+
+    const { levels, breaks } = walkSrLevels(symbol, assetClass, clean);
+    if (levels.length) levelsBySymbol[symbol] = levels;
+    allBreaks.push(...breaks);
+  }
+  return { levelsBySymbol, breaks: allBreaks };
+}
+
+// Wholesale replace, same rationale as lead_lag_signals — a level that's
+// since been invalidated (broken, or superseded by a fresher cluster)
+// should disappear, not linger from a stale prior run.
+export async function replaceSrLevels(env, levelsBySymbol) {
+  await d1(env, 'DELETE FROM asset_sr_levels');
+  const updatedAt = new Date().toISOString();
+  const allRows = [];
+  for (const [symbol, levels] of Object.entries(levelsBySymbol)) {
+    for (const lvl of levels) allRows.push({ symbol, ...lvl });
+  }
+  let written = 0;
+  for (const batch of chunk(allRows, 15)) {
+    const placeholders = batch.map(() => '(?,?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap((r) => [r.symbol, r.level, r.levelType, r.touches, r.firstSeen, r.lastTouched, updatedAt]);
+    await d1(env, `INSERT INTO asset_sr_levels (symbol, level, level_type, touches, first_seen, last_touched, updated_at) VALUES ${placeholders}`, params);
+    written += batch.length;
+  }
+  return written;
+}
+
+// Wholesale replace, not incremental accumulate — unlike asset_move_stats
+// (fed one matured prediction at a time as real time actually passes, so
+// it has to accumulate), computeSrLevelsAndBreaks re-derives every break
+// event from the complete archive fresh each run; incrementing on top of
+// that would double-count the same historical breaks forever. Aggregates
+// to (bucket_key, horizon_hours) sums here in memory before one wholesale
+// write — same n/sum_pct/sum_pct_sq shape asset_move_stats uses, so
+// mean/stdev retrieval works identically, just populated by full-
+// recompute-replace like lead_lag_signals instead of streaming upsert.
+export async function replaceSrBreakStats(env, breaks) {
+  const agg = {};
+  for (const b of breaks) {
+    const key = `${b.bucketKey}|${b.horizonHours}`;
+    const a = (agg[key] ??= { bucketKey: b.bucketKey, horizonHours: b.horizonHours, n: 0, sumPct: 0, sumPctSq: 0 });
+    a.n++; a.sumPct += b.pct; a.sumPctSq += b.pct * b.pct;
+  }
+  await d1(env, 'DELETE FROM sr_break_stats');
+  const updatedAt = new Date().toISOString();
+  let written = 0;
+  for (const batch of chunk(Object.values(agg), 15)) {
+    const placeholders = batch.map(() => '(?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap((r) => [r.bucketKey, r.horizonHours, r.n, r.sumPct, r.sumPctSq, updatedAt]);
+    await d1(env, `INSERT INTO sr_break_stats (bucket_key, horizon_hours, n, sum_pct, sum_pct_sq, updated_at) VALUES ${placeholders}`, params);
+    written += batch.length;
+  }
+  return written;
+}
+
 // ------------------------------ SECTORS -------------------------------------
 // Category -> sector membership, recomputed daily from whichever symbols
 // the sentiment loop (daily-refresh.mjs) already fetched CoinGecko detail

@@ -26,7 +26,8 @@ import {
   replaceAssetSectors, computeSectorComposites, upsertDailyBars,
   computeYieldSpread,
   fetchDefiLlamaProtocols, matchProtocolsToUniverse, defiLlamaProtocolTvlHistory,
-  fetchDeribitDvolHistory, upsertIvDaily, fetchStockAtmIv
+  fetchDeribitDvolHistory, upsertIvDaily, fetchStockAtmIv,
+  computeSrLevelsAndBreaks, replaceSrLevels, replaceSrBreakStats
 } from './archive.mjs';
 import { evaluateYesterdaySwingTimes } from './reliability.mjs';
 
@@ -184,6 +185,21 @@ async function main() {
     console.log(`lead/lag: ${written} significant relationships registered (recomputed in ${Date.now() - started}ms)`);
   } catch (e) {
     console.error('lead/lag recompute failed:', e.message);
+  }
+
+  // Runs after backfill-history.mjs (same job) has the archive current, same
+  // dependency lead/lag above has. Independent of everything else in this
+  // file — reads asset_daily_bars fresh each time, writes its own two
+  // tables — so a failure here can't take down sentiment/sectors/lead-lag
+  // or vice versa.
+  try {
+    const started = Date.now();
+    const { levelsBySymbol, breaks } = await computeSrLevelsAndBreaks(env);
+    const levelsWritten = await replaceSrLevels(env, levelsBySymbol);
+    const statsWritten = await replaceSrBreakStats(env, breaks);
+    console.log(`support/resistance: ${Object.keys(levelsBySymbol).length} symbols with a key level, ${levelsWritten} levels, ${breaks.length} historical break events -> ${statsWritten} calibration buckets (${Date.now() - started}ms)`);
+  } catch (e) {
+    console.error('support/resistance computation failed:', e.message);
   }
 
   try {
