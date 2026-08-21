@@ -771,6 +771,80 @@ export async function computeSectorComposites(env, sectorRows, minConstituents =
   return out;
 }
 
+// ------------------------- BROAD MARKET COMPOSITE ---------------------------
+// A single MCAP:BROAD pseudo-symbol spanning every tracked crypto asset,
+// reusing computeSectorCompositeSeries's exact machinery (worker.js) with
+// one synthetic group instead of writing a second composite implementation
+// — equal-weighted average daily return across whatever deep-history
+// constituents are alive on a given date (early dates average across just
+// the handful of coins with real history that far back; more join as
+// their own history starts). This is a PROXY for the total crypto market,
+// not the literal dollar figure: CoinGecko's historical global-market-cap
+// endpoint is Pro-tier only (confirmed live, HTTP 10005 on the free key),
+// so there's no real historical TOTAL series available to this project —
+// deliberately named MCAP:BROAD, not MCAP:TOTAL, to keep it distinct from
+// the real (but short-history-only, see below) dollar figure. Feeds
+// computeSrLevelsAndBreaks (support/resistance) and computeLeadLag
+// automatically, same "just another symbol in asset_daily_bars" reuse
+// SECTOR:*/TVL:*/SPREAD:* already get — no changes needed there.
+export async function computeMarketComposite(env, minConstituents = 20) {
+  const rows = await d1(env, `SELECT symbol, date, close FROM asset_daily_bars WHERE asset_class = 'crypto' ORDER BY symbol, date`);
+  const allSymbols = [...new Set(rows.map((r) => r.symbol))];
+  if (allSymbols.length < minConstituents) return [];
+
+  const seedRows = await d1(env, `SELECT date, close FROM asset_daily_bars WHERE symbol = 'MCAP:BROAD' ORDER BY date DESC LIMIT 1`);
+  const seeds = seedRows.length ? { BROAD: { date: seedRows[0].date, close: seedRows[0].close } } : {};
+
+  const returnsBySymbol = barsRowsToReturnsBySymbol(rows);
+  const composites = computeSectorCompositeSeries(returnsBySymbol, { BROAD: allSymbols }, minConstituents, seeds);
+
+  return (composites.BROAD || []).map((point) => ({
+    symbol: 'MCAP:BROAD', assetClass: 'market', date: point.date, close: point.close,
+    high: null, low: null, volume: null, source: 'composite'
+  }));
+}
+
+// The real dollar total_market_cap figure (getGlobal(), worker.js — same
+// call the hourly build already makes for the overview tiles), archived
+// daily from today forward as MCAP:TOTAL. Short history by construction
+// (CoinGecko's historical version of this is Pro-only, see MCAP:BROAD's
+// docs above) but exact, unlike the proxy — worth having both: MCAP:BROAD
+// for retrospective study today, MCAP:TOTAL for real precision once enough
+// days accumulate.
+export async function upsertMarketCapTotal(env, date, totalMarketCapUsd) {
+  if (totalMarketCapUsd == null) return 0;
+  return upsertDailyBars(env, [{
+    symbol: 'MCAP:TOTAL', assetClass: 'market', date, close: totalMarketCapUsd,
+    high: null, low: null, volume: null, source: 'coingecko'
+  }]);
+}
+
+// Most recent 24h/168h % change for the broad market, for the mktoutlier
+// technique (worker.js) to compare an asset's own move against. Prefers
+// MCAP:TOTAL (the real figure) once it has enough days; falls back to
+// MCAP:BROAD (the proxy) otherwise — same historical-if-enough-samples-
+// else-proxy-fallback shape used elsewhere in this engine, just for a data
+// source rather than a statistical estimate. Returns null (abstain, not a
+// guess) if neither has enough recent history yet.
+export async function loadMarketReturn(env) {
+  const rows = await d1(env, `SELECT symbol, date, close FROM asset_daily_bars WHERE symbol IN ('MCAP:TOTAL', 'MCAP:BROAD') ORDER BY symbol, date`);
+  const bySymbol = {};
+  for (const r of rows) (bySymbol[r.symbol] ??= []).push(r);
+
+  const fromSeries = (bars) => {
+    if (!bars || bars.length < 8) return null;
+    const last = bars[bars.length - 1];
+    const prev1d = bars[bars.length - 2];
+    const prev7d = bars[bars.length - 8];
+    return {
+      chg24h: prev1d && prev1d.close ? ((last.close / prev1d.close) - 1) * 100 : null,
+      chg7d: prev7d && prev7d.close ? ((last.close / prev7d.close) - 1) * 100 : null,
+      asOf: last.date
+    };
+  };
+  return fromSeries(bySymbol['MCAP:TOTAL']) || fromSeries(bySymbol['MCAP:BROAD']) || null;
+}
+
 // Derived SPREAD:<name> pseudo-symbol (see computeSpreadSeries in worker.js
 // for why this needs no seed/incremental logic the way sector composites
 // do): reads two already-archived level series and writes their daily

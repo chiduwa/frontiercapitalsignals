@@ -17,7 +17,7 @@
 // Optional env: CMC_API_KEY, CRYPTOPANIC_API_TOKEN — both sources simply
 //   produce nothing (not an error) when their key is unset, same pattern
 //   as TREFIS_OVERRIDES elsewhere in this pipeline.
-import { getCryptoMarkets, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, mapCategoriesToSectors, STOCK_WATCHLIST, getCrumb } from '../worker.js';
+import { getCryptoMarkets, getGlobal, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, mapCategoriesToSectors, STOCK_WATCHLIST, getCrumb } from '../worker.js';
 import {
   coingeckoSentiment, cryptoPanicSentiment, cmcFearGreed,
   upsertAssetSentiment, upsertMarketSentiment,
@@ -27,7 +27,8 @@ import {
   computeYieldSpread,
   fetchDefiLlamaProtocols, matchProtocolsToUniverse, defiLlamaProtocolTvlHistory,
   fetchDeribitDvolHistory, upsertIvDaily, fetchStockAtmIv,
-  computeSrLevelsAndBreaks, replaceSrLevels, replaceSrBreakStats
+  computeSrLevelsAndBreaks, replaceSrLevels, replaceSrBreakStats,
+  computeMarketComposite, upsertMarketCapTotal
 } from './archive.mjs';
 import { evaluateYesterdaySwingTimes } from './reliability.mjs';
 
@@ -128,6 +129,34 @@ async function main() {
     }
   } catch (e) {
     console.error('sector taxonomy/composite computation failed:', e.message);
+  }
+
+  // MCAP:BROAD (retrospective proxy, deep history via the existing sector-
+  // composite machinery) and MCAP:TOTAL (the real dollar figure, short
+  // history by construction) — see their own docs in archive.mjs for why
+  // both exist rather than just one.
+  try {
+    const marketComposite = await computeMarketComposite(env);
+    if (marketComposite.length) {
+      const written = await upsertDailyBars(env, marketComposite);
+      console.log(`broad market composite (MCAP:BROAD): ${written} rows attempted (full history on the first run, a 1-2-row append after that)`);
+    } else {
+      console.log('broad market composite: not enough constituent history yet');
+    }
+  } catch (e) {
+    console.error('broad market composite computation failed:', e.message);
+  }
+
+  try {
+    const global = await getGlobal();
+    if (global && global.total_mcap != null) {
+      const written = await upsertMarketCapTotal(env, today, global.total_mcap);
+      console.log(`real total market cap (MCAP:TOTAL): $${(global.total_mcap / 1e9).toFixed(1)}B, ${written} row attempted`);
+    } else {
+      console.log('real total market cap: getGlobal() returned nothing usable this run');
+    }
+  } catch (e) {
+    console.error('real total market cap fetch failed:', e.message);
   }
 
   try {

@@ -877,6 +877,31 @@ const noObv = baseMetric({ chg7d: 1, bb: { squeezed: true, expanding: false } })
 const accumNoObv = findTech(mod.evaluateTechniques(noObv, 'crypto'), 'accum');
 check('no OBV data at all: abstains (null), nothing to read a lean from', accumNoObv.dir === null, JSON.stringify(accumNoObv));
 
+console.log('\n== mktoutlier technique: this asset\'s own move vs. the broad crypto market\'s ==');
+const marketFlat = { chg24h: 0.5, chg7d: 2, asOf: '2026-08-20' };
+
+const outlierBullGap = findTech(mod.evaluateTechniques(baseMetric({ chg7d: 20 }), 'crypto', undefined, { marketReturn: marketFlat }), 'mktoutlier');
+check('asset up 20% while market up only 2% (an 18-point gap): fires bullish', outlierBullGap.dir === 1, JSON.stringify(outlierBullGap));
+check('note names both this asset\'s and the market\'s own figures', outlierBullGap.note.includes('20%') && outlierBullGap.note.includes('2%'), outlierBullGap.note);
+
+const outlierBearGap = findTech(mod.evaluateTechniques(baseMetric({ chg7d: -16 }), 'crypto', undefined, { marketReturn: marketFlat }), 'mktoutlier');
+check('asset down 16% while market up 2% (an 18-point gap): fires bearish', outlierBearGap.dir === -1, JSON.stringify(outlierBearGap));
+
+const outlierOppositeSign = findTech(mod.evaluateTechniques(baseMetric({ chg7d: 4 }), 'crypto', undefined, { marketReturn: { chg24h: -1, chg7d: -5, asOf: '2026-08-20' } }), 'mktoutlier');
+check('asset up 4% while the market is DOWN 5% (opposite signs, gap only 9 -- below the 12-point bar alone): still fires bullish via the opposite-sign path', outlierOppositeSign.dir === 1, JSON.stringify(outlierOppositeSign));
+
+const notAnOutlier = findTech(mod.evaluateTechniques(baseMetric({ chg7d: 3 }), 'crypto', undefined, { marketReturn: marketFlat }), 'mktoutlier');
+check('asset up 3%, market up 2%: just riding the same wave, not an outlier -- neutral', notAnOutlier.dir === 0, JSON.stringify(notAnOutlier));
+
+const outlierNoMarketData = findTech(mod.evaluateTechniques(baseMetric({ chg7d: 20 }), 'crypto'), 'mktoutlier');
+check('no marketReturn loaded at all: abstains (null)', outlierNoMarketData.dir === null, JSON.stringify(outlierNoMarketData));
+
+const outlierMarketReturnNull = findTech(mod.evaluateTechniques(baseMetric({ chg7d: 20 }), 'crypto', undefined, { marketReturn: null }), 'mktoutlier');
+check('marketReturn explicitly null (not enough history yet, see loadMarketReturn): abstains (null)', outlierMarketReturnNull.dir === null, JSON.stringify(outlierMarketReturnNull));
+
+const outlierStockGated = findTech(mod.evaluateTechniques(baseMetric({ chg7d: 20 }), 'stock', undefined, { marketReturn: marketFlat }), 'mktoutlier');
+check('crypto-only: stocks never fire this technique even with marketReturn present', outlierStockGated.dir === null, JSON.stringify(outlierStockGated));
+
 console.log('\n== seasonalAnalog: does this asset\'s own history contain a real analog? ==');
 check('too short a series: returns null, not a guess', mod.seasonalAnalog(Array.from({ length: 100 }, () => 100), 365) === null);
 function patternWindow(offset) { return Array.from({ length: 90 }, (_, i) => 100 + Math.sin((i + offset) / 10) * 8 + i * 0.1); }
