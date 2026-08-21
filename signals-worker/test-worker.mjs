@@ -938,6 +938,23 @@ check('target date before any archived bar: null', mod.levelChangeBefore(yieldBa
 check('empty series: null, not a crash', mod.levelChangeBefore([], '2026-01-08', 3) === null);
 check('returns a raw point difference, not a percentage', mod.levelChangeBefore(yieldBars, '2026-01-12', 1) < 0 && Math.abs(mod.levelChangeBefore(yieldBars, '2026-01-12', 1)) < 1, mod.levelChangeBefore(yieldBars, '2026-01-12', 1));
 
+console.log('\n== yieldcurve technique: the one validated consolidation-research finding (2s10s spread narrowing precedes crypto weakness) ==');
+const yieldcurveFires = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, { yieldSpreadChange: { chg5d: -0.03, asOf: '2026-08-20' } }), 'yieldcurve');
+check('spread moved -0.03pts over 5d (past the -0.015 bar): fires bearish', yieldcurveFires.dir === -1, JSON.stringify(yieldcurveFires));
+check('note carries the actual spread move', yieldcurveFires.note.includes('-0.03'), yieldcurveFires.note);
+
+const yieldcurveSmallMove = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, { yieldSpreadChange: { chg5d: -0.005, asOf: '2026-08-20' } }), 'yieldcurve');
+check('a small move within ordinary noise (-0.005, close to the -0.003 normal-day mean): neutral, not fired', yieldcurveSmallMove.dir === 0, JSON.stringify(yieldcurveSmallMove));
+
+const yieldcurveRising = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto', undefined, { yieldSpreadChange: { chg5d: 0.05, asOf: '2026-08-20' } }), 'yieldcurve');
+check('deliberately asymmetric: a spread WIDENING does not fire bullish (that mirror hypothesis did not validate)', yieldcurveRising.dir === 0, JSON.stringify(yieldcurveRising));
+
+const yieldcurveNoData = findTech(mod.evaluateTechniques(baseMetric({}), 'crypto'), 'yieldcurve');
+check('no yieldSpreadChange loaded at all: abstains (null)', yieldcurveNoData.dir === null, JSON.stringify(yieldcurveNoData));
+
+const yieldcurveStockGated = findTech(mod.evaluateTechniques(baseMetric({}), 'stock', undefined, { yieldSpreadChange: { chg5d: -0.03, asOf: '2026-08-20' } }), 'yieldcurve');
+check('crypto-only: stocks never fire this technique (the validated finding was crypto-specific)', yieldcurveStockGated.dir === null, JSON.stringify(yieldcurveStockGated));
+
 console.log('\n== seasonalAnalog: does this asset\'s own history contain a real analog? ==');
 check('too short a series: returns null, not a guess', mod.seasonalAnalog(Array.from({ length: 100 }, () => 100), 365) === null);
 function patternWindow(offset) { return Array.from({ length: 90 }, (_, i) => 100 + Math.sin((i + offset) / 10) * 8 + i * 0.1); }

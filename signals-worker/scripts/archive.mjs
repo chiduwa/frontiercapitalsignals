@@ -15,7 +15,7 @@
 // two are genuinely the same need either way: "what's in the universe" and
 // "what's each coin's live funding right now."
 import { d1, chunk } from './d1-client.mjs';
-import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, computeSpreadSeries } from '../worker.js';
+import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, computeSpreadSeries, levelChangeBefore } from '../worker.js';
 
 const UA = 'Mozilla/5.0 (compatible; FrontierCapitalSignals/2.0)';
 
@@ -843,6 +843,25 @@ export async function loadMarketReturn(env) {
     };
   };
   return fromSeries(bySymbol['MCAP:TOTAL']) || fromSeries(bySymbol['MCAP:BROAD']) || null;
+}
+
+// 5-day change in the 2s10s Treasury yield spread, for the `yieldcurve`
+// technique (worker.js). Real, validated finding from correlation-
+// research.mjs (2026-08-21, guarded pooled + chronological-half-split,
+// both halves independently significant): the spread moving more
+// negative over the preceding 5 days measurably precedes a crypto
+// breakdown episode (>=20% down within <=7 days) — the level of either
+// yield alone, and shorter/longer lookbacks, did NOT hold up the same
+// way, so this is specifically the 5-day spread change, not a broader
+// "rates are moving" signal. Reuses the already-archived SPREAD:2s10s
+// series (computeYieldSpread/daily-refresh.mjs) and levelChangeBefore
+// (worker.js) — no new fetches.
+export async function loadYieldSpreadChange(env, lookbackDays = 5) {
+  const bars = await loadRecentBars(env, ['SPREAD:2s10s'], lookbackDays + 5);
+  const series = bars['SPREAD:2s10s'];
+  if (!series || series.length < lookbackDays + 1) return null;
+  const chg = levelChangeBefore(series, series[series.length - 1].date, lookbackDays);
+  return chg == null ? null : { chg5d: chg, asOf: series[series.length - 1].date };
 }
 
 // Derived SPREAD:<name> pseudo-symbol (see computeSpreadSeries in worker.js
