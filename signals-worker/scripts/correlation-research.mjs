@@ -16,7 +16,7 @@
 // the deliverable as the D1 rows.
 //
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID
-import { twoSampleZTest, volumeSurgeSeries, forwardReturns, chronologicalHalfSplit, sentimentExtremeForwardReturns, timeOfDaySentimentSplit, RELIABILITY_SIGNIFICANCE_Z } from '../worker.js';
+import { twoSampleZTest, volumeSurgeSeries, forwardReturns, chronologicalHalfSplit, sentimentExtremeForwardReturns, timeOfDaySentimentSplit, RELIABILITY_SIGNIFICANCE_Z, detectMoveEpisodes, volRegime, levelChangeBefore } from '../worker.js';
 import { d1 } from './d1-client.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
@@ -240,6 +240,110 @@ async function main() {
       finding.notes += ` (horizon=${TOD_SENTIMENT_HORIZON_HOURS}h, Bonferroni pooled bar=${TOD_SENTIMENT_BONFERRONI_Z})`;
       findings.push(finding);
     }
+  }
+
+  // ---- Consolidation-then-breakout research (2026-08-21) --------------------
+  // Detects every historical episode where a tracked asset moved
+  // >=EPISODE_THRESHOLD_PCT% within EPISODE_WINDOW_DAYS days, either
+  // direction (detectMoveEpisodes, worker.js), then tests two candidate
+  // leading covariates with the exact same pooled + chronological-half-
+  // split guardrail as every hypothesis above. Descriptive stats (typical
+  // magnitude/duration by side) are logged unconditionally — "how far do
+  // these usually go" is a real statistic once real episodes exist, not a
+  // hypothesis with a null to reject.
+  const EPISODE_THRESHOLD_PCT = 20;
+  const EPISODE_WINDOW_DAYS = 7;
+  const EPISODE_COOLDOWN_DAYS = 21;
+  const YIELD_LOOKBACK_DAYS = [3, 5, 10];
+  // Lower than MIN_SAMPLE_PER_BUCKET (30) for the same reason
+  // MIN_MARKET_SURGE_SAMPLE is lower than it above: a >=20%-in-a-week move
+  // is a rare, significant event by construction — there will never be as
+  // many of these as ordinary trading days, no matter how deep the archive
+  // gets. If real data can't even clear 15, that's the honest answer, not
+  // a reason to lower the bar further just to force a result.
+  const MIN_EPISODE_SAMPLE = 15;
+
+  const allEpisodes = [];
+  for (const [symbol, { assetClass, bars }] of Object.entries(bySymbol)) {
+    if (assetClass !== 'crypto' && assetClass !== 'stock') continue;
+    if (bars.length < 90) continue;
+    const sortedBars = bars.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+    for (const e of detectMoveEpisodes(sortedBars, EPISODE_THRESHOLD_PCT, EPISODE_WINDOW_DAYS, EPISODE_COOLDOWN_DAYS)) {
+      const compression = volRegime(sortedBars.slice(0, e.startIdx + 1).map((b) => b.close), 20, 60);
+      allEpisodes.push({ symbol, assetClass, ...e, compression });
+    }
+  }
+  console.log(`consolidation research: ${allEpisodes.length} episodes found (>=${EPISODE_THRESHOLD_PCT}% within <=${EPISODE_WINDOW_DAYS} days) across ${Object.keys(bySymbol).length} symbols`);
+
+  const mean = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+  const median = (arr) => { if (!arr.length) return null; const s = [...arr].sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+  for (const cls of ['crypto', 'stock']) {
+    for (const dir of [1, -1]) {
+      const subset = allEpisodes.filter((e) => e.assetClass === cls && e.dir === dir);
+      if (!subset.length) { console.log(`[episode stats] ${cls} ${dir === 1 ? 'bullish' : 'bearish'}: none found`); continue; }
+      const comps = subset.filter((e) => e.compression != null).map((e) => e.compression);
+      console.log(`[episode stats] ${cls} ${dir === 1 ? 'bullish' : 'bearish'}: n=${subset.length}, median full move=${median(subset.map((e) => e.fullMovePct))?.toFixed(1)}%, median days-to-extreme=${median(subset.map((e) => e.daysToExtreme))}, mean pre-episode compression ratio=${mean(comps)?.toFixed(2) ?? 'n/a'} (< 1.0 means genuinely coiled going in)`);
+    }
+  }
+
+  // Yield moves preceding a crypto episode — the user's own "yield rate
+  // dropping" framing, tested both directions: does a yield DROP precede a
+  // BULLISH episode, does a yield RISE precede a BEARISH one. Normal
+  // sample: the same level-change-over-N-days metric at a regular sample
+  // of ordinary days (every 5th, not literally every day — a stable
+  // baseline mean doesn't need the full density, and it keeps this fast).
+  const yieldSeries = {};
+  for (const sym of ['UST10Y', 'UST2Y', 'SPREAD:2s10s']) {
+    yieldSeries[sym] = ((bySymbol[sym] && bySymbol[sym].bars) || []).slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+  }
+  const allDates = [...new Set(rows.map((r) => r.date))].sort().filter((_, i) => i % 5 === 0);
+
+  for (const sym of ['UST10Y', 'UST2Y', 'SPREAD:2s10s']) {
+    if (!yieldSeries[sym].length) { console.log(`[yield research] ${sym}: not archived, skipped`); continue; }
+    for (const lookback of YIELD_LOOKBACK_DAYS) {
+      const normalSample = allDates
+        .map((d) => ({ date: d, value: levelChangeBefore(yieldSeries[sym], d, lookback) }))
+        .filter((p) => p.value != null);
+      for (const [label, dir] of [['bull', 1], ['bear', -1]]) {
+        const episodeSample = allEpisodes
+          .filter((e) => e.assetClass === 'crypto' && e.dir === dir)
+          .map((e) => ({ date: e.startDate, value: levelChangeBefore(yieldSeries[sym], e.startDate, lookback) }))
+          .filter((p) => p.value != null);
+        const hypothesis = `yield_${sym.replace(/[:.]/g, '_')}_before_${label}_crypto_episode_${lookback}d`;
+        if (episodeSample.length < MIN_EPISODE_SAMPLE || normalSample.length < MIN_SAMPLE_PER_BUCKET) {
+          console.log(`[${hypothesis}] too few samples (episode=${episodeSample.length}, normal=${normalSample.length}) — skipped`);
+          continue;
+        }
+        const finding = runGuardedTest(hypothesis, 'crypto', null, episodeSample, normalSample);
+        if (finding) findings.push(finding);
+      }
+    }
+  }
+
+  // Pre-episode volatility compression — was the asset genuinely coiled
+  // (volRegime < 1) going into the move, pooled across both directions
+  // (coiling should precede a breakout either way, unlike the yield
+  // hypothesis above which is directionally specific). Normal sample:
+  // volRegime computed at a regular sample of points per symbol (every
+  // 15th bar), not just episode starts.
+  const compressionEpisodeSample = allEpisodes
+    .filter((e) => e.assetClass === 'crypto' && e.compression != null)
+    .map((e) => ({ date: e.startDate, value: e.compression }));
+  const compressionNormalSample = [];
+  for (const [symbol, { assetClass, bars }] of Object.entries(bySymbol)) {
+    if (assetClass !== 'crypto' || bars.length < 90) continue;
+    const sortedBars = bars.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+    for (let i = 60; i < sortedBars.length; i += 15) {
+      const v = volRegime(sortedBars.slice(0, i + 1).map((b) => b.close), 20, 60);
+      if (v != null) compressionNormalSample.push({ date: sortedBars[i].date, value: v });
+    }
+  }
+  const compressionHypothesis = 'pre_episode_compression_crypto';
+  if (compressionEpisodeSample.length < MIN_EPISODE_SAMPLE || compressionNormalSample.length < MIN_SAMPLE_PER_BUCKET) {
+    console.log(`[${compressionHypothesis}] too few samples (episode=${compressionEpisodeSample.length}, normal=${compressionNormalSample.length}) — skipped`);
+  } else {
+    const finding = runGuardedTest(compressionHypothesis, 'crypto', null, compressionEpisodeSample, compressionNormalSample);
+    if (finding) findings.push(finding);
   }
 
   console.log(`correlation-research: ${findings.length} validated finding(s)`);

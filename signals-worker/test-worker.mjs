@@ -902,6 +902,42 @@ check('marketReturn explicitly null (not enough history yet, see loadMarketRetur
 const outlierStockGated = findTech(mod.evaluateTechniques(baseMetric({ chg7d: 20 }), 'stock', undefined, { marketReturn: marketFlat }), 'mktoutlier');
 check('crypto-only: stocks never fire this technique even with marketReturn present', outlierStockGated.dir === null, JSON.stringify(outlierStockGated));
 
+console.log('\n== detectMoveEpisodes: real breakout/breakdown episodes, not one per day the trigger stays crossed ==');
+const emStart = new Date('2026-01-01T00:00:00Z').getTime();
+const emClose = (i) => {
+  if (i < 20) return 100;                          // flat pad, pre-episode
+  if (i <= 32) return 100 + (i - 19) * (50 / 13);   // rises 100 -> 150 over days 20-32 (trigger + continuation to its real peak)
+  return 150 - (i - 32) * 2;                        // declines after the peak
+};
+const emBars = Array.from({ length: 60 }, (_, i) => ({ date: new Date(emStart + i * 86400000).toISOString().slice(0, 10), close: emClose(i) }));
+const episodes = mod.detectMoveEpisodes(emBars, 20, 7, 21, 30);
+check('finds exactly one episode, not one per day the 7-day return stays above threshold', episodes.length === 1, JSON.stringify(episodes));
+check('correctly identifies it as bullish', episodes[0].dir === 1, JSON.stringify(episodes[0]));
+check('the full move to the real peak (50%) is much bigger than the bare 7-day trigger, and the trigger itself cleared the threshold', episodes[0].fullMovePct > episodes[0].triggerPct && episodes[0].fullMovePct > 40 && episodes[0].triggerPct >= 20, JSON.stringify(episodes[0]));
+check('daysToExtreme is positive and lands at the real peak (day 32)', episodes[0].daysToExtreme > 0 && episodes[0].extremeDate === emBars[32].date, JSON.stringify(episodes[0]));
+
+const emFlat = Array.from({ length: 40 }, (_, i) => ({ date: new Date(emStart + i * 86400000).toISOString().slice(0, 10), close: 100 + Math.sin(i / 5) * 2 }));
+check('a genuinely flat/noisy series with no real breakout: finds nothing', mod.detectMoveEpisodes(emFlat, 20, 7, 21, 30).length === 0);
+
+const emBearish = emBars.map((b) => ({ date: b.date, close: 250 - b.close })); // mirror image -> a breakdown instead of a breakout
+const bearEpisodes = mod.detectMoveEpisodes(emBearish, 20, 7, 21, 30);
+check('the mirrored series is correctly detected as bearish', bearEpisodes.length === 1 && bearEpisodes[0].dir === -1, JSON.stringify(bearEpisodes));
+
+check('too little history: no crash, no episodes', mod.detectMoveEpisodes([{ date: '2026-01-01', close: 100 }], 20, 7, 21, 30).length === 0);
+
+console.log('\n== levelChangeBefore: N-trading-day level change ending at/before a target date, gap-tolerant ==');
+const yieldBars = [
+  { date: '2026-01-02', close: 4.5 }, { date: '2026-01-05', close: 4.45 }, // weekday-only series -- 01-03/04 are a weekend, correctly absent
+  { date: '2026-01-06', close: 4.4 }, { date: '2026-01-07', close: 4.35 }, { date: '2026-01-08', close: 4.3 },
+  { date: '2026-01-09', close: 4.2 }, { date: '2026-01-12', close: 4.1 }
+];
+check('3-index-position change ending at the exact target date', Math.abs(mod.levelChangeBefore(yieldBars, '2026-01-08', 3) - (4.3 - 4.45)) < 1e-9, mod.levelChangeBefore(yieldBars, '2026-01-08', 3));
+check('a target date that falls on a gap (weekend) uses the latest PRIOR bar, never a future one', Math.abs(mod.levelChangeBefore(yieldBars, '2026-01-10', 2) - (4.2 - 4.35)) < 1e-9, mod.levelChangeBefore(yieldBars, '2026-01-10', 2));
+check('not enough trailing bars for the requested lookback: null, not a guess', mod.levelChangeBefore(yieldBars, '2026-01-05', 5) === null);
+check('target date before any archived bar: null', mod.levelChangeBefore(yieldBars, '2025-01-01', 1) === null);
+check('empty series: null, not a crash', mod.levelChangeBefore([], '2026-01-08', 3) === null);
+check('returns a raw point difference, not a percentage', mod.levelChangeBefore(yieldBars, '2026-01-12', 1) < 0 && Math.abs(mod.levelChangeBefore(yieldBars, '2026-01-12', 1)) < 1, mod.levelChangeBefore(yieldBars, '2026-01-12', 1));
+
 console.log('\n== seasonalAnalog: does this asset\'s own history contain a real analog? ==');
 check('too short a series: returns null, not a guess', mod.seasonalAnalog(Array.from({ length: 100 }, () => 100), 365) === null);
 function patternWindow(offset) { return Array.from({ length: 90 }, (_, i) => 100 + Math.sin((i + offset) / 10) * 8 + i * 0.1); }

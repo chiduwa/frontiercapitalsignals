@@ -1066,6 +1066,76 @@ export function chronologicalHalfSplit(dates) {
   return { firstHalf: new Set(sorted.slice(0, mid)), secondHalf: new Set(sorted.slice(mid)) };
 }
 
+// Finds every historical episode where this asset moved at least
+// thresholdPct% within windowDays days, either direction — the "≥20% in a
+// week or less" pattern behind correlation-research.mjs's consolidation-
+// then-breakout study. Detection point is the FIRST day a trailing
+// windowDays return crosses the threshold; cooldownDays then suppresses
+// re-detecting the same underlying move as it keeps extending (a real
+// multi-week breakout would otherwise get counted dozens of times, once
+// per day it stays past the threshold — the same "don't double-count one
+// underlying event" discipline evaluateMatured's seenMoves and
+// walkSrLevels' broken-cluster retirement already use). Also walks forward
+// up to maxForwardDays to find the actual peak/trough — the fuller move,
+// not just the triggering windowDays slice — and how many days it took,
+// the real magnitude/duration behind "how far do these usually go and how
+// long do they take." `startIdx`/`detectedIdx` are the bar-array indices
+// (not just dates), so a caller can slice bars[0:startIdx] to look at
+// exactly what preceded this episode with no lookahead.
+export function detectMoveEpisodes(bars, thresholdPct = 20, windowDays = 7, cooldownDays = 21, maxForwardDays = 30) {
+  const sorted = bars.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const episodes = [];
+  let cooldownUntil = -1;
+  for (let i = windowDays; i < sorted.length; i++) {
+    if (i <= cooldownUntil) continue;
+    const startClose = sorted[i - windowDays].close;
+    const nowClose = sorted[i].close;
+    if (!startClose || !nowClose) continue;
+    const ret = ((nowClose / startClose) - 1) * 100;
+    if (Math.abs(ret) < thresholdPct) continue;
+
+    const dir = ret > 0 ? 1 : -1;
+    let extremeIdx = i, extremeClose = nowClose;
+    for (let j = i + 1; j < Math.min(sorted.length, i + maxForwardDays); j++) {
+      const c = sorted[j].close;
+      if (c == null) continue;
+      if ((dir === 1 && c > extremeClose) || (dir === -1 && c < extremeClose)) { extremeClose = c; extremeIdx = j; }
+    }
+    episodes.push({
+      startIdx: i - windowDays, startDate: sorted[i - windowDays].date,
+      detectedIdx: i, detectedDate: sorted[i].date,
+      dir, triggerPct: ret,
+      fullMovePct: ((extremeClose / startClose) - 1) * 100,
+      daysToExtreme: extremeIdx - i,
+      extremeDate: sorted[extremeIdx].date
+    });
+    cooldownUntil = Math.max(extremeIdx, i + cooldownDays);
+  }
+  return episodes;
+}
+
+// The level change over lookbackDays index-positions, ending at the latest
+// bar on or before targetDate — used by correlation-research.mjs to ask
+// "how much did this yield series move in the N trading days before this
+// crypto episode started." Index-based, not calendar-day-based, so a
+// 5-day-a-week series (Treasury yields, weekends/holidays) is handled
+// correctly without special-casing gaps — the same reasoning
+// detectMoveEpisodes' own windowDays already relies on for a series with
+// its own natural cadence. Returns the raw level difference (e.g. yield
+// percentage points), not a % return — the economically meaningful unit
+// for something like a Treasury yield, where "4.5% -> 4.3%" is a "-0.2"
+// move, not a "-4.4% return." `sortedBars`: [{date, close}], ascending.
+export function levelChangeBefore(sortedBars, targetDate, lookbackDays) {
+  if (!sortedBars || !sortedBars.length) return null;
+  let idx = -1;
+  for (let i = sortedBars.length - 1; i >= 0; i--) {
+    if (sortedBars[i].date <= targetDate) { idx = i; break; }
+  }
+  if (idx < lookbackDays) return null;
+  const now = sortedBars[idx].close, then = sortedBars[idx - lookbackDays].close;
+  return (now == null || then == null) ? null : now - then;
+}
+
 // Buckets each bar's forward return by that DAY's Fear & Greed reading,
 // using the same >=75/<=25 "extreme" thresholds the live `sentiment`
 // technique already acts on (evaluateTechniques, marketContext.fearGreed)
