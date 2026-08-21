@@ -16,7 +16,8 @@ import {
   fearGreedHistory, insertFearGreedHistory,
   yahooHourlyBars, computeSwingTimeTallies, upsertSwingTimeStats, getSwingTimeCoverage,
   upsertTimeOfDayStats,
-  binanceUsExchangeInfo, binanceUsKlines, getExistingHourlyCoverage, upsertHourlyBars
+  binanceUsExchangeInfo, binanceUsKlines, getExistingHourlyCoverage, upsertHourlyBars,
+  isYahooCryptoDataTrustworthy
 } from './archive.mjs';
 import { selectIntradayWatchlist } from './intraday.mjs';
 import { d1 } from './d1-client.mjs';
@@ -61,7 +62,7 @@ async function main() {
   const cryptoUniverse = cryptoRaw
     .filter((c) => !CRYPTO_BLOCKLIST.has((c.symbol || '').toLowerCase()))
     .filter((c) => (c.market_cap || 0) >= CRYPTO_MIN_MCAP && (c.total_volume || 0) >= CRYPTO_MIN_VOLUME)
-    .map((c) => ({ symbol: (c.symbol || '').toUpperCase(), id: c.id, assetClass: 'crypto', yahooTicker: `${(c.symbol || '').toUpperCase()}-USD` }));
+    .map((c) => ({ symbol: (c.symbol || '').toUpperCase(), id: c.id, assetClass: 'crypto', yahooTicker: `${(c.symbol || '').toUpperCase()}-USD`, refPrice: c.current_price ?? null }));
   const stockUniverse = STOCK_WATCHLIST.map((s) => ({ symbol: s, assetClass: 'stock', yahooTicker: s }));
   // Macro benchmarks (DXY/Gold/Oil) — archived alongside crypto/stocks so
   // they're eligible candidate leaders for the cross-asset lead/lag engine
@@ -98,7 +99,11 @@ async function main() {
 
     let bars = null, source = null;
     try {
-      bars = await yahooFullHistory(a.yahooTicker);
+      const yahooBars = await yahooFullHistory(a.yahooTicker);
+      if (a.assetClass === 'crypto' && !isYahooCryptoDataTrustworthy(yahooBars, a.refPrice, Date.now())) {
+        throw new Error(`Yahoo ${a.yahooTicker} looks like the wrong asset (stale or off by an order of magnitude vs CoinGecko's current price) — treating as a fetch failure`);
+      }
+      bars = yahooBars;
       source = 'yahoo';
       yahooOk++;
     } catch (e) {

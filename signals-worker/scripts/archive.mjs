@@ -58,6 +58,42 @@ export async function yahooFullHistory(ticker) {
   return bars;
 }
 
+// Yahoo's {SYMBOL}-USD ticker construction (backfill-history.mjs's universe
+// map) is purely mechanical — crypto ticker collisions across unrelated
+// coins are common (short symbols, no central registrar), and Yahoo
+// silently returns whatever it has under that exact string with no signal
+// it's the wrong asset. Found live across the tracked universe: at least
+// 16 symbols (HYPE, SUI, UNI, APT and others) had Yahoo tickers tracking
+// some unrelated, long-dead coin — real-looking dates and values, decaying
+// toward near-zero over months to years (volume=0 throughout, then
+// nothing), off by 100x-24000x from CoinGecko's live price for the actual
+// asset. HYPE's case was the clearest: Yahoo's HYPE-USD dating back to
+// 2021 and dying by mid-2024 — completely unrelated to Hyperliquid, which
+// didn't launch its token until November 2024. A handful (ARB, JUP, M,
+// WLFI) were being written wrong on the SAME day this was found, not just
+// stale history. A gradual multi-year decay doesn't trip
+// IMPLAUSIBLE_DAILY_RETURN_PCT below (that guards single-day spikes, not
+// this). Two independent checks here, either one enough to reject: the
+// most recent bar is stale (a real, currently-traded coin updates at
+// least every couple weeks) or its close is off by an order of magnitude
+// from CoinGecko's own current price for this coin (refPrice — already on
+// every universe entry from the same getCryptoMarkets() call backfill-
+// history.mjs already makes, zero extra fetches). A wrong-ticker mismatch
+// is almost always many orders of magnitude off, not a close call, so a
+// wide 10x band stays generous to real volatility/timing gaps while still
+// catching this. `nowMs` is a parameter, not an internal Date.now(), so
+// this stays a pure, directly testable function.
+export function isYahooCryptoDataTrustworthy(bars, refPrice, nowMs, maxStaleDays = 21) {
+  if (!bars || !bars.length) return false;
+  if (refPrice == null || refPrice <= 0) return true; // nothing to check the price against — don't block on staleness alone here, that's stocks'/benchmarks' path too
+  const last = bars[bars.length - 1];
+  const staleDays = (nowMs - new Date(last.date).getTime()) / 86400000;
+  if (staleDays > maxStaleDays) return false;
+  if (last.close == null || last.close <= 0) return false;
+  const ratio = last.close / refPrice;
+  return ratio >= 0.1 && ratio <= 10;
+}
+
 // CoinGecko fallback for the ~29% of the crypto universe Yahoo doesn't
 // carry (measured during planning) — same 365-day free-tier ceiling as
 // worker.js's getCryptoDailyHistory, but this variant keeps the real

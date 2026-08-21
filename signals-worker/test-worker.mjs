@@ -10,7 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { computeSwingTimeTallies, barsRowsToReturnsBySymbol, matchProtocolsToUniverse, findPivots, walkSrLevels } from './scripts/archive.mjs';
+import { computeSwingTimeTallies, barsRowsToReturnsBySymbol, matchProtocolsToUniverse, findPivots, walkSrLevels, isYahooCryptoDataTrustworthy } from './scripts/archive.mjs';
 import { selectIntradayWatchlist, CRYPTO_WATCHLIST_SIZE } from './scripts/intraday.mjs';
 import { parseBinanceKlines } from './scripts/archive.mjs';
 
@@ -743,6 +743,24 @@ check('no tvlSeries loaded at all: abstains (null)', tvlTechNoData.dir === null,
 
 const tvlTechStockGated = findTech(mod.evaluateTechniques(baseMetric({ symbol: 'AAVE', chg7d: 10 }), 'stock', undefined, { tvlSeries: { AAVE: tvlBarsUp } }), 'tvltrend');
 check('crypto-only: stocks never fire this technique even with matching TVL data', tvlTechStockGated.dir === null, JSON.stringify(tvlTechStockGated));
+
+console.log('\n== isYahooCryptoDataTrustworthy: catches wrong-ticker collisions (the HYPE/SUI/UNI bug) ==');
+const NOW = new Date('2026-08-21T00:00:00Z').getTime();
+const freshRealisticBars = [{ date: '2026-08-19', close: 73 }, { date: '2026-08-20', close: 74.5 }];
+check('fresh data, close to the reference price: trusted', isYahooCryptoDataTrustworthy(freshRealisticBars, 74.14, NOW) === true);
+
+const wrongTickerBars = [{ date: '2024-08-27', close: 0.000005 }]; // the actual HYPE-USD garbage found live
+check('wildly wrong magnitude AND stale (the real HYPE bug): rejected', isYahooCryptoDataTrustworthy(wrongTickerBars, 74.14, NOW) === false);
+
+const freshButWrongMagnitude = [{ date: '2026-08-21', close: 0.0006290287710726261 }]; // the real ARB bug found live -- fresh date, still wrong
+check('fresh date but off by two orders of magnitude (the real ARB/JUP/M/WLFI bug): rejected even though not stale', isYahooCryptoDataTrustworthy(freshButWrongMagnitude, 0.096339, NOW) === false);
+
+const staleButRightMagnitude = [{ date: '2022-12-11', close: 0.000006 }]; // the real PEPE case -- right ballpark, just old
+check('right order of magnitude but stale (the real PEPE case): rejected on staleness alone, so a fresh re-fetch gets forced', isYahooCryptoDataTrustworthy(staleButRightMagnitude, 0.00000361, NOW) === false);
+
+check('no reference price available (stocks/benchmarks never set one): trusted, this guard only applies where refPrice exists', isYahooCryptoDataTrustworthy(freshRealisticBars, null, NOW) === true);
+check('empty bars: rejected outright, nothing to trust', isYahooCryptoDataTrustworthy([], 74.14, NOW) === false);
+check('a zero/negative close on the latest bar: rejected', isYahooCryptoDataTrustworthy([{ date: '2026-08-20', close: 0 }], 74.14, NOW) === false);
 
 console.log('\n== findPivots / walkSrLevels: swing-pivot detection, clustering, and no-lookahead break simulation ==');
 // A clean double-touch of support at ~100 (idx 5 and idx 15, both real
