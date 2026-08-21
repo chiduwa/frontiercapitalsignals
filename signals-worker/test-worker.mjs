@@ -53,7 +53,12 @@ const coins = [
   mkCoin('ethereum', 'eth', 'Ethereum', 1800, 2.2e11),
   mkCoin('solana', 'sol', 'Solana', 75, 3.5e10),
   mkCoin('chainlink', 'link', 'Chainlink', 14, 9e9),
-  mkCoin('tether', 'usdt', 'Tether', 1, 1e11) // must be filtered out
+  mkCoin('tether', 'usdt', 'Tether', 1, 1e11), // must be filtered out
+  // Below CRYPTO_MIN_MCAP/CRYPTO_MIN_VOLUME on purpose — a favorite must
+  // still qualify (see FAVORITE_SYMBOLS' bypass in buildPayload), a
+  // non-favorite at the same size must not.
+  mkCoin('stellar', 'xlm', 'Stellar', 0.11, 10_000_000),
+  mkCoin('some-microcap', 'micro', 'MicroCap', 0.01, 5_000_000)
 ];
 
 function stubbedFetch(url) {
@@ -244,7 +249,17 @@ check('sparkline fallback has no calibrated lookback (no real daily history to b
 console.log('\n== engine: buildPayload() called directly, as build-signals.mjs will ==');
 const { payload: built, log } = await mod.buildPayload({ TREFIS_OVERRIDES: '{"AAPL": 999}' });
 check('crypto boards populated', built.crypto.breakout.length > 0 && built.crypto.universe >= 3);
-check('stablecoin filtered from universe', built.crypto.universe === 4, `universe=${built.crypto.universe}`);
+// 5, not 4: bitcoin/ethereum/solana/chainlink + stellar (a favorite,
+// deliberately fixtured below CRYPTO_MIN_MCAP/CRYPTO_MIN_VOLUME to prove
+// the bypass actually works) — tether (blocklisted) and some-microcap (an
+// ordinary non-favorite coin at the same size as stellar) are both
+// correctly excluded.
+check('stablecoin filtered, favorite bypasses the mcap/volume floor, an equally-small non-favorite does not', built.crypto.universe === 5, `universe=${built.crypto.universe}`);
+check('the favorite itself is present in favorites despite being far below the normal mcap/volume floor', built.crypto.favorites.some(f => f.symbol === 'XLM'), JSON.stringify(built.crypto.favorites.map(f => f.symbol)));
+check('an equally-small NON-favorite is excluded from the universe entirely, not just from favorites', !built.crypto.breakout.concat(built.crypto.breakdown, built.crypto.favorites).some(r => r.symbol === 'MICRO'));
+check('only the 4 named favorites ever appear in the favorites section', built.crypto.favorites.every(f => ['XLM', 'XRP', 'HYPE', 'HBAR'].includes(f.symbol)), JSON.stringify(built.crypto.favorites.map(f => f.symbol)));
+check('stocks never carry a favorites section (FAVORITE_SYMBOLS is crypto-only)', Array.isArray(built.stocks.favorites) && built.stocks.favorites.length === 0);
+check('every favorites row is shaped exactly like a board row (reuses entry(), not a second implementation)', built.crypto.favorites.every(f => typeof f.score === 'number' && (f.dir === 1 || f.dir === -1) && typeof f.price === 'number'));
 check('stocks boards populated', built.stocks.breakout.length > 0);
 // Ceiling is 18, not 16, now that fibonacci and timeofday exist (see
 // TECHNIQUE_META) — 'attention' is crypto-trending-conditional so it's
@@ -261,7 +276,7 @@ check('open interest fed to crypto', built.crypto.breakout.concat(built.crypto.b
 check('DXY/Gold/Oil macro benchmarks reach payload.overview', built.overview.dxy && built.overview.gold && built.overview.oil, JSON.stringify(built.overview));
 check('UST2Y/UST10Y Treasury yield benchmarks reach payload.overview too', built.overview.ust2y && built.overview.ust10y, JSON.stringify(built.overview));
 check('health counts sane', built.health.stocks_ok === built.health.stocks_total && built.health.valuation_ok > 0);
-check('crypto_daily health reflects the daily-history fetch (3 of 4 succeed, solana has none stubbed)', built.health.crypto_daily_total === 4 && built.health.crypto_daily_ok === 3, `ok=${built.health.crypto_daily_ok} total=${built.health.crypto_daily_total}`);
+check('crypto_daily health reflects the daily-history fetch (3 of 5 succeed, solana and stellar have none stubbed)', built.health.crypto_daily_total === 5 && built.health.crypto_daily_ok === 3, `ok=${built.health.crypto_daily_ok} total=${built.health.crypto_daily_total}`);
 check('votesLog/priceLog/rangeLog/allSymbols not leaked into the public payload', built.crypto.votesLog === undefined && built.crypto.priceLog === undefined && built.crypto.rangeLog === undefined && built.crypto.allSymbols === undefined && built.stocks.votesLog === undefined && built.stocks.rangeLog === undefined && built.stocks.allSymbols === undefined);
 check('log has directional votes for both asset classes', log.votes.some(v => v.asset_class === 'crypto') && log.votes.some(v => v.asset_class === 'stock'));
 check('log votes are directional only (no 0/null dir)', log.votes.every(v => v.dir === 1 || v.dir === -1));

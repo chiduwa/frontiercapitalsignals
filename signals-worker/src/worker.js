@@ -84,6 +84,16 @@ export const CRYPTO_HISTORY_DAYS = 365;
 const CRYPTO_HISTORY_BATCH = 1;
 const CRYPTO_HISTORY_DELAY_MS = 3000;
 
+// Always evaluated and always shown in their own pinned dashboard section
+// (see rankBoards' favorites below), regardless of current rank or
+// whether they'd otherwise crack the top-10 breakout/breakdown boards —
+// the user wants these specific 4 visible every run, not just when they
+// happen to place. Also bypasses the CRYPTO_MIN_MCAP/CRYPTO_MIN_VOLUME
+// floor below (still subject to CRYPTO_BLOCKLIST and simply needing to be
+// in CoinGecko's fetched top-CRYPTO_UNIVERSE page at all), so "always"
+// actually means always, not "usually, since they're currently large-cap."
+export const FAVORITE_SYMBOLS = new Set(['XLM', 'XRP', 'HYPE', 'HBAR']);
+
 export const CRYPTO_BLOCKLIST = new Set([
   'usdt','usdc','usds','usde','dai','fdusd','pyusd','tusd','usdp','gusd','frax',
   'lusd','susd','usdd','usdy','usd0','usdtb','rlusd','eurc','eurt','usdx','buidl',
@@ -2803,6 +2813,11 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       volRatio: x.m.volRatio,
       rangePos: x.m.rangePos,
       score,
+      // Which side this specific row was built for — always matches
+      // cfg.side for the regular boards (uniform by construction), but the
+      // favorites section (below) mixes both, so boardHtml uses this per
+      // row rather than the board-level cfg.side for anything row-specific.
+      dir,
       conf: { agree: side === 'long' ? x.c.bull : x.c.bear, total: x.c.total },
       drivers: side === 'long' ? x.c.longNotes : x.c.shortNotes,
       horizon,
@@ -2824,7 +2839,19 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       || (side === 'long' ? b.c.bull - a.c.bull : b.c.bear - a.c.bear))
     .slice(0, 10)
     .map(x => entry(x, side));
-  return { breakout: sortSide('long'), breakdown: sortSide('short'), universe: metrics.length, votesLog, priceLog, rangeLog, allSymbols };
+  // Pinned section, independent of top-10 rank on either board — see
+  // FAVORITE_SYMBOLS' own docs. Each favorite shows on whichever side its
+  // OWN current confluence actually leans (mirroring compositeCall's own
+  // long-vs-short pick), reusing entry() directly rather than a second
+  // row-building implementation. Crypto only (FAVORITE_SYMBOLS is an
+  // all-crypto list); stocks always get an empty array so the dashboard
+  // never has to branch on whether the key exists.
+  const favorites = kind === 'crypto'
+    ? scored
+        .filter(x => FAVORITE_SYMBOLS.has(x.m.symbol))
+        .map(x => entry(x, x.c.long >= x.c.short ? 'long' : 'short'))
+    : [];
+  return { breakout: sortSide('long'), breakdown: sortSide('short'), universe: metrics.length, votesLog, priceLog, rangeLog, allSymbols, favorites };
 }
 
 // ----------------------------- HANDLER --------------------------------------
@@ -2907,7 +2934,8 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     }
     const qualifying = raw
       .filter(c => !CRYPTO_BLOCKLIST.has((c.symbol || '').toLowerCase()))
-      .filter(c => (c.market_cap || 0) >= CRYPTO_MIN_MCAP && (c.total_volume || 0) >= CRYPTO_MIN_VOLUME);
+      .filter(c => FAVORITE_SYMBOLS.has((c.symbol || '').toUpperCase())
+        || ((c.market_cap || 0) >= CRYPTO_MIN_MCAP && (c.total_volume || 0) >= CRYPTO_MIN_VOLUME));
 
     // Paced, not pooled at full concurrency: ~100 per-coin calls against
     // CoinGecko's free tier, one call per qualifying coin (no batched
@@ -3171,10 +3199,12 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .board{background:var(--ink-1);border:1px solid var(--line)}
   .board.long{border-top:2px solid var(--amber)}
   .board.short{border-top:2px solid var(--down)}
+  .board.favorites{border-top:2px solid var(--up)}
   .board-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:16px 18px 12px}
   .eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim)}
   .board.long .eyebrow b{color:var(--amber);font-weight:600}
   .board.short .eyebrow b{color:var(--down);font-weight:600}
+  .board.favorites .eyebrow b{color:var(--up);font-weight:600}
   .board-title{font-weight:800;font-size:19px;letter-spacing:-.01em;margin-top:3px}
   .board-count{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);white-space:nowrap}
 
@@ -3203,6 +3233,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .meter i{width:6px;height:13px;background:var(--ink-2);border-radius:1px}
   .board.long .meter i.on{background:var(--amber);box-shadow:0 0 5px rgba(255,178,36,.45)}
   .board.short .meter i.on{background:var(--down);box-shadow:0 0 5px rgba(255,122,133,.4)}
+  .board.favorites .meter i.on{background:var(--up);box-shadow:0 0 5px rgba(61,220,151,.45)}
   .score{font-weight:600;min-width:24px;color:var(--paper)}
   .conf{font-size:9.5px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
   .horizon{font-size:9.5px;letter-spacing:.06em;padding:1px 6px;border-radius:3px;border:1px solid var(--line);cursor:help}
@@ -3527,8 +3558,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     if(rows&&rows.length){
       rows.forEach(function(r,i){
         var url = assetUrl(cfg.assetClass, r);
+        var rowSide = r.dir===-1 ? 'short' : 'long'; // per-row, not cfg.side — the favorites board mixes both
         var symHtml = url
-          ? '<a class="sym-link" target="_blank" rel="noopener noreferrer" href="'+url+'" data-symbol="'+esc(r.symbol)+'" data-class="'+cfg.assetClass+'" data-side="'+cfg.side+'" data-rank="'+(i+1)+'" data-score="'+r.score+'"><span class="sym">'+esc(r.symbol)+'</span></a>'
+          ? '<a class="sym-link" target="_blank" rel="noopener noreferrer" href="'+url+'" data-symbol="'+esc(r.symbol)+'" data-class="'+cfg.assetClass+'" data-side="'+rowSide+'" data-rank="'+(i+1)+'" data-score="'+r.score+'"><span class="sym">'+esc(r.symbol)+'</span></a>'
           : '<span class="sym">'+esc(r.symbol)+'</span>';
         var name = r.name && r.name!==r.symbol ? '<span class="nm">'+esc(r.name)+'</span>' : '';
         var why = (r.drivers&&r.drivers.length)?'<span class="why">'+esc(r.drivers.join(' · '))+'</span>':'';
@@ -3559,6 +3591,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
 
   function renderBoards(d){
     var b='';
+    if(d.crypto.favorites && d.crypto.favorites.length){
+      b+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-favorites', eyebrow:'CRYPTO · <b>YOUR FAVORITES</b>', title:'Always tracked'}, d.crypto.favorites, d.crypto.favorites.length);
+    }
     b+=boardHtml({side:'long', assetClass:'crypto', boardId:'crypto-long', eyebrow:'CRYPTO · <b>LONG SIDE</b>', title:'Breakout watch'}, d.crypto.breakout, d.crypto.universe);
     b+=boardHtml({side:'short', assetClass:'crypto', boardId:'crypto-short', eyebrow:'CRYPTO · <b>RISK SIDE</b>', title:'Breakdown risk'}, d.crypto.breakdown, d.crypto.universe);
     b+=boardHtml({side:'long', assetClass:'stock', boardId:'stock-long', eyebrow:'US EQUITIES · <b>LONG SIDE</b>', title:'Breakout watch'}, d.stocks.breakout, d.stocks.universe);
