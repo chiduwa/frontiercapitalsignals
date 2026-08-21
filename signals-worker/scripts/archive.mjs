@@ -626,7 +626,12 @@ export async function replaceSrLevels(env, levelsBySymbol) {
     for (const lvl of levels) allRows.push({ symbol, ...lvl });
   }
   let written = 0;
-  for (const batch of chunk(allRows, 15)) {
+  // 10, not 15: this row is 7 columns wide — confirmed live (real D1 400,
+  // "too many SQL variables") that 15 x 7 = 105 params exceeds D1's actual
+  // per-query bound-parameter limit, unlike every other batched insert in
+  // this file, which all stay well under 100 (e.g. upsertDailyBars' 8
+  // columns x 10 rows = 80) — matching that same margin here.
+  for (const batch of chunk(allRows, 10)) {
     const placeholders = batch.map(() => '(?,?,?,?,?,?,?)').join(',');
     const params = batch.flatMap((r) => [r.symbol, r.level, r.levelType, r.touches, r.firstSeen, r.lastTouched, updatedAt]);
     await d1(env, `INSERT INTO asset_sr_levels (symbol, level, level_type, touches, first_seen, last_touched, updated_at) VALUES ${placeholders}`, params);
@@ -654,7 +659,10 @@ export async function replaceSrBreakStats(env, breaks) {
   await d1(env, 'DELETE FROM sr_break_stats');
   const updatedAt = new Date().toISOString();
   let written = 0;
-  for (const batch of chunk(Object.values(agg), 15)) {
+  // 12, not 15: same D1 bound-parameter ceiling as replaceSrLevels above
+  // (confirmed live) — 6 columns x 12 rows = 72, matching this file's
+  // established safety margin (e.g. computeSwingTimeTallies' 7 x 12 = 84).
+  for (const batch of chunk(Object.values(agg), 12)) {
     const placeholders = batch.map(() => '(?,?,?,?,?,?)').join(',');
     const params = batch.flatMap((r) => [r.bucketKey, r.horizonHours, r.n, r.sumPct, r.sumPctSq, updatedAt]);
     await d1(env, `INSERT INTO sr_break_stats (bucket_key, horizon_hours, n, sum_pct, sum_pct_sq, updated_at) VALUES ${placeholders}`, params);
