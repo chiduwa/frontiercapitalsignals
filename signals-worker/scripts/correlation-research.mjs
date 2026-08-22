@@ -416,9 +416,9 @@ async function main() {
   // structurally less volatile than any single constituent (diversification
   // dampens it), so requiring the same bar as the individual asset would
   // almost never fire.
-  const marketSeriesRaw = (bySymbol['MCAP:TOTAL'] && bySymbol['MCAP:TOTAL'].bars.length > 90) ? bySymbol['MCAP:TOTAL'].bars : ((bySymbol['MCAP:BROAD'] && bySymbol['MCAP:BROAD'].bars) || []);
-  const marketLabel = (bySymbol['MCAP:TOTAL'] && bySymbol['MCAP:TOTAL'].bars.length > 90) ? 'MCAP:TOTAL' : 'MCAP:BROAD (proxy)';
-  const marketSeries = marketSeriesRaw.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+  const marketSymbolKey = (bySymbol['MCAP:TOTAL'] && bySymbol['MCAP:TOTAL'].bars.length > 90) ? 'MCAP:TOTAL' : (bySymbol['MCAP:BROAD'] ? 'MCAP:BROAD' : null);
+  const marketLabel = marketSymbolKey === 'MCAP:BROAD' ? 'MCAP:BROAD (proxy)' : (marketSymbolKey || 'none');
+  const marketSeries = (marketSymbolKey ? bySymbol[marketSymbolKey].bars : []).slice().sort((a, b) => (a.date < b.date ? -1 : 1));
   const pctRunBefore = (series, targetDate, lookbackDays) => {
     let idx = -1;
     for (let i = series.length - 1; i >= 0; i--) { if (series[i].date <= targetDate) { idx = i; break; } }
@@ -441,6 +441,92 @@ async function main() {
   } else {
     const finding = runGuardedTest(marketAlignHypothesis, 'crypto', null, marketAligned, isolated);
     if (finding) findings.push(finding);
+  }
+
+  // Leaders vs laggers (user-requested 2026-08-22, follow-up to the
+  // exhaustion-reversal work above): does a specific asset's OWN reversal
+  // tend to happen BEFORE others', making it an early warning rather than
+  // just another coincident symptom of the same market-wide move? This is
+  // deliberately scoped to two PRE-SPECIFIED, structurally-obvious
+  // candidates — BTC (already the dominant benchmark used everywhere else
+  // in this codebase, e.g. correlationWithBenchmark) and the market
+  // composite itself — not a mined scan across every symbol pair. Testing
+  // all ~50+ symbols as candidate leaders would be exactly the multiple-
+  // testing trap this file's own header warns about: with enough symbols
+  // tried, something clears significance by chance alone. (The general,
+  // ongoing version of "which symbol leads which" already exists and runs
+  // daily — see computeLeadLag/lead_lag_signals, archive.mjs — this is
+  // narrower: does that leadership structure specifically hold AROUND
+  // exhaustion-reversal events.)
+  const exhaustionLeaderCandidates = ['BTC', ...(marketSymbolKey ? [marketSymbolKey] : [])];
+
+  // Descriptive first (unconditional, same philosophy as the episode/
+  // outcome stats above): of the OTHER assets' own qualifying exhaustion
+  // reversals, when one falls within 15 days of this candidate's own
+  // same-direction reversal, how many days apart are they and who moved
+  // first — a plain, intuitive "does X tend to lead by about N days."
+  for (const leaderSymbol of exhaustionLeaderCandidates) {
+    const leaderEpisodes = allExhaustionReversals.filter((e) => e.symbol === leaderSymbol);
+    const leaderTag = leaderSymbol === marketSymbolKey ? marketLabel : leaderSymbol;
+    if (!leaderEpisodes.length) { console.log(`[exhaustion lead-lag] ${leaderTag}: no qualifying exhaustion reversals of its own to compare against`); continue; }
+    const gaps = [];
+    for (const follower of allExhaustionReversals) {
+      if (follower.assetClass !== 'crypto' || follower.symbol === leaderSymbol) continue;
+      let nearestGap = null;
+      for (const le of leaderEpisodes) {
+        if (le.dir !== follower.dir) continue;
+        const gapDays = (new Date(follower.detectedDate) - new Date(le.detectedDate)) / 86400000;
+        if (Math.abs(gapDays) <= 15 && (nearestGap == null || Math.abs(gapDays) < Math.abs(nearestGap))) nearestGap = gapDays;
+      }
+      if (nearestGap != null) gaps.push(nearestGap);
+    }
+    if (gaps.length >= MIN_EXHAUSTION_SAMPLE) {
+      const ledCount = gaps.filter((g) => g > 0).length;
+      console.log(`[exhaustion lead-lag] ${leaderTag} vs other assets' own exhaustion reversals: n=${gaps.length} paired within 15 days, median gap=${median(gaps)?.toFixed(1)} days (positive = ${leaderTag} moved first), led in ${((ledCount / gaps.length) * 100).toFixed(0)}% of paired cases`);
+    } else {
+      console.log(`[exhaustion lead-lag] ${leaderTag} vs other assets: too few paired same-direction episodes within 15 days (n=${gaps.length}) to say anything yet`);
+    }
+  }
+
+  // Guarded hypothesis: does a candidate leader's exhaustion reversal
+  // predict OTHER crypto assets' forward returns, sign-aligned to the
+  // leader's own direction (pooling dip and spike episodes together — same
+  // "should hold either way" pooling the pre-episode-compression hypothesis
+  // above already uses, not a new judgment call). Family size = candidates
+  // x HORIZONS_DAYS (2 x 2 = 4 when both BTC and a market composite are
+  // available) — same size and same overall-alpha reasoning as the
+  // TOD_SENTIMENT family below, so it reuses that exact Bonferroni bar
+  // rather than deriving a new one for what is, when both candidates
+  // exist, the identical family size.
+  const exhaustionLeaderZBar = exhaustionLeaderCandidates.length > 1 ? TOD_SENTIMENT_BONFERRONI_Z : RELIABILITY_SIGNIFICANCE_Z;
+  for (const leaderSymbol of exhaustionLeaderCandidates) {
+    const leaderEpisodes = allExhaustionReversals.filter((e) => e.symbol === leaderSymbol);
+    const leaderTag = leaderSymbol === marketSymbolKey ? marketLabel : leaderSymbol;
+    if (!leaderEpisodes.length) continue; // already logged above
+
+    for (const horizon of HORIZONS_DAYS) {
+      const surgeSample = [], normalSample = [];
+      for (const [symbol, { assetClass, bars }] of Object.entries(bySymbol)) {
+        if (assetClass !== 'crypto' || symbol === leaderSymbol || bars.length < 90) continue;
+        const sortedBars = bars.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+        const fwd = forwardReturns(sortedBars, [horizon]);
+        for (const le of leaderEpisodes) {
+          const entry = fwd[le.detectedDate];
+          if (entry && entry[horizon] != null) surgeSample.push({ date: `${symbol}|${le.detectedDate}`, value: le.dir === -1 ? entry[horizon] : -entry[horizon] });
+        }
+        const sampledDates = Object.keys(fwd).sort().filter((_, idx) => idx % 10 === 0);
+        for (const d of sampledDates) {
+          if (fwd[d][horizon] != null) normalSample.push({ date: `${symbol}|${d}`, value: fwd[d][horizon] });
+        }
+      }
+      const hypothesis = `exhaustion_leader_${leaderSymbol.replace(/[:.]/g, '_')}_${horizon}d`;
+      if (surgeSample.length < MIN_EXHAUSTION_SAMPLE || normalSample.length < MIN_SAMPLE_PER_BUCKET) {
+        console.log(`[${hypothesis}] too few samples (leader-conditioned=${surgeSample.length}, normal=${normalSample.length}) — skipped`);
+        continue;
+      }
+      const finding = runGuardedTest(hypothesis, 'crypto', horizon, surgeSample, normalSample, exhaustionLeaderZBar);
+      if (finding) findings.push(finding);
+    }
   }
 
   console.log(`correlation-research: ${findings.length} validated finding(s)`);
