@@ -182,6 +182,27 @@ check('301 targets /signals/', (redir.headers.get('location') || '').endsWith('/
 const page = await worker.fetch(new Request('https://x.com/signals/'), emptyEnv, ctx);
 const pageText = await page.text();
 check('dashboard served', page.headers.get('content-type').includes('text/html') && pageText.includes('Frontier Capital'));
+
+// Every embedded <script> block must actually parse — added 2026-08-22
+// after a real, live incident: an apostrophe inside a single-quoted
+// string (r.flipStability's title text) broke the WHOLE dashboard, silent
+// at every other layer. PAGE_HTML is a JS template literal (worker.js),
+// so a backslash-escaped `\'` in the SOURCE gets consumed by the OUTER
+// template literal's own escape processing before the string ever reaches
+// the browser -- what worker.js's source shows as `\'` renders as a bare,
+// unescaped `'` in the actual page, which node --check confirmed silently
+// (no build-time error, no runtime error report -- the whole inline
+// script just fails to parse in the browser, so NOTHING on the page
+// renders). `new Function(...)` throws SyntaxError immediately on a bad
+// script without ever executing it, the same fast, side-effect-free check
+// used to find and confirm the fix for the real incident.
+const embeddedScripts = [...pageText.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]).filter((s) => s.trim());
+check('at least one inline <script> block found to check', embeddedScripts.length > 0, `found ${embeddedScripts.length}`);
+for (const [i, scriptSrc] of embeddedScripts.entries()) {
+  let syntaxError = null;
+  try { new Function(scriptSrc); } catch (e) { syntaxError = e.message; }
+  check(`inline <script> block ${i} parses with no syntax error (a broken one takes down the ENTIRE dashboard, silently)`, syntaxError === null, syntaxError);
+}
 check('dashboard sends CSP + hardening headers', !!page.headers.get('content-security-policy') && page.headers.get('x-content-type-options') === 'nosniff' && page.headers.get('x-frame-options') === 'DENY');
 check('CSP allows GTM/GA4 domains (script-src + connect-src)', page.headers.get('content-security-policy').includes('googletagmanager.com') && page.headers.get('content-security-policy').includes('google-analytics.com'));
 check('GTM container + consent-mode snippet present in the page', pageText.includes('GTM-5Q7JC6JX') && pageText.includes('fcs_consent_v1') && pageText.includes("gtag('consent','default'"));
@@ -194,6 +215,7 @@ check('favorites board says just "FAVORITES", not a possessive "YOUR FAVORITES"'
 check('per-row direction arrow + consolidating-badge markup present', pageText.includes('dir-arrow') && pageText.includes('class="coil') && pageText.includes('Consolidating'));
 check('quality + rotation badge markup present', pageText.includes('class="quality') && pageText.includes('class="rotation') && pageText.includes('Rotating in'));
 check('flip-caution badge markup present', pageText.includes('class="flip-note') && pageText.includes('Flipped') && pageText.includes('extra caution'));
+check('a link back to the FCS homepage is present', pageText.includes('class="home-link"') && pageText.includes('href="https://frontiercapitalsignals.com/"'));
 
 console.log('\n== getFundingMap: CoinGecko derivatives, highest-OI perpetual market wins ==');
 const fundingMap = await mod.getFundingMap();

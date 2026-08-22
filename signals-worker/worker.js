@@ -3523,6 +3523,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .stat.warn b{color:var(--amber)}
 
   .masthead{padding:58px 0 34px}
+  .home-link{display:inline-block;color:var(--dim);font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;text-decoration:none;margin-bottom:14px}
+  .home-link:hover{color:var(--amber)}
   .masthead h1{font-weight:900;font-size:clamp(42px,7.2vw,94px);line-height:.94;letter-spacing:-.025em;text-transform:uppercase}
   .masthead h1 .amber{color:var(--amber)}
   .mast-grid{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-end;justify-content:space-between}
@@ -3681,6 +3683,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   <header class="masthead">
     <div class="mast-grid">
       <div>
+        <a class="home-link" href="https://frontiercapitalsignals.com/">← Frontier Capital Signals home</a>
         <h1>Frontier Capital<br><span class="amber">Signals</span></h1>
         <p class="dek">Confluence screens across the <b>top 100 cryptos</b> and <b>61 US equities</b>. Up to <b>32 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to funding-rate percentiles, open interest, Fibonacci retracements, time-of-day/day-of-week bias, intraday swing-timing, hack/exploit severity, market sentiment, options-implied volatility, earnings-calendar risk, key support/resistance breaks, accumulation/distribution, a broad-market composite, and a yield-curve read validated against the tracked history of every major breakout and breakdown, must point the <b>same direction</b> before a signal ranks — each with an <b>expected timeframe</b> learned from its own track record. Prices, funding, and sentiment archive permanently for deep multi-year pattern analysis. <b>Analysis syncs hourly; price and 24h change tick live</b> in between.</p>
       </div>
@@ -3936,8 +3939,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           var flipAgo = flipMs < 3600000 ? Math.max(1,Math.round(flipMs/60000))+'m' : Math.round(flipMs/3600000)+'h';
           var flipArrow = (r.recentFlip.fromDir===1?'▲':'▼')+'→'+(r.recentFlip.toDir===1?'▲':'▼');
           var stabTitle = r.flipStability
-            ? ' This asset\'s past flips held '+Math.round(r.flipStability.heldRate*100)+'% of the time and reverted '+Math.round(r.flipStability.revertedRate*100)+'% of the time, over '+r.flipStability.n+' evaluated flips.'
-            : ' Not enough of this asset\'s own past flips have matured yet to say whether they tend to hold or revert.';
+            ? " This asset's past flips held "+Math.round(r.flipStability.heldRate*100)+"% of the time and reverted "+Math.round(r.flipStability.revertedRate*100)+"% of the time, over "+r.flipStability.n+" evaluated flips."
+            : " Not enough of this asset's own past flips have matured yet to say whether they tend to hold or revert.";
           flipNote = '<span class="flip-note" title="Call reversed direction '+flipAgo+' ago -- treat with extra caution until it either holds or reverts.'+stabTitle+'">⚠️ Flipped '+flipArrow+' '+flipAgo+' ago</span>';
         }
         var dirArrow = '<span class="dir-arrow '+(rowSide==='long'?'dir-up':'dir-down')+'" title="'+(rowSide==='long'?'Leaning up':'Leaning down')+'">'+(rowSide==='long'?'▲':'▼')+'</span>';
