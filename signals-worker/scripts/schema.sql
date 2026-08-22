@@ -667,3 +667,34 @@ CREATE TABLE IF NOT EXISTS sr_break_stats (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (bucket_key, horizon_hours)
 );
+
+-- Call-flip tracking (added 2026-08-22, user-requested -- the WLFI case:
+-- called a bottom, switched to breakdown risk a few hours later). Not a
+-- new log of the composite call itself -- that's already recorded every
+-- run in technique_votes (technique_id='composite', see logRun) for the
+-- calibration curve. This is a small, PERMANENT record of just the
+-- moments that history reversed direction (detectAndLogCallFlips reads
+-- technique_votes' rolling ~200h window and appends here; see
+-- detectCallFlips, worker.js, for the pure detection logic), so flip
+-- history survives long after the raw votes it was derived from age out
+-- of technique_votes' own retention window. outcome is filled in ~24h
+-- later by evaluateCallFlips: did the NEW direction hold, revert back
+-- toward the old one (whipsaw noise), or was the move too small to call
+-- either way. Informational only, same as quality/rotation -- surfaced on
+-- the dashboard as a caution note, never fed back into score/dir.
+CREATE TABLE IF NOT EXISTS call_flip_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  symbol TEXT NOT NULL,
+  asset_class TEXT NOT NULL,
+  prior_dir INTEGER NOT NULL,
+  prior_score INTEGER NOT NULL,
+  prior_run_at TEXT NOT NULL,
+  new_dir INTEGER NOT NULL,
+  new_score INTEGER NOT NULL,
+  flip_run_at TEXT NOT NULL,
+  hours_between REAL NOT NULL,
+  outcome TEXT, -- NULL until evaluated, then 'held' | 'reverted' | 'flat'
+  outcome_checked_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_call_flip_log_unique ON call_flip_log(symbol, flip_run_at);
+CREATE INDEX IF NOT EXISTS idx_call_flip_log_pending ON call_flip_log(outcome, flip_run_at);

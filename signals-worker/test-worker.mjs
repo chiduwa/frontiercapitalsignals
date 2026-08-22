@@ -193,6 +193,7 @@ check('live-price markup + polling code present', pageText.includes('live-price-
 check('favorites board says just "FAVORITES", not a possessive "YOUR FAVORITES"', pageText.includes('>FAVORITES</b>') && !pageText.includes('YOUR FAVORITES'), pageText.includes('YOUR FAVORITES'));
 check('per-row direction arrow + consolidating-badge markup present', pageText.includes('dir-arrow') && pageText.includes('class="coil') && pageText.includes('Consolidating'));
 check('quality + rotation badge markup present', pageText.includes('class="quality') && pageText.includes('class="rotation') && pageText.includes('Rotating in'));
+check('flip-caution badge markup present', pageText.includes('class="flip-note') && pageText.includes('Flipped') && pageText.includes('extra caution'));
 
 console.log('\n== getFundingMap: CoinGecko derivatives, highest-OI perpetual market wins ==');
 const fundingMap = await mod.getFundingMap();
@@ -301,6 +302,7 @@ check('stocks never carry a favorites section (FAVORITE_SYMBOLS is crypto-only)'
 check('every favorites row is shaped exactly like a board row (reuses entry(), not a second implementation)', built.crypto.favorites.every(f => typeof f.score === 'number' && (f.dir === 1 || f.dir === -1) && typeof f.price === 'number'));
 check('every crypto board row carries a consolidating field, null or a real direction, never anything else', built.crypto.breakout.concat(built.crypto.breakdown, built.crypto.favorites).every(r => r.consolidating === null || r.consolidating === 1 || r.consolidating === -1), JSON.stringify(built.crypto.breakout.map(r => r.consolidating)));
 check('every crypto board row carries a rotation field, null or a real streak object, never anything else', built.crypto.breakout.concat(built.crypto.breakdown, built.crypto.favorites).every(r => r.rotation === null || typeof r.rotation.peakRel === 'number'));
+check('every crypto board row carries recentFlip/flipStability fields, safely null with no callFlipData passed (never a crash)', built.crypto.breakout.concat(built.crypto.breakdown, built.crypto.favorites).every(r => r.recentFlip === null && r.flipStability === null));
 check('stocks boards populated', built.stocks.breakout.length > 0);
 // Ceiling is 18, not 16, now that fibonacci and timeofday exist (see
 // TECHNIQUE_META) — 'attention' is crypto-trending-conditional so it's
@@ -1447,6 +1449,44 @@ check('a tie (long === short) has no falsifiable direction: null', mod.composite
 check('long leading: dir 1, score is the long side', JSON.stringify(mod.compositeCall({ long: 70, short: 30 })) === JSON.stringify({ dir: 1, score: 70 }));
 check('short leading: dir -1, score is the short side', JSON.stringify(mod.compositeCall({ long: 20, short: 55 })) === JSON.stringify({ dir: -1, score: 55 }));
 check('no confluence result at all: null, not a crash', mod.compositeCall(null) === null);
+
+console.log('\n== detectCallFlips: direction reversals in a symbol\'s own logged composite-call history (2026-08-22, the WLFI case -- called a bottom, then switched to breakdown risk a few hours later) ==');
+const wlfiLikeRows = [
+  { run_at: '2026-08-22T01:00:00Z', dir: 1, score: 62 },
+  { run_at: '2026-08-22T02:00:00Z', dir: 1, score: 58 },
+  { run_at: '2026-08-22T03:00:00Z', dir: 1, score: 55 },
+  { run_at: '2026-08-22T06:00:00Z', dir: -1, score: 51 },
+  { run_at: '2026-08-22T07:00:00Z', dir: -1, score: 49 }
+];
+const wlfiFlips = mod.detectCallFlips(wlfiLikeRows);
+check('finds exactly the one real reversal, not the repeated same-direction rows around it', wlfiFlips.length === 1, JSON.stringify(wlfiFlips));
+check('correctly identifies the direction change (bottomed/long -> breakdown-risk/short)', wlfiFlips[0].priorDir === 1 && wlfiFlips[0].newDir === -1, JSON.stringify(wlfiFlips));
+check('carries the exact scores either side of the flip', wlfiFlips[0].priorScore === 55 && wlfiFlips[0].newScore === 51, JSON.stringify(wlfiFlips));
+check('hoursBetween measures the real gap (03:00 -> 06:00 = 3h), not just "one row apart"', wlfiFlips[0].hoursBetween === 3, JSON.stringify(wlfiFlips));
+
+check('no reversal at all: stable direction the whole time finds nothing', mod.detectCallFlips([
+  { run_at: '2026-08-22T01:00:00Z', dir: 1, score: 60 },
+  { run_at: '2026-08-22T02:00:00Z', dir: 1, score: 65 },
+  { run_at: '2026-08-22T03:00:00Z', dir: 1, score: 70 }
+]).length === 0);
+
+const choppyFlips = mod.detectCallFlips([
+  { run_at: '2026-08-22T01:00:00Z', dir: 1, score: 55 },
+  { run_at: '2026-08-22T02:00:00Z', dir: -1, score: 52 },
+  { run_at: '2026-08-22T03:00:00Z', dir: 1, score: 53 },
+  { run_at: '2026-08-22T04:00:00Z', dir: -1, score: 54 }
+]);
+check('a genuinely whipsawing call finds every reversal, not just the first', choppyFlips.length === 3, JSON.stringify(choppyFlips));
+
+const unsortedFlips = mod.detectCallFlips([
+  { run_at: '2026-08-22T03:00:00Z', dir: -1, score: 51 },
+  { run_at: '2026-08-22T01:00:00Z', dir: 1, score: 60 },
+  { run_at: '2026-08-22T02:00:00Z', dir: 1, score: 58 }
+]);
+check('sorts chronologically internally regardless of input order', unsortedFlips.length === 1 && unsortedFlips[0].priorRunAt === '2026-08-22T02:00:00Z', JSON.stringify(unsortedFlips));
+
+check('fewer than 2 rows: no crash, nothing to compare', mod.detectCallFlips([{ run_at: '2026-08-22T01:00:00Z', dir: 1, score: 60 }]).length === 0);
+check('empty history: no crash', mod.detectCallFlips([]).length === 0);
 
 console.log('\n== assetPredictionScore: pooled track record across composite/pivot/range, out of 100 ==');
 check('below MIN_RELIABILITY_SAMPLES pooled outcomes: null, not a noisy guess', mod.assetPredictionScore('THIN', { 'THIN|composite': { correct: 5, total: 10 } }, {}) === null);

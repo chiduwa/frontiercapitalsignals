@@ -4,7 +4,7 @@
 // Talks to Cloudflare's D1 HTTP API directly via d1-client.mjs, shared with
 // the archive/backfill scripts so there's one D1 client, not a hand-copied
 // duplicate that could drift.
-import { MIN_RELIABILITY_SAMPLES, slotsForTimestamp, assetPredictionScore, scoreBucket, TOD_HORIZONS_HOURS } from '../worker.js';
+import { MIN_RELIABILITY_SAMPLES, slotsForTimestamp, assetPredictionScore, scoreBucket, TOD_HORIZONS_HOURS, detectCallFlips } from '../worker.js';
 import { d1, chunk } from './d1-client.mjs';
 import { computeSwingTimeTallies, upsertSwingTimeStats } from './archive.mjs';
 
@@ -405,6 +405,143 @@ export async function evaluateMatured(env, nowIso) {
   await d1(env, 'DELETE FROM range_log WHERE run_at < ?', [hardCapCutoff]);
 
   return evaluatedCount;
+}
+
+// Minimum gap a genuinely FRESH flip needs from the previous one already
+// logged for the same symbol, so a call that's whipsawing every single
+// hour doesn't spam call_flip_log with a near-duplicate row per build —
+// the unique index on (symbol, flip_run_at) already prevents re-logging
+// the EXACT same flip_run_at twice, this additionally skips a flip that's
+// really just the continuation of one already caught within the last hour.
+const CALL_FLIP_MIN_GAP_HOURS = 0.75;
+// How long to wait before judging whether a flip's NEW direction actually
+// held — 24h, not the engine's usual 24h/168h pair: a flip is inherently a
+// short-timescale question (the user's own framing was "within a few
+// minutes or hours"), and a single well-chosen horizon here starts
+// yielding real findings sooner than doubling up would.
+const CALL_FLIP_EVAL_HORIZON_HOURS = 24;
+// Reuses evaluateMatured's own OUTCOME_DEADBAND_PCT threshold for "did
+// price even move enough to call it a direction" — same question, same
+// answer, not a second judgment call about how big a move counts.
+
+// Scans this run's own recently-logged composite calls (technique_votes
+// WHERE technique_id='composite' — already recorded every run for the
+// calibration curve, see logRun/evaluateMatured; nothing new is written
+// there) for direction reversals, appending any newly-found ones to
+// call_flip_log. INSERT OR IGNORE + the unique (symbol, flip_run_at) index
+// makes this idempotent — safe to call every run without double-counting
+// a flip already caught on a prior pass. Only looks back
+// RETENTION_HOURS-worth of composite history (whatever's still in
+// technique_votes; older rows have already aged out), which is plenty —
+// a flip more than a few days old isn't "just switched," it's just this
+// asset's current call.
+export async function detectAndLogCallFlips(env, nowIso) {
+  const cutoff = new Date(new Date(nowIso).getTime() - RETENTION_HOURS * 3600 * 1000).toISOString();
+  const rows = await d1(env, `
+    SELECT symbol, asset_class, run_at, dir, score FROM technique_votes
+    WHERE technique_id = 'composite' AND run_at >= ? ORDER BY symbol, run_at
+  `, [cutoff]);
+
+  const bySymbol = {};
+  for (const r of rows) (bySymbol[r.symbol] ??= { assetClass: r.asset_class, rows: [] }).rows.push(r);
+
+  const toInsert = [];
+  for (const [symbol, { assetClass, rows: symRows }] of Object.entries(bySymbol)) {
+    const flips = detectCallFlips(symRows);
+    let lastLoggedAt = null;
+    for (const f of flips) {
+      if (lastLoggedAt != null && (new Date(f.newRunAt) - new Date(lastLoggedAt)) / 3600000 < CALL_FLIP_MIN_GAP_HOURS) continue;
+      lastLoggedAt = f.newRunAt;
+      toInsert.push({ symbol, assetClass, ...f });
+    }
+  }
+  if (!toInsert.length) return 0;
+
+  let written = 0;
+  for (const batch of chunk(toInsert, CHUNK)) {
+    const placeholders = batch.map(() => '(?,?,?,?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap((f) => [f.symbol, f.assetClass, f.priorDir, f.priorScore, f.priorRunAt, f.newDir, f.newScore, f.newRunAt, f.hoursBetween]);
+    await d1(env, `
+      INSERT OR IGNORE INTO call_flip_log (symbol, asset_class, prior_dir, prior_score, prior_run_at, new_dir, new_score, flip_run_at, hours_between)
+      VALUES ${placeholders}
+    `, params);
+    written += batch.length;
+  }
+  return written;
+}
+
+// Judges every call_flip_log row old enough to have matured (24h since the
+// flip itself): did the NEW direction actually hold (price kept moving
+// that way), did it revert back toward the OLD direction (the flip was
+// whipsaw noise — the original call would have aged better), or was the
+// move too small to call either way (same OUTCOME_DEADBAND_PCT flat-zone
+// evaluateMatured already uses). Same "logged price at time X, logged
+// price now" join evaluateMatured uses — not the live API, so this is
+// exact-replay-able and doesn't cost a fetch.
+export async function evaluateCallFlips(env, nowIso) {
+  const cutoff = new Date(new Date(nowIso).getTime() - CALL_FLIP_EVAL_HORIZON_HOURS * 3600 * 1000).toISOString();
+  const due = await d1(env, 'SELECT id, symbol, new_dir, flip_run_at FROM call_flip_log WHERE outcome IS NULL AND flip_run_at <= ?', [cutoff]);
+  if (!due.length) return 0;
+
+  const symbols = [...new Set(due.map((r) => r.symbol))];
+  const priceNow = {};
+  for (const batch of chunk(symbols, CHUNK)) {
+    const placeholders = batch.map(() => '?').join(',');
+    const rows = await d1(env, `SELECT symbol, price FROM asset_price_log WHERE symbol IN (${placeholders}) ORDER BY run_at DESC`, batch);
+    for (const r of rows) if (!(r.symbol in priceNow)) priceNow[r.symbol] = r.price;
+  }
+  const runAts = [...new Set(due.map((r) => r.flip_run_at))];
+  const priceAtFlip = {};
+  for (const runAt of runAts) {
+    const rows = await d1(env, 'SELECT symbol, price FROM asset_price_log WHERE run_at = ?', [runAt]);
+    for (const r of rows) priceAtFlip[`${runAt}|${r.symbol}`] = r.price;
+  }
+
+  let evaluated = 0;
+  for (const r of due) {
+    const before = priceAtFlip[`${r.flip_run_at}|${r.symbol}`];
+    const after = priceNow[r.symbol];
+    if (before == null || after == null) continue; // symbol vanished from the universe; hard-cap prune handles the row eventually
+    const movePct = ((after / before) - 1) * 100;
+    const actualDir = Math.abs(movePct) < OUTCOME_DEADBAND_PCT ? 0 : (movePct > 0 ? 1 : -1);
+    const outcome = actualDir === 0 ? 'flat' : (actualDir === r.new_dir ? 'held' : 'reverted');
+    await d1(env, 'UPDATE call_flip_log SET outcome = ?, outcome_checked_at = ? WHERE id = ?', [outcome, nowIso, r.id]);
+    evaluated++;
+  }
+  return evaluated;
+}
+
+// Per-symbol flip history for display: how many times has this asset's
+// call reversed recently, and once evaluated, how often did the new
+// direction actually hold vs revert. Two different consumers, two
+// different gates — recentFlips needs just ONE row to be worth a caution
+// note on the dashboard (even a single fresh flip is worth flagging, same
+// as WLFI's own case), while stability needs a real sample before its
+// held/reverted rate means anything, same MIN_RELIABILITY_SAMPLES bar
+// reliabilityMultiplier itself already requires elsewhere for "enough
+// history to trust." withinHours default (48) is deliberately short — a
+// flip from a week ago isn't "recently switched" any more, it's just this
+// asset's current call.
+export async function loadCallFlipData(env, nowIso, withinHours = 48) {
+  const recentCutoff = new Date(new Date(nowIso).getTime() - withinHours * 3600 * 1000).toISOString();
+  const recentRows = await d1(env, 'SELECT symbol, prior_dir, new_dir, flip_run_at, hours_between FROM call_flip_log WHERE flip_run_at >= ? ORDER BY flip_run_at DESC', [recentCutoff]);
+  const recentFlips = {};
+  for (const r of recentRows) {
+    if (r.symbol in recentFlips) continue; // most recent only (rows are DESC), one caution note per asset, not a stack
+    recentFlips[r.symbol] = { fromDir: r.prior_dir, toDir: r.new_dir, flipRunAt: r.flip_run_at, hoursBetween: r.hours_between };
+  }
+
+  const statRows = await d1(env, `
+    SELECT symbol, COUNT(*) as n, SUM(CASE WHEN outcome = 'held' THEN 1 ELSE 0 END) as held, SUM(CASE WHEN outcome = 'reverted' THEN 1 ELSE 0 END) as reverted
+    FROM call_flip_log WHERE outcome IS NOT NULL GROUP BY symbol
+  `);
+  const stability = {};
+  for (const r of statRows) {
+    if (r.n < MIN_RELIABILITY_SAMPLES) continue;
+    stability[r.symbol] = { n: r.n, heldRate: r.held / r.n, revertedRate: r.reverted / r.n };
+  }
+
+  return { recentFlips, stability };
 }
 
 // { meanPct, stdevPct, n } per "symbol|slot|horizon_hours" — mirrors
