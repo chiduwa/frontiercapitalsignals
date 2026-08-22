@@ -2579,8 +2579,33 @@ export function perpBasisPct(price, index) {
   return ((price / index) - 1) * 100;
 }
 
+// Retries on 429 with the same backoff getCryptoDailyHistory already uses
+// against this same CoinGecko host — added after a live 429 (confirmed via
+// the real GitHub Actions log, 2026-08-21/22) took out the ENTIRE
+// funding/OI/basis snapshot for the day with a single failed request and
+// no retry at all. This isn't just about the new basis_pct archiving: the
+// live `positioning`/`openinterest` techniques call this same function
+// every hourly build too, so an un-retried 429 here silently degrades
+// them mid-day exactly the way the old Bybit-403 outage once did (see
+// this function's own history) — just from a transient rate limit instead
+// of a dead endpoint this time.
 export async function getFundingMap() {
-  const j = await fetchJson('https://api.coingecko.com/api/v3/derivatives');
+  const backoffsMs = [3000, 6000];
+  let j, lastErr;
+  for (let attempt = 0; attempt <= backoffsMs.length; attempt++) {
+    try {
+      j = await fetchJson('https://api.coingecko.com/api/v3/derivatives');
+      lastErr = null;
+      break;
+    } catch (e) {
+      lastErr = e;
+      const is429 = /^HTTP 429/.test(String(e && e.message));
+      if (!is429 || attempt === backoffsMs.length) break;
+      await new Promise((r) => setTimeout(r, backoffsMs[attempt]));
+    }
+  }
+  if (lastErr) throw lastErr;
+
   const map = {};
   let bestOi = {};
   for (const t of j || []) {

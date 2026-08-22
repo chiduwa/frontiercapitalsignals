@@ -203,6 +203,36 @@ check('BTC\'s basisPct comes from the SAME highest-OI market\'s own price/index 
 check('SOL: perp trading exactly at its index -> zero basis', fundingMap.SOL.basisPct === 0);
 check('LINK: no price/index in this market\'s fixture -> basisPct is null, not a crash or a fabricated zero', fundingMap.LINK.basisPct === null);
 
+console.log('\n== getFundingMap: retries on 429, gives up on persistent 429 (found live, 2026-08-21/22 -- a single un-retried 429 was silently wiping out the whole day\'s funding/OI/basis snapshot) ==');
+let fundingCall429Count = 0;
+global.fetch = async (url) => {
+  const u = String(url);
+  if (u.includes('/derivatives')) {
+    fundingCall429Count++;
+    if (fundingCall429Count > 1) {
+      return { ok: true, status: 200, json: async () => ([{ contract_type: 'perpetual', index_id: 'BTC', symbol: 'BTCUSDT', funding_rate: 0.0001, open_interest: 1e9, market: 'Binance (Futures)' }]), headers: { get: () => null } };
+    }
+    return { ok: false, status: 429, json: async () => ({}), text: async () => 'rate limited', headers: { get: () => null } };
+  }
+  return stubbedFetch(url);
+};
+const fundingRecovered = await mod.getFundingMap();
+check('recovers after one 429 (retried, second attempt succeeded)', fundingRecovered.BTC.fundingRate === 0.0001 && fundingCall429Count === 2, `calls=${fundingCall429Count}`);
+
+fundingCall429Count = 0;
+global.fetch = async (url) => {
+  const u = String(url);
+  if (u.includes('/derivatives')) {
+    fundingCall429Count++;
+    return { ok: false, status: 429, json: async () => ({}), text: async () => 'rate limited', headers: { get: () => null } };
+  }
+  return stubbedFetch(url);
+};
+let fundingThrew = false;
+try { await mod.getFundingMap(); } catch { fundingThrew = true; }
+check('gives up after exhausting retries on persistent 429, does not hang or silently return empty', fundingThrew && fundingCall429Count === 3, `calls=${fundingCall429Count}`);
+global.fetch = stubbedFetch;
+
 console.log('\n== api: empty KV (before first Action run) ==');
 const empty = await worker.fetch(new Request('https://x.com/signals/api/signals'), emptyEnv, ctx);
 const emptyBody = await empty.json();
