@@ -2919,6 +2919,13 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
     const dir = side === 'long' ? 1 : -1;
     const score = side === 'long' ? x.c.long : x.c.short;
     const horizon = side === 'long' ? x.c.longHorizon : x.c.shortHorizon;
+    // Independent of which side this row is shown on — the accum
+    // technique's own vote, whichever way it's currently leaning (or null
+    // if it didn't fire this run). A coiled range is a distinct, worth-
+    // flagging setup regardless of whether the asset's overall score
+    // happens to currently lean the same way, so this is read straight
+    // off x.c.votes rather than gated on dir === score's own direction.
+    const accumVote = x.c.votes.find((v) => v.id === 'accum');
     return {
       symbol: x.m.symbol,
       name: x.m.name,
@@ -2934,6 +2941,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       // favorites section (below) mixes both, so boardHtml uses this per
       // row rather than the board-level cfg.side for anything row-specific.
       dir,
+      consolidating: accumVote ? accumVote.dir : null,
       conf: { agree: side === 'long' ? x.c.bull : x.c.bear, total: x.c.total },
       drivers: side === 'long' ? x.c.longNotes : x.c.shortNotes,
       horizon,
@@ -3359,6 +3367,12 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .range.hz-hist{color:var(--amber)}
   .range.hz-meth{color:var(--muted)}
   .topind{display:block;color:var(--dim);font-size:10px;margin-top:3px;font-family:var(--disp);white-space:normal}
+  .dir-arrow{font-size:11px;margin-left:5px;cursor:help}
+  .dir-arrow.dir-up{color:var(--up)}
+  .dir-arrow.dir-down{color:var(--down)}
+  .coil{display:block;font-size:10px;letter-spacing:.04em;margin-top:3px;font-family:var(--disp);cursor:help}
+  .coil.coil-up{color:var(--up)}
+  .coil.coil-down{color:var(--down)}
 
   .track-record{background:var(--ink-1);border:1px solid var(--line);border-top:2px solid var(--amber);margin-bottom:44px;padding:18px 18px 6px}
   .tr-title{font-weight:800;font-size:17px;letter-spacing:-.01em;margin-top:3px}
@@ -3681,6 +3695,10 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var name = r.name && r.name!==r.symbol ? '<span class="nm">'+esc(r.name)+'</span>' : '';
         var why = (r.drivers&&r.drivers.length)?'<span class="why">'+esc(r.drivers.join(' · '))+'</span>':'';
         var topInd = r.topIndicator ? '<span class="topind" title="Best individually-proven indicator for '+esc(r.symbol)+' so far, out of '+r.topIndicator.total+' scored calls">Leans on '+esc(r.topIndicator.id)+' ('+Math.round(r.topIndicator.accuracy*100)+'%)</span>' : '';
+        var coil = (r.consolidating===1||r.consolidating===-1)
+          ? '<span class="coil '+(r.consolidating===1?'coil-up':'coil-down')+'" title="Coiled range detected (tightening Bollinger bands or realized volatility well under baseline) with on-balance volume already leaning '+(r.consolidating===1?'up':'down')+', ahead of price confirming it">⏳ Consolidating '+(r.consolidating===1?'↑':'↓')+'</span>'
+          : '';
+        var dirArrow = '<span class="dir-arrow '+(rowSide==='long'?'dir-up':'dir-down')+'" title="'+(rowSide==='long'?'Leaning up':'Leaning down')+'">'+(rowSide==='long'?'▲':'▼')+'</span>';
         var conf = r.conf ? '<span class="conf">'+r.conf.agree+'/'+r.conf.total+' aligned</span>' : '';
         var horizon = r.horizon ? '<span class="horizon '+(r.horizon.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+(r.horizon.basis==='historical'?"Based on this asset's own historical accuracy by horizon":"Methodology estimate, not yet enough of this asset's own history to say")+'">'+esc(r.horizon.label)+(r.horizon.basis==='historical'?' ✓':'')+'</span>' : '';
         var rangeTitle = r.range && r.range.basis==='historical'
@@ -3689,13 +3707,13 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var range = r.range ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+rangeTitle+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>' : '<span class="dim">—</span>';
         h+='<tr class="in" style="animation-delay:'+(i*30)+'ms" data-symbol="'+esc(r.symbol)+'" data-class="'+cfg.assetClass+'">'
           +'<td class="rk">'+(i+1)+'</td>'
-          +'<td class="asset">'+symHtml+name+why+topInd+'</td>'
+          +'<td class="asset">'+symHtml+name+why+topInd+coil+'</td>'
           +'<td class="live-price-cell"><span class="live-price">'+fmtPrice(r.price)+'</span></td>'
           +'<td class="live-chg-cell '+pctCls(r.chg24h)+'"><span class="live-chg">'+fmtPct(r.chg24h)+'</span></td>'
           +'<td class="'+pctCls(r.chg7d)+'">'+fmtPct(r.chg7d)+'</td>'
           +'<td class="'+rsiCls(r.rsi)+'">'+(r.rsi!=null?r.rsi.toFixed(0):'—')+'</td>'
           +'<td>'+range+'</td>'
-          +'<td><span class="sigcell"><span class="sigrow">'+meter(r.score)+'<span class="score">'+r.score+'</span></span>'+conf+horizon+'</span></td>'
+          +'<td><span class="sigcell"><span class="sigrow">'+meter(r.score)+'<span class="score">'+r.score+'</span>'+dirArrow+'</span>'+conf+horizon+'</span></td>'
           +'</tr>';
       });
     } else {
@@ -3708,7 +3726,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   function renderBoards(d){
     var b='';
     if(d.crypto.favorites && d.crypto.favorites.length){
-      b+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-favorites', eyebrow:'CRYPTO · <b>YOUR FAVORITES</b>', title:'Always tracked'}, d.crypto.favorites, d.crypto.favorites.length);
+      b+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-favorites', eyebrow:'CRYPTO · <b>FAVORITES</b>', title:'Always tracked'}, d.crypto.favorites, d.crypto.favorites.length);
     }
     b+=boardHtml({side:'long', assetClass:'crypto', boardId:'crypto-long', eyebrow:'CRYPTO · <b>LONG SIDE</b>', title:'Breakout watch'}, d.crypto.breakout, d.crypto.universe);
     b+=boardHtml({side:'short', assetClass:'crypto', boardId:'crypto-short', eyebrow:'CRYPTO · <b>RISK SIDE</b>', title:'Breakdown risk'}, d.crypto.breakdown, d.crypto.universe);

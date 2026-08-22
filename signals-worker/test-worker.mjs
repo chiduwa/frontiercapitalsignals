@@ -187,6 +187,8 @@ check('clickable-row + sortable-header tracking present', pageText.includes('sig
 check('horizon chip markup + methodology copy present', pageText.includes('class="horizon') && pageText.includes('hz-hist') && pageText.includes('hz-meth') && pageText.includes('Leading vs. lagging'));
 check('track-record section + methodology copy present', pageText.includes('id="trackRecord"') && pageText.includes('95%+') && pageText.includes('Prediction-score track record'));
 check('live-price markup + polling code present', pageText.includes('live-price-cell') && pageText.includes('live-chg-cell') && pageText.includes("api/prices") && pageText.includes('updateLivePrices'));
+check('favorites board says just "FAVORITES", not a possessive "YOUR FAVORITES"', pageText.includes('>FAVORITES</b>') && !pageText.includes('YOUR FAVORITES'), pageText.includes('YOUR FAVORITES'));
+check('per-row direction arrow + consolidating-badge markup present', pageText.includes('dir-arrow') && pageText.includes('class="coil') && pageText.includes('Consolidating'));
 
 console.log('\n== getFundingMap: CoinGecko derivatives, highest-OI perpetual market wins ==');
 const fundingMap = await mod.getFundingMap();
@@ -260,6 +262,7 @@ check('an equally-small NON-favorite is excluded from the universe entirely, not
 check('only the 4 named favorites ever appear in the favorites section', built.crypto.favorites.every(f => ['XLM', 'XRP', 'HYPE', 'HBAR'].includes(f.symbol)), JSON.stringify(built.crypto.favorites.map(f => f.symbol)));
 check('stocks never carry a favorites section (FAVORITE_SYMBOLS is crypto-only)', Array.isArray(built.stocks.favorites) && built.stocks.favorites.length === 0);
 check('every favorites row is shaped exactly like a board row (reuses entry(), not a second implementation)', built.crypto.favorites.every(f => typeof f.score === 'number' && (f.dir === 1 || f.dir === -1) && typeof f.price === 'number'));
+check('every crypto board row carries a consolidating field, null or a real direction, never anything else', built.crypto.breakout.concat(built.crypto.breakdown, built.crypto.favorites).every(r => r.consolidating === null || r.consolidating === 1 || r.consolidating === -1), JSON.stringify(built.crypto.breakout.map(r => r.consolidating)));
 check('stocks boards populated', built.stocks.breakout.length > 0);
 // Ceiling is 18, not 16, now that fibonacci and timeofday exist (see
 // TECHNIQUE_META) — 'attention' is crypto-trending-conditional so it's
