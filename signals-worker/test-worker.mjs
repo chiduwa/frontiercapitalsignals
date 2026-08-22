@@ -192,6 +192,7 @@ check('track-record section + methodology copy present', pageText.includes('id="
 check('live-price markup + polling code present', pageText.includes('live-price-cell') && pageText.includes('live-chg-cell') && pageText.includes("api/prices") && pageText.includes('updateLivePrices'));
 check('favorites board says just "FAVORITES", not a possessive "YOUR FAVORITES"', pageText.includes('>FAVORITES</b>') && !pageText.includes('YOUR FAVORITES'), pageText.includes('YOUR FAVORITES'));
 check('per-row direction arrow + consolidating-badge markup present', pageText.includes('dir-arrow') && pageText.includes('class="coil') && pageText.includes('Consolidating'));
+check('quality + rotation badge markup present', pageText.includes('class="quality') && pageText.includes('class="rotation') && pageText.includes('Rotating in'));
 
 console.log('\n== getFundingMap: CoinGecko derivatives, highest-OI perpetual market wins ==');
 const fundingMap = await mod.getFundingMap();
@@ -269,6 +270,7 @@ check('only the 4 named favorites ever appear in the favorites section', built.c
 check('stocks never carry a favorites section (FAVORITE_SYMBOLS is crypto-only)', Array.isArray(built.stocks.favorites) && built.stocks.favorites.length === 0);
 check('every favorites row is shaped exactly like a board row (reuses entry(), not a second implementation)', built.crypto.favorites.every(f => typeof f.score === 'number' && (f.dir === 1 || f.dir === -1) && typeof f.price === 'number'));
 check('every crypto board row carries a consolidating field, null or a real direction, never anything else', built.crypto.breakout.concat(built.crypto.breakdown, built.crypto.favorites).every(r => r.consolidating === null || r.consolidating === 1 || r.consolidating === -1), JSON.stringify(built.crypto.breakout.map(r => r.consolidating)));
+check('every crypto board row carries a rotation field, null or a real streak object, never anything else', built.crypto.breakout.concat(built.crypto.breakdown, built.crypto.favorites).every(r => r.rotation === null || typeof r.rotation.peakRel === 'number'));
 check('stocks boards populated', built.stocks.breakout.length > 0);
 // Ceiling is 18, not 16, now that fibonacci and timeofday exist (see
 // TECHNIQUE_META) — 'attention' is crypto-trending-conditional so it's
@@ -974,6 +976,29 @@ console.log('\n== fundingSnapshotToRows: carries basisPct through alongside fund
 const fundingSnapWithBasis = fundingSnapshotToRows({ BTC: { fundingRate: 0.0001, openInterest: 5e9, basisPct: 0.14 }, ONLYBASIS: { fundingRate: null, openInterest: null, basisPct: -0.5 } }, '2026-08-21');
 check('a symbol with funding+OI+basis carries all three through', fundingSnapWithBasis.find(r => r.symbol === 'BTC').basisPct === 0.14, JSON.stringify(fundingSnapWithBasis));
 check('a symbol with ONLY basis (no funding/OI) still produces a row, not silently dropped', fundingSnapWithBasis.some(r => r.symbol === 'ONLYBASIS' && r.basisPct === -0.5), JSON.stringify(fundingSnapWithBasis));
+
+console.log('\n== detectOutperformanceRotation: sustained multi-month outperformance vs a benchmark (the Solana-then/Hyperliquid-now pattern) ==');
+const rotStart = new Date('2020-01-01T00:00:00Z').getTime();
+const rotDate = (i) => new Date(rotStart + i * 86400000).toISOString().slice(0, 10);
+const benchFlat = Array.from({ length: 500 }, (_, i) => ({ date: rotDate(i), close: 100 })); // a perfectly flat benchmark -- any real asset growth is, by construction, outperformance
+const rotatingAsset = Array.from({ length: 500 }, (_, i) => {
+  if (i < 200) return { date: rotDate(i), close: 100 };            // tracks the benchmark, no rotation yet
+  if (i < 350) return { date: rotDate(i), close: 100 * Math.pow(1.03, i - 200) }; // Solana-like roaring growth phase
+  return { date: rotDate(i), close: rotatingAssetPeak() };          // flattens out again at its new (much higher) level
+  function rotatingAssetPeak() { return 100 * Math.pow(1.03, 149); }
+});
+
+const rotations = mod.detectOutperformanceRotation(rotatingAsset, benchFlat);
+check('finds at least one real rotation streak during the roaring-growth phase', rotations.length >= 1, JSON.stringify(rotations));
+check('the streak clears the minimum consecutive-checkpoint bar (3)', rotations.every((r) => r.checkpoints >= 3), JSON.stringify(rotations));
+check('peak relative strength is enormous (this is Solana-2020-21-scale growth, not a marginal edge)', rotations[0].peakRel > 500, JSON.stringify(rotations[0]));
+check('the detected streak starts within the actual growth phase (day 200+), not the flat pre-rotation period', rotations[0].startDate >= rotDate(200), rotations[0].startDate);
+
+const noRotation = mod.detectOutperformanceRotation(benchFlat, benchFlat);
+check('an asset that never outperforms its own benchmark: no rotation found', noRotation.length === 0);
+
+const thinHistory = mod.detectOutperformanceRotation(benchFlat.slice(0, 50), benchFlat.slice(0, 50), 90);
+check('not enough history to even form one windowDays-long window: no crash, no rotation', thinHistory.length === 0);
 
 console.log('\n== computeQualityScores: cross-sectional utility/community percentile, never an absolute number ==');
 // 12 symbols so every metric clears the "at least 10 peers" bar -- ETH-like

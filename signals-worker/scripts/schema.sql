@@ -146,6 +146,29 @@ CREATE TABLE IF NOT EXISTS funding_rate_daily (
 -- file's other added columns — applied once directly against production.
 ALTER TABLE funding_rate_daily ADD COLUMN basis_pct REAL;
 
+-- Outperformer-rotation detection (user-requested, 2026-08-21: "every few
+-- years there seems to be a new crypto that seems to outperform the rest
+-- and moves into the top 10, like solana a few years back, and what now
+-- seems to be happening to hyperliquid"). One row per symbol CURRENTLY (or
+-- as of the last recomputation) showing a sustained multi-month
+-- outperformance streak vs the broad-market composite (detectOutperformance
+-- Rotation, worker.js) -- validated live against SOL's own real archive
+-- before shipping: correctly found all 4 of its real, independently-
+-- documented breakout phases (the 2021-03/06 rally to $37, the 2021-09/12
+-- rally to $230, and the 2023-11/2024-05 post-FTX-collapse recovery) with
+-- no hand-tuning to SOL specifically. Wholesale replace each day (computeOutperformanceRotations,
+-- archive.mjs), same "a relationship that no longer holds should
+-- disappear" reasoning as lead_lag_signals -- this is current status, not
+-- an append-only log.
+CREATE TABLE IF NOT EXISTS asset_rotation_status (
+  symbol TEXT PRIMARY KEY,
+  start_date TEXT NOT NULL,
+  end_date TEXT NOT NULL,
+  checkpoints INTEGER NOT NULL,
+  peak_rel_pct REAL NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 -- Daily options-implied-volatility archive (Deribit's DVOL index — BTC/ETH
 -- only, the two currencies Deribit actually publishes it for). Same shape
 -- and same job as funding_rate_daily: lets a technique ask "is implied

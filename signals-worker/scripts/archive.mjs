@@ -15,7 +15,7 @@
 // two are genuinely the same need either way: "what's in the universe" and
 // "what's each coin's live funding right now."
 import { d1, chunk } from './d1-client.mjs';
-import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, computeSpreadSeries, levelChangeBefore } from '../worker.js';
+import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, computeSpreadSeries, levelChangeBefore, detectOutperformanceRotation } from '../worker.js';
 
 const UA = 'Mozilla/5.0 (compatible; FrontierCapitalSignals/2.0)';
 
@@ -891,6 +891,58 @@ export async function loadYieldSpreadChange(env, lookbackDays = 5) {
   if (!series || series.length < lookbackDays + 1) return null;
   const chg = levelChangeBefore(series, series[series.length - 1].date, lookbackDays);
   return chg == null ? null : { chg5d: chg, asOf: series[series.length - 1].date };
+}
+
+// ------------------------- OUTPERFORMER ROTATION -----------------------------
+// Which crypto assets currently show a sustained multi-month outperformance
+// streak vs MCAP:BROAD (detectOutperformanceRotation, worker.js) — the
+// "Solana-then/Hyperliquid-now" pattern (user-requested 2026-08-21).
+// Validated live against SOL's own real archive before shipping: correctly
+// found all 4 of its independently-documented breakout phases (see
+// asset_rotation_status' own docs, schema.sql). Only reports a streak
+// whose endDate is recent (within ROTATION_RECENCY_DAYS of the archive's
+// own latest date) as CURRENTLY rotating — a symbol that rotated years ago
+// and has been quiet since shouldn't show as "rotating" forever.
+const ROTATION_RECENCY_DAYS = 60;
+
+export async function computeOutperformanceRotations(env) {
+  const rows = await d1(env, `SELECT symbol, asset_class, date, close FROM asset_daily_bars WHERE symbol = 'MCAP:BROAD' OR asset_class = 'crypto' ORDER BY symbol, date`);
+  const bySymbol = {};
+  for (const r of rows) (bySymbol[r.symbol] ??= []).push(r);
+  const benchmark = bySymbol['MCAP:BROAD'];
+  if (!benchmark || !benchmark.length) return [];
+
+  let latestDate = null;
+  for (const r of benchmark) if (!latestDate || r.date > latestDate) latestDate = r.date;
+  const cutoff = new Date(new Date(latestDate).getTime() - ROTATION_RECENCY_DAYS * 86400000).toISOString().slice(0, 10);
+
+  const out = [];
+  for (const [symbol, bars] of Object.entries(bySymbol)) {
+    if (symbol === 'MCAP:BROAD' || bars.length < 90) continue;
+    const recent = detectOutperformanceRotation(bars, benchmark).filter((r) => r.endDate >= cutoff);
+    if (!recent.length) continue;
+    const best = recent.reduce((a, b) => (b.peakRel > a.peakRel ? b : a));
+    out.push({ symbol, startDate: best.startDate, endDate: best.endDate, checkpoints: best.checkpoints, peakRel: best.peakRel });
+  }
+  return out;
+}
+
+// Wholesale replace, same rationale as lead_lag_signals — a rotation that
+// no longer holds (its own streak's endDate has aged past
+// ROTATION_RECENCY_DAYS) should disappear from the table, not linger from
+// a stale prior run.
+export async function replaceRotationStatus(env, rows) {
+  await d1(env, 'DELETE FROM asset_rotation_status');
+  if (!rows.length) return 0;
+  const updatedAt = new Date().toISOString();
+  let written = 0;
+  for (const batch of chunk(rows, 12)) {
+    const placeholders = batch.map(() => '(?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap((r) => [r.symbol, r.startDate, r.endDate, r.checkpoints, r.peakRel, updatedAt]);
+    await d1(env, `INSERT INTO asset_rotation_status (symbol, start_date, end_date, checkpoints, peak_rel_pct, updated_at) VALUES ${placeholders}`, params);
+    written += batch.length;
+  }
+  return written;
 }
 
 // Derived SPREAD:<name> pseudo-symbol (see computeSpreadSeries in worker.js

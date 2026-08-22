@@ -585,6 +585,18 @@ export async function loadQualityData(env) {
   return out;
 }
 
+// Which crypto symbols are currently in a sustained multi-month
+// outperformance streak vs the broad market (asset_rotation_status,
+// computeOutperformanceRotations/archive.mjs, run daily) — the "Solana-
+// then/Hyperliquid-now" pattern. Grouped by symbol for a plain property
+// read, same shape loadRecentEvents/loadSrLevels use.
+export async function loadRotationStatus(env) {
+  const rows = await d1(env, 'SELECT symbol, start_date, end_date, checkpoints, peak_rel_pct FROM asset_rotation_status');
+  const out = {};
+  for (const r of rows) out[r.symbol] = { startDate: r.start_date, endDate: r.end_date, checkpoints: r.checkpoints, peakRel: r.peak_rel_pct };
+  return out;
+}
+
 // { [followerSymbol]: [{leaderSymbol, lagDays, corr, samples}] } — grouped
 // by follower for direct per-asset lookup by the leadlag technique
 // (worker.js). Relationships are (re)computed daily by computeLeadLag

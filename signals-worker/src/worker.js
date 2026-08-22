@@ -1170,6 +1170,58 @@ export function computeQualityScores(qualityData) {
   return out;
 }
 
+// Detects sustained multi-month outperformance vs a benchmark — the "new
+// entrant rotates into relevance" pattern (Solana's 2020-21 rise; the
+// question behind whether Hyperliquid is doing the same now, user-
+// requested 2026-08-21). Deliberately NOT "did this asset pump this
+// week" — detectMoveEpisodes/srbreak/accum already cover that — this
+// wants PERSISTENCE: the asset's own trailing-windowDays relative return
+// vs the benchmark has stayed at or above thresholdPct at
+// minConsecutiveChecks separate checkpoints in a row, spaced stepDays
+// apart, not just touched it once. `assetBars`/`benchmarkBars`:
+// [{date, close}], any order. Returns every such streak found (a symbol
+// can rotate more than once across its history), each with when it
+// started, how many checkpoints it held, and the peak relative strength
+// reached — the real magnitude/duration behind "is this a genuine
+// rotation, and how strong."
+export function detectOutperformanceRotation(assetBars, benchmarkBars, windowDays = 90, thresholdPct = 50, stepDays = 30, minConsecutiveChecks = 3) {
+  const assetSorted = assetBars.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+  const benchByDate = {};
+  for (const b of benchmarkBars) benchByDate[b.date] = b.close;
+  const benchDates = Object.keys(benchByDate).sort();
+
+  const nearestBenchClose = (targetDate) => {
+    let lo = 0, hi = benchDates.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (benchDates[mid] < targetDate) lo = mid + 1; else hi = mid; }
+    const idx = (lo < benchDates.length && benchDates[lo] === targetDate) ? lo : lo - 1;
+    return idx >= 0 ? benchByDate[benchDates[idx]] : null;
+  };
+
+  const rotations = [];
+  let streak = null; // { startIdx, startDate, checkpoints, peakRel }
+  for (let i = windowDays; i < assetSorted.length; i += stepDays) {
+    const now = assetSorted[i], then = assetSorted[i - windowDays];
+    if (!now.close || !then.close) continue;
+    const assetRet = ((now.close / then.close) - 1) * 100;
+    const benchNow = nearestBenchClose(now.date), benchThen = nearestBenchClose(then.date);
+    if (benchNow == null || benchThen == null || !benchThen) continue;
+    const benchRet = ((benchNow / benchThen) - 1) * 100;
+    const rel = assetRet - benchRet;
+
+    if (rel >= thresholdPct) {
+      if (!streak) streak = { startIdx: i, startDate: now.date, checkpoints: 0, peakRel: -Infinity };
+      streak.checkpoints++;
+      streak.peakRel = Math.max(streak.peakRel, rel);
+      streak.endDate = now.date;
+    } else {
+      if (streak && streak.checkpoints >= minConsecutiveChecks) rotations.push(streak);
+      streak = null;
+    }
+  }
+  if (streak && streak.checkpoints >= minConsecutiveChecks) rotations.push(streak);
+  return rotations;
+}
+
 // Buckets each bar's forward return by that DAY's Fear & Greed reading,
 // using the same >=75/<=25 "extreme" thresholds the live `sentiment`
 // technique already acts on (evaluateTechniques, marketContext.fearGreed)
@@ -2909,7 +2961,7 @@ export function buildStockMetrics(row, valuation, override, benchCloses, ivHist)
 const RANGE_LOG_HORIZONS_DAYS = [1, 7];
 
 function rankBoards(metrics, kind, reliability, ctx = {}) {
-  const { moveStats, qualityScores } = ctx;
+  const { moveStats, qualityScores, rotationStatus } = ctx;
   const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, ctx) }));
   // Full-universe vote log (not just the top-10 shown on each board) so the
   // reliability learning loop sees every asset, not only that hour's winners.
@@ -2994,6 +3046,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       dir,
       consolidating: accumVote ? accumVote.dir : null,
       quality: (qualityScores && qualityScores[x.m.symbol]) || null,
+      rotation: (rotationStatus && rotationStatus[x.m.symbol]) || null,
       conf: { agree: side === 'long' ? x.c.bull : x.c.bear, total: x.c.total },
       drivers: side === 'long' ? x.c.longNotes : x.c.shortNotes,
       horizon,
@@ -3041,7 +3094,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -3098,7 +3151,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   // Shared by both rankBoards calls below (crypto and stock) — see
   // evaluateTechniques' docs for why this is one object, not positional args.
   const qualityScores = computeQualityScores(qualityData || {});
-  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityScores };
+  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityScores, rotationStatus };
 
   let cryptoBoards = { breakout: [], breakdown: [], universe: 0 };
   let btc = null, eth = null;
@@ -3427,6 +3480,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .coil.coil-up{color:var(--up)}
   .coil.coil-down{color:var(--down)}
   .quality{display:block;color:var(--dim);font-size:10px;margin-top:3px;font-family:var(--disp);cursor:help}
+  .rotation{display:block;color:var(--amber);font-size:10px;letter-spacing:.04em;margin-top:3px;font-family:var(--disp);cursor:help;font-weight:600}
 
   .track-record{background:var(--ink-1);border:1px solid var(--line);border-top:2px solid var(--amber);margin-bottom:44px;padding:18px 18px 6px}
   .tr-title{font-weight:800;font-size:17px;letter-spacing:-.01em;margin-top:3px}
@@ -3755,6 +3809,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var quality = r.quality
           ? '<span class="quality" title="Utility/community percentile vs. every other tracked coin with data today (GitHub commits + PR contributors, Telegram/Reddit reach, CoinGecko watchlist users) -- informational only, never part of the score above">Quality '+r.quality.score+'/100</span>'
           : '';
+        var rotation = r.rotation
+          ? '<span class="rotation" title="Sustained outperformance vs. the broad crypto market since '+r.rotation.startDate+' -- '+r.rotation.checkpoints+' consecutive monthly checkpoints, peak +'+Math.round(r.rotation.peakRel)+'pts relative strength. The Solana-2021-style pattern -- informational only, never part of the score above">⬆️ Rotating in</span>'
+          : '';
         var dirArrow = '<span class="dir-arrow '+(rowSide==='long'?'dir-up':'dir-down')+'" title="'+(rowSide==='long'?'Leaning up':'Leaning down')+'">'+(rowSide==='long'?'▲':'▼')+'</span>';
         var conf = r.conf ? '<span class="conf">'+r.conf.agree+'/'+r.conf.total+' aligned</span>' : '';
         var horizon = r.horizon ? '<span class="horizon '+(r.horizon.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+(r.horizon.basis==='historical'?"Based on this asset's own historical accuracy by horizon":"Methodology estimate, not yet enough of this asset's own history to say")+'">'+esc(r.horizon.label)+(r.horizon.basis==='historical'?' ✓':'')+'</span>' : '';
@@ -3764,7 +3821,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var range = r.range ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+rangeTitle+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>' : '<span class="dim">—</span>';
         h+='<tr class="in" style="animation-delay:'+(i*30)+'ms" data-symbol="'+esc(r.symbol)+'" data-class="'+cfg.assetClass+'">'
           +'<td class="rk">'+(i+1)+'</td>'
-          +'<td class="asset">'+symHtml+name+why+topInd+coil+quality+'</td>'
+          +'<td class="asset">'+symHtml+name+why+topInd+coil+quality+rotation+'</td>'
           +'<td class="live-price-cell"><span class="live-price">'+fmtPrice(r.price)+'</span></td>'
           +'<td class="live-chg-cell '+pctCls(r.chg24h)+'"><span class="live-chg">'+fmtPct(r.chg24h)+'</span></td>'
           +'<td class="'+pctCls(r.chg7d)+'">'+fmtPct(r.chg7d)+'</td>'

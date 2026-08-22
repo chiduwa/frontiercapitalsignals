@@ -28,7 +28,8 @@ import {
   fetchDefiLlamaProtocols, matchProtocolsToUniverse, defiLlamaProtocolTvlHistory,
   fetchDeribitDvolHistory, upsertIvDaily, fetchStockAtmIv,
   computeSrLevelsAndBreaks, replaceSrLevels, replaceSrBreakStats,
-  computeMarketComposite, upsertMarketCapTotal
+  computeMarketComposite, upsertMarketCapTotal,
+  computeOutperformanceRotations, replaceRotationStatus
 } from './archive.mjs';
 import { evaluateYesterdaySwingTimes } from './reliability.mjs';
 
@@ -154,6 +155,16 @@ async function main() {
     }
   } catch (e) {
     console.error('broad market composite computation failed:', e.message);
+  }
+
+  // Depends on MCAP:BROAD already being written (the step just above) —
+  // needs it as the benchmark to compare every crypto asset against.
+  try {
+    const rotations = await computeOutperformanceRotations(env);
+    const written = await replaceRotationStatus(env, rotations);
+    console.log(`outperformer rotation: ${written} symbol(s) currently in a sustained multi-month outperformance streak${rotations.length ? ' -- ' + rotations.map((r) => `${r.symbol} (+${r.peakRel.toFixed(0)}pts)`).join(', ') : ''}`);
+  } catch (e) {
+    console.error('outperformer rotation computation failed:', e.message);
   }
 
   try {
