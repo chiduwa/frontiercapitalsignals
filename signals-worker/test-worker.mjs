@@ -966,6 +966,58 @@ check('the mirrored series is correctly detected as bearish', bearEpisodes.lengt
 
 check('too little history: no crash, no episodes', mod.detectMoveEpisodes([{ date: '2026-01-01', close: 100 }], 20, 7, 21, 30).length === 0);
 
+console.log('\n== detectExhaustionReversals: dip/spike preceded by an extended opposite run, outlier (reclaimed) vs pivot (held) (2026-08-22, grounded in the real BTC/ETH/SOL/XRP/XLM/HBAR intraday reversal off fresh highs after the 08-20/21 rally) ==');
+// The prior rise/bounce legs are deliberately gradual (well under the 20%-
+// in-7-days trigger on their own) so detectMoveEpisodes flags ONLY the
+// sudden dip itself as an episode — a first version of this fixture used a
+// rise steep enough to trigger its OWN episode, whose cooldown window then
+// swallowed the dip entirely (detectMoveEpisodes never got a chance to see
+// it as a fresh trigger). The rise is still large cumulatively (+18.6% over
+// the 10-day priorRunLookbackDays window) — real, just not itself abrupt.
+const erReclaimedClose = (i) => {
+  if (i < 20) return 100;                              // flat pad
+  if (i <= 44) return 100 + (i - 20) * 2.4;             // extended prior rise: 100 -> 157.6 over 25 days, max 7-day window ~16.8% (never self-triggers)
+  if (i <= 51) return 157.6 - (i - 44) * 8;             // sudden dip: 157.6 -> 101.6 over 7 days (-35.5%, clears the 20% trigger)
+  return 101.6 + (i - 51) * 2.2;                        // bounces back, reclaims the pre-dip ~152.8 level around day 74-75; max 7-day window ~15.4% (never self-triggers)
+};
+const erReclaimedBars = Array.from({ length: 110 }, (_, i) => ({ date: new Date(emStart + i * 86400000).toISOString().slice(0, 10), close: erReclaimedClose(i) }));
+const erReclaimedEpisodes = mod.detectMoveEpisodes(erReclaimedBars, 20, 7, 21, 30);
+const erReclaimed = mod.detectExhaustionReversals(erReclaimedBars, erReclaimedEpisodes, 10, 12, 30);
+check('finds exactly the dip episode (the gradual rise/bounce never independently trigger their own episode)', erReclaimedEpisodes.length === 1 && erReclaimed.length === 1, `episodes=${erReclaimedEpisodes.length} exhaustion=${JSON.stringify(erReclaimed)}`);
+check('correctly identifies it as a bearish (dip) exhaustion episode with a real double-digit prior run', erReclaimed[0] && erReclaimed[0].dir === -1 && erReclaimed[0].priorRunPct > 15 && erReclaimed[0].priorRunPct < 25, JSON.stringify(erReclaimed));
+check('outcome is "reclaimed" — price later exceeded the pre-dip peak, so this was an outlier/blip, not a pivot', erReclaimed[0] && erReclaimed[0].outcome === 'reclaimed' && erReclaimed[0].daysToReclaim > 0, JSON.stringify(erReclaimed));
+
+const erHeldClose = (i) => {
+  if (i < 20) return 100;
+  if (i <= 44) return 100 + (i - 20) * 2.4;             // same extended prior rise
+  if (i <= 51) return 157.6 - (i - 44) * 8;             // same sudden dip
+  return 101.6;                                          // flat forever — never recovers toward the pre-dip peak
+};
+const erHeldBars = Array.from({ length: 110 }, (_, i) => ({ date: new Date(emStart + i * 86400000).toISOString().slice(0, 10), close: erHeldClose(i) }));
+const erHeldEpisodes = mod.detectMoveEpisodes(erHeldBars, 20, 7, 21, 30);
+const erHeld = mod.detectExhaustionReversals(erHeldBars, erHeldEpisodes, 10, 12, 30);
+check('outcome is "held" — price never reclaimed the pre-dip peak within the window, so this was a genuine pivot', erHeld.length === 1 && erHeld[0].outcome === 'held' && erHeld[0].daysToReclaim === null, JSON.stringify(erHeld));
+
+const erNoRunClose = (i) => {
+  if (i < 30) return 100;                              // flat — no prior run at all
+  if (i <= 37) return 100 - (i - 30) * (30 / 7);       // sharp dip in isolation, no extended rise behind it
+  return 70;
+};
+const erNoRunBars = Array.from({ length: 70 }, (_, i) => ({ date: new Date(emStart + i * 86400000).toISOString().slice(0, 10), close: erNoRunClose(i) }));
+const erNoRunEpisodes = mod.detectMoveEpisodes(erNoRunBars, 20, 7, 21, 30);
+const erNoRun = mod.detectExhaustionReversals(erNoRunBars, erNoRunEpisodes, 10, 12, 30);
+check('a real dip with no extended prior run behind it does not qualify as an exhaustion reversal (plain detectMoveEpisodes still finds the raw episode)', erNoRunEpisodes.length === 1 && erNoRun.length === 0, `episodes=${erNoRunEpisodes.length} exhaustion=${erNoRun.length}`);
+
+const erSpikeClose = (i) => 300 - erReclaimedClose(i); // mirror image: extended decline -> sudden spike -> fades back (bounces back down) — the symmetric capitulation-bounce case
+const erSpikeBars = Array.from({ length: 110 }, (_, i) => ({ date: new Date(emStart + i * 86400000).toISOString().slice(0, 10), close: erSpikeClose(i) }));
+const erSpikeEpisodes = mod.detectMoveEpisodes(erSpikeBars, 20, 7, 21, 30);
+const erSpike = mod.detectExhaustionReversals(erSpikeBars, erSpikeEpisodes, 10, 12, 30);
+check('symmetric bear-side case: a spike preceded by an extended decline (capitulation bounce) is correctly detected, dir=1, priorRunPct clearly negative', erSpike.length === 1 && erSpike[0].dir === 1 && erSpike[0].priorRunPct < -12, JSON.stringify(erSpike));
+
+const erShortBars = Array.from({ length: 8 }, (_, i) => ({ date: `2026-01-0${i + 1}`, close: 100 + i }));
+const erShortEpisodes = [{ startIdx: 3, startDate: erShortBars[3].date, detectedIdx: 5, detectedDate: erShortBars[5].date, dir: -1, triggerPct: -25, fullMovePct: -25, daysToExtreme: 0, extremeDate: erShortBars[5].date }];
+check('too little history before the episode to check a prior run (priorIdx would go negative): no crash, filtered out', mod.detectExhaustionReversals(erShortBars, erShortEpisodes, 10, 12, 30).length === 0);
+
 console.log('\n== levelChangeBefore: N-trading-day level change ending at/before a target date, gap-tolerant ==');
 const yieldBars = [
   { date: '2026-01-02', close: 4.5 }, { date: '2026-01-05', close: 4.45 }, // weekday-only series -- 01-03/04 are a weekend, correctly absent

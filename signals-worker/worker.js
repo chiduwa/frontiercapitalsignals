@@ -1115,6 +1115,59 @@ export function detectMoveEpisodes(bars, thresholdPct = 20, windowDays = 7, cool
   return episodes;
 }
 
+// Filters a symbol's own detectMoveEpisodes() output down to the ones
+// that were preceded by an extended run in the OPPOSITE direction — "dipped
+// suddenly after days of continuous rising" (user-requested, grounded in
+// the real 2026-08-22 case: BTC/ETH/SOL/XRP/XLM/HBAR all hit fresh highs
+// then pulled back 3-11% intraday after the 08-20/21 rally, while still
+// net-positive for the day). A plain detectMoveEpisodes() bearish episode
+// doesn't tell you whether it followed a rally or just more of the same
+// downtrend — this adds that precondition, plus the piece
+// detectMoveEpisodes doesn't measure at all: what happens AFTER the
+// episode's own extreme. If price later reclaims the pre-episode level,
+// this was an outlier/blip within a rally that resumed; if it doesn't
+// within reclaimWindowDays, that's the operational definition of a
+// genuine pivot used here. This is the direct answer to "when are they
+// outliers and when can we know the market/asset is pivoting."
+// bars: full sorted [{date, close}] history for one symbol. episodes:
+// that same symbol's own detectMoveEpisodes() output (whatever extra
+// fields the caller already attached, e.g. symbol/assetClass, pass
+// through unchanged via spread).
+export function detectExhaustionReversals(bars, episodes, priorRunLookbackDays = 10, priorRunThresholdPct = 12, reclaimWindowDays = 30) {
+  const sorted = bars.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+  const out = [];
+  for (const e of episodes) {
+    const priorIdx = e.startIdx - priorRunLookbackDays;
+    if (priorIdx < 0) continue;
+    const priorClose = sorted[priorIdx].close;
+    const startClose = sorted[e.startIdx].close;
+    if (!priorClose || !startClose) continue;
+    const priorRunPct = ((startClose / priorClose) - 1) * 100;
+    // Bearish episode (dip) must be preceded by a prior RISE; bullish
+    // episode (spike) must be preceded by a prior DECLINE (a capitulation
+    // bounce) — the opposite-direction precondition is what makes this
+    // "exhaustion" rather than plain momentum/continuation, which
+    // detectMoveEpisodes on its own doesn't distinguish.
+    const qualifies = e.dir === -1 ? priorRunPct >= priorRunThresholdPct : priorRunPct <= -priorRunThresholdPct;
+    if (!qualifies) continue;
+
+    const extremeIdx = e.detectedIdx + e.daysToExtreme;
+    let reclaimedIdx = null;
+    for (let j = extremeIdx + 1; j < Math.min(sorted.length, extremeIdx + reclaimWindowDays); j++) {
+      const c = sorted[j].close;
+      if (c == null) continue;
+      if ((e.dir === -1 && c >= startClose) || (e.dir === 1 && c <= startClose)) { reclaimedIdx = j; break; }
+    }
+    out.push({
+      ...e,
+      priorRunPct,
+      outcome: reclaimedIdx != null ? 'reclaimed' : 'held',
+      daysToReclaim: reclaimedIdx != null ? (reclaimedIdx - extremeIdx) : null
+    });
+  }
+  return out;
+}
+
 // The level change over lookbackDays index-positions, ending at the latest
 // bar on or before targetDate — used by correlation-research.mjs to ask
 // "how much did this yield series move in the N trading days before this

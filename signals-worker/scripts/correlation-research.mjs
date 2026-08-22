@@ -16,7 +16,7 @@
 // the deliverable as the D1 rows.
 //
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID
-import { twoSampleZTest, volumeSurgeSeries, forwardReturns, chronologicalHalfSplit, sentimentExtremeForwardReturns, timeOfDaySentimentSplit, RELIABILITY_SIGNIFICANCE_Z, detectMoveEpisodes, volRegime, levelChangeBefore } from '../worker.js';
+import { twoSampleZTest, volumeSurgeSeries, forwardReturns, chronologicalHalfSplit, sentimentExtremeForwardReturns, timeOfDaySentimentSplit, RELIABILITY_SIGNIFICANCE_Z, detectMoveEpisodes, detectExhaustionReversals, volRegime, levelChangeBefore } from '../worker.js';
 import { d1 } from './d1-client.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
@@ -262,15 +262,30 @@ async function main() {
   // gets. If real data can't even clear 15, that's the honest answer, not
   // a reason to lower the bar further just to force a result.
   const MIN_EPISODE_SAMPLE = 15;
+  // "Extended run" precondition for the exhaustion-reversal research below:
+  // at least this much cumulative move in the OPPOSITE direction over the
+  // preceding window, real but not itself abrupt (kept well under
+  // EPISODE_THRESHOLD_PCT so a genuine multi-day rally/decline doesn't just
+  // get counted as its own episode instead of the setup for this one).
+  const EXHAUSTION_PRIOR_RUN_LOOKBACK_DAYS = 10;
+  const EXHAUSTION_PRIOR_RUN_THRESHOLD_PCT = 12;
+  const EXHAUSTION_RECLAIM_WINDOW_DAYS = 30;
 
   const allEpisodes = [];
+  const allExhaustionReversals = [];
   for (const [symbol, { assetClass, bars }] of Object.entries(bySymbol)) {
     if (assetClass !== 'crypto' && assetClass !== 'stock') continue;
     if (bars.length < 90) continue;
     const sortedBars = bars.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+    const symbolEpisodes = [];
     for (const e of detectMoveEpisodes(sortedBars, EPISODE_THRESHOLD_PCT, EPISODE_WINDOW_DAYS, EPISODE_COOLDOWN_DAYS)) {
       const compression = volRegime(sortedBars.slice(0, e.startIdx + 1).map((b) => b.close), 20, 60);
-      allEpisodes.push({ symbol, assetClass, ...e, compression });
+      const decorated = { symbol, assetClass, ...e, compression };
+      symbolEpisodes.push(decorated);
+      allEpisodes.push(decorated);
+    }
+    for (const r of detectExhaustionReversals(sortedBars, symbolEpisodes, EXHAUSTION_PRIOR_RUN_LOOKBACK_DAYS, EXHAUSTION_PRIOR_RUN_THRESHOLD_PCT, EXHAUSTION_RECLAIM_WINDOW_DAYS)) {
+      allExhaustionReversals.push(r);
     }
   }
   console.log(`consolidation research: ${allEpisodes.length} episodes found (>=${EPISODE_THRESHOLD_PCT}% within <=${EPISODE_WINDOW_DAYS} days) across ${Object.keys(bySymbol).length} symbols`);
@@ -343,6 +358,88 @@ async function main() {
     console.log(`[${compressionHypothesis}] too few samples (episode=${compressionEpisodeSample.length}, normal=${compressionNormalSample.length}) — skipped`);
   } else {
     const finding = runGuardedTest(compressionHypothesis, 'crypto', null, compressionEpisodeSample, compressionNormalSample);
+    if (finding) findings.push(finding);
+  }
+
+  // Exhaustion reversals: a sudden dip/spike preceded by an extended run in
+  // the OPPOSITE direction — "dipped suddenly after days of continuous
+  // rising" (user-requested 2026-08-22, grounded in the real event that
+  // day: BTC/ETH/SOL/XRP/XLM/HBAR all hit fresh highs then pulled back
+  // 3-11% intraday after the 08-20/21 rally, still net-positive for the
+  // day). The prevalence/outcome split is reported unconditionally, same
+  // philosophy as the episode stats above — "how often is this an outlier
+  // vs a genuine pivot" is a real statistic once real cases exist, not a
+  // hypothesis with a null to reject. Two guarded hypotheses follow the
+  // user's own candidate explanations: does volume at the reversal predict
+  // which outcome, and does it matter whether the WHOLE market was also
+  // extended at the time (vs this being an isolated single-asset move).
+  console.log(`\nexhaustion-reversal research: ${allExhaustionReversals.length} episodes found — a >=${EPISODE_THRESHOLD_PCT}% move preceded by a >=${EXHAUSTION_PRIOR_RUN_THRESHOLD_PCT}% run the OTHER way over the prior ${EXHAUSTION_PRIOR_RUN_LOOKBACK_DAYS} days`);
+  for (const dir of [-1, 1]) {
+    const subset = allExhaustionReversals.filter((e) => e.assetClass === 'crypto' && e.dir === dir);
+    const label = dir === -1 ? 'bull-exhaustion (dip after a rally)' : 'bear-exhaustion (spike after a decline — capitulation bounce)';
+    if (!subset.length) { console.log(`[exhaustion stats] crypto ${label}: none found`); continue; }
+    const reclaimed = subset.filter((e) => e.outcome === 'reclaimed');
+    const held = subset.filter((e) => e.outcome === 'held');
+    console.log(`[exhaustion stats] crypto ${label}: n=${subset.length}, median prior run=${median(subset.map((e) => e.priorRunPct))?.toFixed(1)}%, median move=${median(subset.map((e) => e.fullMovePct))?.toFixed(1)}%, median days-to-extreme=${median(subset.map((e) => e.daysToExtreme))}`);
+    console.log(`[exhaustion stats] crypto ${label}: OUTCOME — reclaimed/outlier: ${reclaimed.length} (${((reclaimed.length / subset.length) * 100).toFixed(0)}%, median ${median(reclaimed.map((e) => e.daysToReclaim))} days to reclaim) | held/genuine pivot: ${held.length} (${((held.length / subset.length) * 100).toFixed(0)}%)`);
+  }
+
+  const MIN_EXHAUSTION_SAMPLE = 10; // rarer than a plain episode (episode AND a qualifying prior run AND enough forward history to classify the outcome) — MIN_MARKET_SURGE_SAMPLE's same reasoning for a rarer bucket
+  const exhaustionSurgeBySymbol = {};
+  for (const r of allExhaustionReversals) {
+    if (r.symbol in exhaustionSurgeBySymbol) continue;
+    const symBars = (bySymbol[r.symbol] && bySymbol[r.symbol].bars) || [];
+    exhaustionSurgeBySymbol[r.symbol] = Object.fromEntries(volumeSurgeSeries(symBars, VOLUME_LOOKBACK_DAYS).map((s) => [s.date, s.surgeRatio]));
+  }
+  const exhaustionVolumeReclaimed = allExhaustionReversals
+    .filter((r) => r.assetClass === 'crypto' && r.outcome === 'reclaimed')
+    .map((r) => ({ date: r.detectedDate, value: exhaustionSurgeBySymbol[r.symbol] && exhaustionSurgeBySymbol[r.symbol][r.detectedDate] }))
+    .filter((p) => p.value != null);
+  const exhaustionVolumeHeld = allExhaustionReversals
+    .filter((r) => r.assetClass === 'crypto' && r.outcome === 'held')
+    .map((r) => ({ date: r.detectedDate, value: exhaustionSurgeBySymbol[r.symbol] && exhaustionSurgeBySymbol[r.symbol][r.detectedDate] }))
+    .filter((p) => p.value != null);
+  const exhaustionVolumeHypothesis = 'exhaustion_reversal_volume_held_vs_reclaimed';
+  if (exhaustionVolumeReclaimed.length < MIN_EXHAUSTION_SAMPLE || exhaustionVolumeHeld.length < MIN_EXHAUSTION_SAMPLE) {
+    console.log(`[${exhaustionVolumeHypothesis}] too few samples (reclaimed=${exhaustionVolumeReclaimed.length}, held=${exhaustionVolumeHeld.length}) — skipped`);
+  } else {
+    const finding = runGuardedTest(exhaustionVolumeHypothesis, 'crypto', null, exhaustionVolumeHeld, exhaustionVolumeReclaimed);
+    if (finding) findings.push(finding);
+  }
+
+  // Does it matter whether the whole market was ALSO extended in the same
+  // direction at the time (a market-wide top/bottom), vs this being an
+  // isolated single-asset move? Encodes outcome as held=1/reclaimed=0 and
+  // compares the two groups' mean — equivalent to a two-proportion test,
+  // reusing twoSampleZTest as-is rather than writing a new stats function.
+  // Half the per-asset prior-run bar: a broad market-cap composite is
+  // structurally less volatile than any single constituent (diversification
+  // dampens it), so requiring the same bar as the individual asset would
+  // almost never fire.
+  const marketSeriesRaw = (bySymbol['MCAP:TOTAL'] && bySymbol['MCAP:TOTAL'].bars.length > 90) ? bySymbol['MCAP:TOTAL'].bars : ((bySymbol['MCAP:BROAD'] && bySymbol['MCAP:BROAD'].bars) || []);
+  const marketLabel = (bySymbol['MCAP:TOTAL'] && bySymbol['MCAP:TOTAL'].bars.length > 90) ? 'MCAP:TOTAL' : 'MCAP:BROAD (proxy)';
+  const marketSeries = marketSeriesRaw.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+  const pctRunBefore = (series, targetDate, lookbackDays) => {
+    let idx = -1;
+    for (let i = series.length - 1; i >= 0; i--) { if (series[i].date <= targetDate) { idx = i; break; } }
+    if (idx < lookbackDays) return null;
+    const now = series[idx].close, then = series[idx - lookbackDays].close;
+    return (now == null || !then) ? null : ((now / then) - 1) * 100;
+  };
+  const marketAligned = [], isolated = [];
+  for (const r of allExhaustionReversals) {
+    if (r.assetClass !== 'crypto' || !marketSeries.length) continue;
+    const marketRunPct = pctRunBefore(marketSeries, r.startDate, EXHAUSTION_PRIOR_RUN_LOOKBACK_DAYS);
+    if (marketRunPct == null) continue;
+    const marketAgrees = r.dir === -1 ? marketRunPct >= EXHAUSTION_PRIOR_RUN_THRESHOLD_PCT / 2 : marketRunPct <= -EXHAUSTION_PRIOR_RUN_THRESHOLD_PCT / 2;
+    (marketAgrees ? marketAligned : isolated).push({ date: r.startDate, value: r.outcome === 'held' ? 1 : 0 });
+  }
+  console.log(`[exhaustion market-alignment] using ${marketLabel} as the market-wide series; aligned=${marketAligned.length}, isolated=${isolated.length}`);
+  const marketAlignHypothesis = 'exhaustion_reversal_market_aligned_predicts_pivot';
+  if (marketAligned.length < MIN_EXHAUSTION_SAMPLE || isolated.length < MIN_EXHAUSTION_SAMPLE) {
+    console.log(`[${marketAlignHypothesis}] too few samples (aligned=${marketAligned.length}, isolated=${isolated.length}) — skipped`);
+  } else {
+    const finding = runGuardedTest(marketAlignHypothesis, 'crypto', null, marketAligned, isolated);
     if (finding) findings.push(finding);
   }
 
