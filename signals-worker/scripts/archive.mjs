@@ -411,12 +411,18 @@ export async function insertFearGreedHistory(env, rows) {
 // COALESCE merge as upsertMarketSentiment, for the same reason.
 export async function upsertAssetSentiment(env, date, rows) {
   let attempted = 0;
-  // 12, not 15: this row is now 8 columns wide (utility/community fields
+  // 10, not 15: this row is now 8 columns wide (utility/community fields
   // added 2026-08-21) — 15 x 8 = 120 would repeat the exact "too many SQL
   // variables" D1 400 the srbreak archive writes hit earlier this session
-  // (see replaceSrLevels' own docs); 12 x 8 = 96 stays under the same
-  // margin every other batched insert in this file already respects.
-  for (const batch of chunk(rows, 12)) {
+  // (see replaceSrLevels' own docs). 10 x 8 = 80 matches upsertDailyBars/
+  // upsertHourlyBars' own margin for the same 8-column width — pulled back
+  // from an initial 12 (96) after an audit of every batched insert in this
+  // file found 96 was the widest margin anywhere, right at the edge of
+  // what a live 105-param call had already proven fails, for code that
+  // hadn't run in production yet at this new width. (upsertTimeOfDayStats
+  // is also 8x12=96, pre-existing and already proven stable there — left
+  // as-is rather than changed without a reason.)
+  for (const batch of chunk(rows, 10)) {
     const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(',');
     const params = batch.flatMap((r) => [
       date, r.symbol, r.coingeckoUpPct ?? null, r.cryptopanicScore ?? null,
@@ -496,8 +502,16 @@ export function barsRowsToReturnsBySymbol(rows) {
 // computeSectorComposites (below) as just more rows in the same table, so
 // sector-leads-sector and sector-leads-asset relationships fall out of this
 // same O(n^2) pass for free — no separate sector-lead-lag engine needed.
-export async function computeLeadLag(env) {
-  const rows = await d1(env, 'SELECT symbol, date, close FROM asset_daily_bars ORDER BY symbol, date');
+// `preloadedRows` (optional): pass an already-fetched superset (symbol,
+// date, close, and any extra columns — ignored here) to skip this
+// function's own read entirely. Added so daily-refresh.mjs can share ONE
+// full-table read with computeSrLevelsAndBreaks below (both ran back-to-
+// back, each independently pulling the whole table — confirmed live,
+// ~660-700K rows_read apiece) instead of two. Omit it (or pass nothing)
+// and this reads exactly as it always did — fully backward compatible,
+// nothing about the default path changed.
+export async function computeLeadLag(env, preloadedRows) {
+  const rows = preloadedRows || await d1(env, 'SELECT symbol, date, close FROM asset_daily_bars ORDER BY symbol, date');
   const returnsBySymbol = barsRowsToReturnsBySymbol(rows);
 
   const symbols = Object.keys(returnsBySymbol);
@@ -651,14 +665,24 @@ export function walkSrLevels(symbol, assetClass, bars) {
 // barsRowsToReturnsBySymbol does for lead/lag — so a Yahoo stuck-price-
 // then-jump artifact (see IMPLAUSIBLE_DAILY_RETURN_PCT's docs) can't
 // fabricate a fake level or a fake break.
-export async function computeSrLevelsAndBreaks(env) {
-  const rows = await d1(env, `
+// `preloadedRows` (optional): same shared-read mechanism as computeLeadLag
+// above — pass an already-fetched superset (must include asset_class,
+// close, high, low; a plain, unfiltered `SELECT * ... ORDER BY symbol,
+// date` easily qualifies) to skip this function's own read. The pseudo-
+// symbol exclusion that used to live in the SQL WHERE clause now happens
+// here in JS instead, so it applies the same way regardless of which path
+// supplied the rows. Omit the parameter and this reads exactly as it
+// always did.
+export async function computeSrLevelsAndBreaks(env, preloadedRows) {
+  const rows = preloadedRows || await d1(env, `
     SELECT symbol, asset_class, date, close, high, low FROM asset_daily_bars
-    WHERE symbol NOT LIKE 'SECTOR:%' AND symbol NOT LIKE 'TVL:%' AND symbol NOT LIKE 'SPREAD:%'
     ORDER BY symbol, date
   `);
   const barsBySymbol = {};
-  for (const r of rows) (barsBySymbol[r.symbol] ??= []).push(r);
+  for (const r of rows) {
+    if (r.symbol.startsWith('SECTOR:') || r.symbol.startsWith('TVL:') || r.symbol.startsWith('SPREAD:')) continue;
+    (barsBySymbol[r.symbol] ??= []).push(r);
+  }
 
   const levelsBySymbol = {};
   const allBreaks = [];

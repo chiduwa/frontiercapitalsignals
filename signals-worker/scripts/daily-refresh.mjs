@@ -31,6 +31,7 @@ import {
   computeMarketComposite, upsertMarketCapTotal,
   computeOutperformanceRotations, replaceRotationStatus
 } from './archive.mjs';
+import { d1 } from './d1-client.mjs';
 import { evaluateYesterdaySwingTimes } from './reliability.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, CMC_API_KEY, CRYPTOPANIC_API_TOKEN } = process.env;
@@ -222,28 +223,41 @@ async function main() {
     console.error('TVL fetch/match failed:', e.message);
   }
 
-  // Runs AFTER the sector-composite, yield-spread, and TVL steps above so
-  // this same pass's SECTOR:<name>/SPREAD:2s10s/TVL:<symbol> rows are
-  // already in asset_daily_bars — computeLeadLag treats them as just more
-  // symbols, so those relationships are discovered in this same O(n^2)
-  // call, no separate lead-lag engine needed for any of them.
+  // Shared read for lead/lag AND support/resistance below: both run back-
+  // to-back here, both after sector-composite/MCAP/yield-spread/TVL are
+  // already written (so SECTOR:<name>/MCAP:BROAD/SPREAD:2s10s/TVL:<symbol>
+  // rows are all in asset_daily_bars by now — computeLeadLag treats them
+  // as just more symbols, so those relationships are discovered in its
+  // same O(n^2) pass, no separate lead-lag engine needed for any of them),
+  // and both were independently pulling the ENTIRE table — confirmed live,
+  // ~660-700K rows_read each. One read instead of two, same data either
+  // function would have fetched on its own (see their own docs,
+  // computeLeadLag/computeSrLevelsAndBreaks in archive.mjs, for why this
+  // is safe: each already accepts a preloadedRows override with identical
+  // behavior to fetching it itself).
+  let sharedDailyBarsRows = null;
+  try {
+    sharedDailyBarsRows = await d1(env, 'SELECT symbol, asset_class, date, close, high, low FROM asset_daily_bars ORDER BY symbol, date');
+    console.log(`shared archive read for lead/lag + support/resistance: ${sharedDailyBarsRows.length} rows`);
+  } catch (e) {
+    console.error('shared archive read failed — lead/lag and support/resistance will each fall back to their own read:', e.message);
+  }
+
   try {
     const started = Date.now();
-    const signals = await computeLeadLag(env);
+    const signals = await computeLeadLag(env, sharedDailyBarsRows);
     const written = await replaceLeadLagSignals(env, signals, new Date().toISOString());
     console.log(`lead/lag: ${written} significant relationships registered (recomputed in ${Date.now() - started}ms)`);
   } catch (e) {
     console.error('lead/lag recompute failed:', e.message);
   }
 
-  // Runs after backfill-history.mjs (same job) has the archive current, same
-  // dependency lead/lag above has. Independent of everything else in this
-  // file — reads asset_daily_bars fresh each time, writes its own two
-  // tables — so a failure here can't take down sentiment/sectors/lead-lag
-  // or vice versa.
+  // Independent of everything else in this file besides the shared read
+  // above — writes its own two tables, so a failure here can't take down
+  // sentiment/sectors/lead-lag or vice versa.
   try {
     const started = Date.now();
-    const { levelsBySymbol, breaks } = await computeSrLevelsAndBreaks(env);
+    const { levelsBySymbol, breaks } = await computeSrLevelsAndBreaks(env, sharedDailyBarsRows);
     const levelsWritten = await replaceSrLevels(env, levelsBySymbol);
     const statsWritten = await replaceSrBreakStats(env, breaks);
     console.log(`support/resistance: ${Object.keys(levelsBySymbol).length} symbols with a key level, ${levelsWritten} levels, ${breaks.length} historical break events -> ${statsWritten} calibration buckets (${Date.now() - started}ms)`);
