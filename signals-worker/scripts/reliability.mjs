@@ -414,6 +414,14 @@ export async function evaluateMatured(env, nowIso) {
 // the EXACT same flip_run_at twice, this additionally skips a flip that's
 // really just the continuation of one already caught within the last hour.
 const CALL_FLIP_MIN_GAP_HOURS = 0.75;
+// call_flip_log's insert is 9 columns wide — CHUNK (15) was sized for a
+// narrower table (see its own comment above); 15 x 9 = 135 would exceed
+// D1's real 100-bound-parameter cap, confirmed live (2026-08-22, this
+// table's very first run: a large first-ever backlog of historical flips
+// across the whole tracked universe landed in one batch and hit exactly
+// this ceiling — "too many SQL variables at offset 387"). 11 x 9 = 99
+// stays under it, matching VOTES_CHUNK's own reasoning for a wider row.
+const CALL_FLIP_CHUNK = 11;
 // How long to wait before judging whether a flip's NEW direction actually
 // held — 24h, not the engine's usual 24h/168h pair: a flip is inherently a
 // short-timescale question (the user's own framing was "within a few
@@ -458,7 +466,7 @@ export async function detectAndLogCallFlips(env, nowIso) {
   if (!toInsert.length) return 0;
 
   let written = 0;
-  for (const batch of chunk(toInsert, CHUNK)) {
+  for (const batch of chunk(toInsert, CALL_FLIP_CHUNK)) {
     const placeholders = batch.map(() => '(?,?,?,?,?,?,?,?,?)').join(',');
     const params = batch.flatMap((f) => [f.symbol, f.assetClass, f.priorDir, f.priorScore, f.priorRunAt, f.newDir, f.newScore, f.newRunAt, f.hoursBetween]);
     await d1(env, `
