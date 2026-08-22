@@ -135,8 +135,8 @@ export async function coingeckoDailyBars(id, days = 365) {
 export function fundingSnapshotToRows(fundingMap, date) {
   const rows = [];
   for (const [symbol, v] of Object.entries(fundingMap || {})) {
-    if (v.fundingRate == null && v.openInterest == null) continue;
-    rows.push({ symbol, date, fundingRate: v.fundingRate ?? null, openInterest: v.openInterest ?? null, source: 'coingecko' });
+    if (v.fundingRate == null && v.openInterest == null && v.basisPct == null) continue;
+    rows.push({ symbol, date, fundingRate: v.fundingRate ?? null, openInterest: v.openInterest ?? null, basisPct: v.basisPct ?? null, source: 'coingecko' });
   }
   return rows;
 }
@@ -175,14 +175,15 @@ export async function upsertDailyBars(env, rows) {
 export async function upsertFundingDaily(env, rows) {
   let attempted = 0;
   for (const batch of chunk(rows, 12)) {
-    const placeholders = batch.map(() => '(?,?,?,?,?)').join(',');
-    const params = batch.flatMap((r) => [r.symbol, r.date, r.fundingRate ?? null, r.openInterest ?? null, r.source]);
+    const placeholders = batch.map(() => '(?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap((r) => [r.symbol, r.date, r.fundingRate ?? null, r.openInterest ?? null, r.basisPct ?? null, r.source]);
     await d1(env, `
-      INSERT INTO funding_rate_daily (symbol, date, funding_rate, open_interest, source)
+      INSERT INTO funding_rate_daily (symbol, date, funding_rate, open_interest, basis_pct, source)
       VALUES ${placeholders}
       ON CONFLICT(symbol, date) DO UPDATE SET
         funding_rate = COALESCE(excluded.funding_rate, funding_rate_daily.funding_rate),
-        open_interest = COALESCE(excluded.open_interest, funding_rate_daily.open_interest)
+        open_interest = COALESCE(excluded.open_interest, funding_rate_daily.open_interest),
+        basis_pct = COALESCE(excluded.basis_pct, funding_rate_daily.basis_pct)
     `, params);
     attempted += batch.length;
   }

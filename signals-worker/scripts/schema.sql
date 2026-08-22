@@ -123,6 +123,29 @@ CREATE TABLE IF NOT EXISTS funding_rate_daily (
   PRIMARY KEY (symbol, date)
 );
 
+-- Perp-vs-spot basis (user-requested, 2026-08-21: "binance perpetuals...
+-- price suddenly spike or dip... before major pivots" -- investigate, add
+-- if it holds). No historical basis is available anywhere (CoinGecko's
+-- /derivatives, worker.js's getFundingMap, is a live-snapshot-only
+-- endpoint, same reason funding_rate_daily above only ever grows one real
+-- day at a time rather than being backfilled) and Binance.com's own perp
+-- API is geo-blocked from this project's infra (see archive.mjs's
+-- Binance.US docs) -- so this can't be tested retroactively against the
+-- archive today. Computed as (perp price / spot index - 1) * 100 from
+-- getFundingMap's own price/index fields, NOT CoinGecko's own reported
+-- "basis" field, whose exact formula didn't reconcile against price/index
+-- in a live spot-check (plausibly annualized or otherwise adjusted) and
+-- isn't documented -- this way the number this project stores has a
+-- formula we actually understand. Archived daily going forward
+-- (backfill-history.mjs, same run that already writes funding_rate_daily
+-- from the same getFundingMap() snapshot, zero new fetches) so
+-- correlation-research.mjs can actually test the "basis spikes before a
+-- pivot" hypothesis in a few weeks once real history exists, rather than
+-- fabricating a finding from data that doesn't exist yet.
+-- Not wrapped in IF NOT EXISTS, same non-idempotent-ALTER caveat as this
+-- file's other added columns — applied once directly against production.
+ALTER TABLE funding_rate_daily ADD COLUMN basis_pct REAL;
+
 -- Daily options-implied-volatility archive (Deribit's DVOL index — BTC/ETH
 -- only, the two currencies Deribit actually publishes it for). Same shape
 -- and same job as funding_rate_daily: lets a technique ask "is implied

@@ -2513,6 +2513,20 @@ async function getTrending() {
 // For each base symbol, keeps the USDT-margined perpetual market with the
 // highest open interest when more than one exchange lists it — the most
 // liquid, representative venue, not just whichever happens to sort first.
+// Perp-vs-spot basis: how far the perpetual's own last price sits from its
+// spot index, as a %. Computed here rather than trusting CoinGecko's own
+// "basis" field on each derivatives record — a live spot-check (price
+// 77006.7, index 76902.25) didn't reconcile against that field's reported
+// value (-1.81%, vs. the +0.14% this formula gives), and CoinGecko doesn't
+// document its exact definition (plausibly annualized or otherwise
+// adjusted) — this way the number this project stores and archives
+// (funding_rate_daily.basis_pct, schema.sql) has a formula this codebase
+// actually understands and can reason about later.
+export function perpBasisPct(price, index) {
+  if (price == null || index == null || !index) return null;
+  return ((price / index) - 1) * 100;
+}
+
 export async function getFundingMap() {
   const j = await fetchJson('https://api.coingecko.com/api/v3/derivatives');
   const map = {};
@@ -2524,11 +2538,15 @@ export async function getFundingMap() {
     if (!Number.isFinite(fundingRate)) continue;
     const oiParsed = parseFloat(t.open_interest);
     const openInterest = Number.isFinite(oiParsed) ? oiParsed : null;
+    const priceParsed = parseFloat(t.price);
+    const indexParsed = parseFloat(t.index);
+    const price = Number.isFinite(priceParsed) ? priceParsed : null;
+    const index = Number.isFinite(indexParsed) ? indexParsed : null;
     const base = t.index_id.toUpperCase();
     const rank = openInterest ?? -1;
     if (!(base in bestOi) || rank > bestOi[base]) {
       bestOi[base] = rank;
-      map[base] = { fundingRate, openInterest, market: t.market || null };
+      map[base] = { fundingRate, openInterest, market: t.market || null, basisPct: perpBasisPct(price, index) };
     }
   }
   if (!Object.keys(map).length) throw new Error('empty derivatives map');

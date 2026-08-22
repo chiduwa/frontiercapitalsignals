@@ -10,7 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { computeSwingTimeTallies, barsRowsToReturnsBySymbol, matchProtocolsToUniverse, findPivots, walkSrLevels, isYahooCryptoDataTrustworthy } from './scripts/archive.mjs';
+import { computeSwingTimeTallies, barsRowsToReturnsBySymbol, matchProtocolsToUniverse, findPivots, walkSrLevels, isYahooCryptoDataTrustworthy, fundingSnapshotToRows } from './scripts/archive.mjs';
 import { selectIntradayWatchlist, CRYPTO_WATCHLIST_SIZE } from './scripts/intraday.mjs';
 import { parseBinanceKlines } from './scripts/archive.mjs';
 
@@ -114,11 +114,14 @@ function stubbedFetch(url) {
   // CoinGecko's aggregated derivatives listing (replaced Bybit's tickers
   // call after that endpoint started 403-ing from GitHub Actions — see
   // getFundingMap's docs). BTC deliberately listed on two markets with
-  // different open_interest to exercise "keeps the highest-OI market."
+  // different open_interest to exercise "keeps the highest-OI market" --
+  // and different price/index pairs on those two, to also exercise "the
+  // basis carried through is specifically the highest-OI market's own,
+  // not some other market's leaking in."
   if (u.includes('/derivatives')) return ok([
-    { contract_type: 'perpetual', index_id: 'BTC', symbol: 'BTCUSDT', funding_rate: 0.00005, open_interest: 5e9, market: 'Binance (Futures)' },
-    { contract_type: 'perpetual', index_id: 'BTC', symbol: 'BTCUSDT', funding_rate: 0.00009, open_interest: 1e8, market: 'OKX (Futures)' },
-    { contract_type: 'perpetual', index_id: 'SOL', symbol: 'SOLUSDT', funding_rate: -0.0001, open_interest: 8e8, market: 'Binance (Futures)' },
+    { contract_type: 'perpetual', index_id: 'BTC', symbol: 'BTCUSDT', funding_rate: 0.00005, open_interest: 5e9, market: 'Binance (Futures)', price: '64200', index: 64000 },
+    { contract_type: 'perpetual', index_id: 'BTC', symbol: 'BTCUSDT', funding_rate: 0.00009, open_interest: 1e8, market: 'OKX (Futures)', price: '70000', index: 60000 },
+    { contract_type: 'perpetual', index_id: 'SOL', symbol: 'SOLUSDT', funding_rate: -0.0001, open_interest: 8e8, market: 'Binance (Futures)', price: '150', index: 150 },
     { contract_type: 'perpetual', index_id: 'LINK', symbol: 'LINKUSDT', funding_rate: 0.0002, open_interest: 2e8, market: 'Binance (Futures)' },
     { contract_type: 'futures', index_id: 'BTC', symbol: 'BTCUSD_1226', funding_rate: 0.0003, open_interest: 9e9, market: 'CME (Futures)' }
   ]);
@@ -195,6 +198,9 @@ const fundingMap = await mod.getFundingMap();
 check('BTC picks the higher-OI perpetual market (Binance, 5e9) over the lower-OI one (OKX, 1e8)', fundingMap.BTC.fundingRate === 0.00005 && fundingMap.BTC.openInterest === 5e9, JSON.stringify(fundingMap.BTC));
 check('a futures (non-perpetual) contract with even higher OI is correctly excluded', fundingMap.BTC.market === 'Binance (Futures)', fundingMap.BTC.market);
 check('SOL and LINK (single-market fixtures) both present', fundingMap.SOL.fundingRate === -0.0001 && fundingMap.LINK.fundingRate === 0.0002);
+check('BTC\'s basisPct comes from the SAME highest-OI market\'s own price/index (64200/64000), not the lower-OI OKX market\'s (70000/60000)', Math.abs(fundingMap.BTC.basisPct - ((64200 / 64000 - 1) * 100)) < 1e-9, fundingMap.BTC.basisPct);
+check('SOL: perp trading exactly at its index -> zero basis', fundingMap.SOL.basisPct === 0);
+check('LINK: no price/index in this market\'s fixture -> basisPct is null, not a crash or a fabricated zero', fundingMap.LINK.basisPct === null);
 
 console.log('\n== api: empty KV (before first Action run) ==');
 const empty = await worker.fetch(new Request('https://x.com/signals/api/signals'), emptyEnv, ctx);
@@ -957,6 +963,17 @@ check('no yieldSpreadChange loaded at all: abstains (null)', yieldcurveNoData.di
 
 const yieldcurveStockGated = findTech(mod.evaluateTechniques(baseMetric({}), 'stock', undefined, { yieldSpreadChange: { chg5d: -0.03, asOf: '2026-08-20' } }), 'yieldcurve');
 check('crypto-only: stocks never fire this technique (the validated finding was crypto-specific)', yieldcurveStockGated.dir === null, JSON.stringify(yieldcurveStockGated));
+
+console.log('\n== perpBasisPct: perp-vs-spot basis, computed independently of CoinGecko\'s own undocumented "basis" field ==');
+check('perp trading above spot index: positive basis', mod.perpBasisPct(77006.7, 76902.25) > 0 && mod.perpBasisPct(77006.7, 76902.25) < 1, mod.perpBasisPct(77006.7, 76902.25));
+check('perp trading below spot index: negative basis', mod.perpBasisPct(100, 105) < 0, mod.perpBasisPct(100, 105));
+check('perp exactly at index: zero basis', mod.perpBasisPct(100, 100) === 0);
+check('missing price or index: null, not a crash or a fabricated zero', mod.perpBasisPct(null, 100) === null && mod.perpBasisPct(100, null) === null && mod.perpBasisPct(100, 0) === null);
+
+console.log('\n== fundingSnapshotToRows: carries basisPct through alongside funding/OI ==');
+const fundingSnapWithBasis = fundingSnapshotToRows({ BTC: { fundingRate: 0.0001, openInterest: 5e9, basisPct: 0.14 }, ONLYBASIS: { fundingRate: null, openInterest: null, basisPct: -0.5 } }, '2026-08-21');
+check('a symbol with funding+OI+basis carries all three through', fundingSnapWithBasis.find(r => r.symbol === 'BTC').basisPct === 0.14, JSON.stringify(fundingSnapWithBasis));
+check('a symbol with ONLY basis (no funding/OI) still produces a row, not silently dropped', fundingSnapWithBasis.some(r => r.symbol === 'ONLYBASIS' && r.basisPct === -0.5), JSON.stringify(fundingSnapWithBasis));
 
 console.log('\n== computeQualityScores: cross-sectional utility/community percentile, never an absolute number ==');
 // 12 symbols so every metric clears the "at least 10 peers" bar -- ETH-like
