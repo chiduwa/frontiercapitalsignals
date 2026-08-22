@@ -8,12 +8,38 @@ function d1Url(env) {
   return `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/d1/database/${env.FCS_D1_DATABASE_ID}/query`;
 }
 
+// Every D1 call from every script (reliability.mjs, archive.mjs,
+// correlation-research.mjs, build-signals.mjs, daily-refresh.mjs — this is
+// the one shared client, per this file's own docs above) went through
+// plain fetch() with no timeout at all until now. Found live, 2026-08-22:
+// a signals-refresh run built its payload and wrote it to KV in a normal
+// ~10 minutes, then produced zero further log output for 18 straight
+// minutes (not even logRun's own try/catch error message) until the
+// workflow's 28-minute timeout finally killed it — a real D1 HTTP hang,
+// not a slow query (D1 queries in this project complete in single-digit
+// milliseconds even against the 688K-row asset_daily_bars table,
+// confirmed live via direct query metadata; there is no legitimate reason
+// for one to take more than a few seconds). 30s is generous headroom for
+// even a large result-set transfer while still bounding what used to be
+// an unbounded hang — same AbortController pattern already proven safe in
+// archive.mjs's fetchJson (fixed earlier the same day for the identical
+// class of bug) and worker.js's own fetchWithTimeout.
+const D1_TIMEOUT_MS = 30000;
+
 export async function d1(env, sql, params = []) {
-  const res = await fetch(d1Url(env), {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sql, params })
-  });
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), D1_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(d1Url(env), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql, params }),
+      signal: ctrl.signal
+    });
+  } finally {
+    clearTimeout(t);
+  }
   const body = await res.json().catch(() => null);
   if (!res.ok || !body || body.success !== true) {
     throw new Error(`D1 query failed: HTTP ${res.status} ${JSON.stringify(body && body.errors)}`);
