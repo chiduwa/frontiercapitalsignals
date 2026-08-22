@@ -464,8 +464,24 @@ async function main() {
   // outcome stats above): of the OTHER assets' own qualifying exhaustion
   // reversals, when one falls within 15 days of this candidate's own
   // same-direction reversal, how many days apart are they and who moved
-  // first — a plain, intuitive "does X tend to lead by about N days."
-  for (const leaderSymbol of exhaustionLeaderCandidates) {
+  // first — a plain, intuitive "does X tend to lead by about N days." Widened
+  // beyond BTC/market for this DESCRIPTIVE pass only (never for the guarded
+  // hypothesis test below, which stays limited to the two pre-specified
+  // candidates) to the top general leaders already validated by the
+  // existing, independent, already-rigorous lead_lag_signals table
+  // (computeLeadLag, archive.mjs) — the candidate SET was chosen by that
+  // separate process before this analysis ever ran, so checking them here
+  // isn't a fresh post-hoc mining scan, just asking whether an
+  // already-proven day-to-day leader ALSO leads specifically on this event.
+  let generalLeaders = [];
+  try {
+    generalLeaders = await d1(env, 'SELECT leader_symbol, COUNT(*) as followers FROM lead_lag_signals GROUP BY leader_symbol ORDER BY followers DESC LIMIT 5');
+  } catch (e) {
+    console.log(`[exhaustion lead-lag] could not load general leaders from lead_lag_signals (${e.message}) — descriptive pass limited to BTC/market`);
+  }
+  const descriptiveLeaderCandidates = [...new Set([...exhaustionLeaderCandidates, ...generalLeaders.map((r) => r.leader_symbol)])];
+  console.log(`[exhaustion lead-lag] descriptive pass candidates: ${descriptiveLeaderCandidates.join(', ')} (BTC/market pre-specified, rest are the top ${generalLeaders.length} already-validated general leaders from lead_lag_signals)`);
+  for (const leaderSymbol of descriptiveLeaderCandidates) {
     const leaderEpisodes = allExhaustionReversals.filter((e) => e.symbol === leaderSymbol);
     const leaderTag = leaderSymbol === marketSymbolKey ? marketLabel : leaderSymbol;
     if (!leaderEpisodes.length) { console.log(`[exhaustion lead-lag] ${leaderTag}: no qualifying exhaustion reversals of its own to compare against`); continue; }
