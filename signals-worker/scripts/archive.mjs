@@ -19,8 +19,28 @@ import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, com
 
 const UA = 'Mozilla/5.0 (compatible; FrontierCapitalSignals/2.0)';
 
+// Same timeout value and AbortController mechanism as worker.js's own
+// fetchWithTimeout/FETCH_TIMEOUT_MS — this file never had one at all
+// (found 2026-08-22: a live daily run stalled 40+ minutes on the
+// per-asset sentiment step, which calls this for both coingeckoSentiment
+// and cryptoPanicSentiment, in a plain sequential loop with no
+// concurrency — a single slow/hung upstream response had nothing to cut
+// it off and simply blocked the entire rest of that step, and every step
+// after it, indefinitely). 9s, matching worker.js exactly, is generous
+// for every payload this file fetches (yahooFullHistory's full-history
+// chart JSON included) — worker.js's own hourly build stays well within
+// it for comparably-sized fetches today.
+const FETCH_TIMEOUT_MS = 9000;
+
 async function fetchJson(url) {
-  const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json,text/plain,*/*' } });
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json,text/plain,*/*' }, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
