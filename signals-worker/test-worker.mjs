@@ -958,6 +958,26 @@ check('no yieldSpreadChange loaded at all: abstains (null)', yieldcurveNoData.di
 const yieldcurveStockGated = findTech(mod.evaluateTechniques(baseMetric({}), 'stock', undefined, { yieldSpreadChange: { chg5d: -0.03, asOf: '2026-08-20' } }), 'yieldcurve');
 check('crypto-only: stocks never fire this technique (the validated finding was crypto-specific)', yieldcurveStockGated.dir === null, JSON.stringify(yieldcurveStockGated));
 
+console.log('\n== computeQualityScores: cross-sectional utility/community percentile, never an absolute number ==');
+// 12 symbols so every metric clears the "at least 10 peers" bar -- ETH-like
+// at the top of every metric, HYPE-like with real watchlist interest but
+// zero GitHub data (the real case confirmed live), the rest a plain ramp.
+const qualityFixture = { ETH: { githubCommits4w: 41, githubPrContributors: 906, communityReach: 500000, watchlistUsers: 1978834 } };
+for (let i = 0; i < 11; i++) qualityFixture[`ALT${i}`] = { githubCommits4w: i, githubPrContributors: i, communityReach: i * 1000, watchlistUsers: i * 10000 };
+qualityFixture.HYPE = { githubCommits4w: null, githubPrContributors: null, communityReach: 26598, watchlistUsers: 190367 };
+qualityFixture.NODATA = { githubCommits4w: null, githubPrContributors: null, communityReach: null, watchlistUsers: null };
+
+const qualityScores = mod.computeQualityScores(qualityFixture);
+check('the strongest-on-every-metric symbol scores at or near the top', qualityScores.ETH.score >= 90, JSON.stringify(qualityScores.ETH));
+check('its basis reflects all 4 metrics contributing', qualityScores.ETH.basis === 4, JSON.stringify(qualityScores.ETH));
+check('a symbol with real community/interest data but zero GitHub activity (the real HYPE case) still gets a score, just from fewer metrics', qualityScores.HYPE && qualityScores.HYPE.basis === 2, JSON.stringify(qualityScores.HYPE));
+check('a symbol with no data at all for any metric: not scored, not fabricated as 0', !('NODATA' in qualityScores));
+check('the weakest-on-every-metric symbol scores at or near the bottom', qualityScores.ALT0.score <= 20, JSON.stringify(qualityScores.ALT0));
+check('scores are relative rank, not an absolute count -- ETH\'s 41 commits beats everyone despite being a small raw number', qualityScores.ETH.score > qualityScores.ALT10.score, `ETH=${qualityScores.ETH.score} ALT10=${qualityScores.ALT10.score}`);
+
+const thinPeerGroup = { A: { githubCommits4w: 5, githubPrContributors: null, communityReach: null, watchlistUsers: null }, B: { githubCommits4w: 10, githubPrContributors: null, communityReach: null, watchlistUsers: null } };
+check('fewer than 10 peers with a metric: that metric is excluded from ranking entirely, not ranked on a tiny unreliable sample', !('A' in mod.computeQualityScores(thinPeerGroup)));
+
 console.log('\n== seasonalAnalog: does this asset\'s own history contain a real analog? ==');
 check('too short a series: returns null, not a guess', mod.seasonalAnalog(Array.from({ length: 100 }, () => 100), 365) === null);
 function patternWindow(offset) { return Array.from({ length: 90 }, (_, i) => 100 + Math.sin((i + offset) / 10) * 8 + i * 0.1); }

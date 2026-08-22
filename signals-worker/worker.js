@@ -1137,6 +1137,39 @@ export function levelChangeBefore(sortedBars, targetDate, lookbackDays) {
   return (now == null || then == null) ? null : now - then;
 }
 
+// Cross-sectional utility/community "quality" score (user-requested "spot
+// crypto with the most useful utility and community") — percentile rank
+// against every other tracked asset with data that day, not an absolute
+// number: raw GitHub/community counts are wildly different scales per
+// project, and coverage is genuinely uneven (loadQualityData's own docs,
+// reliability.mjs — many coins have no linked GitHub repo on CoinGecko at
+// all, confirmed live). Deliberately informational only, never a
+// directional vote — a coin can have excellent fundamentals and still
+// chop sideways short-term, so this never touches confluence()'s score,
+// the same discipline the earningsrisk technique already uses for a
+// different kind of non-directional flag. `basis` is how many of the 4
+// metrics actually contributed for this symbol, so a thin single-metric
+// score can be shown differently from a well-rounded one.
+export function computeQualityScores(qualityData) {
+  const metrics = ['githubCommits4w', 'githubPrContributors', 'communityReach', 'watchlistUsers'];
+  const sorted = {};
+  for (const metric of metrics) {
+    sorted[metric] = Object.values(qualityData).map((q) => q[metric]).filter((v) => v != null).sort((a, b) => a - b);
+  }
+  const out = {};
+  for (const [symbol, q] of Object.entries(qualityData)) {
+    const percentiles = [];
+    for (const metric of metrics) {
+      if (q[metric] == null || sorted[metric].length < 10) continue; // too few peers with this metric yet to rank meaningfully
+      percentiles.push(percentileRank(sorted[metric], q[metric]));
+    }
+    if (percentiles.length) {
+      out[symbol] = { score: Math.round((percentiles.reduce((a, b) => a + b, 0) / percentiles.length) * 100), basis: percentiles.length };
+    }
+  }
+  return out;
+}
+
 // Buckets each bar's forward return by that DAY's Fear & Greed reading,
 // using the same >=75/<=25 "extreme" thresholds the live `sentiment`
 // technique already acts on (evaluateTechniques, marketContext.fearGreed)
@@ -2858,7 +2891,7 @@ export function buildStockMetrics(row, valuation, override, benchCloses, ivHist)
 const RANGE_LOG_HORIZONS_DAYS = [1, 7];
 
 function rankBoards(metrics, kind, reliability, ctx = {}) {
-  const { moveStats } = ctx;
+  const { moveStats, qualityScores } = ctx;
   const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, ctx) }));
   // Full-universe vote log (not just the top-10 shown on each board) so the
   // reliability learning loop sees every asset, not only that hour's winners.
@@ -2942,6 +2975,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       // row rather than the board-level cfg.side for anything row-specific.
       dir,
       consolidating: accumVote ? accumVote.dir : null,
+      quality: (qualityScores && qualityScores[x.m.symbol]) || null,
       conf: { agree: side === 'long' ? x.c.bull : x.c.bear, total: x.c.total },
       drivers: side === 'long' ? x.c.longNotes : x.c.shortNotes,
       horizon,
@@ -2989,7 +3023,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -3045,7 +3079,8 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   };
   // Shared by both rankBoards calls below (crypto and stock) — see
   // evaluateTechniques' docs for why this is one object, not positional args.
-  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange };
+  const qualityScores = computeQualityScores(qualityData || {});
+  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityScores };
 
   let cryptoBoards = { breakout: [], breakdown: [], universe: 0 };
   let btc = null, eth = null;
@@ -3373,6 +3408,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .coil{display:block;font-size:10px;letter-spacing:.04em;margin-top:3px;font-family:var(--disp);cursor:help}
   .coil.coil-up{color:var(--up)}
   .coil.coil-down{color:var(--down)}
+  .quality{display:block;color:var(--dim);font-size:10px;margin-top:3px;font-family:var(--disp);cursor:help}
 
   .track-record{background:var(--ink-1);border:1px solid var(--line);border-top:2px solid var(--amber);margin-bottom:44px;padding:18px 18px 6px}
   .tr-title{font-weight:800;font-size:17px;letter-spacing:-.01em;margin-top:3px}
@@ -3698,6 +3734,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var coil = (r.consolidating===1||r.consolidating===-1)
           ? '<span class="coil '+(r.consolidating===1?'coil-up':'coil-down')+'" title="Coiled range detected (tightening Bollinger bands or realized volatility well under baseline) with on-balance volume already leaning '+(r.consolidating===1?'up':'down')+', ahead of price confirming it">⏳ Consolidating '+(r.consolidating===1?'↑':'↓')+'</span>'
           : '';
+        var quality = r.quality
+          ? '<span class="quality" title="Utility/community percentile vs. every other tracked coin with data today (GitHub commits + PR contributors, Telegram/Reddit reach, CoinGecko watchlist users) -- informational only, never part of the score above">Quality '+r.quality.score+'/100</span>'
+          : '';
         var dirArrow = '<span class="dir-arrow '+(rowSide==='long'?'dir-up':'dir-down')+'" title="'+(rowSide==='long'?'Leaning up':'Leaning down')+'">'+(rowSide==='long'?'▲':'▼')+'</span>';
         var conf = r.conf ? '<span class="conf">'+r.conf.agree+'/'+r.conf.total+' aligned</span>' : '';
         var horizon = r.horizon ? '<span class="horizon '+(r.horizon.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+(r.horizon.basis==='historical'?"Based on this asset's own historical accuracy by horizon":"Methodology estimate, not yet enough of this asset's own history to say")+'">'+esc(r.horizon.label)+(r.horizon.basis==='historical'?' ✓':'')+'</span>' : '';
@@ -3707,7 +3746,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var range = r.range ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+rangeTitle+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>' : '<span class="dim">—</span>';
         h+='<tr class="in" style="animation-delay:'+(i*30)+'ms" data-symbol="'+esc(r.symbol)+'" data-class="'+cfg.assetClass+'">'
           +'<td class="rk">'+(i+1)+'</td>'
-          +'<td class="asset">'+symHtml+name+why+topInd+coil+'</td>'
+          +'<td class="asset">'+symHtml+name+why+topInd+coil+quality+'</td>'
           +'<td class="live-price-cell"><span class="live-price">'+fmtPrice(r.price)+'</span></td>'
           +'<td class="live-chg-cell '+pctCls(r.chg24h)+'"><span class="live-chg">'+fmtPct(r.chg24h)+'</span></td>'
           +'<td class="'+pctCls(r.chg7d)+'">'+fmtPct(r.chg7d)+'</td>'

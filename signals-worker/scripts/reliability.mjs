@@ -560,6 +560,31 @@ export async function loadSentimentMap(env) {
   return out;
 }
 
+// Raw utility/community fields per symbol (github_commits_4w etc., see
+// sentiment_daily's own docs, schema.sql) — separate from loadSentimentMap
+// above deliberately: that one blends coingecko_up_pct/cryptopanic_score
+// into a single -1..1 SENTIMENT number for the `sentiment` technique's own
+// use; this is a different concept (fundamentals, not mood) computed into
+// a cross-sectional percentile composite by computeQualityScores
+// (worker.js), which needs the raw per-metric numbers, not a pre-blended
+// score. Same source table, same "most recent row per symbol" pattern.
+export async function loadQualityData(env) {
+  const rows = await d1(env, `
+    SELECT symbol, github_commits_4w, github_pr_contributors, community_reach, watchlist_users, date FROM sentiment_daily
+    WHERE symbol != '' AND (github_commits_4w IS NOT NULL OR github_pr_contributors IS NOT NULL OR community_reach IS NOT NULL OR watchlist_users IS NOT NULL)
+    ORDER BY date DESC
+  `);
+  const out = {};
+  for (const r of rows) {
+    if (r.symbol in out) continue; // first hit per symbol (DESC order) = most recent
+    out[r.symbol] = {
+      githubCommits4w: r.github_commits_4w, githubPrContributors: r.github_pr_contributors,
+      communityReach: r.community_reach, watchlistUsers: r.watchlist_users
+    };
+  }
+  return out;
+}
+
 // { [followerSymbol]: [{leaderSymbol, lagDays, corr, samples}] } — grouped
 // by follower for direct per-asset lookup by the leadlag technique
 // (worker.js). Relationships are (re)computed daily by computeLeadLag

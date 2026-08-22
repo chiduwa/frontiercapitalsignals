@@ -63,10 +63,11 @@ async function main() {
   const rows = [];
   const sectorRows = [];
   for (const a of universe) {
-    let coingeckoUpPct = null, cryptopanicScore = null;
+    let coingeckoUpPct = null, cryptopanicScore = null, quality = null;
     try {
       const cg = await coingeckoSentiment(a.id);
       coingeckoUpPct = cg.up;
+      quality = cg;
       if (coingeckoUpPct != null) cgOk++;
       for (const sector of mapCategoriesToSectors(cg.categories)) sectorRows.push({ symbol: a.symbol, sector });
     } catch (e) {
@@ -80,7 +81,15 @@ async function main() {
       cpFailed++;
       console.error(`cryptoPanicSentiment failed for ${a.symbol}:`, e.message);
     }
-    if (coingeckoUpPct != null || cryptopanicScore != null) rows.push({ symbol: a.symbol, coingeckoUpPct, cryptopanicScore });
+    if (coingeckoUpPct != null || cryptopanicScore != null || quality) {
+      rows.push({
+        symbol: a.symbol, coingeckoUpPct, cryptopanicScore,
+        githubCommits4w: quality ? quality.githubCommits4w : null,
+        githubPrContributors: quality ? quality.githubPrContributors : null,
+        communityReach: quality ? quality.communityReach : null,
+        watchlistUsers: quality ? quality.watchlistUsers : null
+      });
+    }
     // 4500ms: even 3000ms (CRYPTO_HISTORY_DELAY_MS's own already-proven-
     // safe value for the *other* per-coin CoinGecko endpoint) still showed
     // real 429s on a live run against this specific one (35/73 succeeded,

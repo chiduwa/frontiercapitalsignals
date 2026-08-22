@@ -157,6 +157,27 @@ CREATE TABLE IF NOT EXISTS sentiment_daily (
   PRIMARY KEY (date, symbol)
 );
 
+-- Utility/community fundamentals (added 2026-08-21, user-requested "spot
+-- crypto with the most useful utility and community"), piggybacked on the
+-- SAME per-coin CoinGecko detail call coingeckoSentiment() already makes
+-- for coingecko_up_pct/categories above (community_data=true&
+-- developer_data=true instead of false — zero new fetches, just a bigger
+-- response). Confirmed live these vary hugely and are often genuinely
+-- zero/null per coin (e.g. Hyperliquid has no linked GitHub repo at all
+-- on CoinGecko, all-zero developer_data, vs. Ethereum's 44k stars/906 PR
+-- contributors) — not a bug, just real, uneven coverage; worker.js's
+-- computeQualityScores handles this by cross-sectional percentile rank
+-- (this asset vs. every other tracked asset THAT DAY), not an absolute
+-- score, and only over whichever of the three groups below have enough
+-- non-null coverage that day to rank at all.
+-- Not wrapped in IF NOT EXISTS, same non-idempotent-ALTER caveat as
+-- technique_votes' score/regime columns above — applied once directly
+-- against production.
+ALTER TABLE sentiment_daily ADD COLUMN github_commits_4w REAL;
+ALTER TABLE sentiment_daily ADD COLUMN github_pr_contributors REAL;
+ALTER TABLE sentiment_daily ADD COLUMN community_reach REAL; -- telegram_channel_user_count + reddit_subscribers, comparable "people in a project channel" units
+ALTER TABLE sentiment_daily ADD COLUMN watchlist_users REAL; -- CoinGecko's own watchlist_portfolio_users -- a distinct "people tracking this" interest signal
+
 -- Cross-asset lead/lag relationships, recomputed daily from asset_daily_bars
 -- by scripts/daily-refresh.mjs (see computeLeadLag in reliability.mjs). Each
 -- row says "leader_symbol's return tends to predict follower_symbol's return

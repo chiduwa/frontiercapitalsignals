@@ -291,9 +291,14 @@ export async function fearGreedHistory(limit = 0) {
 // "Decentralized Finance (DeFi)", "Governance") — reused by the daily
 // sector-taxonomy step (see mapCategoriesToSectors in worker.js) so that
 // step costs zero additional fetches, not a second per-coin call.
+// community_data/developer_data are true, not false: utility/community
+// fundamentals (github_commits_4w etc., see sentiment_daily's own docs,
+// schema.sql) ride the SAME call this was already making for
+// sentiment_votes_up_percentage/categories — zero new fetches, just a
+// bigger response.
 export async function coingeckoSentiment(id) {
   const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}`
-    + '?localization=false&tickers=false&market_data=false&community_data=false&developer_data=false&sparkline=false';
+    + '?localization=false&tickers=false&market_data=false&community_data=true&developer_data=true&sparkline=false';
   const backoffsMs = [3000, 6000];
   let lastErr;
   for (let attempt = 0; attempt <= backoffsMs.length; attempt++) {
@@ -301,7 +306,18 @@ export async function coingeckoSentiment(id) {
       const j = await fetchJson(url);
       const up = Number(j && j.sentiment_votes_up_percentage);
       const categories = Array.isArray(j && j.categories) ? j.categories : [];
-      return { up: Number.isFinite(up) ? up : null, categories };
+      const dev = j && j.developer_data;
+      const community = j && j.community_data;
+      const numOrNull = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+      const sumOrNull = (a, b) => (a == null && b == null) ? null : (a || 0) + (b || 0);
+      return {
+        up: Number.isFinite(up) ? up : null,
+        categories,
+        githubCommits4w: dev ? numOrNull(dev.commit_count_4_weeks) : null,
+        githubPrContributors: dev ? numOrNull(dev.pull_request_contributors) : null,
+        communityReach: community ? sumOrNull(numOrNull(community.telegram_channel_user_count), numOrNull(community.reddit_subscribers)) : null,
+        watchlistUsers: numOrNull(j && j.watchlist_portfolio_users)
+      };
     } catch (e) {
       lastErr = e;
       const is429 = /^HTTP 429/.test(String(e && e.message));
@@ -394,15 +410,27 @@ export async function insertFearGreedHistory(env, rows) {
 // COALESCE merge as upsertMarketSentiment, for the same reason.
 export async function upsertAssetSentiment(env, date, rows) {
   let attempted = 0;
-  for (const batch of chunk(rows, 15)) {
-    const placeholders = batch.map(() => '(?, ?, ?, ?)').join(',');
-    const params = batch.flatMap((r) => [date, r.symbol, r.coingeckoUpPct ?? null, r.cryptopanicScore ?? null]);
+  // 12, not 15: this row is now 8 columns wide (utility/community fields
+  // added 2026-08-21) — 15 x 8 = 120 would repeat the exact "too many SQL
+  // variables" D1 400 the srbreak archive writes hit earlier this session
+  // (see replaceSrLevels' own docs); 12 x 8 = 96 stays under the same
+  // margin every other batched insert in this file already respects.
+  for (const batch of chunk(rows, 12)) {
+    const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?)').join(',');
+    const params = batch.flatMap((r) => [
+      date, r.symbol, r.coingeckoUpPct ?? null, r.cryptopanicScore ?? null,
+      r.githubCommits4w ?? null, r.githubPrContributors ?? null, r.communityReach ?? null, r.watchlistUsers ?? null
+    ]);
     await d1(env, `
-      INSERT INTO sentiment_daily (date, symbol, coingecko_up_pct, cryptopanic_score)
+      INSERT INTO sentiment_daily (date, symbol, coingecko_up_pct, cryptopanic_score, github_commits_4w, github_pr_contributors, community_reach, watchlist_users)
       VALUES ${placeholders}
       ON CONFLICT (date, symbol) DO UPDATE SET
         coingecko_up_pct = COALESCE(excluded.coingecko_up_pct, sentiment_daily.coingecko_up_pct),
-        cryptopanic_score = COALESCE(excluded.cryptopanic_score, sentiment_daily.cryptopanic_score)
+        cryptopanic_score = COALESCE(excluded.cryptopanic_score, sentiment_daily.cryptopanic_score),
+        github_commits_4w = COALESCE(excluded.github_commits_4w, sentiment_daily.github_commits_4w),
+        github_pr_contributors = COALESCE(excluded.github_pr_contributors, sentiment_daily.github_pr_contributors),
+        community_reach = COALESCE(excluded.community_reach, sentiment_daily.community_reach),
+        watchlist_users = COALESCE(excluded.watchlist_users, sentiment_daily.watchlist_users)
     `, params);
     attempted += batch.length;
   }
