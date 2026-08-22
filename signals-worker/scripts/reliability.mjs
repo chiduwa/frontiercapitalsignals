@@ -431,6 +431,22 @@ const CALL_FLIP_EVAL_HORIZON_HOURS = 24;
 // Reuses evaluateMatured's own OUTCOME_DEADBAND_PCT threshold for "did
 // price even move enough to call it a direction" — same question, same
 // answer, not a second judgment call about how big a move counts.
+// detectAndLogCallFlips only needs each symbol's last couple of composite
+// rows to catch a FRESH flip — a much shorter window than RETENTION_HOURS
+// (200h). Found live, 2026-08-22: at 200h, this function rescans and
+// recomputes flips across a symbol's ENTIRE retained history every single
+// run — the unique index makes re-INSERTing them harmless, but the
+// query + in-memory detectCallFlips pass over that much history was
+// costing ~11 minutes every hour regardless (confirmed: "2085 new
+// flip(s) logged" on a run immediately after one that had already logged
+// 2101 -- almost entirely the same flips, reprocessed and silently
+// ignored). 8h comfortably covers even a rough multi-hour gap between
+// builds (this project's worst observed gaps today, itself an anomaly,
+// topped out under an hour) while cutting the scanned window ~25x. The
+// one-time historical backfill already captured everything older than
+// this on the very first run this feature existed — narrowing the window
+// now doesn't lose that, it just stops needlessly re-walking it forever.
+const CALL_FLIP_DETECT_LOOKBACK_HOURS = 8;
 
 // Scans this run's own recently-logged composite calls (technique_votes
 // WHERE technique_id='composite' — already recorded every run for the
@@ -438,13 +454,9 @@ const CALL_FLIP_EVAL_HORIZON_HOURS = 24;
 // there) for direction reversals, appending any newly-found ones to
 // call_flip_log. INSERT OR IGNORE + the unique (symbol, flip_run_at) index
 // makes this idempotent — safe to call every run without double-counting
-// a flip already caught on a prior pass. Only looks back
-// RETENTION_HOURS-worth of composite history (whatever's still in
-// technique_votes; older rows have already aged out), which is plenty —
-// a flip more than a few days old isn't "just switched," it's just this
-// asset's current call.
+// a flip already caught on a prior pass.
 export async function detectAndLogCallFlips(env, nowIso) {
-  const cutoff = new Date(new Date(nowIso).getTime() - RETENTION_HOURS * 3600 * 1000).toISOString();
+  const cutoff = new Date(new Date(nowIso).getTime() - CALL_FLIP_DETECT_LOOKBACK_HOURS * 3600 * 1000).toISOString();
   const rows = await d1(env, `
     SELECT symbol, asset_class, run_at, dir, score FROM technique_votes
     WHERE technique_id = 'composite' AND run_at >= ? ORDER BY symbol, run_at
