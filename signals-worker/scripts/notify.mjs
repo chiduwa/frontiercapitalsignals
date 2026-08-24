@@ -131,6 +131,85 @@ export async function checkAndNotifyReversals(env, nowIso, lookbackHours = 4) {
   return sent;
 }
 
+// User-requested 2026-08-24, broadening the original "hacked" ask: "any
+// breach or negative news that usually disrupts an asset/the entire
+// market" -- extremely good news is the flip side of the same request
+// ("disruptive OR extremely good news"). DeFiLlama's hacks tracker only
+// covers named, matched DeFi exploits (notifyOnNewHacks above); this
+// catches the broader case with no news source at all -- a genuinely
+// abrupt price move is itself evidence something just happened, whatever
+// it is. Reads asset_price_log (already hourly-fresh, already flowing,
+// no new fetch) over a short recent window per real tracked asset, and
+// separately takes the MEDIAN of those same per-asset moves as a live,
+// hourly-fresh market-wide read -- deliberately NOT the existing
+// marketReturn/loadMarketReturn (MCAP:TOTAL/BROAD), which only updates
+// once a day from the daily job and would describe yesterday's move, not
+// "right now," failing this feature's whole point.
+//
+// Dedup is UTC-date-bucketed (not a true state-transition like
+// checkAndNotifyReversals' adjacent-pair check) -- there's no discrete
+// per-hour "vote" row here to anchor a precise transition timestamp to,
+// only whatever this run happens to compute fresh each time. A date
+// bucket means at most one alert per (symbol, direction) per UTC day:
+// re-fires on a genuinely new day's move, doesn't spam every run an
+// ongoing move keeps qualifying. Simpler than reconstructing a true
+// state machine, and lines up with the user's own stated tolerance
+// ("max a day or two old") for this alert family specifically.
+export async function checkAndNotifySuddenMoves(env, nowIso, windowHours = 6, cryptoThresholdPct = 10, stockThresholdPct = 6, marketThresholdPct = 5) {
+  if (!env.NTFY_TOPIC) return 0;
+  const cutoff = new Date(new Date(nowIso).getTime() - (windowHours + 1) * 3600 * 1000).toISOString();
+  const rows = await d1(env, `SELECT symbol, asset_class, run_at, price FROM asset_price_log WHERE run_at >= ? ORDER BY symbol, run_at`, [cutoff]);
+
+  const bySymbol = {};
+  for (const r of rows) (bySymbol[r.symbol] ??= { assetClass: r.asset_class, rows: [] }).rows.push(r);
+
+  const moves = []; // { symbol, assetClass, pct }
+  for (const [symbol, { assetClass, rows: symRows }] of Object.entries(bySymbol)) {
+    if (symRows.length < 2) continue;
+    const oldest = symRows[0], newest = symRows[symRows.length - 1];
+    if (!oldest.price || !newest.price) continue;
+    const hoursSpan = (new Date(newest.run_at) - new Date(oldest.run_at)) / 3600000;
+    if (hoursSpan < windowHours * 0.5) continue; // not enough real elapsed time in this window yet to trust the move
+    moves.push({ symbol, assetClass, pct: ((newest.price / oldest.price) - 1) * 100 });
+  }
+  if (!moves.length) return 0;
+
+  const dateBucket = new Date(nowIso).toISOString().slice(0, 10);
+  let sent = 0;
+
+  const cryptoMoves = moves.filter((m) => m.assetClass === 'crypto');
+  if (cryptoMoves.length >= 5) {
+    const sortedPct = cryptoMoves.map((m) => m.pct).sort((a, b) => a - b);
+    const medianPct = sortedPct[Math.floor(sortedPct.length / 2)];
+    if (Math.abs(medianPct) >= marketThresholdPct) {
+      const dir = medianPct > 0 ? 1 : -1;
+      const notified = await notifyOnChange(env, 'marketmove', 'CRYPTO_MARKET', `${dir}@${dateBucket}`, {
+        title: dir === 1 ? 'Crypto market surging' : 'Crypto market dropping',
+        message: `The tracked crypto market's median move is ${medianPct > 0 ? '+' : ''}${medianPct.toFixed(1)}% over the last ~${windowHours}h (${cryptoMoves.length} assets) -- broad, not one asset.`,
+        priority: 'high',
+        tags: [dir === 1 ? 'rocket' : 'chart_with_downwards_trend'],
+        click: 'https://frontiercapitalsignals.com/signals/'
+      }, nowIso);
+      if (notified) sent++;
+    }
+  }
+
+  for (const m of moves) {
+    const threshold = m.assetClass === 'crypto' ? cryptoThresholdPct : stockThresholdPct;
+    if (Math.abs(m.pct) < threshold) continue;
+    const dir = m.pct > 0 ? 1 : -1;
+    const notified = await notifyOnChange(env, 'suddenmove', m.symbol, `${dir}@${dateBucket}`, {
+      title: `${m.symbol}: sudden ${dir === 1 ? 'spike' : 'drop'}`,
+      message: `${m.symbol} (${m.assetClass}) moved ${m.pct > 0 ? '+' : ''}${m.pct.toFixed(1)}% in ~${windowHours}h -- abrupt enough that something likely just happened. Worth checking for news.`,
+      priority: dir === 1 ? 'high' : 'urgent',
+      tags: [dir === 1 ? 'rocket' : 'warning'],
+      click: 'https://frontiercapitalsignals.com/signals/'
+    }, nowIso);
+    if (notified) sent++;
+  }
+  return sent;
+}
+
 // Immediate, high-priority alert for a NEWLY-matched hack/exploit against
 // a tracked symbol. `matched`: matchHacksToUniverse's own output (this
 // run's full DeFiLlama pull, symbol=null for anything not in the tracked
