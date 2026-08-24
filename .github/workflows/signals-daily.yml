@@ -74,3 +74,4 @@ jobs:
           # both free). CoinGecko's community-vote sentiment needs no key.
           CMC_API_KEY: ${{ secrets.CMC_API_KEY }}
           CRYPTOPANIC_API_TOKEN: ${{ secrets.CRYPTOPANIC_API_TOKEN }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}

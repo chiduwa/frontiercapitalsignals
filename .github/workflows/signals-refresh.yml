@@ -71,6 +71,7 @@ jobs:
           FCS_KV_NAMESPACE_ID: ${{ vars.FCS_KV_NAMESPACE_ID }}
           FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
           TREFIS_OVERRIDES: ${{ vars.TREFIS_OVERRIDES }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           # Lets build-signals.mjs's freshness pre-check apply only to
           # scheduled firings, never to a manual workflow_dispatch (which
           # always means "I want a real rebuild right now").

@@ -698,3 +698,19 @@ CREATE TABLE IF NOT EXISTS call_flip_log (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_call_flip_log_unique ON call_flip_log(symbol, flip_run_at);
 CREATE INDEX IF NOT EXISTS idx_call_flip_log_pending ON call_flip_log(outcome, flip_run_at);
+
+-- Push-notification dedup state (added 2026-08-24, user-requested: alert
+-- on a peak/bottom signal, and immediately on disruptive/extremely good
+-- news like a hack). One row per (kind, symbol) holding the last value
+-- actually alerted on -- see notifyOnChange, scripts/notify.mjs. Not an
+-- audit log (no history kept, just current state): the only question
+-- this needs to answer is "does the CURRENT occurrence differ from the
+-- last one we already sent," so a state that just keeps holding doesn't
+-- re-notify every run.
+CREATE TABLE IF NOT EXISTS notification_state (
+  kind TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  last_value TEXT NOT NULL,
+  last_sent_at TEXT NOT NULL,
+  PRIMARY KEY (kind, symbol)
+);

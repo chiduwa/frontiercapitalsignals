@@ -14,8 +14,8 @@
 // archive data to already be there).
 //
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID
-// Optional env: CMC_API_KEY, CRYPTOPANIC_API_TOKEN — both sources simply
-//   produce nothing (not an error) when their key is unset, same pattern
+// Optional env: CMC_API_KEY, CRYPTOPANIC_API_TOKEN, NTFY_TOPIC — all three
+//   simply produce/send nothing (not an error) when unset, same pattern
 //   as TREFIS_OVERRIDES elsewhere in this pipeline.
 import { getCryptoMarkets, getGlobal, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, mapCategoriesToSectors, STOCK_WATCHLIST, getCrumb } from '../worker.js';
 import {
@@ -33,12 +33,13 @@ import {
 } from './archive.mjs';
 import { d1 } from './d1-client.mjs';
 import { evaluateYesterdaySwingTimes } from './reliability.mjs';
+import { notifyOnNewHacks } from './notify.mjs';
 
-const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, CMC_API_KEY, CRYPTOPANIC_API_TOKEN } = process.env;
+const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, CMC_API_KEY, CRYPTOPANIC_API_TOKEN, NTFY_TOPIC } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
   if (!v) { console.error(`Missing required env var: ${name}`); process.exit(1); }
 }
-const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID };
+const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, NTFY_TOPIC };
 
 // Per-run row/request budget, not a D1-write concern this time (a few
 // thousand sentiment rows/day is trivial) but a politeness-to-upstream one
@@ -278,6 +279,8 @@ async function main() {
     const written = await upsertAssetEvents(env, matched);
     const linked = matched.filter((h) => h.symbol).length;
     console.log(`hack/exploit events: ${hacks.length} fetched, ${linked} matched to a tracked symbol, ${written} rows attempted (INSERT OR IGNORE, so re-runs are cheap)`);
+    const alerted = await notifyOnNewHacks(env, matched, new Date().toISOString());
+    console.log(`hack alerts: ${alerted} sent${env.NTFY_TOPIC ? '' : ' (NTFY_TOPIC not set, skipped)'}`);
   } catch (e) {
     console.error('DeFiLlama hacks fetch failed:', e.message);
   }

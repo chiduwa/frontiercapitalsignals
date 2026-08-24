@@ -13,15 +13,16 @@
 // Optional (enables reliability weighting when set): FCS_D1_DATABASE_ID
 import { buildPayload, CACHE_KEY, coingeckoSimplePrice, yahooQuote, getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST } from '../worker.js';
 import { loadReliability, loadMoveStats, loadRangeReliability, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, loadSwingTimeStats, loadRecentEvents, loadIvHistory, loadRegimeReliability, loadSrLevels, loadSrBreakStats, loadQualityData, loadRotationStatus, loadCallFlipData, logRun, evaluateMatured, evaluateTimeOfDay, snapshotAssetScores, detectAndLogCallFlips, evaluateCallFlips } from './reliability.mjs';
+import { checkAndNotifyReversals } from './notify.mjs';
 import { upsertMarketSentiment, loadRecentBars, loadTvlSeries, loadMarketReturn, loadYieldSpreadChange } from './archive.mjs';
 import { selectIntradayWatchlist } from './intraday.mjs';
 
-const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES, GITHUB_EVENT_NAME } = process.env;
+const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES, GITHUB_EVENT_NAME, NTFY_TOPIC } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID })) {
   if (!v) { console.error(`Missing required env var: ${name}`); process.exit(1); }
 }
 
-const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID };
+const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, NTFY_TOPIC };
 
 // GitHub Actions' `schedule` trigger is only a request, not a guarantee —
 // confirmed live over 97 scheduled runs: average gap 142min against the
@@ -210,6 +211,15 @@ if (FCS_D1_DATABASE_ID) {
     console.log(`call-flip tracking: ${flipsLogged} new flip(s) logged, ${flipsEvaluated} matured flip(s) evaluated`);
   } catch (e) {
     console.error('call-flip tracking failed (KV already updated, dashboard unaffected):', e.message || e);
+  }
+  try {
+    // Reads this run's own just-logged 'reversal' composite votes (above)
+    // plus the last couple of hours already in technique_votes — no new
+    // fetch, just a new read of data already flowing every run.
+    const reversalAlerts = await checkAndNotifyReversals(env, payload.generated_at);
+    console.log(`reversal (peak/bottom) alerts: ${reversalAlerts} sent${env.NTFY_TOPIC ? '' : ' (NTFY_TOPIC not set, skipped)'}`);
+  } catch (e) {
+    console.error('reversal alert check failed (KV already updated, dashboard unaffected):', e.message || e);
   }
   try {
     // Reuses this run's own just-logged prices (no re-query) — see

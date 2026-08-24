@@ -1,0 +1,140 @@
+// Push notifications via ntfy.sh (https://ntfy.sh) -- a free, signup-free
+// pub/sub notification service. The destination is just a topic name kept
+// in the NTFY_TOPIC secret; the user subscribes to it via the ntfy app or
+// a browser (https://ntfy.sh/<topic>). User-requested 2026-08-24: alert on
+// a peak/bottom signal, and immediately on disruptive/extremely good news
+// (hacks, major contracts/deals/policy).
+//
+// env.NTFY_TOPIC unset is treated as "notifications not yet configured" --
+// every exported function here silently no-ops rather than throwing,
+// matching this project's established pattern for an optional,
+// user-provided credential (CMC_API_KEY, CRYPTOPANIC_API_TOKEN).
+import { d1 } from './d1-client.mjs';
+
+const NTFY_TIMEOUT_MS = 10000;
+
+async function sendNtfy(topic, { title, message, priority = 'default', tags = [], click }) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), NTFY_TIMEOUT_MS);
+  try {
+    const res = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Title': title,
+        'Priority': priority,
+        ...(tags.length ? { Tags: tags.join(',') } : {}),
+        ...(click ? { Click: click } : {})
+      },
+      body: message,
+      signal: ctrl.signal
+    });
+    if (!res.ok) throw new Error(`ntfy HTTP ${res.status}`);
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// Sends a notification only if (kind, symbol)'s dedup value has genuinely
+// changed since the last one sent for it -- so a state that just KEEPS
+// holding (the same hack record seen again tomorrow, the same reversal
+// direction still active next hour) doesn't re-notify every single run,
+// only a real change does. `value` should be something that's guaranteed
+// to differ between two genuinely distinct occurrences (a hack's own
+// (date, description) key; a reversal transition's own run_at) and
+// IDENTICAL between repeated observations of the exact same occurrence.
+// Returns true only if a notification was actually sent.
+export async function notifyOnChange(env, kind, symbol, value, notification, nowIso) {
+  if (!env.NTFY_TOPIC) return false;
+  const existing = await d1(env, 'SELECT last_value FROM notification_state WHERE kind = ? AND symbol = ?', [kind, symbol]);
+  if (existing.length && existing[0].last_value === value) return false;
+  await sendNtfy(env.NTFY_TOPIC, notification);
+  await d1(env, `
+    INSERT INTO notification_state (kind, symbol, last_value, last_sent_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT (kind, symbol) DO UPDATE SET last_value = excluded.last_value, last_sent_at = excluded.last_sent_at
+  `, [kind, symbol, value, nowIso]);
+  return true;
+}
+
+// Fresh reversal detection: technique_id='reversal' composite votes are
+// already logged every hourly build (same technique_votes table every
+// other technique uses, see logRun/evaluateMatured) -- this reads just
+// the last couple of hours of them (NOT a deep rescan -- see
+// detectAndLogCallFlips' own 200h-vs-8h lesson, 2026-08-22, for exactly
+// why that would be a real, avoidable cost) and finds symbols whose
+// LATEST vote is a fresh bottom/peak (dir 1 or -1) that the IMMEDIATELY
+// PRECEDING vote wasn't already -- a transition, not a level. A symbol
+// that returns to neutral and later bottoms again correctly re-alerts
+// (there's no "already alerted this direction" memory beyond the
+// adjacent pair), while a bottom that just keeps holding hour after hour
+// does not spam. `lookbackHours` needs only to comfortably span 2-3 real
+// build cycles.
+export async function checkAndNotifyReversals(env, nowIso, lookbackHours = 4) {
+  if (!env.NTFY_TOPIC) return 0;
+  const cutoff = new Date(new Date(nowIso).getTime() - lookbackHours * 3600 * 1000).toISOString();
+  const rows = await d1(env, `
+    SELECT symbol, asset_class, run_at, dir FROM technique_votes
+    WHERE technique_id = 'reversal' AND run_at >= ? ORDER BY symbol, run_at
+  `, [cutoff]);
+
+  const bySymbol = {};
+  for (const r of rows) (bySymbol[r.symbol] ??= { assetClass: r.asset_class, rows: [] }).rows.push(r);
+
+  const fresh = [];
+  for (const [symbol, { assetClass, rows: symRows }] of Object.entries(bySymbol)) {
+    if (symRows.length < 2) continue;
+    const prev = symRows[symRows.length - 2], cur = symRows[symRows.length - 1];
+    if ((cur.dir === 1 || cur.dir === -1) && cur.dir !== prev.dir) {
+      fresh.push({ symbol, assetClass, dir: cur.dir, runAt: cur.run_at });
+    }
+  }
+  if (!fresh.length) return 0;
+
+  const symbols = fresh.map((f) => f.symbol);
+  const priceNow = {};
+  const placeholders = symbols.map(() => '?').join(',');
+  const priceRows = await d1(env, `SELECT symbol, price FROM asset_price_log WHERE symbol IN (${placeholders}) ORDER BY run_at DESC`, symbols);
+  for (const r of priceRows) if (!(r.symbol in priceNow)) priceNow[r.symbol] = r.price;
+
+  let sent = 0;
+  for (const f of fresh) {
+    const price = priceNow[f.symbol];
+    const label = f.dir === 1 ? 'bottomed' : 'peaked';
+    const emoji = f.dir === 1 ? 'chart_with_upwards_trend' : 'chart_with_downwards_trend';
+    const notified = await notifyOnChange(env, 'reversal', f.symbol, `${f.dir}@${f.runAt}`, {
+      title: `${f.symbol} ${label}`,
+      message: `${f.symbol} (${f.assetClass}) flagged a ${label} reversal` + (price != null ? ` near ${price}` : '') + ` -- RSI turned, confirmed by an independent signal.`,
+      priority: 'default',
+      tags: [emoji],
+      click: 'https://frontiercapitalsignals.com/signals/'
+    }, nowIso);
+    if (notified) sent++;
+  }
+  return sent;
+}
+
+// Immediate, high-priority alert for a NEWLY-matched hack/exploit against
+// a tracked symbol. `matched`: matchHacksToUniverse's own output (this
+// run's full DeFiLlama pull, symbol=null for anything not in the tracked
+// universe) -- filtered here to real matches only. Dedup value is the
+// hack's own (event_date, description) key, the SAME uniqueness
+// asset_events itself already uses (see schema.sql) -- the full 600+
+// history gets re-matched every daily run, so without this every already-
+// known hack would re-alert daily forever.
+export async function notifyOnNewHacks(env, matched, nowIso) {
+  if (!env.NTFY_TOPIC) return 0;
+  let sent = 0;
+  for (const h of matched) {
+    if (!h.symbol) continue;
+    const amountStr = h.amount ? `$${(h.amount / 1e6).toFixed(1)}M` : 'undisclosed amount';
+    const notified = await notifyOnChange(env, 'hack', h.symbol, `${h.date}|${h.name}`, {
+      title: `URGENT: ${h.symbol} hacked`,
+      message: `${h.symbol}: "${h.name}" -- ${amountStr}${h.classification ? `, ${h.classification}` : ''}, ${h.date}.`,
+      priority: 'urgent',
+      tags: ['rotating_light', 'money_with_wings'],
+      click: 'https://frontiercapitalsignals.com/signals/'
+    }, nowIso);
+    if (notified) sent++;
+  }
+  return sent;
+}
