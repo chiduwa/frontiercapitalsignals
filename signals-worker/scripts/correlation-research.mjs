@@ -16,7 +16,7 @@
 // the deliverable as the D1 rows.
 //
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID
-import { twoSampleZTest, volumeSurgeSeries, forwardReturns, chronologicalHalfSplit, sentimentExtremeForwardReturns, timeOfDaySentimentSplit, RELIABILITY_SIGNIFICANCE_Z, detectMoveEpisodes, detectExhaustionReversals, volRegime, levelChangeBefore } from '../worker.js';
+import { twoSampleZTest, volumeSurgeSeries, forwardReturns, chronologicalHalfSplit, sentimentExtremeForwardReturns, timeOfDaySentimentSplit, RELIABILITY_SIGNIFICANCE_Z, detectMoveEpisodes, detectExhaustionReversals, detectBottomThenMoonshot, volRegime, levelChangeBefore } from '../worker.js';
 import { d1 } from './d1-client.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
@@ -543,6 +543,121 @@ async function main() {
       const finding = runGuardedTest(hypothesis, 'crypto', horizon, surgeSample, normalSample, exhaustionLeaderZBar);
       if (finding) findings.push(finding);
     }
+  }
+
+  // "Bottomed, then 10x+" research (user-requested 2026-08-24, grounded in
+  // ZEC's real archived history: $18.29 low 2024-07-05, $786.42 on
+  // 2026-08-23, a confirmed 43x, still accelerating). Same universe
+  // (bySymbol) and same pooled + chronological-half-split rigor as every
+  // hypothesis above. detectBottomThenMoonshot (worker.js) only returns
+  // troughs that DID go on to multiply -- for a genuine "what's different
+  // about the ones that moonshot" comparison, this also needs a CONTROL
+  // group of real, isolated troughs that DIDN'T. findAllIsolatedTroughs
+  // below mirrors that same function's own trough-finding logic (a real
+  // local min, with the "does an even deeper low follow before anything
+  // is achieved" correction its own live ZEC test caught and fixed) but
+  // without the >=10x gate, so every genuine trough -- moonshot or not --
+  // comes back with whatever multiple it actually achieved. Kept local to
+  // this research script rather than exported from worker.js: it's
+  // exploratory instrumentation for this one question, not a primitive
+  // anything live needs.
+  function findAllIsolatedTroughs(bars, troughWindowDays, maxForwardDays) {
+    const sorted = bars.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+    const n = sorted.length;
+    const troughs = [];
+    let cooldownUntil = -1;
+    for (let i = 0; i < n; i++) {
+      if (i <= cooldownUntil) continue;
+      const troughClose = sorted[i].close;
+      if (troughClose == null || troughClose <= 0) continue;
+      let isMin = true;
+      const lo = Math.max(0, i - troughWindowDays), hi = Math.min(n - 1, i + troughWindowDays);
+      for (let j = lo; j <= hi; j++) {
+        if (j === i) continue;
+        if (sorted[j].close != null && sorted[j].close < troughClose) { isMin = false; break; }
+      }
+      if (!isMin) continue;
+      let peakIdx = i, peakClose = troughClose, deeperLowFound = false;
+      for (let j = i + 1; j < Math.min(n, i + maxForwardDays); j++) {
+        const c = sorted[j].close;
+        if (c == null) continue;
+        if (c < troughClose) { deeperLowFound = true; break; }
+        if (c > peakClose) { peakClose = c; peakIdx = j; }
+      }
+      if (deeperLowFound) continue;
+      troughs.push({ idx: i, date: sorted[i].date, close: troughClose, peakIdx, peakClose, multiple: peakClose / troughClose });
+      cooldownUntil = Math.max(peakIdx, i + 180);
+    }
+    return troughs;
+  }
+
+  const MOONSHOT_MULTIPLE = 10;
+  const MOONSHOT_TROUGH_WINDOW_DAYS = 90;
+  const MOONSHOT_MAX_FORWARD_DAYS = 1095; // ~3 years
+  const MOONSHOT_DRAWDOWN_LOOKBACK_DAYS = 730; // ~2 years trailing, for "how far below its own recent high"
+  const MIN_MOONSHOT_SAMPLE = 10; // rarer still than an exhaustion reversal — a real isolated trough AND (for the treatment group) a >=10x follow-through
+
+  const allTroughs = []; // { symbol, assetClass, ...trough, isMoonshot, drawdownPct, compression }
+  for (const [symbol, { assetClass, bars }] of Object.entries(bySymbol)) {
+    if (assetClass !== 'crypto' || bars.length < 400) continue;
+    const sortedBars = bars.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+    const closes = sortedBars.map((b) => b.close);
+    for (const t of findAllIsolatedTroughs(sortedBars, MOONSHOT_TROUGH_WINDOW_DAYS, MOONSHOT_MAX_FORWARD_DAYS)) {
+      const lookStart = Math.max(0, t.idx - MOONSHOT_DRAWDOWN_LOOKBACK_DAYS);
+      const trailingHigh = Math.max(...closes.slice(lookStart, t.idx + 1).filter((c) => c != null));
+      const drawdownPct = trailingHigh > 0 ? ((t.close / trailingHigh) - 1) * 100 : null;
+      const compression = volRegime(closes.slice(0, t.idx + 1), 20, 60);
+      allTroughs.push({ symbol, assetClass, ...t, isMoonshot: t.multiple >= MOONSHOT_MULTIPLE, drawdownPct, compression });
+    }
+  }
+  const moonshots = allTroughs.filter((t) => t.isMoonshot);
+  const controls = allTroughs.filter((t) => !t.isMoonshot);
+  console.log(`\nbottom-then-moonshot research: ${allTroughs.length} genuine isolated troughs found across ${Object.keys(bySymbol).length} symbols (>=400 days history) -- ${moonshots.length} went on to >=${MOONSHOT_MULTIPLE}x within ~${Math.round(MOONSHOT_MAX_FORWARD_DAYS / 365)}y, ${controls.length} did not`);
+  if (moonshots.length) {
+    console.log(`[moonshot stats] median days trough-to-peak=${median(moonshots.map((m) => m.peakIdx - m.idx))}, median eventual multiple=${median(moonshots.map((m) => m.multiple))?.toFixed(1)}x, median drawdown from trailing 2y high=${median(moonshots.map((m) => m.drawdownPct).filter((v) => v != null))?.toFixed(1)}%`);
+    console.log(`[moonshot examples] ${moonshots.slice(0, 8).map((m) => `${m.symbol}@${m.date} (${m.multiple.toFixed(1)}x)`).join(', ')}`);
+  }
+
+  const drawdownMoonshot = moonshots.map((t) => ({ date: t.date, value: t.drawdownPct })).filter((p) => p.value != null);
+  const drawdownControl = controls.map((t) => ({ date: t.date, value: t.drawdownPct })).filter((p) => p.value != null);
+  const drawdownHypothesis = 'moonshot_trough_deeper_drawdown_than_control';
+  if (drawdownMoonshot.length < MIN_MOONSHOT_SAMPLE || drawdownControl.length < MIN_MOONSHOT_SAMPLE) {
+    console.log(`[${drawdownHypothesis}] too few samples (moonshot=${drawdownMoonshot.length}, control=${drawdownControl.length}) — skipped`);
+  } else {
+    const finding = runGuardedTest(drawdownHypothesis, 'crypto', null, drawdownMoonshot, drawdownControl);
+    if (finding) findings.push(finding);
+  }
+
+  const compressionMoonshot = moonshots.map((t) => ({ date: t.date, value: t.compression })).filter((p) => p.value != null);
+  const compressionControl = controls.map((t) => ({ date: t.date, value: t.compression })).filter((p) => p.value != null);
+  const moonshotCompressionHypothesis = 'moonshot_trough_more_compressed_than_control';
+  if (compressionMoonshot.length < MIN_MOONSHOT_SAMPLE || compressionControl.length < MIN_MOONSHOT_SAMPLE) {
+    console.log(`[${moonshotCompressionHypothesis}] too few samples (moonshot=${compressionMoonshot.length}, control=${compressionControl.length}) — skipped`);
+  } else {
+    const finding = runGuardedTest(moonshotCompressionHypothesis, 'crypto', null, compressionMoonshot, compressionControl);
+    if (finding) findings.push(finding);
+  }
+
+  // Market-wide coincidence: of the moonshot troughs, how many fell within
+  // 60 days of at least 3 OTHER tracked symbols' own isolated troughs —
+  // "was this a systemic, market-wide bottom" vs "this asset alone." Every
+  // symbol's own trough list is already sitting in allTroughs, grouped
+  // here by symbol once rather than re-scanned per moonshot.
+  const troughDatesBySymbol = {};
+  for (const t of allTroughs) (troughDatesBySymbol[t.symbol] ??= []).push(t.date);
+  let systemicCount = 0;
+  for (const m of moonshots) {
+    const windowStart = new Date(new Date(m.date).getTime() - 60 * 86400000).toISOString().slice(0, 10);
+    const windowEnd = new Date(new Date(m.date).getTime() + 60 * 86400000).toISOString().slice(0, 10);
+    let coincident = 0;
+    for (const [sym, dates] of Object.entries(troughDatesBySymbol)) {
+      if (sym === m.symbol) continue;
+      if (dates.some((d) => d >= windowStart && d <= windowEnd)) coincident++;
+    }
+    if (coincident >= 3) systemicCount++;
+  }
+  if (moonshots.length) {
+    console.log(`[moonshot market-wide coincidence] ${systemicCount}/${moonshots.length} (${((systemicCount / moonshots.length) * 100).toFixed(0)}%) moonshot troughs fell within 60 days of at least 3 other tracked symbols' own troughs -- descriptive only, not a hypothesis test (no independent control-group comparison here, just how common a systemic-bottom backdrop is among the moonshot cases themselves)`);
   }
 
   console.log(`correlation-research: ${findings.length} validated finding(s)`);

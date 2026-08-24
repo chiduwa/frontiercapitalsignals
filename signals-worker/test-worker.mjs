@@ -1042,6 +1042,52 @@ const erShortBars = Array.from({ length: 8 }, (_, i) => ({ date: `2026-01-0${i +
 const erShortEpisodes = [{ startIdx: 3, startDate: erShortBars[3].date, detectedIdx: 5, detectedDate: erShortBars[5].date, dir: -1, triggerPct: -25, fullMovePct: -25, daysToExtreme: 0, extremeDate: erShortBars[5].date }];
 check('too little history before the episode to check a prior run (priorIdx would go negative): no crash, filtered out', mod.detectExhaustionReversals(erShortBars, erShortEpisodes, 10, 12, 30).length === 0);
 
+console.log('\n== detectBottomThenMoonshot: a genuine, isolated trough that eventually multiplies by >=10x (2026-08-24, grounded in ZEC\'s real archived history -- $18.29 low on 2024-07-05, $786.42 on 2026-08-23, a confirmed 43x, still accelerating) ==');
+const bmStart = new Date('2026-01-01T00:00:00Z').getTime();
+const bmDate = (i) => new Date(bmStart + i * 86400000).toISOString().slice(0, 10);
+
+const bmSimpleClose = (i) => {
+  if (i < 10) return 100;                    // flat pad
+  if (i <= 20) return 100 - (i - 10) * 8;     // decline to a trough: 100 -> 20 at i=20
+  return 20 + (i - 20) * 5;                   // rally: crosses 10x (200) at i=56, keeps climbing after
+};
+const bmSimpleBars = Array.from({ length: 160 }, (_, i) => ({ date: bmDate(i), close: bmSimpleClose(i) }));
+const bmSimple = mod.detectBottomThenMoonshot(bmSimpleBars, 10, 10, 100, 20);
+check('finds the one genuine trough-then-10x episode', bmSimple.length === 1, JSON.stringify(bmSimple));
+check('trough lands exactly at the real local minimum (day 20, close 20)', bmSimple[0] && bmSimple[0].troughDate === bmDate(20) && bmSimple[0].troughClose === 20, JSON.stringify(bmSimple));
+check('daysToMultiple and peakMultiple are computed correctly off the real trough', bmSimple[0] && bmSimple[0].daysToMultiple === 36 && bmSimple[0].peakMultiple >= 10, JSON.stringify(bmSimple));
+
+// Double-bottom case mirroring ZEC's own real shape: an early, shallower
+// isolated local min (day 20) that looks like a trough at the time, but
+// price later makes a NEW, deeper low (day 40) before ever reaching the
+// target multiple from the first one -- the real launch point is the
+// SECOND, deeper trough, not the first. This is exactly the bug this
+// function's own history caught and fixed against ZEC's real data (an
+// early version anchored on the shallower Nov-2022-shaped point and
+// missed the deeper, real-launch July-2024-shaped point entirely).
+const bmDoubleClose = (i) => {
+  if (i < 10) return 100;                      // flat pad
+  if (i <= 20) return 100 - (i - 10) * 6;       // decline to shallow trough A: 100 -> 40 at i=20
+  if (i <= 30) return 40 + (i - 20) * 3;        // partial bounce, nowhere near 10x: 40 -> 70
+  if (i <= 40) return 70 - (i - 30) * 5.5;      // decline again to a DEEPER trough B: 70 -> 15 at i=40
+  return 15 + (i - 40) * 10;                    // real rally from B: crosses 10x (150) at i=54
+};
+const bmDoubleBars = Array.from({ length: 160 }, (_, i) => ({ date: bmDate(i), close: bmDoubleClose(i) }));
+const bmDouble = mod.detectBottomThenMoonshot(bmDoubleBars, 10, 10, 100, 20);
+check('double-bottom case: finds exactly one episode, not one per candidate trough', bmDouble.length === 1, JSON.stringify(bmDouble));
+check('anchors on the DEEPER, real-launch trough (day 40, close 15), not the earlier shallower one (day 20, close 40)', bmDouble[0] && bmDouble[0].troughDate === bmDate(40) && bmDouble[0].troughClose === 15, JSON.stringify(bmDouble));
+
+const bmNoMultiple = (i) => {
+  if (i < 10) return 100;
+  if (i <= 20) return 100 - (i - 10) * 7;   // decline to 30
+  return Math.min(90, 30 + (i - 20) * 2);   // only ever reaches 3x, capped well under 10x
+};
+const bmNoMultipleBars = Array.from({ length: 120 }, (_, i) => ({ date: bmDate(i), close: bmNoMultiple(i) }));
+check('a real trough that never reaches the target multiple: correctly finds nothing (not a lesser multiple counted as a false positive)', mod.detectBottomThenMoonshot(bmNoMultipleBars, 10, 10, 100, 20).length === 0);
+
+check('too little history: no crash, nothing found', mod.detectBottomThenMoonshot([{ date: '2026-01-01', close: 100 }], 10, 10, 100, 20).length === 0);
+check('empty history: no crash', mod.detectBottomThenMoonshot([], 10, 10, 100, 20).length === 0);
+
 console.log('\n== levelChangeBefore: N-trading-day level change ending at/before a target date, gap-tolerant ==');
 const yieldBars = [
   { date: '2026-01-02', close: 4.5 }, { date: '2026-01-05', close: 4.45 }, // weekday-only series -- 01-03/04 are a weekend, correctly absent

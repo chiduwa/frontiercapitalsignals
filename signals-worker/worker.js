@@ -1168,6 +1168,73 @@ export function detectExhaustionReversals(bars, episodes, priorRunLookbackDays =
   return out;
 }
 
+// Finds every historical "bottomed, then went on a sustained multi-month/
+// year moonshot" episode in one symbol's own history — user-requested
+// 2026-08-24, grounded in a real, extreme, currently-unfolding case:
+// ZEC's real archived low was $18.29 on 2024-07-05; as of 2026-08-23 it's
+// $786.42, a confirmed 43x, still accelerating (+60% in the week before
+// that last read alone). A different question from detectMoveEpisodes
+// (fast, ≤7-day moves) or detectExhaustionReversals (days-to-weeks
+// reversal-after-a-run) — this is deliberately long-horizon and large-
+// magnitude: a genuine, isolated trough (the lowest close within
+// troughWindowDays on EITHER side — not just any daily dip) that
+// eventually multiplies by at least minMultiple within maxForwardDays.
+// cooldownDays after the eventual peak stops one long bottoming-and-
+// rallying process from being counted many times over as price
+// oscillates near its own trough before the real move starts, same
+// double-counting concern detectMoveEpisodes' own cooldown already
+// guards against. Returns each found episode's trough and eventual
+// crossing/peak — the raw material correlation-research.mjs uses to ask
+// what, if anything, was different about conditions BEFORE the trough
+// in cases that went on to multiply vs. troughs that didn't.
+export function detectBottomThenMoonshot(bars, troughWindowDays = 90, minMultiple = 10, maxForwardDays = 1095, cooldownDays = 180) {
+  const sorted = bars.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+  const n = sorted.length;
+  const episodes = [];
+  let cooldownUntil = -1;
+  for (let i = 0; i < n; i++) {
+    if (i <= cooldownUntil) continue;
+    const troughClose = sorted[i].close;
+    if (troughClose == null || troughClose <= 0) continue;
+
+    let isMin = true;
+    const lo = Math.max(0, i - troughWindowDays), hi = Math.min(n - 1, i + troughWindowDays);
+    for (let j = lo; j <= hi; j++) {
+      if (j === i) continue;
+      if (sorted[j].close != null && sorted[j].close < troughClose) { isMin = false; break; }
+    }
+    if (!isMin) continue;
+
+    // Walk forward tracking the running peak — but if a NEW, DEEPER low
+    // appears before the target multiple is ever reached, this candidate
+    // wasn't really "the" trough, just an early stop on a longer, grinding
+    // decline (real case found live testing this against ZEC: an isolated
+    // local min in Nov 2022 — genuinely the FTX-crash-era bottom at the
+    // time — got superseded by an even deeper low 20 months later in July
+    // 2024, which is where the real 40x+ move actually launched from).
+    // Neither recording an episode nor setting a cooldown here lets the
+    // loop continue naturally and pick up that deeper point as its own
+    // candidate once i reaches it.
+    let firstCrossIdx = -1, peakIdx = i, peakClose = troughClose, deeperLowFound = false;
+    for (let j = i + 1; j < Math.min(n, i + maxForwardDays); j++) {
+      const c = sorted[j].close;
+      if (c == null) continue;
+      if (c < troughClose) { deeperLowFound = true; break; }
+      if (c > peakClose) { peakClose = c; peakIdx = j; }
+      if (firstCrossIdx === -1 && c / troughClose >= minMultiple) firstCrossIdx = j;
+    }
+    if (deeperLowFound || firstCrossIdx === -1) continue; // not the real trough, or never reached minMultiple within the horizon
+
+    episodes.push({
+      troughIdx: i, troughDate: sorted[i].date, troughClose,
+      firstCrossIdx, firstCrossDate: sorted[firstCrossIdx].date, daysToMultiple: firstCrossIdx - i,
+      peakIdx, peakDate: sorted[peakIdx].date, peakClose, peakMultiple: peakClose / troughClose
+    });
+    cooldownUntil = Math.max(peakIdx, i + cooldownDays);
+  }
+  return episodes;
+}
+
 // The level change over lookbackDays index-positions, ending at the latest
 // bar on or before targetDate — used by correlation-research.mjs to ask
 // "how much did this yield series move in the N trading days before this
