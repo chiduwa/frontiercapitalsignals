@@ -10,6 +10,7 @@
 // matching this project's established pattern for an optional,
 // user-provided credential (CMC_API_KEY, CRYPTOPANIC_API_TOKEN).
 import { d1 } from './d1-client.mjs';
+import { MIN_RELIABILITY_SAMPLES } from '../worker.js';
 
 const NTFY_TIMEOUT_MS = 10000;
 
@@ -91,19 +92,36 @@ export async function checkAndNotifyReversals(env, nowIso, lookbackHours = 4) {
   if (!fresh.length) return 0;
 
   const symbols = fresh.map((f) => f.symbol);
-  const priceNow = {};
   const placeholders = symbols.map(() => '?').join(',');
+  const priceNow = {};
   const priceRows = await d1(env, `SELECT symbol, price FROM asset_price_log WHERE symbol IN (${placeholders}) ORDER BY run_at DESC`, symbols);
   for (const r of priceRows) if (!(r.symbol in priceNow)) priceNow[r.symbol] = r.price;
+
+  // This asset's OWN measured accuracy for the 'reversal' technique
+  // specifically -- already computed and maintained by the existing
+  // adaptive-weighting loop (technique_reliability, evaluateMatured), not
+  // new data collection. Pooled across both scored horizons, same blended
+  // shape loadReliability itself uses. Gated on the SAME
+  // MIN_RELIABILITY_SAMPLES bar the live engine already requires before
+  // trusting an asset-specific number anywhere else -- an alert still
+  // fires below that bar (a new or thin-history asset shouldn't be
+  // silenced), it just can't yet say how much to trust it.
+  const relRows = await d1(env, `SELECT symbol, SUM(correct) as correct, SUM(total) as total FROM technique_reliability WHERE technique_id = 'reversal' AND symbol IN (${placeholders}) GROUP BY symbol`, symbols);
+  const reliability = {};
+  for (const r of relRows) reliability[r.symbol] = { correct: r.correct, total: r.total };
 
   let sent = 0;
   for (const f of fresh) {
     const price = priceNow[f.symbol];
     const label = f.dir === 1 ? 'bottomed' : 'peaked';
     const emoji = f.dir === 1 ? 'chart_with_upwards_trend' : 'chart_with_downwards_trend';
+    const rel = reliability[f.symbol];
+    const trackRecord = rel && rel.total >= MIN_RELIABILITY_SAMPLES
+      ? ` This asset's own reversal calls have been right ${Math.round((rel.correct / rel.total) * 100)}% of the time (${rel.total} prior calls).`
+      : '';
     const notified = await notifyOnChange(env, 'reversal', f.symbol, `${f.dir}@${f.runAt}`, {
       title: `${f.symbol} ${label}`,
-      message: `${f.symbol} (${f.assetClass}) flagged a ${label} reversal` + (price != null ? ` near ${price}` : '') + ` -- RSI turned, confirmed by an independent signal.`,
+      message: `${f.symbol} (${f.assetClass}) flagged a ${label} reversal` + (price != null ? ` near ${price}` : '') + ` -- RSI turned, confirmed by an independent signal.${trackRecord}`,
       priority: 'default',
       tags: [emoji],
       click: 'https://frontiercapitalsignals.com/signals/'
