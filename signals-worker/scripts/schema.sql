@@ -732,3 +732,32 @@ CREATE TABLE IF NOT EXISTS notification_log (
   sent_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_notification_log_sent_at ON notification_log(sent_at);
+
+-- "Long-term potential" category (added 2026-08-24, user-requested:
+-- research cryptos like ZEC that bottomed a year or two ago then did
+-- 10x+, find patterns spottable in advance, build a category for them).
+-- Real research (correlation-research.mjs) found a genuine 38% base
+-- rate for an isolated multi-month/year low going on to >=10x within
+-- ~3 years (56 of 146 real cases) -- but found NO tested signal
+-- (drawdown depth, pre-low volatility compression, or market-wide
+-- coincidence, which actually ran BACKWARDS: moonshot troughs were
+-- LESS commonly coincident with other assets' own troughs than
+-- ordinary ones, not more) that reliably predicts which specific
+-- troughs succeed. computeLongTermBottomCandidates/
+-- replaceLongTermBottomCandidates (archive.mjs) refresh this daily
+-- from detectPossibleLongTermBottom (worker.js), the live, forward-
+-- looking counterpart to the retrospective research. One row per
+-- symbol CURRENTLY qualifying; wholesale-replaced each run, same
+-- reasoning as asset_rotation_status (a candidate that has since
+-- rallied away, or been undercut by a newer low, should not linger).
+-- Purely descriptive. Not financial advice.
+CREATE TABLE IF NOT EXISTS long_term_bottom_status (
+  symbol TEXT NOT NULL,
+  low_close REAL NOT NULL,
+  low_date TEXT NOT NULL,
+  days_since_low INTEGER NOT NULL,
+  current_close REAL NOT NULL,
+  pct_above_low REAL NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (symbol)
+);

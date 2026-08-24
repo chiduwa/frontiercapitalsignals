@@ -15,7 +15,7 @@
 // two are genuinely the same need either way: "what's in the universe" and
 // "what's each coin's live funding right now."
 import { d1, chunk } from './d1-client.mjs';
-import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, computeSpreadSeries, levelChangeBefore, detectOutperformanceRotation } from '../worker.js';
+import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, computeSpreadSeries, levelChangeBefore, detectOutperformanceRotation, detectPossibleLongTermBottom } from '../worker.js';
 
 const UA = 'Mozilla/5.0 (compatible; FrontierCapitalSignals/2.0)';
 
@@ -984,6 +984,43 @@ export async function replaceRotationStatus(env, rows) {
     const placeholders = batch.map(() => '(?,?,?,?,?,?)').join(',');
     const params = batch.flatMap((r) => [r.symbol, r.startDate, r.endDate, r.checkpoints, r.peakRel, updatedAt]);
     await d1(env, `INSERT INTO asset_rotation_status (symbol, start_date, end_date, checkpoints, peak_rel_pct, updated_at) VALUES ${placeholders}`, params);
+    written += batch.length;
+  }
+  return written;
+}
+
+// ------------------------- LONG-TERM POTENTIAL -------------------------------
+// "Long-term potential" category (user-requested 2026-08-24): which crypto
+// assets are CURRENTLY sitting near a fresh, still-recent multi-month/year
+// low (detectPossibleLongTermBottom, worker.js — see its own docs for the
+// real research behind this, and why it deliberately does NOT try to rank
+// candidates by any signal). Purely descriptive; not financial advice.
+export async function computeLongTermBottomCandidates(env) {
+  const rows = await d1(env, `SELECT symbol, asset_class, date, close FROM asset_daily_bars WHERE asset_class = 'crypto' ORDER BY symbol, date`);
+  const bySymbol = {};
+  for (const r of rows) (bySymbol[r.symbol] ??= []).push(r);
+
+  const out = [];
+  for (const [symbol, bars] of Object.entries(bySymbol)) {
+    if (symbol.includes(':') || bars.length < 365) continue; // pseudo-symbols (SECTOR:/MCAP:/SPREAD:/TVL:) aren't real, holdable assets
+    const candidate = detectPossibleLongTermBottom(bars);
+    if (candidate) out.push({ symbol, ...candidate });
+  }
+  return out;
+}
+
+// Wholesale replace, same rationale as asset_rotation_status — a candidate
+// that's since rallied away from its low (or been undercut by a newer one)
+// should disappear from the table, not linger from a stale prior run.
+export async function replaceLongTermBottomCandidates(env, rows) {
+  await d1(env, 'DELETE FROM long_term_bottom_status');
+  if (!rows.length) return 0;
+  const updatedAt = new Date().toISOString();
+  let written = 0;
+  for (const batch of chunk(rows, 12)) {
+    const placeholders = batch.map(() => '(?,?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap((r) => [r.symbol, r.lowClose, r.lowDate, r.daysSinceLow, r.currentClose, r.pctAboveLow, updatedAt]);
+    await d1(env, `INSERT INTO long_term_bottom_status (symbol, low_close, low_date, days_since_low, current_close, pct_above_low, updated_at) VALUES ${placeholders}`, params);
     written += batch.length;
   }
   return written;

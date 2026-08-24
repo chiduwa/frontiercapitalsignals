@@ -222,6 +222,7 @@ check('favorites board says just "FAVORITES", not a possessive "YOUR FAVORITES"'
 check('per-row direction arrow + consolidating-badge markup present', pageText.includes('dir-arrow') && pageText.includes('class="coil') && pageText.includes('Consolidating'));
 check('quality + rotation badge markup present', pageText.includes('class="quality') && pageText.includes('class="rotation') && pageText.includes('Rotating in'));
 check('flip-caution badge markup present', pageText.includes('class="flip-note') && pageText.includes('Flipped') && pageText.includes('extra caution'));
+check('long-term-potential badge markup + prominent not-financial-advice disclaimer present', pageText.includes('class="ltp-note') && pageText.includes('Long-term potential') && pageText.includes('Not a recommendation, not guaranteed, not financial advice'));
 check('a link back to the FCS homepage is present', pageText.includes('class="home-link"') && pageText.includes('href="https://frontiercapitalsignals.com/"'));
 
 console.log('\n== getFundingMap: CoinGecko derivatives, highest-OI perpetual market wins ==');
@@ -332,6 +333,9 @@ check('every favorites row is shaped exactly like a board row (reuses entry(), n
 check('every crypto board row carries a consolidating field, null or a real direction, never anything else', built.crypto.breakout.concat(built.crypto.breakdown, built.crypto.favorites).every(r => r.consolidating === null || r.consolidating === 1 || r.consolidating === -1), JSON.stringify(built.crypto.breakout.map(r => r.consolidating)));
 check('every crypto board row carries a rotation field, null or a real streak object, never anything else', built.crypto.breakout.concat(built.crypto.breakdown, built.crypto.favorites).every(r => r.rotation === null || typeof r.rotation.peakRel === 'number'));
 check('every crypto board row carries recentFlip/flipStability fields, safely null with no callFlipData passed (never a crash)', built.crypto.breakout.concat(built.crypto.breakdown, built.crypto.favorites).every(r => r.recentFlip === null && r.flipStability === null));
+check('every crypto board row carries a longTermPotential field, safely null with no longTermBottomStatus passed (never a crash)', built.crypto.breakout.concat(built.crypto.breakdown, built.crypto.favorites).every(r => r.longTermPotential === null));
+check('longTermPotential board key exists and is empty when no longTermBottomStatus was passed (not undefined -- the dashboard branches on .length)', Array.isArray(built.crypto.longTermPotential) && built.crypto.longTermPotential.length === 0);
+check('stocks never carry a longTermPotential section (crypto-only, same reasoning as favorites)', Array.isArray(built.stocks.longTermPotential) && built.stocks.longTermPotential.length === 0);
 check('stocks boards populated', built.stocks.breakout.length > 0);
 // Ceiling is 18, not 16, now that fibonacci and timeofday exist (see
 // TECHNIQUE_META) — 'attention' is crypto-trending-conditional so it's
@@ -1094,6 +1098,35 @@ check('a real trough that never reaches the target multiple: correctly finds not
 
 check('too little history: no crash, nothing found', mod.detectBottomThenMoonshot([{ date: '2026-01-01', close: 100 }], 10, 10, 100, 20).length === 0);
 check('empty history: no crash', mod.detectBottomThenMoonshot([], 10, 10, 100, 20).length === 0);
+
+console.log('\n== detectPossibleLongTermBottom: the LIVE, forward-looking counterpart to detectBottomThenMoonshot -- "is this asset CURRENTLY near a fresh multi-month/year low" (2026-08-24, for the long-term-potential category; deliberately makes no claim about which candidates will actually succeed) ==');
+const ltpDate = (i) => new Date(bmStart + i * 86400000).toISOString().slice(0, 10);
+
+const ltpQualifyingClose = (i) => {
+  if (i <= 59) return 100 - i * (80 / 59);       // decline 100 -> 20 over days 0-59 (the low)
+  return 20 + ((i - 60) % 5);                     // stays near the low (20-24) for the rest, well within 20%
+};
+const ltpQualifyingBars = Array.from({ length: 100 }, (_, i) => ({ date: ltpDate(i), close: ltpQualifyingClose(i) }));
+const ltpQualifying = mod.detectPossibleLongTermBottom(ltpQualifyingBars, 100, 10, 20);
+check('a fresh low that has held for a while, still near it: qualifies', ltpQualifying !== null && ltpQualifying.lowClose === 20 && ltpQualifying.daysSinceLow === 40, JSON.stringify(ltpQualifying));
+check('pctAboveLow correctly reflects the current close vs. the real low', ltpQualifying !== null && ltpQualifying.pctAboveLow >= 0 && ltpQualifying.pctAboveLow <= 20, JSON.stringify(ltpQualifying));
+
+const ltpTooRecentClose = (i) => {
+  if (i <= 95) return 100 - i * (80 / 95);        // still declining right up to near the end
+  return 20 + (i - 95);                            // barely off the low, only a few days old
+};
+const ltpTooRecentBars = Array.from({ length: 100 }, (_, i) => ({ date: ltpDate(i), close: ltpTooRecentClose(i) }));
+check('the low was hit too recently (still might be in free-fall, not stabilized): does not yet qualify', mod.detectPossibleLongTermBottom(ltpTooRecentBars, 100, 10, 20) === null);
+
+const ltpRalliedAwayClose = (i) => {
+  if (i <= 59) return 100 - i * (80 / 59);        // same decline to a real low at day 59
+  return 20 + (i - 60) * 1.2;                       // then rallies hard away from it
+};
+const ltpRalliedAwayBars = Array.from({ length: 100 }, (_, i) => ({ date: ltpDate(i), close: ltpRalliedAwayClose(i) }));
+check('price has already rallied well away from the low: no longer qualifies (this is the ZEC case, live-verified 2026-08-24 -- 43x off its own real low, correctly returns null)', mod.detectPossibleLongTermBottom(ltpRalliedAwayBars, 100, 10, 20) === null);
+
+check('not enough history yet to judge a full lookback window: no crash, null', mod.detectPossibleLongTermBottom(ltpQualifyingBars.slice(0, 50), 100, 10, 20) === null);
+check('empty history: no crash, null', mod.detectPossibleLongTermBottom([], 100, 10, 20) === null);
 
 console.log('\n== levelChangeBefore: N-trading-day level change ending at/before a target date, gap-tolerant ==');
 const yieldBars = [

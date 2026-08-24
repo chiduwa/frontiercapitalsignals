@@ -1235,6 +1235,42 @@ export function detectBottomThenMoonshot(bars, troughWindowDays = 90, minMultipl
   return episodes;
 }
 
+// The LIVE counterpart to detectBottomThenMoonshot, for the "long-term
+// potential" category (user-requested 2026-08-24). That function is
+// necessarily retrospective — confirming a trough needs troughWindowDays
+// of FUTURE price action on both sides, which a still-unfolding low
+// doesn't have yet. This instead asks "is this asset CURRENTLY sitting
+// near a fresh multi-month/year low that hasn't been undercut in a
+// while" — the honest, forward-looking version of the same question,
+// with no claim about which specific candidates will actually go on to
+// multiply. Real research against this project's own archived history
+// (correlation-research.mjs, 2026-08-24) found the base rate for a
+// genuine isolated trough — 38% went on to >=10x within ~3 years — but
+// found NONE of drawdown-depth, pre-trough volatility compression, or
+// market-wide coincidence reliably distinguish which specific troughs
+// succeed (the coincidence test actually ran backwards: moonshot troughs
+// were LESS commonly part of a crowded, market-wide bottom than ordinary
+// ones, not more). So this deliberately does not try to rank or filter
+// candidates by any of those — there's no validated basis to. Purely
+// descriptive: the historical base rate is the only number this, or
+// anything built on it, should ever claim. Not financial advice.
+export function detectPossibleLongTermBottom(bars, lookbackDays = 365, minDaysSinceLow = 30, nearLowPct = 30) {
+  const sorted = bars.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+  const n = sorted.length;
+  if (n < lookbackDays) return null;
+  const window = sorted.slice(n - lookbackDays);
+  let lowIdx = 0, lowClose = window[0].close;
+  for (let i = 1; i < window.length; i++) {
+    if (window[i].close != null && window[i].close < lowClose) { lowClose = window[i].close; lowIdx = i; }
+  }
+  const current = window[window.length - 1].close;
+  if (current == null || lowClose == null || lowClose <= 0) return null;
+  const daysSinceLow = window.length - 1 - lowIdx;
+  const pctAboveLow = ((current / lowClose) - 1) * 100;
+  if (daysSinceLow < minDaysSinceLow || pctAboveLow > nearLowPct) return null;
+  return { lowClose, lowDate: window[lowIdx].date, daysSinceLow, currentClose: current, pctAboveLow };
+}
+
 // The level change over lookbackDays index-positions, ending at the latest
 // bar on or before targetDate — used by correlation-research.mjs to ask
 // "how much did this yield series move in the N trading days before this
@@ -3135,7 +3171,7 @@ export function buildStockMetrics(row, valuation, override, benchCloses, ivHist)
 const RANGE_LOG_HORIZONS_DAYS = [1, 7];
 
 function rankBoards(metrics, kind, reliability, ctx = {}) {
-  const { moveStats, qualityScores, rotationStatus, callFlipData } = ctx;
+  const { moveStats, qualityScores, rotationStatus, callFlipData, longTermBottomStatus } = ctx;
   const scored = metrics.map(m => ({ m, c: confluence(m, kind, reliability, ctx) }));
   // Full-universe vote log (not just the top-10 shown on each board) so the
   // reliability learning loop sees every asset, not only that hour's winners.
@@ -3231,6 +3267,12 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       // gate) — informational either way, never a vote on dir/score.
       recentFlip: (callFlipData && callFlipData.recentFlips[x.m.symbol]) || null,
       flipStability: (callFlipData && callFlipData.stability[x.m.symbol]) || null,
+      // "Long-term potential" (user-requested 2026-08-24) — see
+      // detectPossibleLongTermBottom's own docs for the real research
+      // behind this and why it carries no ranking/confidence number.
+      // Informational only, same discipline as quality/rotation — never a
+      // vote on dir/score. Not financial advice.
+      longTermPotential: (longTermBottomStatus && longTermBottomStatus[x.m.symbol]) || null,
       conf: { agree: side === 'long' ? x.c.bull : x.c.bear, total: x.c.total },
       drivers: side === 'long' ? x.c.longNotes : x.c.shortNotes,
       horizon,
@@ -3264,7 +3306,18 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
         .filter(x => FAVORITE_SYMBOLS.has(x.m.symbol))
         .map(x => entry(x, x.c.long >= x.c.short ? 'long' : 'short'))
     : [];
-  return { breakout: sortSide('long'), breakdown: sortSide('short'), universe: metrics.length, votesLog, priceLog, rangeLog, allSymbols, favorites };
+  // "Long-term potential" (user-requested 2026-08-24) — a pinned section
+  // same as favorites above, independent of top-10 rank: a quiet asset
+  // sitting near a fresh multi-month/year low may not have a strong
+  // enough immediate confluence score to make breakout/breakdown at all,
+  // but that's exactly the point of this list. Crypto only, same
+  // reasoning as favorites (longTermBottomStatus is crypto-only).
+  const longTermPotential = kind === 'crypto' && longTermBottomStatus
+    ? scored
+        .filter(x => longTermBottomStatus[x.m.symbol])
+        .map(x => entry(x, x.c.long >= x.c.short ? 'long' : 'short'))
+    : [];
+  return { breakout: sortSide('long'), breakdown: sortSide('short'), universe: metrics.length, votesLog, priceLog, rangeLog, allSymbols, favorites, longTermPotential };
 }
 
 // ----------------------------- HANDLER --------------------------------------
@@ -3278,7 +3331,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -3335,7 +3388,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   // Shared by both rankBoards calls below (crypto and stock) — see
   // evaluateTechniques' docs for why this is one object, not positional args.
   const qualityScores = computeQualityScores(qualityData || {});
-  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityScores, rotationStatus, callFlipData };
+  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityScores, rotationStatus, callFlipData, longTermBottomStatus };
 
   let cryptoBoards = { breakout: [], breakdown: [], universe: 0 };
   let btc = null, eth = null;
@@ -3669,6 +3722,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .quality{display:block;color:var(--dim);font-size:10px;margin-top:3px;font-family:var(--disp);cursor:help}
   .rotation{display:block;color:var(--amber);font-size:10px;letter-spacing:.04em;margin-top:3px;font-family:var(--disp);cursor:help;font-weight:600}
   .flip-note{display:block;color:var(--amber);font-size:10px;letter-spacing:.04em;margin-top:3px;font-family:var(--disp);cursor:help;font-weight:600}
+  .ltp-note{display:block;color:var(--muted);font-size:10px;letter-spacing:.04em;margin-top:3px;font-family:var(--disp);cursor:help}
 
   .track-record{background:var(--ink-1);border:1px solid var(--line);border-top:2px solid var(--amber);margin-bottom:44px;padding:18px 18px 6px}
   .tr-title{font-weight:800;font-size:17px;letter-spacing:-.01em;margin-top:3px}
@@ -4012,6 +4066,11 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
             : " Not enough of this asset's own past flips have matured yet to say whether they tend to hold or revert.";
           flipNote = '<span class="flip-note" title="Call reversed direction '+flipAgo+' ago -- treat with extra caution until it either holds or reverts.'+stabTitle+'">⚠️ Flipped '+flipArrow+' '+flipAgo+' ago</span>';
         }
+        var ltpNote = '';
+        if(r.longTermPotential){
+          var ltp = r.longTermPotential;
+          ltpNote = '<span class="ltp-note" title="Currently near a fresh multi-month/year low ('+ltp.daysSinceLow+' days since the low, '+ltp.pctAboveLow.toFixed(0)+'% above it). Historically, a genuine isolated low like this has gone on to 10x or more within about 3 years roughly 38% of the time (56 of 146 real cases studied) -- but no tested signal reliably predicts WHICH specific ones will. This is descriptive history only, not a prediction for this asset, not guaranteed, and not financial advice.">💎 Long-term potential ('+ltp.daysSinceLow+'d since low)</span>';
+        }
         var dirArrow = '<span class="dir-arrow '+(rowSide==='long'?'dir-up':'dir-down')+'" title="'+(rowSide==='long'?'Leaning up':'Leaning down')+'">'+(rowSide==='long'?'▲':'▼')+'</span>';
         var conf = r.conf ? '<span class="conf">'+r.conf.agree+'/'+r.conf.total+' aligned</span>' : '';
         var horizon = r.horizon ? '<span class="horizon '+(r.horizon.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+(r.horizon.basis==='historical'?"Based on this asset's own historical accuracy by horizon":"Methodology estimate, not yet enough of this asset's own history to say")+'">'+esc(r.horizon.label)+(r.horizon.basis==='historical'?' ✓':'')+'</span>' : '';
@@ -4021,7 +4080,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var range = r.range ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+rangeTitle+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>' : '<span class="dim">—</span>';
         h+='<tr class="in" style="animation-delay:'+(i*30)+'ms" data-symbol="'+esc(r.symbol)+'" data-class="'+cfg.assetClass+'">'
           +'<td class="rk">'+(i+1)+'</td>'
-          +'<td class="asset">'+symHtml+name+why+topInd+coil+quality+rotation+flipNote+'</td>'
+          +'<td class="asset">'+symHtml+name+why+topInd+coil+quality+rotation+flipNote+ltpNote+'</td>'
           +'<td class="live-price-cell"><span class="live-price">'+fmtPrice(r.price)+'</span></td>'
           +'<td class="live-chg-cell '+pctCls(r.chg24h)+'"><span class="live-chg">'+fmtPct(r.chg24h)+'</span></td>'
           +'<td class="'+pctCls(r.chg7d)+'">'+fmtPct(r.chg7d)+'</td>'
@@ -4041,6 +4100,10 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     var b='';
     if(d.crypto.favorites && d.crypto.favorites.length){
       b+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-favorites', eyebrow:'CRYPTO · <b>FAVORITES</b>', title:'Always tracked'}, d.crypto.favorites, d.crypto.favorites.length);
+    }
+    if(d.crypto.longTermPotential && d.crypto.longTermPotential.length){
+      b+='<div class="xp-banner" role="note"><b>Not a recommendation, not guaranteed, not financial advice.</b> Historically, a genuine isolated multi-month/year low has gone on to 10x or more within about 3 years in roughly 38% of real cases studied (56 of 146, across this full tracked crypto history) -- but no signal tested (how far below its prior high, how quiet it was beforehand, or how many other assets bottomed at the same time) reliably predicts which specific ones will. This list only flags assets currently sitting near such a low; it makes no claim about any individual one below.</div>';
+      b+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-ltp', eyebrow:'CRYPTO · <b>LONG-TERM POTENTIAL</b>', title:'Possible multi-month/year lows'}, d.crypto.longTermPotential, d.crypto.longTermPotential.length);
     }
     b+=boardHtml({side:'long', assetClass:'crypto', boardId:'crypto-long', eyebrow:'CRYPTO · <b>LONG SIDE</b>', title:'Breakout watch'}, d.crypto.breakout, d.crypto.universe);
     b+=boardHtml({side:'short', assetClass:'crypto', boardId:'crypto-short', eyebrow:'CRYPTO · <b>RISK SIDE</b>', title:'Breakdown risk'}, d.crypto.breakdown, d.crypto.universe);

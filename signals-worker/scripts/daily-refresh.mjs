@@ -29,7 +29,8 @@ import {
   fetchDeribitDvolHistory, upsertIvDaily, fetchStockAtmIv,
   computeSrLevelsAndBreaks, replaceSrLevels, replaceSrBreakStats,
   computeMarketComposite, upsertMarketCapTotal,
-  computeOutperformanceRotations, replaceRotationStatus
+  computeOutperformanceRotations, replaceRotationStatus,
+  computeLongTermBottomCandidates, replaceLongTermBottomCandidates
 } from './archive.mjs';
 import { d1 } from './d1-client.mjs';
 import { evaluateYesterdaySwingTimes } from './reliability.mjs';
@@ -167,6 +168,14 @@ async function main() {
     console.log(`outperformer rotation: ${written} symbol(s) currently in a sustained multi-month outperformance streak${rotations.length ? ' -- ' + rotations.map((r) => `${r.symbol} (+${r.peakRel.toFixed(0)}pts)`).join(', ') : ''}`);
   } catch (e) {
     console.error('outperformer rotation computation failed:', e.message);
+  }
+
+  try {
+    const candidates = await computeLongTermBottomCandidates(env);
+    const written = await replaceLongTermBottomCandidates(env, candidates);
+    console.log(`long-term potential: ${written} symbol(s) currently near a fresh multi-month/year low${candidates.length ? ' -- ' + candidates.map((c) => `${c.symbol} (${c.daysSinceLow}d since low)`).join(', ') : ''}`);
+  } catch (e) {
+    console.error('long-term potential computation failed:', e.message);
   }
 
   try {

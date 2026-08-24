@@ -754,6 +754,19 @@ export async function loadRotationStatus(env) {
   return out;
 }
 
+// "Long-term potential" candidates (user-requested 2026-08-24) —
+// computeLongTermBottomCandidates/replaceLongTermBottomCandidates
+// (archive.mjs) refresh this daily; see detectPossibleLongTermBottom's
+// own docs (worker.js) for the real research behind it and why it
+// carries no ranking/confidence signal. Purely descriptive; not
+// financial advice.
+export async function loadLongTermBottomStatus(env) {
+  const rows = await d1(env, 'SELECT symbol, low_close, low_date, days_since_low, current_close, pct_above_low FROM long_term_bottom_status');
+  const out = {};
+  for (const r of rows) out[r.symbol] = { lowClose: r.low_close, lowDate: r.low_date, daysSinceLow: r.days_since_low, currentClose: r.current_close, pctAboveLow: r.pct_above_low };
+  return out;
+}
+
 // { [followerSymbol]: [{leaderSymbol, lagDays, corr, samples}] } — grouped
 // by follower for direct per-asset lookup by the leadlag technique
 // (worker.js). Relationships are (re)computed daily by computeLeadLag
