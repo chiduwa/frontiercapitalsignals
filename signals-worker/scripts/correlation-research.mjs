@@ -638,26 +638,42 @@ async function main() {
     if (finding) findings.push(finding);
   }
 
-  // Market-wide coincidence: of the moonshot troughs, how many fell within
-  // 60 days of at least 3 OTHER tracked symbols' own isolated troughs —
-  // "was this a systemic, market-wide bottom" vs "this asset alone." Every
-  // symbol's own trough list is already sitting in allTroughs, grouped
-  // here by symbol once rather than re-scanned per moonshot.
+  // Market-wide coincidence, properly tested this time — user-requested
+  // 2026-08-24 follow-up: the first pass only described HOW OFTEN moonshot
+  // troughs were coincident with others (79%), which doesn't actually say
+  // whether coincidence PREDICTS anything — ordinary troughs might be just
+  // as commonly coincident, in which case a crowded bottom is simply the
+  // usual backdrop either way, not a real signal. This computes the same
+  // coincidence COUNT (other tracked symbols with their own trough within
+  // 60 days) for every real trough, moonshot AND control alike, then runs
+  // the same guarded pooled + chronological-half-split test as every
+  // other hypothesis here — an actual comparison, not just one group's
+  // own description.
   const troughDatesBySymbol = {};
   for (const t of allTroughs) (troughDatesBySymbol[t.symbol] ??= []).push(t.date);
-  let systemicCount = 0;
-  for (const m of moonshots) {
-    const windowStart = new Date(new Date(m.date).getTime() - 60 * 86400000).toISOString().slice(0, 10);
-    const windowEnd = new Date(new Date(m.date).getTime() + 60 * 86400000).toISOString().slice(0, 10);
-    let coincident = 0;
+  function coincidentCount(trough) {
+    const windowStart = new Date(new Date(trough.date).getTime() - 60 * 86400000).toISOString().slice(0, 10);
+    const windowEnd = new Date(new Date(trough.date).getTime() + 60 * 86400000).toISOString().slice(0, 10);
+    let n = 0;
     for (const [sym, dates] of Object.entries(troughDatesBySymbol)) {
-      if (sym === m.symbol) continue;
-      if (dates.some((d) => d >= windowStart && d <= windowEnd)) coincident++;
+      if (sym === trough.symbol) continue;
+      if (dates.some((d) => d >= windowStart && d <= windowEnd)) n++;
     }
-    if (coincident >= 3) systemicCount++;
+    return n;
   }
+  const moonshotCoincidence = moonshots.map((t) => ({ date: t.date, value: coincidentCount(t) }));
+  const controlCoincidence = controls.map((t) => ({ date: t.date, value: coincidentCount(t) }));
   if (moonshots.length) {
-    console.log(`[moonshot market-wide coincidence] ${systemicCount}/${moonshots.length} (${((systemicCount / moonshots.length) * 100).toFixed(0)}%) moonshot troughs fell within 60 days of at least 3 other tracked symbols' own troughs -- descriptive only, not a hypothesis test (no independent control-group comparison here, just how common a systemic-bottom backdrop is among the moonshot cases themselves)`);
+    const systemicCount = moonshotCoincidence.filter((c) => c.value >= 3).length;
+    const controlSystemicCount = controlCoincidence.filter((c) => c.value >= 3).length;
+    console.log(`[moonshot market-wide coincidence] moonshot troughs: ${systemicCount}/${moonshots.length} (${((systemicCount / moonshots.length) * 100).toFixed(0)}%) had >=3 other symbols also trough within 60 days -- control (non-moonshot) troughs: ${controlSystemicCount}/${controls.length} (${controls.length ? ((controlSystemicCount / controls.length) * 100).toFixed(0) : 'n/a'}%)`);
+  }
+  const coincidenceHypothesis = 'moonshot_trough_more_coincident_than_control';
+  if (moonshotCoincidence.length < MIN_MOONSHOT_SAMPLE || controlCoincidence.length < MIN_MOONSHOT_SAMPLE) {
+    console.log(`[${coincidenceHypothesis}] too few samples (moonshot=${moonshotCoincidence.length}, control=${controlCoincidence.length}) — skipped`);
+  } else {
+    const finding = runGuardedTest(coincidenceHypothesis, 'crypto', null, moonshotCoincidence, controlCoincidence);
+    if (finding) findings.push(finding);
   }
 
   console.log(`correlation-research: ${findings.length} validated finding(s)`);
