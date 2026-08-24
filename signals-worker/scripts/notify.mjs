@@ -139,11 +139,26 @@ export async function checkAndNotifyReversals(env, nowIso, lookbackHours = 4) {
 // asset_events itself already uses (see schema.sql) -- the full 600+
 // history gets re-matched every daily run, so without this every already-
 // known hack would re-alert daily forever.
+//
+// RECENCY_MAX_DAYS guards a real bug found live, 2026-08-24: dedup alone
+// only stops an ALREADY-SEEN event from re-alerting -- it does nothing on
+// a symbol's FIRST-ever pass, when notification_state has no row for it
+// yet. Against DeFiLlama's full multi-year history, that meant the very
+// first time this ran, every tracked symbol's oldest matched hack fired
+// an alert regardless of whether it happened in 2026 or 2020. User's own
+// framing: alerts should land "a few seconds to a few hours, max a day or
+// two" after the real event -- so this is a hard filter on event_date
+// BEFORE the dedup check ever runs, not a dedup problem to solve more
+// cleverly. DeFiLlama's hack records carry only a date, not a precise
+// timestamp, so the window is necessarily date-granular.
+const HACK_ALERT_MAX_AGE_DAYS = 2;
+
 export async function notifyOnNewHacks(env, matched, nowIso) {
   if (!env.NTFY_TOPIC) return 0;
+  const cutoffDate = new Date(new Date(nowIso).getTime() - HACK_ALERT_MAX_AGE_DAYS * 86400000).toISOString().slice(0, 10);
   let sent = 0;
   for (const h of matched) {
-    if (!h.symbol) continue;
+    if (!h.symbol || h.date < cutoffDate) continue;
     const amountStr = h.amount ? `$${(h.amount / 1e6).toFixed(1)}M` : 'undisclosed amount';
     const notified = await notifyOnChange(env, 'hack', h.symbol, `${h.date}|${h.name}`, {
       title: `URGENT: ${h.symbol} hacked`,
