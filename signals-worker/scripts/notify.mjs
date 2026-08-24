@@ -45,6 +45,13 @@ async function sendNtfy(topic, { title, message, priority = 'default', tags = []
 // (date, description) key; a reversal transition's own run_at) and
 // IDENTICAL between repeated observations of the exact same occurrence.
 // Returns true only if a notification was actually sent.
+//
+// Also appends to notification_log -- a real, permanent history of every
+// notification ever sent, distinct from notification_state's own
+// current-value-only, no-history design (see that table's own docs).
+// User-requested 2026-08-24: an RSS feed "on the side" for news/alerts,
+// which needs an actual list to read from, not just the latest dedup
+// state per (kind, symbol) — see the Worker's /api/feed route.
 export async function notifyOnChange(env, kind, symbol, value, notification, nowIso) {
   if (!env.NTFY_TOPIC) return false;
   const existing = await d1(env, 'SELECT last_value FROM notification_state WHERE kind = ? AND symbol = ?', [kind, symbol]);
@@ -54,6 +61,9 @@ export async function notifyOnChange(env, kind, symbol, value, notification, now
     INSERT INTO notification_state (kind, symbol, last_value, last_sent_at) VALUES (?, ?, ?, ?)
     ON CONFLICT (kind, symbol) DO UPDATE SET last_value = excluded.last_value, last_sent_at = excluded.last_sent_at
   `, [kind, symbol, value, nowIso]);
+  await d1(env, `
+    INSERT INTO notification_log (kind, symbol, title, message, priority, click_url, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `, [kind, symbol, notification.title, notification.message, notification.priority || 'default', notification.click || null, nowIso]);
   return true;
 }
 

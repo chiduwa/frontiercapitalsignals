@@ -3560,6 +3560,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
 })();</script>
 <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','GTM-5Q7JC6JX');</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230A101D'/%3E%3Crect x='6' y='18' width='4' height='8' fill='%23FFB224'/%3E%3Crect x='13' y='12' width='4' height='14' fill='%23FFB224'/%3E%3Crect x='20' y='6' width='4' height='20' fill='%23FFB224'/%3E%3C/svg%3E">
+<link rel="alternate" type="application/rss+xml" title="Frontier Capital Signals — Alerts" href="/signals/api/feed">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -3751,6 +3752,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     <div class="mast-grid">
       <div>
         <a class="home-link" href="https://frontiercapitalsignals.com/">← Frontier Capital Signals home</a>
+        <a class="home-link rss-link" href="/signals/api/feed" title="Subscribe in any RSS reader for a persistent, browsable history of every alert — a complement to the ntfy push channel, which only shows what's live right now">📡 Alerts RSS feed</a>
         <h1>Frontier Capital<br><span class="amber">Signals</span></h1>
         <p class="dek">Confluence screens across the <b>top 100 cryptos</b> and <b>61 US equities</b>. Up to <b>32 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to funding-rate percentiles, open interest, Fibonacci retracements, time-of-day/day-of-week bias, intraday swing-timing, hack/exploit severity, market sentiment, options-implied volatility, earnings-calendar risk, key support/resistance breaks, accumulation/distribution, a broad-market composite, and a yield-curve read validated against the tracked history of every major breakout and breakdown, must point the <b>same direction</b> before a signal ranks — each with an <b>expected timeframe</b> learned from its own track record. Prices, funding, and sentiment archive permanently for deep multi-year pattern analysis. <b>Analysis syncs hourly; price and 24h change tick live</b> in between.</p>
       </div>
@@ -4279,6 +4281,14 @@ const PAGE_CSP = [
   "base-uri 'none'"
 ].join('; ');
 
+// XML 1.0's five predefined entities — everything the RSS feed route
+// (/api/feed) needs to escape in title/description/link text pulled
+// straight from notification_log, which can contain any of these
+// (a description like `SYMBOL: "Some & Co." hacked -- $1.2M`).
+function xmlEscape(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
+}
+
 function json(obj, extraHeaders) {
   return new Response(JSON.stringify(obj), {
     headers: {
@@ -4409,6 +4419,49 @@ export default {
     // off the Worker, not to ban D1 outright. An occasional single-symbol
     // read is trivial by comparison and stays well inside Workers Free
     // plan's per-request limits regardless of which plan is active.
+    // RSS feed of every notification actually sent (reversal/peak-bottom,
+    // hack, sudden-move — see scripts/notify.mjs) — user-requested
+    // 2026-08-24, "a sort of rss feed on the side for the news and
+    // notifications," a persistent, browsable/subscribable complement to
+    // the ntfy push channel (which is momentary — nothing to look back
+    // through once a notification's gone). Same narrow D1-read exception
+    // as /api/asset/ above, same rate limiting.
+    if (path === '/api/feed' || path === 'api/feed' || path === '/api/feed.xml' || path === 'api/feed.xml') {
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      if (isRateLimited(ip)) {
+        return new Response('rate limited, try again shortly', { status: 429, headers: { 'Retry-After': '60', ...SECURITY_HEADERS } });
+      }
+      if (!env.FCS_DB) return new Response('feed not available (D1 not bound)', { status: 503, headers: SECURITY_HEADERS });
+      try {
+        const rows = await env.FCS_DB.prepare('SELECT kind, symbol, title, message, click_url, sent_at FROM notification_log ORDER BY sent_at DESC LIMIT 100').all();
+        const items = (rows.results || []).map((r) => {
+          const link = r.click_url || 'https://frontiercapitalsignals.com/signals/';
+          return `<item>
+      <title>${xmlEscape(r.title)}</title>
+      <link>${xmlEscape(link)}</link>
+      <description>${xmlEscape(r.message)}</description>
+      <category>${xmlEscape(r.kind)}</category>
+      <pubDate>${new Date(r.sent_at).toUTCString()}</pubDate>
+      <guid isPermaLink="false">fcs-${xmlEscape(r.kind)}-${xmlEscape(r.symbol)}-${xmlEscape(r.sent_at)}</guid>
+    </item>`;
+        }).join('\n    ');
+        const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Frontier Capital Signals — Alerts</title>
+    <link>https://frontiercapitalsignals.com/signals/</link>
+    <description>Peak/bottom signals, hack alerts, and sudden-move alerts from the FCS confluence engine.</description>
+    <language>en-us</language>
+    <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
+    ${items}
+  </channel>
+</rss>`;
+        return new Response(xml, { headers: { 'Content-Type': 'application/rss+xml; charset=utf-8', 'Cache-Control': 'public, max-age=300', ...SECURITY_HEADERS } });
+      } catch (e) {
+        return new Response('feed query failed: ' + String((e && e.message) || e), { status: 500, headers: SECURITY_HEADERS });
+      }
+    }
+
     if (path.startsWith('/api/asset/') || path.startsWith('api/asset/')) {
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       if (isRateLimited(ip)) {

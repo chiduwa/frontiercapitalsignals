@@ -714,3 +714,21 @@ CREATE TABLE IF NOT EXISTS notification_state (
   last_sent_at TEXT NOT NULL,
   PRIMARY KEY (kind, symbol)
 );
+
+-- The actual permanent history notification_state deliberately doesn't
+-- keep -- one row per notification actually sent, read by the Worker's
+-- /api/feed RSS route (worker.js). User-requested 2026-08-24: "a sort of
+-- rss feed on the side for the news and notifications," a persistent,
+-- browsable complement to the ntfy push channel (which only shows what's
+-- live right now, nothing to look back through once it's gone).
+CREATE TABLE IF NOT EXISTS notification_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  priority TEXT NOT NULL,
+  click_url TEXT,
+  sent_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notification_log_sent_at ON notification_log(sent_at);

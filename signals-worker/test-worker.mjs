@@ -152,14 +152,21 @@ class MockKV {
 // style as stubbedFetch's URL matching above) since this mock only ever
 // needs to serve the one route (/api/asset/:symbol) that reads D1 directly.
 class MockD1 {
-  constructor(seed) { this.seed = seed || { technique_reliability: [], range_reliability: [], asset_score_snapshots: [] }; }
+  constructor(seed) { this.seed = seed || { technique_reliability: [], range_reliability: [], asset_score_snapshots: [], notification_log: [] }; }
   prepare(sql) {
     const table = sql.includes('technique_reliability') ? 'technique_reliability'
       : sql.includes('range_reliability') ? 'range_reliability'
       : sql.includes('asset_score_snapshots') ? 'asset_score_snapshots'
+      : sql.includes('notification_log') ? 'notification_log'
       : null;
     const rows = (table && this.seed[table]) || [];
-    return { bind: (symbol) => ({ all: async () => ({ results: rows.filter((r) => r.symbol === symbol) }) }) };
+    return {
+      bind: (symbol) => ({ all: async () => ({ results: rows.filter((r) => r.symbol === symbol) }) }),
+      // /api/feed's query has no bind params (a plain top-N SELECT) —
+      // .all() callable directly on prepare()'s own return, distinct from
+      // the .bind(symbol).all() chain every other D1-bound route here uses.
+      all: async () => ({ results: rows })
+    };
   }
 }
 
@@ -1707,6 +1714,34 @@ check('the 41st request from the same IP within the window is rate-limited (429)
 check('rate-limit response includes Retry-After', rl41st.headers.get('retry-after') === '60');
 const rlDifferentIp = await worker.fetch(rlRequest('203.0.113.9'), d1Env, ctx);
 check('a different IP is not affected by another IP\'s rate limit', rlDifferentIp.status === 200, rlDifferentIp.status);
+
+console.log('\n== api: /api/feed — RSS feed of every notification actually sent (2026-08-24, "a sort of rss feed on the side for the news and notifications") ==');
+const feedSeed = {
+  technique_reliability: [], range_reliability: [], asset_score_snapshots: [],
+  notification_log: [
+    { kind: 'hack', symbol: 'BTC', title: 'URGENT: BTC hacked', message: 'BTC: "Some & <Weird> Exchange" -- $1.2M, "exploit", 2026-08-23.', click_url: 'https://frontiercapitalsignals.com/signals/', sent_at: '2026-08-24T01:00:00.000Z' },
+    { kind: 'reversal', symbol: 'ETH', title: 'ETH bottomed', message: 'ETH (crypto) flagged a bottomed reversal near 2400.', click_url: 'https://frontiercapitalsignals.com/signals/', sent_at: '2026-08-23T12:00:00.000Z' }
+  ]
+};
+const feedEnv = { FCS_CACHE: new MockKV(), FCS_DB: new MockD1(feedSeed) };
+const feedIp = '198.51.100.20'; // fresh IP, unrelated to the /api/asset/ rate-limit tests above (isRateLimited's tracking is shared/global across all routes, not per-route)
+const feedResp = await worker.fetch(new Request('https://x.com/signals/api/feed', { headers: { 'CF-Connecting-IP': feedIp } }), feedEnv, ctx);
+const feedBody = await feedResp.text();
+check('served as RSS XML with the right content-type', feedResp.status === 200 && (feedResp.headers.get('content-type') || '').includes('application/rss+xml'), feedResp.headers.get('content-type'));
+check('valid RSS 2.0 envelope (channel title/link/description present)', feedBody.includes('<rss version="2.0">') && feedBody.includes('<channel>') && feedBody.includes('<title>Frontier Capital Signals'), feedBody.slice(0, 200));
+check('both seeded notifications appear as items, most recent first', feedBody.indexOf('BTC hacked') < feedBody.indexOf('ETH bottomed') && feedBody.indexOf('ETH bottomed') !== -1);
+check('XML-escapes special characters in title/message (a raw & or < would produce invalid, unparseable XML)', feedBody.includes('Some &amp; &lt;Weird&gt; Exchange') && !feedBody.includes('Some & <Weird>'), feedBody.includes('Some & <Weird>'));
+check('each item carries a stable, non-permalink guid and a real pubDate', feedBody.includes('<guid isPermaLink="false">fcs-hack-BTC-') && feedBody.includes('<pubDate>'));
+check('feed link auto-discovery tag present in the dashboard page head', pageText.includes('rel="alternate"') && pageText.includes('type="application/rss+xml"') && pageText.includes('/signals/api/feed'));
+check('visible feed link present on the dashboard', pageText.includes('rss-link') && pageText.includes('Alerts RSS feed'));
+
+const feedNoD1Resp = await worker.fetch(new Request('https://x.com/signals/api/feed', { headers: { 'CF-Connecting-IP': '198.51.100.21' } }), emptyEnv, ctx);
+check('D1 not bound: graceful 503, not a crash', feedNoD1Resp.status === 503);
+
+const feedEmptyEnv = { FCS_CACHE: new MockKV(), FCS_DB: new MockD1({ technique_reliability: [], range_reliability: [], asset_score_snapshots: [], notification_log: [] }) };
+const feedEmptyResp = await worker.fetch(new Request('https://x.com/signals/api/feed', { headers: { 'CF-Connecting-IP': '198.51.100.22' } }), feedEmptyEnv, ctx);
+const feedEmptyBody = await feedEmptyResp.text();
+check('no notifications sent yet: still a valid, well-formed empty feed, not an error', feedEmptyResp.status === 200 && feedEmptyBody.includes('<channel>') && feedEmptyBody.includes('</channel>'), feedEmptyBody.slice(0, 200));
 
 console.log('\n== selectIntradayWatchlist: curated day-trading watchlist, liquidity-proxied by open interest ==');
 const wlCrypto = [
