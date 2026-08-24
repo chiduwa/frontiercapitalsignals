@@ -1128,6 +1128,15 @@ check('price has already rallied well away from the low: no longer qualifies (th
 check('not enough history yet to judge a full lookback window: no crash, null', mod.detectPossibleLongTermBottom(ltpQualifyingBars.slice(0, 50), 100, 10, 20) === null);
 check('empty history: no crash, null', mod.detectPossibleLongTermBottom([], 100, 10, 20) === null);
 
+console.log('\n== CRYPTO_BLOCKLIST: stablecoins/wrapped assets excluded from the tracked universe ==');
+// Found live 2026-08-24 verifying the long-term-potential category:
+// BFUSD/GHO/USD1 all traded in a tight $0.96-$1.01 band across their
+// full archived history (confirmed via direct query) but were missing
+// from this list, showing up as false "long-term potential" candidates
+// by virtue of never moving much at all. A real gap, not a hypothetical.
+check('the three stablecoins found live 2026-08-24 are blocked', mod.CRYPTO_BLOCKLIST.has('bfusd') && mod.CRYPTO_BLOCKLIST.has('gho') && mod.CRYPTO_BLOCKLIST.has('usd1'));
+check('pre-existing blocklist entries are still intact (not accidentally replaced)', mod.CRYPTO_BLOCKLIST.has('usdt') && mod.CRYPTO_BLOCKLIST.has('wbtc') && mod.CRYPTO_BLOCKLIST.size >= 50, mod.CRYPTO_BLOCKLIST.size);
+
 console.log('\n== levelChangeBefore: N-trading-day level change ending at/before a target date, gap-tolerant ==');
 const yieldBars = [
   { date: '2026-01-02', close: 4.5 }, { date: '2026-01-05', close: 4.45 }, // weekday-only series -- 01-03/04 are a weekend, correctly absent

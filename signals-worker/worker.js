@@ -99,7 +99,14 @@ export const CRYPTO_BLOCKLIST = new Set([
   'lusd','susd','usdd','usdy','usd0','usdtb','rlusd','eurc','eurt','usdx','buidl',
   'wbtc','weth','wsteth','steth','cbbtc','cbeth','reth','weeth','rseth','ezeth',
   'jitosol','msol','bnsol','tbtc','lbtc','solvbtc','wbeth','frxeth','sfrxeth',
-  'oseth','lseth','swbtc','meth','susds','sdai','xaut','jlp','wbnb'
+  'oseth','lseth','swbtc','meth','susds','sdai','xaut','jlp','wbnb',
+  // Found live 2026-08-24 while verifying the long-term-potential
+  // category: all three traded in a tight $0.96-$1.01 band across their
+  // full archived history (confirmed via direct query, not assumed from
+  // the ticker name) — stable-value assets that slipped past this list
+  // and were showing up as false "long-term potential" candidates simply
+  // by virtue of never moving much at all.
+  'bfusd','gho','usd1'
 ]);
 
 export const STOCK_WATCHLIST = [

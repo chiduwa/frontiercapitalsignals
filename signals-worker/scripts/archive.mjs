@@ -15,7 +15,7 @@
 // two are genuinely the same need either way: "what's in the universe" and
 // "what's each coin's live funding right now."
 import { d1, chunk } from './d1-client.mjs';
-import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, computeSpreadSeries, levelChangeBefore, detectOutperformanceRotation, detectPossibleLongTermBottom } from '../worker.js';
+import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, computeSpreadSeries, levelChangeBefore, detectOutperformanceRotation, detectPossibleLongTermBottom, CRYPTO_BLOCKLIST } from '../worker.js';
 
 const UA = 'Mozilla/5.0 (compatible; FrontierCapitalSignals/2.0)';
 
@@ -1002,7 +1002,16 @@ export async function computeLongTermBottomCandidates(env) {
 
   const out = [];
   for (const [symbol, bars] of Object.entries(bySymbol)) {
-    if (symbol.includes(':') || bars.length < 365) continue; // pseudo-symbols (SECTOR:/MCAP:/SPREAD:/TVL:) aren't real, holdable assets
+    // Pseudo-symbols (SECTOR:/MCAP:/SPREAD:/TVL:) aren't real, holdable
+    // assets. CRYPTO_BLOCKLIST (stablecoins/wrapped assets) needs an
+    // explicit re-check here even though it already gates the live
+    // universe elsewhere — this reads asset_daily_bars directly, the full
+    // ARCHIVE, which includes history for symbols the blocklist would
+    // otherwise keep out of every other computation (defense-in-depth:
+    // a $1-pegged asset trivially sits "near its own low" forever simply
+    // by never moving, a false positive this category is specifically
+    // vulnerable to in a way most other techniques are not).
+    if (symbol.includes(':') || bars.length < 365 || CRYPTO_BLOCKLIST.has(symbol.toLowerCase())) continue;
     const candidate = detectPossibleLongTermBottom(bars);
     if (candidate) out.push({ symbol, ...candidate });
   }
