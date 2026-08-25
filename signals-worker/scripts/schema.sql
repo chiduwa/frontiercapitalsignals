@@ -10,6 +10,12 @@ CREATE TABLE IF NOT EXISTS asset_price_log (
   PRIMARY KEY (run_at, symbol)
 );
 
+-- The PK leads with run_at, but the dominant read shape across reliability.mjs
+-- and notify.mjs is "most recent price for these symbols" (WHERE symbol IN
+-- (...) ORDER BY run_at DESC) — a shape the PK can't serve, forcing a full
+-- table scan every time it ran. This index matches that shape directly.
+CREATE INDEX IF NOT EXISTS idx_asset_price_log_symbol_run_at ON asset_price_log(symbol, run_at DESC);
+
 CREATE TABLE IF NOT EXISTS technique_votes (
   run_at TEXT NOT NULL,
   asset_class TEXT NOT NULL,
@@ -34,6 +40,14 @@ CREATE TABLE IF NOT EXISTS technique_reliability (
 );
 
 CREATE INDEX IF NOT EXISTS idx_technique_votes_run_at ON technique_votes(run_at);
+
+-- Partial indexes for evaluateMatured's maturity scan (reliability.mjs,
+-- WHERE run_at <= ? AND evaluated_24/168 = 0). idx_technique_votes_run_at
+-- above only narrows by time, still forcing a scan of every retained row
+-- (most already evaluated) to find the few still pending; these contain
+-- only not-yet-matured rows and shrink automatically as rows get evaluated.
+CREATE INDEX IF NOT EXISTS idx_technique_votes_pending_24 ON technique_votes(run_at) WHERE evaluated_24 = 0;
+CREATE INDEX IF NOT EXISTS idx_technique_votes_pending_168 ON technique_votes(run_at) WHERE evaluated_168 = 0;
 
 -- Realized move size per asset per horizon (mean/stdev via running sum and
 -- sum-of-squares), independent of any technique — a fixed aggregate keyed
@@ -106,6 +120,15 @@ CREATE TABLE IF NOT EXISTS asset_daily_bars (
   source TEXT NOT NULL,
   PRIMARY KEY (symbol, date)
 );
+
+-- computeMarketComposite/computeOutperformanceRotations/computeLongTerm-
+-- BottomCandidates (archive.mjs, run daily) each filter this table by
+-- asset_class = 'crypto' (one also OR's in symbol = 'MCAP:BROAD') with
+-- nothing to use but the (symbol, date) PK — full scans of the whole table
+-- on every run. Can't dedupe these into one shared read the way lead-lag/
+-- support-resistance already do (daily-refresh.mjs) since each depends on
+-- data the previous one just wrote, so an index is the safe fix here.
+CREATE INDEX IF NOT EXISTS idx_asset_daily_bars_asset_class ON asset_daily_bars(asset_class, symbol, date);
 
 -- Daily funding-rate + open-interest archive for perpetual contracts, from
 -- Bybit (both the live-snapshot ticker endpoint already used in worker.js
@@ -530,7 +553,12 @@ CREATE TABLE IF NOT EXISTS asset_hourly_bars (
   source TEXT NOT NULL,
   PRIMARY KEY (symbol, bar_at)
 );
-CREATE INDEX IF NOT EXISTS idx_asset_hourly_bars_symbol ON asset_hourly_bars(symbol, bar_at);
+-- No secondary index here: (symbol, bar_at) is already this table's own
+-- PRIMARY KEY. A duplicate idx_asset_hourly_bars_symbol(symbol, bar_at)
+-- index used to exist too — same columns, same order, zero read benefit
+-- over the PK, but still costing one extra written row on every insert.
+-- Dropped 2026-08-25.
+DROP INDEX IF EXISTS idx_asset_hourly_bars_symbol;
 
 -- Backtest-seeds the live intraday_reliability table's own numbers by
 -- replaying replayIntradaySignal (worker.js) against ~2 years of Binance

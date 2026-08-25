@@ -128,6 +128,12 @@ async function main() {
         const written = await upsertDailyBars(env, toWrite);
         priceRowsWritten += written;
         rowsWrittenThisRun += written;
+        if (written) {
+          const writtenDates = toWrite.map((b) => b.date);
+          const newMin = writtenDates.reduce((m, d) => (m === null || d < m ? d : m), minExisting);
+          const newMax = writtenDates.reduce((m, d) => (m === null || d > m ? d : m), maxExisting);
+          coverage[a.symbol] = { minDate: newMin, maxDate: newMax, count: (existing ? existing.count : 0) + written };
+        }
       }
     }
     await new Promise((r) => setTimeout(r, 250));
@@ -300,7 +306,11 @@ async function main() {
     console.error('Binance.US backfill failed:', e.message);
   }
 
-  const finalCoverage = await getExistingCoverage(env, universe.map((u) => u.symbol));
+  // Reuses `coverage`, updated in place above as each symbol's fresh rows
+  // were written, instead of re-querying — was a second full GROUP BY scan
+  // of the entire asset_daily_bars table just to log a summary that's
+  // already fully derivable from what this run itself wrote.
+  const finalCoverage = coverage;
   const depths = Object.values(finalCoverage).map((c) => c.count).sort((a, b) => a - b);
   const totalRows = depths.reduce((a, b) => a + b, 0);
   const covered = Object.keys(finalCoverage).length;
