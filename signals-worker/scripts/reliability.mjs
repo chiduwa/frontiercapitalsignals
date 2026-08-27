@@ -365,7 +365,7 @@ export async function evaluateMatured(env, nowIso) {
       if (after >= r.low && after <= r.high) rangeDeltas[r.symbol].hits += 1;
       (evaluatedRangesByRunAt[r.run_at] ??= new Set()).add(r.symbol);
     }
-    for (const [symbol, d] of Object.entries(rangeDeltas)) {
+    await forEachConcurrent(Object.entries(rangeDeltas), D1_WRITE_CONCURRENCY, async ([symbol, d]) => {
       await d1(env, `
         INSERT INTO range_reliability (asset_class, symbol, horizon_hours, hits, total, accuracy, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -375,13 +375,14 @@ export async function evaluateMatured(env, nowIso) {
           accuracy = CAST(range_reliability.hits + excluded.hits AS REAL) / (range_reliability.total + excluded.total),
           updated_at = excluded.updated_at
       `, [d.asset_class, symbol, h, d.hits, d.total, d.total ? d.hits / d.total : 0, nowIso]);
-    }
-    for (const [runAt, symbols] of Object.entries(evaluatedRangesByRunAt)) {
-      for (const batch of chunk([...symbols], CHUNK)) {
-        const placeholders = batch.map(() => '?').join(',');
-        await d1(env, `DELETE FROM range_log WHERE horizon_hours = ? AND run_at = ? AND symbol IN (${placeholders})`, [h, runAt, ...batch]);
-      }
-    }
+    });
+    const rangeDeletionJobs = Object.entries(evaluatedRangesByRunAt).flatMap(([runAt, symbols]) =>
+      chunk([...symbols], CHUNK).map((symbolsBatch) => ({ runAt, symbolsBatch }))
+    );
+    await forEachConcurrent(rangeDeletionJobs, D1_WRITE_CONCURRENCY, async ({ runAt, symbolsBatch }) => {
+      const placeholders = symbolsBatch.map(() => '?').join(',');
+      await d1(env, `DELETE FROM range_log WHERE horizon_hours = ? AND run_at = ? AND symbol IN (${placeholders})`, [h, runAt, ...symbolsBatch]);
+    });
 
     const deltas = {}; // "symbol|technique_id" -> { correct, total, asset_class }
     const moveDeltas = {}; // "symbol" -> { n, sumPct, sumPctSq } — one realized move per (symbol, run_at), deduped across techniques
@@ -477,7 +478,7 @@ export async function evaluateMatured(env, nowIso) {
         }
       }
     }
-    for (const d of Object.values(comboDeltas)) {
+    await forEachConcurrent(Object.values(comboDeltas), D1_WRITE_CONCURRENCY, async (d) => {
       await d1(env, `
         INSERT INTO technique_combo_reliability (symbol, technique_a, technique_b, horizon_hours, correct, total, accuracy, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -487,9 +488,9 @@ export async function evaluateMatured(env, nowIso) {
           accuracy = CAST(technique_combo_reliability.correct + excluded.correct AS REAL) / (technique_combo_reliability.total + excluded.total),
           updated_at = excluded.updated_at
       `, [d.symbol, d.a, d.b, h, d.correct, d.total, d.total ? d.correct / d.total : 0, nowIso]);
-    }
+    });
 
-    for (const d of Object.values(regimeDeltas)) {
+    await forEachConcurrent(Object.values(regimeDeltas), D1_WRITE_CONCURRENCY, async (d) => {
       await d1(env, `
         INSERT INTO technique_regime_reliability (symbol, technique_id, horizon_hours, regime, correct, total, accuracy, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -499,9 +500,9 @@ export async function evaluateMatured(env, nowIso) {
           accuracy = CAST(technique_regime_reliability.correct + excluded.correct AS REAL) / (technique_regime_reliability.total + excluded.total),
           updated_at = excluded.updated_at
       `, [d.symbol, d.technique_id, h, d.regime, d.correct, d.total, d.total ? d.correct / d.total : 0, nowIso]);
-    }
+    });
 
-    for (const [bucket, d] of Object.entries(calibDeltas)) {
+    await forEachConcurrent(Object.entries(calibDeltas), D1_WRITE_CONCURRENCY, async ([bucket, d]) => {
       await d1(env, `
         INSERT INTO score_calibration (bucket, correct, total, updated_at)
         VALUES (?, ?, ?, ?)
@@ -510,9 +511,9 @@ export async function evaluateMatured(env, nowIso) {
           total = score_calibration.total + excluded.total,
           updated_at = excluded.updated_at
       `, [Number(bucket), d.correct, d.total, nowIso]);
-    }
+    });
 
-    for (const d of Object.values(detailedCalibDeltas)) {
+    await forEachConcurrent(Object.values(detailedCalibDeltas), D1_WRITE_CONCURRENCY, async (d) => {
       await d1(env, `
         INSERT INTO score_calibration_detail (asset_class, dir, horizon_hours, bucket, correct, total, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -521,9 +522,9 @@ export async function evaluateMatured(env, nowIso) {
           total = score_calibration_detail.total + excluded.total,
           updated_at = excluded.updated_at
       `, [d.assetClass, d.dir, h, d.bucket, d.correct, d.total, nowIso]);
-    }
+    });
 
-    for (const [key, d] of Object.entries(deltas)) {
+    await forEachConcurrent(Object.entries(deltas), D1_WRITE_CONCURRENCY, async ([key, d]) => {
       const [symbol, techniqueId] = key.split('|');
       await d1(env, `
         INSERT INTO technique_reliability (asset_class, symbol, technique_id, horizon_hours, correct, total, accuracy, updated_at)
@@ -535,9 +536,9 @@ export async function evaluateMatured(env, nowIso) {
           updated_at = excluded.updated_at
       `, [d.asset_class, symbol, techniqueId, h, d.correct, d.total, d.total ? d.correct / d.total : 0, nowIso]);
       evaluatedCount += d.total;
-    }
+    });
 
-    for (const [symbol, d] of Object.entries(moveDeltas)) {
+    await forEachConcurrent(Object.entries(moveDeltas), D1_WRITE_CONCURRENCY, async ([symbol, d]) => {
       await d1(env, `
         INSERT INTO asset_move_stats (symbol, horizon_hours, n, sum_pct, sum_pct_sq, updated_at)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -547,14 +548,15 @@ export async function evaluateMatured(env, nowIso) {
           sum_pct_sq = asset_move_stats.sum_pct_sq + excluded.sum_pct_sq,
           updated_at = excluded.updated_at
       `, [symbol, h, d.n, d.sumPct, d.sumPctSq, nowIso]);
-    }
+    });
 
-    for (const [runAt, symSet] of Object.entries(evaluatedSymbolsByRunAt)) {
-      for (const batch of chunk([...symSet], CHUNK)) {
-        const placeholders = batch.map(() => '?').join(',');
-        await d1(env, `UPDATE technique_votes SET ${col} = 1 WHERE run_at = ? AND symbol IN (${placeholders})`, [runAt, ...batch]);
-      }
-    }
+    const evaluationMarkJobs = Object.entries(evaluatedSymbolsByRunAt).flatMap(([runAt, symSet]) =>
+      chunk([...symSet], CHUNK).map((symbolsBatch) => ({ runAt, symbolsBatch }))
+    );
+    await forEachConcurrent(evaluationMarkJobs, D1_WRITE_CONCURRENCY, async ({ runAt, symbolsBatch }) => {
+      const placeholders = symbolsBatch.map(() => '?').join(',');
+      await d1(env, `UPDATE technique_votes SET ${col} = 1 WHERE run_at = ? AND symbol IN (${placeholders})`, [runAt, ...symbolsBatch]);
+    });
   }
 
   const retentionCutoff = new Date(now - RETENTION_HOURS * 3600 * 1000).toISOString();
@@ -789,7 +791,7 @@ export async function evaluateTimeOfDay(env, nowIso, thisRunPrices) {
       }
     }
 
-    for (const [key, d_] of Object.entries(deltas)) {
+    await forEachConcurrent(Object.entries(deltas), D1_WRITE_CONCURRENCY, async ([key, d_]) => {
       const [symbol, slot] = key.split('|');
       await d1(env, `
         INSERT INTO time_of_day_stats (symbol, asset_class, slot, horizon_hours, n, sum_pct, sum_pct_sq, updated_at)
@@ -801,7 +803,7 @@ export async function evaluateTimeOfDay(env, nowIso, thisRunPrices) {
           updated_at = excluded.updated_at
       `, [symbol, d_.assetClass, slot, h, d_.n, d_.sumPct, d_.sumPctSq, nowIso]);
       updates++;
-    }
+    });
   }
   return updates;
 }
