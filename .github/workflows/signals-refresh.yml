@@ -16,25 +16,20 @@ on:
   # UTC, peak US GitHub usage), so more slots per hour has diminishing
   # returns against a multi-hour outage rather than a single missed pick.
   #
-  # Fix: */5 * * * * — GitHub's documented minimum interval (12x/hour).
-  # Still doesn't GUARANTEE freshness during a bad window, but maximizes
-  # the odds within what GitHub's own scheduler allows, without the added
-  # complexity/risk of routing this through an external trigger. Does NOT
-  # multiply real build cost — build-signals.mjs's own freshness pre-check
-  # (gated to `schedule` events only) skips the ~130-fetch rebuild whenever
-  # the last KV write is under ~50min old, so the actual expensive build
-  # still only runs roughly once an hour; the extra scheduled slots are
-  # cheap insurance, not extra work. This repo is public, so Actions minutes
-  # are free/unlimited regardless. If multi-hour gaps persist even at this
-  # frequency, the next step is an external trigger (cron-job.org, which
-  # this account already uses for KCE/ThriveWorks) calling a secret-gated
-  # Cloudflare Worker route rather than GitHub's own scheduler at all —
-  # deliberately not done here since it adds a new production endpoint, a
-  # new secret, and a new external dependency, and the user chose to try
-  # the free/simple option first.
+  # GitHub's native cron remains useful fallback coverage, but the Worker now
+  # has an independent Cloudflare cron that dispatches this workflow when the
+  # KV payload becomes stale. That dispatcher sends force=false, so this
+  # workflow preserves the same freshness gate and never turns repeated
+  # recovery attempts into repeated full rebuilds.
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Run a full rebuild even when the cached payload is still fresh"
+        required: false
+        default: true
+        type: boolean
 
 concurrency:
   # This run touches shared state (D1, KV) and now takes ~10-11 minutes;
@@ -82,6 +77,8 @@ jobs:
           TREFIS_OVERRIDES: ${{ vars.TREFIS_OVERRIDES }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           # Lets build-signals.mjs's freshness pre-check apply only to
-          # scheduled firings, never to a manual workflow_dispatch (which
-          # always means "I want a real rebuild right now").
+          # scheduled firings and Cloudflare's force=false recovery dispatch.
+          # A manual workflow dispatch defaults to true and still means
+          # "I want a real rebuild right now."
           GITHUB_EVENT_NAME: ${{ github.event_name }}
+          FORCE_REFRESH: ${{ inputs.force || 'false' }}

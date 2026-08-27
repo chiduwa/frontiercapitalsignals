@@ -17,7 +17,7 @@ import { checkAndNotifyReversals, checkAndNotifySuddenMoves, checkAndNotifyConso
 import { upsertMarketSentiment, loadRecentBars, loadTvlSeries, loadMarketReturn, loadYieldSpreadChange } from './archive.mjs';
 import { selectIntradayWatchlist } from './intraday.mjs';
 
-const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES, GITHUB_EVENT_NAME, NTFY_TOPIC } = process.env;
+const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES, GITHUB_EVENT_NAME, FORCE_REFRESH, NTFY_TOPIC } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID })) {
   if (!v) { console.error(`Missing required env var: ${name}`); process.exit(1); }
 }
@@ -26,18 +26,13 @@ const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, N
 
 // GitHub Actions' `schedule` trigger is only a request, not a guarantee —
 // confirmed live over 97 scheduled runs: average gap 142min against the
-// intended 60min cadence, worst observed 281min, never once early. This is
-// GitHub's own documented behavior (scheduled workflows queue and can be
-// delayed or dropped under load), not a bug in this job. The fix is on the
-// signals-refresh.yml side (fires 4x/hour instead of 1x, so a delayed/
-// dropped slot has three more chances that hour to land promptly) — this
-// check here is what keeps that from quadrupling real build cost: skip the
-// ~130-fetch rebuild and its D1 writes (which double-log votes/prices if
-// run twice in a short window, skewing reliability stats) when the last
-// build is still fresh, and only actually run when it's genuinely been a
-// while. Scoped to `schedule` only — a manual workflow_dispatch (e.g. to
-// verify a just-shipped change) always forces a real rebuild regardless of
-// how recent the last one was.
+// intended 60min cadence, worst observed 281min, never once early. The
+// Worker therefore has an independent Cloudflare cron that dispatches this
+// workflow when KV is stale. Both native schedule events and the dispatcher's
+// explicit force=false runs preserve this check: skip the ~130-fetch rebuild
+// and its D1 writes when the last build is still fresh, so recovery retries
+// cannot double-log votes/prices or turn into a queued rebuild backlog. A
+// manual workflow_dispatch defaults to force=true and still always rebuilds.
 const FRESH_ENOUGH_MINUTES = Number(process.env.SIGNALS_FRESH_ENOUGH_MINUTES || 50);
 
 // Phase 7 (event-driven refresh): a fresh-by-the-clock cache can still be
@@ -85,7 +80,9 @@ async function checkForBigMove(cachedOverview) {
   return null;
 }
 
-if (GITHUB_EVENT_NAME === 'schedule') {
+const obeyFreshnessGate = GITHUB_EVENT_NAME === 'schedule'
+  || (GITHUB_EVENT_NAME === 'workflow_dispatch' && String(FORCE_REFRESH).toLowerCase() === 'false');
+if (obeyFreshnessGate) {
   try {
     const checkUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${FCS_KV_NAMESPACE_ID}/values/${encodeURIComponent(CACHE_KEY)}`;
     const existingRes = await fetch(checkUrl, { headers: { Authorization: `Bearer ${CLOUDFLARE_API_TOKEN}` } });

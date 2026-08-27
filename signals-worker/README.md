@@ -10,8 +10,8 @@ The confluence engine (`buildPayload()` in `worker.js`) makes roughly 230 outbou
 
 So the work is split:
 
-- **`.github/workflows/signals-refresh.yml`** (repo root) runs `scripts/build-signals.mjs` on an hourly cron via GitHub Actions — a plain Node process with no such limits — and writes the resulting JSON straight into the Worker's KV namespace over the Cloudflare API. It also drives the reliability-learning loop against D1 (see below).
-- **`worker.js`** does only two things at request time: serve the static dashboard, and read that one KV key. No outbound fetches, negligible CPU — comfortably inside Workers Free plan.
+- **`.github/workflows/signals-refresh.yml`** (repo root) runs `scripts/build-signals.mjs` via GitHub Actions — a plain Node process with no such limits — and writes the resulting JSON straight into the Worker's KV namespace over the Cloudflare API. It also drives the reliability-learning loop against D1 (see below).
+- **`worker.js`** serves the static dashboard and reads that KV key at request time. Its lightweight five-minute Cloudflare cron makes no market-data calls or calculations; it only dispatches the existing GitHub workflow when the KV payload is stale, so GitHub's delayed native cron cannot leave the model stale for hours.
 
 If a build fails (upstream outage, etc.), `build-signals.mjs` exits non-zero without touching KV, so the Worker just keeps serving the last good payload rather than an empty one.
 
@@ -24,6 +24,7 @@ signals-worker/
 ├── wrangler.toml                 KV binding + route template
 ├── scripts/build-signals.mjs     Runs the engine, pushes the result to KV (called by the GitHub Action)
 ├── scripts/reliability.mjs       D1-backed reliability learning loop (load weights, log votes, score outcomes)
+├── migrations/                   Versioned additive D1 schema changes
 ├── test-worker.mjs               Integration harness: routing, KV serving, engine, and reliability weighting
 └── README.md
 ```
@@ -59,8 +60,9 @@ Then run the schema in `scripts/schema.sql` against it (`npx wrangler d1 execute
 | `FCS_KV_NAMESPACE_ID` | variable | The id returned by `wrangler kv namespace create` above. Not secret, just an identifier. |
 | `FCS_D1_DATABASE_ID` | variable | The uuid returned by `wrangler d1 create` above. Leave unset to run without reliability weighting (baseline weights only, no error). |
 | `TREFIS_OVERRIDES` | variable, optional | e.g. `{"AAPL":275.0,"NFLX":88.0}` — your own model price targets, if any. |
+| `GITHUB_ACTIONS_TOKEN` | secret, recommended | A fine-grained GitHub token restricted to this repo with **Actions: Read and write**. `signals-deploy.yml` securely copies it into the Worker as a secret so the five-minute stale-cache monitor can dispatch `Signals Refresh`; it is never sent to browsers, KV, or notifications. |
 
-Then trigger the workflow once manually (Actions tab → Signals Refresh → Run workflow) to populate KV immediately instead of waiting for the next hour. Visit `https://frontiercapitalsignals.com/signals`.
+After adding `GITHUB_ACTIONS_TOKEN`, push/redeploy once so `signals-deploy.yml` copies it to the Worker. Without it, the normal GitHub schedule remains a fallback but cannot self-recover from a multi-hour scheduling gap. Then trigger the workflow once manually (Actions tab → Signals Refresh → Run workflow, leaving **force** enabled) to populate KV immediately instead of waiting for the next run. Visit `https://frontiercapitalsignals.com/signals`.
 
 ## The techniques (16 at launch, 30 as of 2026-08-20 — see worker.js's TECHNIQUE_META for the current authoritative list)
 

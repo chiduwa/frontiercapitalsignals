@@ -39,6 +39,21 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
+      # Optional reliable-refresh bridge. Keeping this as a Worker secret
+      # avoids exposing the GitHub Actions token to browser code or KV data.
+      - name: Sync stale-cache dispatch token
+        working-directory: signals-worker
+        run: |
+          if [ -z "$GITHUB_ACTIONS_TOKEN" ]; then
+            echo "GITHUB_ACTIONS_TOKEN is not configured; stale-cache dispatch remains disabled"
+            exit 0
+          fi
+          printf '%s' "$GITHUB_ACTIONS_TOKEN" | npx --yes wrangler@4 secret put GITHUB_ACTIONS_TOKEN
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GITHUB_ACTIONS_TOKEN: ${{ secrets.GITHUB_ACTIONS_TOKEN }}
+
       # Enforced, not auto-fixed: wrangler deploys src/worker.js, but the
       # actual source of truth is worker.js at the signals-worker root (no
       # build step wires them together). A silent auto-copy here could

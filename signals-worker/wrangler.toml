@@ -19,12 +19,14 @@ binding = "FCS_DB"
 database_name = "frontier-capital-signals-reliability"
 database_id = "b07a4faa-8330-4b13-bf94-99fc662d4d6e"
 
-# No [triggers] cron here: the engine is too heavy for Workers Free plan's
-# 10ms CPU / 50-subrequest caps (~130 fetches + indicator math across ~260
-# assets). It instead runs hourly via a GitHub Actions workflow
-# (.github/workflows/signals-refresh.yml in the repo root), which calls
-# scripts/build-signals.mjs and writes straight into this KV namespace. This
-# Worker only ever reads that cache, so it stays well inside Free plan limits.
+# The cron does not run the engine: scheduled() reads one KV value and, only
+# when stale, dispatches the existing GitHub Actions build. It needs the
+# GITHUB_ACTIONS_TOKEN Worker secret documented in README.md.
+[triggers]
+crons = ["*/5 * * * *"]
+
+# The actual engine remains in GitHub Actions because ~130 fetches plus
+# indicator math across ~260 assets exceeds Workers Free plan limits.
 
 # Serve only on the /signals path of the existing zone; the rest of the site
 # on Cloudflare (the Next.js app) is untouched.

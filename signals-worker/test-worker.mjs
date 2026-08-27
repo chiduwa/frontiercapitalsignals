@@ -1,10 +1,11 @@
 // Integration test for the assembled Worker + engine. No real network.
 //
-// Architecture: the Worker only ever reads the KV cache at request time
-// (fits Workers Free plan's 50-subrequest/10ms-CPU caps); the engine
-// (buildPayload, ~130 outbound fetches + indicator math) runs externally,
-// in scripts/build-signals.mjs via a scheduled GitHub Action, and is
-// imported here directly to verify it still produces a sane payload.
+// Architecture: the Worker reads the KV cache at request time (fits Workers
+// Free plan's 50-subrequest/10ms-CPU caps). Its cron may dispatch the
+// external build only when that cache is stale; the engine itself
+// (buildPayload, ~130 outbound fetches + indicator math) runs in
+// scripts/build-signals.mjs via GitHub Actions and is imported here directly
+// to verify it still produces a sane payload.
 //
 // Run: node test-worker.mjs
 import { readFileSync } from 'node:fs';
@@ -146,6 +147,7 @@ class MockKV {
   constructor() { this.store = new Map(); }
   async get(k) { return this.store.has(k) ? this.store.get(k) : null; }
   async put(k, v) { this.store.set(k, v); }
+  async delete(k) { this.store.delete(k); }
 }
 
 // ---- mock D1 (Workers binding surface: prepare(sql).bind(...args).all()) --
@@ -178,8 +180,74 @@ const ctx = { waitUntil: (p) => { if (p && p.then) p.catch(() => {}); } };
 const src = readFileSync(join(__dirname, 'worker.js'), 'utf8');
 const mod = await import('data:text/javascript,' + encodeURIComponent(src));
 const worker = mod.default;
-check('worker exports fetch only (no in-Worker cron)', typeof worker.fetch === 'function' && worker.scheduled === undefined);
+check('worker exports fetch + stale-cache recovery cron', typeof worker.fetch === 'function' && typeof worker.scheduled === 'function');
 check('buildPayload + CACHE_KEY exported for scripts/build-signals.mjs', typeof mod.buildPayload === 'function' && typeof mod.CACHE_KEY === 'string');
+
+console.log('\n== stale-cache refresh dispatcher ==');
+const originalFetch = global.fetch;
+const dispatchCalls = [];
+global.fetch = async (url, init) => {
+  dispatchCalls.push({ url: String(url), init });
+  return { ok: true, status: 204 };
+};
+
+const freshDispatchEnv = {
+  FCS_CACHE: new MockKV(),
+  GITHUB_ACTIONS_TOKEN: 'test-dispatch-token'
+};
+await freshDispatchEnv.FCS_CACHE.put(mod.CACHE_KEY, JSON.stringify({ generated_at: new Date().toISOString() }));
+let scheduledWork;
+worker.scheduled({}, freshDispatchEnv, { waitUntil: (promise) => { scheduledWork = promise; } });
+const freshDispatchResult = await scheduledWork;
+check('fresh cache does not dispatch the refresh workflow', freshDispatchResult === false && dispatchCalls.length === 0, JSON.stringify(dispatchCalls));
+
+const staleDispatchEnv = {
+  FCS_CACHE: new MockKV(),
+  GITHUB_ACTIONS_TOKEN: 'test-dispatch-token'
+};
+await staleDispatchEnv.FCS_CACHE.put(mod.CACHE_KEY, JSON.stringify({
+  generated_at: new Date(Date.now() - (mod.CACHE_SECONDS + 1) * 1000).toISOString()
+}));
+let staleScheduledWork;
+worker.scheduled({}, staleDispatchEnv, { waitUntil: (promise) => { staleScheduledWork = promise; } });
+const staleDispatchResult = await staleScheduledWork;
+const dispatchRequest = dispatchCalls[0];
+const dispatchBody = dispatchRequest && JSON.parse(dispatchRequest.init.body);
+check('stale cache dispatches the existing refresh workflow once', staleDispatchResult === true && dispatchCalls.length === 1 && dispatchRequest.url.endsWith('/actions/workflows/signals-refresh.yml/dispatches'));
+check('recovery dispatch preserves the freshness gate with force=false', dispatchBody && dispatchBody.ref === 'main' && dispatchBody.inputs.force === 'false');
+check('recovery dispatch authenticates with the Worker secret', dispatchRequest && dispatchRequest.init.headers.Authorization === 'Bearer test-dispatch-token');
+const duplicateDispatchResult = await mod.dispatchRefreshIfStale(staleDispatchEnv);
+check('dispatcher lock prevents a duplicate dispatch while active', duplicateDispatchResult === false && dispatchCalls.length === 1);
+
+const missingTokenEnv = { FCS_CACHE: new MockKV() };
+await missingTokenEnv.FCS_CACHE.put(mod.CACHE_KEY, JSON.stringify({
+  generated_at: new Date(Date.now() - (mod.CACHE_SECONDS + 1) * 1000).toISOString()
+}));
+let missingTokenError;
+try {
+  await mod.dispatchRefreshIfStale(missingTokenEnv);
+} catch (error) {
+  missingTokenError = error;
+}
+check('missing dispatch token fails with a clear configuration error', missingTokenError && missingTokenError.message.includes('GITHUB_ACTIONS_TOKEN Worker secret is required'));
+
+const failedDispatchEnv = {
+  FCS_CACHE: new MockKV(),
+  GITHUB_ACTIONS_TOKEN: 'test-dispatch-token'
+};
+await failedDispatchEnv.FCS_CACHE.put(mod.CACHE_KEY, JSON.stringify({
+  generated_at: new Date(Date.now() - (mod.CACHE_SECONDS + 1) * 1000).toISOString()
+}));
+global.fetch = async () => ({ ok: false, status: 503 });
+let failedDispatchError;
+try {
+  await mod.dispatchRefreshIfStale(failedDispatchEnv);
+} catch (error) {
+  failedDispatchError = error;
+}
+check('failed GitHub dispatch surfaces its HTTP status', failedDispatchError && failedDispatchError.message.includes('HTTP 503'));
+check('failed GitHub dispatch clears the retry lock', await failedDispatchEnv.FCS_CACHE.get('signals:refresh-dispatch-lock') === null);
+global.fetch = originalFetch;
 
 console.log('\n== routing ==');
 const emptyEnv = { FCS_CACHE: new MockKV() };

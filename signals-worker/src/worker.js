@@ -1,11 +1,12 @@
 // ===========================================================================
 // FRONTIER CAPITAL SIGNALS — Cloudflare Worker (single file, no Vercel)
 //
-// One Worker serves the dashboard AND runs the confluence engine:
+// One Worker serves the dashboard and holds the confluence engine:
 //   GET  /signals            -> 301 to /signals/
 //   GET  /signals/           -> dashboard HTML
 //   GET  /signals/api/signals-> JSON (served from KV cache, <=60 min old)
-//   cron 0 * * * *           -> rebuilds the payload into KV every hour
+//   cron */5 * * * *         -> dispatches the external refresh workflow
+//                                only when the KV payload is stale
 //
 // The rest of frontiercapitalsignals.com is untouched: this Worker only
 // runs on the route you bind (frontiercapitalsignals.com/signals*).
@@ -17,13 +18,15 @@
 //        Variable name: FCS_CACHE   Namespace: FCS_CACHE
 //   4. Worker -> Settings -> Domains & Routes -> Add route:
 //        frontiercapitalsignals.com/signals*   (your zone)
-//   5. Worker -> Settings -> Triggers -> Cron Triggers -> add: 0 * * * *
-//   6. (optional valuation override) Settings -> Variables -> add
+//   5. Worker -> Settings -> Triggers -> Cron Triggers -> add: */5 * * * *
+//   6. Worker -> Settings -> Variables -> add the GITHUB_ACTIONS_TOKEN
+//        secret (see README) to enable stale-cache refresh dispatches.
+//   7. (optional valuation override) Settings -> Variables -> add
 //        TREFIS_OVERRIDES = {"AAPL":275.0,"NFLX":88.0}
 //   Then open https://frontiercapitalsignals.com/signals
 //
 //   wrangler alternative: put this at src/worker.js with a wrangler.toml
-//   declaring the KV binding + [triggers] crons = ["0 * * * *"], then
+//   declaring the KV binding + [triggers] crons = ["*/5 * * * *"], then
 //   `npx wrangler deploy`.
 // ===========================================================================
 
@@ -53,6 +56,14 @@ const INTRADAY_FRESH_SECONDS = 45 * 60;
 // ----------------------------- CONFIG ---------------------------------------
 
 export const CACHE_SECONDS = 3600;
+// GitHub Actions' native cron can delay or drop clusters of scheduled runs.
+// Cloudflare invokes this lightweight Worker cron independently; it reads one
+// KV value and only asks GitHub to run the existing heavy external build after
+// the cached payload actually becomes stale. The KV lock avoids repeat
+// dispatches while a delayed GitHub job is still starting.
+const REFRESH_DISPATCH_LOCK_KEY = 'signals:refresh-dispatch-lock';
+const REFRESH_DISPATCH_LOCK_SECONDS = 30 * 60;
+const GITHUB_REFRESH_DISPATCH_URL = 'https://api.github.com/repos/chiduwa/frontiercapitalsignals/actions/workflows/signals-refresh.yml/dispatches';
 // Top 100 by market cap, not 200: a smaller, higher-liquidity universe reads
 // cleaner technically, and the saved request budget instead goes toward a
 // real per-coin daily-history fetch (see getCryptoDailyHistory) rather than
@@ -3750,9 +3761,42 @@ async function getCached(env) {
   } catch { return null; }
 }
 
-function isFresh(payload) {
+function isFresh(payload, nowMs = Date.now()) {
   if (!payload || !payload.generated_at) return false;
-  return (Date.now() - new Date(payload.generated_at).getTime()) < CACHE_SECONDS * 1000;
+  return (nowMs - new Date(payload.generated_at).getTime()) < CACHE_SECONDS * 1000;
+}
+
+// Dispatches the existing GitHub Actions refresh workflow only after the
+// serving payload is stale. The token is a Cloudflare Worker secret, never a
+// client-facing variable; it needs only the repository's Actions write scope.
+// A workflow input tells the build script to retain its normal freshness gate,
+// so queued duplicate dispatches stay cheap no-ops rather than forced rebuilds.
+export async function dispatchRefreshIfStale(env) {
+  const cached = await getCached(env);
+  if (isFresh(cached)) return false;
+  if (!env || !env.FCS_CACHE) throw new Error('FCS_CACHE binding is required for stale-cache refresh dispatch');
+  if (!env.GITHUB_ACTIONS_TOKEN) throw new Error('GITHUB_ACTIONS_TOKEN Worker secret is required to dispatch a stale signals refresh');
+
+  const existingLock = await env.FCS_CACHE.get(REFRESH_DISPATCH_LOCK_KEY);
+  if (existingLock) return false;
+  await env.FCS_CACHE.put(REFRESH_DISPATCH_LOCK_KEY, new Date().toISOString(), { expirationTtl: REFRESH_DISPATCH_LOCK_SECONDS });
+  try {
+    const response = await fetch(GITHUB_REFRESH_DISPATCH_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.GITHUB_ACTIONS_TOKEN}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ ref: 'main', inputs: { force: 'false' } })
+    });
+    if (!response.ok) throw new Error(`GitHub signals refresh dispatch failed: HTTP ${response.status}`);
+  } catch (error) {
+    await env.FCS_CACHE.delete(REFRESH_DISPATCH_LOCK_KEY);
+    throw error;
+  }
+  return true;
 }
 
 async function getCachedIntraday(env) {
@@ -4630,6 +4674,10 @@ function json(obj, extraHeaders) {
 // ----------------------------- WORKER ENTRY ---------------------------------
 
 export default {
+  scheduled(_controller, env, ctx) {
+    ctx.waitUntil(dispatchRefreshIfStale(env));
+  },
+
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     let path = url.pathname;
