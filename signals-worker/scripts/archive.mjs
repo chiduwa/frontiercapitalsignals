@@ -15,7 +15,7 @@
 // two are genuinely the same need either way: "what's in the universe" and
 // "what's each coin's live funding right now."
 import { d1, chunk } from './d1-client.mjs';
-import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, computeSpreadSeries, levelChangeBefore, detectOutperformanceRotation, detectPossibleLongTermBottom, CRYPTO_BLOCKLIST } from '../worker.js';
+import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, computeSpreadSeries, levelChangeBefore, detectOutperformanceRotation, detectPossibleLongTermBottom, isStableValueAsset } from '../worker.js';
 
 const UA = 'Mozilla/5.0 (compatible; FrontierCapitalSignals/2.0)';
 
@@ -990,13 +990,13 @@ export async function replaceRotationStatus(env, rows) {
 }
 
 // ------------------------- LONG-TERM POTENTIAL -------------------------------
-// "Long-term potential" category (user-requested 2026-08-24): which crypto
+// "Long-term potential" category: which tracked assets
 // assets are CURRENTLY sitting near a fresh, still-recent multi-month/year
 // low (detectPossibleLongTermBottom, worker.js — see its own docs for the
 // real research behind this, and why it deliberately does NOT try to rank
 // candidates by any signal). Purely descriptive; not financial advice.
 export async function computeLongTermBottomCandidates(env) {
-  const rows = await d1(env, `SELECT symbol, asset_class, date, close FROM asset_daily_bars WHERE asset_class = 'crypto' ORDER BY symbol, date`);
+  const rows = await d1(env, `SELECT symbol, asset_class, date, close FROM asset_daily_bars WHERE asset_class IN ('crypto', 'stock') ORDER BY symbol, date`);
   const bySymbol = {};
   for (const r of rows) (bySymbol[r.symbol] ??= []).push(r);
 
@@ -1011,8 +1011,8 @@ export async function computeLongTermBottomCandidates(env) {
     // a $1-pegged asset trivially sits "near its own low" forever simply
     // by never moving, a false positive this category is specifically
     // vulnerable to in a way most other techniques are not).
-    if (symbol.includes(':') || bars.length < 365 || CRYPTO_BLOCKLIST.has(symbol.toLowerCase())) continue;
-    const candidate = detectPossibleLongTermBottom(bars);
+    if (symbol.includes(':') || bars.length < 252 || isStableValueAsset({ symbol })) continue;
+    const candidate = detectPossibleLongTermBottom(bars, 252, 30, 30);
     if (candidate) out.push({ symbol, ...candidate });
   }
   return out;

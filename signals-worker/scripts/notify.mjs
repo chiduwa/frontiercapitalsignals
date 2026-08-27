@@ -98,6 +98,7 @@ export async function checkAndNotifyReversals(env, nowIso, lookbackHours = 4) {
     if ((cur.dir === 1 || cur.dir === -1) && cur.dir !== prev.dir) {
       fresh.push({ symbol, assetClass, dir: cur.dir, runAt: cur.run_at });
     }
+
   }
   if (!fresh.length) return 0;
 
@@ -137,6 +138,30 @@ export async function checkAndNotifyReversals(env, nowIso, lookbackHours = 4) {
       click: 'https://frontiercapitalsignals.com/signals/'
     }, nowIso);
     if (notified) sent++;
+  }
+  return sent;
+}
+
+// Alert only on entry into a coiled state; dedup prevents hourly spam while
+// the same consolidation remains active.
+export async function checkAndNotifyConsolidations(env, nowIso, lookbackHours = 4) {
+  if (!env.NTFY_TOPIC) return 0;
+  const cutoff = new Date(new Date(nowIso).getTime() - lookbackHours * 3600 * 1000).toISOString();
+  const rows = await d1(env, `SELECT symbol, asset_class, run_at, dir FROM technique_votes WHERE technique_id = 'accum' AND run_at >= ? ORDER BY symbol, run_at`, [cutoff]);
+  const bySymbol = {};
+  for (const r of rows) (bySymbol[r.symbol] ??= { assetClass: r.asset_class, rows: [] }).rows.push(r);
+  let sent = 0;
+  for (const [symbol, rec] of Object.entries(bySymbol)) {
+    if (rec.rows.length < 2) continue;
+    const prev = rec.rows[rec.rows.length - 2], cur = rec.rows[rec.rows.length - 1];
+    if (![1, -1].includes(cur.dir) || cur.dir === prev.dir) continue;
+    const direction = cur.dir === 1 ? 'upside' : 'downside';
+    if (await notifyOnChange(env, 'consolidation', symbol, `${cur.dir}@${cur.run_at}`, {
+      title: `${symbol}: consolidation detected`,
+      message: `${symbol} (${rec.assetClass}) entered a coiled range with ${direction} volume bias. Watch for a confirmed break; this is not a trade recommendation.`,
+      priority: 'default', tags: ['hourglass_flowing_sand'],
+      click: 'https://frontiercapitalsignals.com/signals/'
+    }, nowIso)) sent++;
   }
   return sent;
 }

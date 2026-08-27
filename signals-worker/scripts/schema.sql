@@ -571,7 +571,7 @@ DROP INDEX IF EXISTS idx_asset_hourly_bars_symbol;
 -- backtest-intraday.mjs for why an appending/incrementing shape doesn't
 -- fit an occasional re-run over a shifting historical window.
 -- Pooled hypothesis-test findings from scripts/correlation-research.mjs —
--- volume-surge and (Phase 5) sentiment-extreme correlations against
+-- volume-surge, stablecoin-depeg, and (Phase 5) sentiment-extreme correlations against
 -- forward returns, tested pooled across the universe (not per-symbol —
 -- see the module's own docs for why that avoids the multiple-testing
 -- trap) and only recorded once a candidate has independently cleared the

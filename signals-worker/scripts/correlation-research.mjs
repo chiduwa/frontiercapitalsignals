@@ -16,7 +16,7 @@
 // the deliverable as the D1 rows.
 //
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID
-import { twoSampleZTest, volumeSurgeSeries, forwardReturns, chronologicalHalfSplit, sentimentExtremeForwardReturns, timeOfDaySentimentSplit, RELIABILITY_SIGNIFICANCE_Z, detectMoveEpisodes, detectExhaustionReversals, detectBottomThenMoonshot, volRegime, levelChangeBefore } from '../worker.js';
+import { twoSampleZTest, volumeSurgeSeries, forwardReturns, chronologicalHalfSplit, sentimentExtremeForwardReturns, timeOfDaySentimentSplit, RELIABILITY_SIGNIFICANCE_Z, detectMoveEpisodes, detectExhaustionReversals, detectBottomThenMoonshot, volRegime, levelChangeBefore, isStableValueAsset } from '../worker.js';
 import { d1 } from './d1-client.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
@@ -110,10 +110,20 @@ async function main() {
   };
   const cryptoDailyVolume = {}; // date -> summed crypto volume that day (for the market-wide test below)
   const cryptoDailyReturns = Object.fromEntries(HORIZONS_DAYS.map((h) => [h, {}])); // date -> [forward returns across every crypto symbol]
+  const stablecoinDeviationByDate = {}; // date -> largest observed deviation from the $1 peg
 
-  for (const [, { assetClass, bars }] of Object.entries(bySymbol)) {
+  for (const [symbol, { assetClass, bars }] of Object.entries(bySymbol)) {
     if (assetClass !== 'crypto' && assetClass !== 'stock') continue; // benchmarks/pseudo-symbols (SECTOR:*, SPREAD:*, TVL:*) don't have a real per-asset volume story
     if (bars.length < VOLUME_LOOKBACK_DAYS + 30) continue; // not enough real history to say anything
+    const stable = assetClass === 'crypto' && isStableValueAsset({ symbol });
+    if (stable) {
+      for (const bar of bars) {
+        if (bar.close == null || !Number.isFinite(Number(bar.close))) continue;
+        const deviation = Math.abs(Number(bar.close) - 1) * 100;
+        stablecoinDeviationByDate[bar.date] = Math.max(stablecoinDeviationByDate[bar.date] || 0, deviation);
+      }
+      continue; // stablecoins are the explanatory variable below, not market assets
+    }
     const surgeByDate = Object.fromEntries(volumeSurgeSeries(bars, VOLUME_LOOKBACK_DAYS).map((s) => [s.date, s.surgeRatio]));
     const fwd = forwardReturns(bars, HORIZONS_DAYS);
 
@@ -126,6 +136,7 @@ async function main() {
           if (entry[h] == null) continue;
           (cryptoDailyReturns[h][bar.date] ??= []).push(entry[h]);
         }
+
       }
       const ratio = surgeByDate[bar.date];
       if (ratio == null) continue; // not enough trailing history yet for this symbol/date
@@ -138,6 +149,25 @@ async function main() {
   }
 
   const findings = [];
+
+  // Research-only stablecoin stress test. A stablecoin leaving its peg is
+  // compared with the next-day cross-sectional return of non-stable crypto.
+  // It is deliberately not a live technique: archived coverage can be sparse,
+  // and the same pooled + chronological-half guardrails must clear first.
+  const stablecoinStressSample = [], stablecoinNormalSample = [];
+  for (const [date, deviation] of Object.entries(stablecoinDeviationByDate)) {
+    const returns = cryptoDailyReturns[1][date];
+    if (!returns || !returns.length) continue;
+    const marketReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
+    (deviation >= 0.25 ? stablecoinStressSample : stablecoinNormalSample).push({ date, value: marketReturn });
+  }
+  const stablecoinHypothesis = 'stablecoin_depeg_crypto_1d';
+  if (stablecoinStressSample.length < MIN_SAMPLE_PER_BUCKET || stablecoinNormalSample.length < MIN_SAMPLE_PER_BUCKET) {
+    console.log(`[${stablecoinHypothesis}] too few samples (stress=${stablecoinStressSample.length}, normal=${stablecoinNormalSample.length}) — skipped`);
+  } else {
+    const finding = runGuardedTest(stablecoinHypothesis, 'crypto', 1, stablecoinStressSample, stablecoinNormalSample);
+    if (finding) findings.push(finding);
+  }
 
   // 4 primary tests: per-symbol volume surge vs forward return, pooled by
   // asset class x horizon.

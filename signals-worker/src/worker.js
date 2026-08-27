@@ -92,7 +92,7 @@ const CRYPTO_HISTORY_DELAY_MS = 3000;
 // floor below (still subject to CRYPTO_BLOCKLIST and simply needing to be
 // in CoinGecko's fetched top-CRYPTO_UNIVERSE page at all), so "always"
 // actually means always, not "usually, since they're currently large-cap."
-export const FAVORITE_SYMBOLS = new Set(['XLM', 'XRP', 'HYPE', 'HBAR']);
+export const FAVORITE_SYMBOLS = new Set(['BTC', 'ETH', 'SOL', 'XLM', 'XRP', 'HYPE', 'HBAR']);
 
 export const CRYPTO_BLOCKLIST = new Set([
   'usdt','usdc','usds','usde','dai','fdusd','pyusd','tusd','usdp','gusd','frax',
@@ -108,6 +108,38 @@ export const CRYPTO_BLOCKLIST = new Set([
   // by virtue of never moving much at all.
   'bfusd','gho','usd1'
 ]);
+
+// Ticker blocklists are necessary but not sufficient: CoinGecko can add a
+// newly launched peg before it is known here. Keep obvious USD-pegged assets
+// out of directional boards even when their ticker is new, without excluding
+// ordinary assets whose names merely contain "usd".
+export function isStableValueAsset(asset) {
+  const symbol = String(asset?.symbol || '').toLowerCase();
+  const id = String(asset?.id || '').toLowerCase();
+  const name = String(asset?.name || '').toLowerCase();
+  if (CRYPTO_BLOCKLIST.has(symbol)) return true;
+  if (/^(usd|usdt|usdc|usde|usds|dai|fdusd|pyusd|tusd|usdp|gusd|frax|lusd|susd|usdd|usdy|usd0|usdtb|rlusd|eurc|eurt|bfusd|gho|usd1)$/.test(symbol)) return true;
+  if (/(stablecoin|usd coin|tether|dai stablecoin|frax usd|pax dollar|trueusd|gemini dollar|usdd)/.test(name) || /(^|-)usd-?stable/.test(id)) return true;
+  return false;
+}
+
+export function dailyMovementStats(bars) {
+  const moves = [];
+  for (let i = 1; i < (bars || []).length; i++) {
+    const prev = bars[i - 1]?.close, close = bars[i]?.close;
+    if (prev > 0 && close > 0) moves.push({ date: bars[i].date || null, pct: (close / prev - 1) * 100, dollar: close - prev });
+  }
+  if (!moves.length) return null;
+  const by = (field, sign) => moves.reduce((best, row) => sign * row[field] > sign * best[field] ? row : best, moves[0]);
+  const sorted = moves.map((m) => Math.abs(m.pct)).sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return {
+    highestGain: by('pct', 1),
+    highestLoss: by('pct', -1),
+    medianAbsPct: sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2,
+    samples: moves.length
+  };
+}
 
 export const STOCK_WATCHLIST = [
   'AAPL','MSFT','NVDA','GOOGL','AMZN','META','TSLA','AVGO',
@@ -422,13 +454,27 @@ export function reliabilityMultiplier(reliability, symbol, techniqueId, byRegime
   if (regime && byRegime && byRegime[regime]) {
     const rrec = byRegime[regime][`${symbol}|${techniqueId}`];
     if (rrec && rrec.total >= MIN_RELIABILITY_SAMPLES && isReliabilitySignificant(rrec.correct, rrec.total)) {
-      return clamp(0.5 + rrec.accuracy, 0.5, 1.5);
+      // Shrink small samples toward a fair coin. This avoids the old
+      // discontinuity where the first significant result immediately got
+      // the full raw hit-rate multiplier.
+      return reliabilityWeight(rrec.accuracy, rrec.total);
     }
   }
   const rec = reliability[`${symbol}|${techniqueId}`];
   if (!rec || rec.total < MIN_RELIABILITY_SAMPLES) return 1;
   if (!isReliabilitySignificant(rec.correct, rec.total)) return 1;
-  return clamp(0.5 + rec.accuracy, 0.5, 1.5);
+  return reliabilityWeight(rec.accuracy, rec.total);
+}
+
+export function reliabilityWeight(accuracy, total) {
+  if (!Number.isFinite(accuracy) || !Number.isFinite(total) || total < MIN_RELIABILITY_SAMPLES) return 1;
+  // Preserve the established, significance-gated behavior while a record is
+  // still small. Once an asset/technique has a genuinely deep record, reduce
+  // the influence of an extreme raw hit rate so long-lived learning does not
+  // overfit one historical regime.
+  if (total < 100) return clamp(0.5 + accuracy, 0.5, 1.5);
+  const confidence = Math.min(1, Math.sqrt(total / 100));
+  return clamp(1 + (accuracy - 0.5) * 2 * confidence, 0.5, 1.5);
 }
 
 // Decile bucket (0-9) of a 0-100 composite score, for the calibration
@@ -2639,7 +2685,12 @@ export async function getCryptoDailyHistory(id, days = CRYPTO_HISTORY_DAYS) {
       const closes = ((j && j.prices) || []).map((p) => p[1]).filter((v) => v != null);
       const vols = ((j && j.total_volumes) || []).map((v) => v[1]).filter((v) => v != null);
       if (closes.length < 60) throw new Error(`thin daily history for ${id}`);
-      return { closes, volumes: vols.length === closes.length ? vols : null };
+      const prices = (j && j.prices) || [];
+      return {
+        closes,
+        volumes: vols.length === closes.length ? vols : null,
+        bars: prices.filter((p) => p[1] != null).map((p) => ({ date: new Date(p[0]).toISOString().slice(0, 10), close: p[1] }))
+      };
     } catch (e) {
       lastErr = e;
       const is429 = /^HTTP 429/.test(String(e && e.message));
@@ -2839,7 +2890,8 @@ async function yahooDaily(symbol, range = '1y') {
     }
   }
   const price = (r.meta && r.meta.regularMarketPrice) || closes[closes.length - 1];
-  return { symbol, price, closes, volumes, highs, lows, source: 'yahoo' };
+  const dates = r.timestamp.map((t) => new Date(t * 1000).toISOString().slice(0, 10));
+  return { symbol, price, closes, volumes, highs, lows, dates, source: 'yahoo' };
 }
 
 // Live spot price + 24h change for one equity symbol — the same chart
@@ -2866,6 +2918,7 @@ async function stooqDaily(symbol) {
   const closes = [], volumes = [], highs = [], lows = [];
   // ~10 years of trading days, matching the Yahoo path's '10y' fetch — the
   // Stooq fallback shouldn't quietly give seasonalAnalog() far less history.
+  const dates = [];
   for (const row of rows.slice(-2600)) {
     const p = row.split(',');
     const c = parseFloat(p[4]);
@@ -2874,9 +2927,10 @@ async function stooqDaily(symbol) {
       highs.push(parseFloat(p[2]) || c);
       lows.push(parseFloat(p[3]) || c);
       volumes.push(parseFloat(p[5]) || 0);
+      dates.push(p[0]);
     }
   }
-  return { symbol, price: closes[closes.length - 1], closes, volumes, highs, lows, source: 'stooq' };
+  return { symbol, price: closes[closes.length - 1], closes, volumes, highs, lows, dates, source: 'stooq' };
 }
 
 async function getStock(symbol) {
@@ -3015,6 +3069,7 @@ export function buildCryptoMetrics(item, extras = {}) {
   const corr = haveDaily && extras.benchCloses ? correlationWithBenchmark(closes, extras.benchCloses, 30) : null;
   const seasonal = haveDaily ? seasonalAnalog(closes, 365) : null;
   const fib = haveDaily ? fibonacciLevels(closes) : null;
+  const dailyMoves = haveDaily ? dailyMovementStats(extras.daily.bars || []) : null;
 
   return {
     symbol,
@@ -3024,6 +3079,7 @@ export function buildCryptoMetrics(item, extras = {}) {
     corr,
     seasonal,
     fib,
+    dailyMoves,
     volPct,
     volLookbackDays: volLookback ? volLookback.lookback : null,
     price,
@@ -3097,6 +3153,7 @@ export function buildStockMetrics(row, valuation, override, benchCloses, ivHist)
   const corr = benchCloses ? correlationWithBenchmark(closes, benchCloses, 30) : null;
   const seasonal = seasonalAnalog(closes, 252);
   const fib = fibonacciLevels(closes);
+  const dailyMoves = dailyMovementStats(closes.map((close, i) => ({ date: row.dates?.[i] || null, close })));
   const hi52 = Math.max(...closes);
 
   let val = null;
@@ -3132,6 +3189,7 @@ export function buildStockMetrics(row, valuation, override, benchCloses, ivHist)
     corr,
     seasonal,
     fib,
+    dailyMoves,
     chgShort: pct(1),
     chg24h: pct(1),
     chg7d: pct(5),
@@ -3292,6 +3350,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       ...(x.m.distHigh52w != null ? { distHigh52w: x.m.distHigh52w } : {}),
       ...(x.m.rank != null ? { mcapRank: x.m.rank } : {}),
       ...(x.m.volLookbackDays != null ? { volLookbackDays: x.m.volLookbackDays } : {}),
+      ...(x.m.dailyMoves ? { dailyMoves: x.m.dailyMoves } : {}),
       ...(x.m.id ? { id: x.m.id } : {}) // CoinGecko coin id (crypto only) — lets the dashboard link out to a real coin page
     };
   };
@@ -3319,7 +3378,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
   // enough immediate confluence score to make breakout/breakdown at all,
   // but that's exactly the point of this list. Crypto only, same
   // reasoning as favorites (longTermBottomStatus is crypto-only).
-  const longTermPotential = kind === 'crypto' && longTermBottomStatus
+  const longTermPotential = longTermBottomStatus
     ? scored
         .filter(x => longTermBottomStatus[x.m.symbol])
         .map(x => entry(x, x.c.long >= x.c.short ? 'long' : 'short'))
@@ -3407,7 +3466,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
       if (c.id === 'ethereum') eth = { price: c.current_price, chg24h: c.price_change_percentage_24h };
     }
     const qualifying = raw
-      .filter(c => !CRYPTO_BLOCKLIST.has((c.symbol || '').toLowerCase()))
+      .filter(c => !isStableValueAsset(c))
       .filter(c => FAVORITE_SYMBOLS.has((c.symbol || '').toUpperCase())
         || ((c.market_cap || 0) >= CRYPTO_MIN_MCAP && (c.total_volume || 0) >= CRYPTO_MIN_VOLUME));
 
@@ -4078,6 +4137,10 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           var ltp = r.longTermPotential;
           ltpNote = '<span class="ltp-note" title="Currently near a fresh multi-month/year low ('+ltp.daysSinceLow+' days since the low, '+ltp.pctAboveLow.toFixed(0)+'% above it). Historically, a genuine isolated low like this has gone on to 10x or more within about 3 years roughly 38% of the time (56 of 146 real cases studied) -- but no tested signal reliably predicts WHICH specific ones will. This is descriptive history only, not a prediction for this asset, not guaranteed, and not financial advice.">💎 Long-term potential ('+ltp.daysSinceLow+'d since low)</span>';
         }
+        var moves = r.dailyMoves;
+        var moveNote = moves
+          ? '<span class="move-note" title="Computed from the archived daily bars for this asset ('+moves.samples+' daily moves).">1d '+(moves.highestGain.pct>=0?'+':'')+moves.highestGain.pct.toFixed(1)+'% ('+fmtPrice(moves.highestGain.dollar)+') '+esc(moves.highestGain.date||'')+' · low '+moves.highestLoss.pct.toFixed(1)+'% ('+fmtPrice(moves.highestLoss.dollar)+') '+esc(moves.highestLoss.date||'')+' · median |move| '+moves.medianAbsPct.toFixed(2)+'%</span>'
+          : '';
         var dirArrow = '<span class="dir-arrow '+(rowSide==='long'?'dir-up':'dir-down')+'" title="'+(rowSide==='long'?'Leaning up':'Leaning down')+'">'+(rowSide==='long'?'▲':'▼')+'</span>';
         var conf = r.conf ? '<span class="conf">'+r.conf.agree+'/'+r.conf.total+' aligned</span>' : '';
         var horizon = r.horizon ? '<span class="horizon '+(r.horizon.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+(r.horizon.basis==='historical'?"Based on this asset's own historical accuracy by horizon":"Methodology estimate, not yet enough of this asset's own history to say")+'">'+esc(r.horizon.label)+(r.horizon.basis==='historical'?' ✓':'')+'</span>' : '';
@@ -4087,7 +4150,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var range = r.range ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+rangeTitle+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>' : '<span class="dim">—</span>';
         h+='<tr class="in" style="animation-delay:'+(i*30)+'ms" data-symbol="'+esc(r.symbol)+'" data-class="'+cfg.assetClass+'">'
           +'<td class="rk">'+(i+1)+'</td>'
-          +'<td class="asset">'+symHtml+name+why+topInd+coil+quality+rotation+flipNote+ltpNote+'</td>'
+          +'<td class="asset">'+symHtml+name+why+topInd+coil+quality+rotation+flipNote+ltpNote+moveNote+'</td>'
           +'<td class="live-price-cell"><span class="live-price">'+fmtPrice(r.price)+'</span></td>'
           +'<td class="live-chg-cell '+pctCls(r.chg24h)+'"><span class="live-chg">'+fmtPct(r.chg24h)+'</span></td>'
           +'<td class="'+pctCls(r.chg7d)+'">'+fmtPct(r.chg7d)+'</td>'
@@ -4109,8 +4172,12 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       b+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-favorites', eyebrow:'CRYPTO · <b>FAVORITES</b>', title:'Always tracked'}, d.crypto.favorites, d.crypto.favorites.length);
     }
     if(d.crypto.longTermPotential && d.crypto.longTermPotential.length){
-      b+='<div class="xp-banner" role="note"><b>Not a recommendation, not guaranteed, not financial advice.</b> Historically, a genuine isolated multi-month/year low has gone on to 10x or more within about 3 years in roughly 38% of real cases studied (56 of 146, across this full tracked crypto history) -- but no signal tested (how far below its prior high, how quiet it was beforehand, or how many other assets bottomed at the same time) reliably predicts which specific ones will. This list only flags assets currently sitting near such a low; it makes no claim about any individual one below.</div>';
+      b+='<div class="xp-banner" role="note"><b>Not a recommendation, not guaranteed, not financial advice.</b> Long-term candidates are descriptive historical lows only; no tested signal reliably predicts which specific asset will recover.</div>';
       b+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-ltp', eyebrow:'CRYPTO · <b>LONG-TERM POTENTIAL</b>', title:'Possible multi-month/year lows'}, d.crypto.longTermPotential, d.crypto.longTermPotential.length);
+    }
+    if(d.stocks.longTermPotential && d.stocks.longTermPotential.length){
+      b+='<div class="xp-banner" role="note"><b>Historical context only.</b> These equities are near a fresh long-term low; the list is not a recovery forecast or recommendation.</div>';
+      b+=boardHtml({side:'favorites', assetClass:'stock', boardId:'stock-ltp', eyebrow:'EQUITIES · <b>LONG-TERM POTENTIAL</b>', title:'Possible multi-month/year lows'}, d.stocks.longTermPotential, d.stocks.longTermPotential.length);
     }
     b+=boardHtml({side:'long', assetClass:'crypto', boardId:'crypto-long', eyebrow:'CRYPTO · <b>LONG SIDE</b>', title:'Breakout watch'}, d.crypto.breakout, d.crypto.universe);
     b+=boardHtml({side:'short', assetClass:'crypto', boardId:'crypto-short', eyebrow:'CRYPTO · <b>RISK SIDE</b>', title:'Breakdown risk'}, d.crypto.breakdown, d.crypto.universe);

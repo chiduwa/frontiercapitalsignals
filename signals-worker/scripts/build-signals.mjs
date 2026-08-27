@@ -13,7 +13,7 @@
 // Optional (enables reliability weighting when set): FCS_D1_DATABASE_ID
 import { buildPayload, CACHE_KEY, coingeckoSimplePrice, yahooQuote, getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST } from '../worker.js';
 import { loadReliability, loadMoveStats, loadRangeReliability, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, loadSwingTimeStats, loadRecentEvents, loadIvHistory, loadRegimeReliability, loadSrLevels, loadSrBreakStats, loadQualityData, loadRotationStatus, loadCallFlipData, loadLongTermBottomStatus, logRun, evaluateMatured, evaluateTimeOfDay, snapshotAssetScores, detectAndLogCallFlips, evaluateCallFlips } from './reliability.mjs';
-import { checkAndNotifyReversals, checkAndNotifySuddenMoves } from './notify.mjs';
+import { checkAndNotifyReversals, checkAndNotifySuddenMoves, checkAndNotifyConsolidations } from './notify.mjs';
 import { upsertMarketSentiment, loadRecentBars, loadTvlSeries, loadMarketReturn, loadYieldSpreadChange } from './archive.mjs';
 import { selectIntradayWatchlist } from './intraday.mjs';
 
@@ -230,6 +230,12 @@ if (FCS_D1_DATABASE_ID) {
     console.log(`sudden-move (disruptive/major) alerts: ${suddenMoveAlerts} sent${env.NTFY_TOPIC ? '' : ' (NTFY_TOPIC not set, skipped)'}`);
   } catch (e) {
     console.error('sudden-move alert check failed (KV already updated, dashboard unaffected):', e.message || e);
+  }
+  try {
+    const consolidationAlerts = await checkAndNotifyConsolidations(env, payload.generated_at);
+    console.log(`consolidation alerts: ${consolidationAlerts} sent${env.NTFY_TOPIC ? '' : ' (NTFY_TOPIC not set, skipped)'}`);
+  } catch (e) {
+    console.error('consolidation alert check failed (KV already updated, dashboard unaffected):', e.message || e);
   }
   try {
     // Reuses this run's own just-logged prices (no re-query) — see
