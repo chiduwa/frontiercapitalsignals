@@ -218,6 +218,9 @@ check('recovery dispatch preserves the freshness gate with force=false', dispatc
 check('recovery dispatch authenticates with the Worker secret', dispatchRequest && dispatchRequest.init.headers.Authorization === 'Bearer test-dispatch-token');
 const duplicateDispatchResult = await mod.dispatchRefreshIfStale(staleDispatchEnv);
 check('dispatcher lock prevents a duplicate dispatch while active', duplicateDispatchResult === false && dispatchCalls.length === 1);
+const dispatchedStatusResponse = await worker.fetch(new Request('https://x.com/signals/api/refresh-status'), staleDispatchEnv, ctx);
+const dispatchedStatus = await dispatchedStatusResponse.json();
+check('refresh-status reports a successful guarded dispatch without exposing a token', dispatchedStatus.result === 'dispatched' && !JSON.stringify(dispatchedStatus).includes('test-dispatch-token'), JSON.stringify(dispatchedStatus));
 
 const missingTokenEnv = { FCS_CACHE: new MockKV() };
 await missingTokenEnv.FCS_CACHE.put(mod.CACHE_KEY, JSON.stringify({
@@ -247,6 +250,9 @@ try {
 }
 check('failed GitHub dispatch surfaces its HTTP status', failedDispatchError && failedDispatchError.message.includes('HTTP 503'));
 check('failed GitHub dispatch clears the retry lock', await failedDispatchEnv.FCS_CACHE.get('signals:refresh-dispatch-lock') === null);
+const failedStatusResponse = await worker.fetch(new Request('https://x.com/signals/api/refresh-status'), failedDispatchEnv, ctx);
+const failedStatus = await failedStatusResponse.json();
+check('refresh-status reports failed dispatches with the safe HTTP error', failedStatus.result === 'failed' && failedStatus.error.includes('HTTP 503'), JSON.stringify(failedStatus));
 global.fetch = originalFetch;
 
 console.log('\n== routing ==');

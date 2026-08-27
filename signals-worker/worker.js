@@ -63,6 +63,8 @@ export const CACHE_SECONDS = 3600;
 // dispatches while a delayed GitHub job is still starting.
 const REFRESH_DISPATCH_LOCK_KEY = 'signals:refresh-dispatch-lock';
 const REFRESH_DISPATCH_LOCK_SECONDS = 30 * 60;
+const REFRESH_DISPATCH_STATUS_KEY = 'signals:refresh-dispatch-status';
+const REFRESH_DISPATCH_STATUS_SECONDS = 24 * 60 * 60;
 const GITHUB_REFRESH_DISPATCH_URL = 'https://api.github.com/repos/chiduwa/frontiercapitalsignals/actions/workflows/signals-refresh.yml/dispatches';
 // Top 100 by market cap, not 200: a smaller, higher-liquidity universe reads
 // cleaner technically, and the saved request budget instead goes toward a
@@ -3761,6 +3763,28 @@ async function getCached(env) {
   } catch { return null; }
 }
 
+async function recordRefreshDispatchStatus(env, status) {
+  try {
+    await env.FCS_CACHE.put(REFRESH_DISPATCH_STATUS_KEY, JSON.stringify({
+      at: new Date().toISOString(),
+      ...status
+    }), { expirationTtl: REFRESH_DISPATCH_STATUS_SECONDS });
+  } catch (error) {
+    console.error('Unable to record signals refresh dispatch status:', error.message);
+  }
+}
+
+async function getRefreshDispatchStatus(env) {
+  if (!env || !env.FCS_CACHE) return null;
+  try {
+    const raw = await env.FCS_CACHE.get(REFRESH_DISPATCH_STATUS_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (error) {
+    console.error('Unable to read signals refresh dispatch status:', error.message);
+    return null;
+  }
+}
+
 function isFresh(payload, nowMs = Date.now()) {
   if (!payload || !payload.generated_at) return false;
   return (nowMs - new Date(payload.generated_at).getTime()) < CACHE_SECONDS * 1000;
@@ -3775,12 +3799,11 @@ export async function dispatchRefreshIfStale(env) {
   const cached = await getCached(env);
   if (isFresh(cached)) return false;
   if (!env || !env.FCS_CACHE) throw new Error('FCS_CACHE binding is required for stale-cache refresh dispatch');
-  if (!env.GITHUB_ACTIONS_TOKEN) throw new Error('GITHUB_ACTIONS_TOKEN Worker secret is required to dispatch a stale signals refresh');
-
-  const existingLock = await env.FCS_CACHE.get(REFRESH_DISPATCH_LOCK_KEY);
-  if (existingLock) return false;
-  await env.FCS_CACHE.put(REFRESH_DISPATCH_LOCK_KEY, new Date().toISOString(), { expirationTtl: REFRESH_DISPATCH_LOCK_SECONDS });
   try {
+    if (!env.GITHUB_ACTIONS_TOKEN) throw new Error('GITHUB_ACTIONS_TOKEN Worker secret is required to dispatch a stale signals refresh');
+    const existingLock = await env.FCS_CACHE.get(REFRESH_DISPATCH_LOCK_KEY);
+    if (existingLock) return false;
+    await env.FCS_CACHE.put(REFRESH_DISPATCH_LOCK_KEY, new Date().toISOString(), { expirationTtl: REFRESH_DISPATCH_LOCK_SECONDS });
     const response = await fetch(GITHUB_REFRESH_DISPATCH_URL, {
       method: 'POST',
       headers: {
@@ -3792,8 +3815,14 @@ export async function dispatchRefreshIfStale(env) {
       body: JSON.stringify({ ref: 'main', inputs: { force: 'false' } })
     });
     if (!response.ok) throw new Error(`GitHub signals refresh dispatch failed: HTTP ${response.status}`);
+    await recordRefreshDispatchStatus(env, { result: 'dispatched' });
   } catch (error) {
-    await env.FCS_CACHE.delete(REFRESH_DISPATCH_LOCK_KEY);
+    try {
+      await env.FCS_CACHE.delete(REFRESH_DISPATCH_LOCK_KEY);
+    } catch (deleteError) {
+      console.error('Unable to clear failed signals refresh dispatch lock:', deleteError.message);
+    }
+    await recordRefreshDispatchStatus(env, { result: 'failed', error: error.message });
     throw error;
   }
   return true;
@@ -4701,6 +4730,11 @@ export default {
         return json(cached, { 'X-FCS-Cache': isFresh(cached) ? 'hit' : 'stale' });
       }
       return json({ error: 'signals not yet built — waiting on the first scheduled build to populate the cache' }, { 'X-FCS-Cache': 'empty' });
+    }
+
+    if (path === '/api/refresh-status' || path === 'api/refresh-status') {
+      const status = await getRefreshDispatchStatus(env);
+      return json(status || { result: 'unknown', message: 'No stale-cache dispatch has been recorded in the last 24 hours.' }, { 'Cache-Control': 'no-store' });
     }
 
     // Day-trading intraday read: single KV read, same "Worker only ever
