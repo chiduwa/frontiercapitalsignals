@@ -54,6 +54,28 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           HUB_ACTIONS_TOKEN: ${{ secrets.HUB_ACTIONS_TOKEN }}
 
+      # Exercise the exact GitHub API call used by the Worker. This makes a
+      # bad/revoked token visible in this deployment's log instead of leaving
+      # a stale cache silently waiting for the next Cloudflare cron. force=false
+      # preserves build-signals.mjs's normal freshness gate.
+      - name: Verify and prime stale-cache refresh dispatch
+        run: |
+          if [ -z "$HUB_ACTIONS_TOKEN" ]; then
+            echo "HUB_ACTIONS_TOKEN is not configured; skipping refresh dispatch verification"
+            exit 0
+          fi
+          curl --fail --silent --show-error \
+            --request POST \
+            --url "https://api.github.com/repos/chiduwa/frontiercapitalsignals/actions/workflows/signals-refresh.yml/dispatches" \
+            --header "Authorization: Bearer $HUB_ACTIONS_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --header "Content-Type: application/json" \
+            --data '{"ref":"main","inputs":{"force":"false"}}'
+          echo "Signals Refresh dispatch accepted"
+        env:
+          HUB_ACTIONS_TOKEN: ${{ secrets.HUB_ACTIONS_TOKEN }}
+
       # Enforced, not auto-fixed: wrangler deploys src/worker.js, but the
       # actual source of truth is worker.js at the signals-worker root (no
       # build step wires them together). A silent auto-copy here could
