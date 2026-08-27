@@ -48,7 +48,7 @@ Then in the Cloudflare dashboard: Worker → Settings → Domains & Routes → c
 npx wrangler d1 create frontier-capital-signals-reliability
 ```
 
-Then run the schema in `scripts/schema.sql` against it (`npx wrangler d1 execute frontier-capital-signals-reliability --file=scripts/schema.sql --remote`).
+Then run the schema in `scripts/schema.sql` against it (`npx wrangler d1 execute frontier-capital-signals-reliability --file=scripts/schema.sql --remote`). Future additive schema changes live in `migrations/`; both the Worker deploy and refresh workflows apply them before running code that depends on them. To apply one manually, run `npx wrangler d1 migrations apply frontier-capital-signals-reliability --remote`.
 
 **3. GitHub repo secrets/variables** (repo → Settings → Secrets and variables → Actions), used by `signals-refresh.yml`:
 
@@ -87,11 +87,13 @@ On top of that, market-wide sentiment — the Fear & Greed index for crypto, and
 
 ## Adaptive reliability weighting
 
-Every build logs each technique's directional call (bullish/bearish, not neutral/abstain) per asset, plus that asset's price, into D1 (`scripts/reliability.mjs`). Once a call is 24 hours or 7 days old, it gets checked against what the price actually did (a move smaller than 0.5% counts as flat, not a win for either side) and folded into a running accuracy count per `(asset, technique, horizon)`.
+Every build logs each technique's directional call (bullish/bearish, not neutral/abstain) per asset, plus that asset's price, into D1 (`scripts/reliability.mjs`). Once a call is 24 hours or 7 days old, it is checked against the first logged price at that exact target horizon (with at most 90 minutes of normal scheduler jitter; a larger gap stays unscored rather than becoming a mislabeled outcome). A move smaller than 0.5% counts as flat, not a win for either side, and valid outcomes fold into a running accuracy count per `(asset, technique, horizon)`.
 
 Before scoring the next hour, `build-signals.mjs` loads each technique's blended accuracy for each specific asset and feeds it into `evaluateTechniques()` as a weight multiplier: `clamp(0.5 + accuracy, 0.5, 1.5)`. A technique that's been right 80% of the time on a given asset gets 1.3x its normal weight *for that asset specifically*; one that's been wrong 80% of the time gets 0.5x. A technique needs at least `MIN_RELIABILITY_SAMPLES` (20, in `worker.js`) matured outcomes for a given asset before its weight moves off the 1x baseline, so a handful of early results can't overfit the score.
 
 This is additive, not load-bearing: if D1 isn't configured (`FCS_D1_DATABASE_ID` unset) or a D1 call fails, `build-signals.mjs` logs a warning and falls back to baseline (unweighted) scoring — the KV write and dashboard are never blocked on it. Tables are pruned automatically (evaluated rows past ~200 hours old, everything past 30 days regardless of evaluated status, so an asset that drops out of the universe can't leave orphaned rows growing forever).
+
+The exact-horizon correction intentionally resets only the old **derived** reliability/calibration/range aggregates once via a D1 migration; their prior labels were based on inconsistent elapsed times and therefore cannot be mixed with corrected evidence. Raw votes, price logs, archived market history, and flip events remain intact. Until corrected outcomes reach the normal evidence thresholds, weights and alerts stay conservative at their baseline behavior rather than pretending the old statistics are valid.
 
 ## Leading vs. lagging, and the expected timeframe
 
@@ -194,6 +196,7 @@ Also found in the same post-mortem, unrelated to either technique: `.github/work
 - **Consolidating badge**: surfaces the `accum` technique's own vote as a dedicated always-visible badge, independent of whether it happens to make the top-3 "why" driver notes.
 - **Stablecoin correlation research**: `correlation-research.mjs` excludes stablecoins from directional market tests and separately tests pooled stablecoin de-peg stress against next-day non-stable crypto returns. Findings are written only after pooled significance and same-signed chronological-half confirmation; the result remains research-only and does not alter live scores.
 - **Tiered reliability weighting**: live technique weights now prefer, in order, the asset's own regime-specific record, then its broader per-asset record, with both shrunk toward the technique's asset-class baseline before affecting a vote. Technique pairs that repeatedly agree and are right for that same asset get only a small extra boost from `technique_combo_reliability`; nothing with thin or insignificant history changes a live weight.
+- **Confident-move alerts**: the ntfy/RSS alert pipeline now prefers score calibration matched to asset class, direction, and 24h/168h horizon (falling back to the pooled curve while a new detail cell warms up), plus that asset's own matching-horizon composite-call record. It uses a conservative Wilson lower estimate rather than a raw hit rate, requires strong current agreement, and caps simultaneous cold-start alerts so a backlog cannot turn into stale notification spam. The alert includes the score, agreement count, conservative estimate, timeframe, and modeled range, and re-arms only after the symbol drops out of that actionable state.
 - **Perp-vs-spot basis**: archived daily going forward (`funding_rate_daily.basis_pct`) from the same CoinGecko derivatives snapshot that already feeds funding/OI — no historical basis exists anywhere to backfill, so this starts real accumulation now rather than fabricating a finding; no live technique reads it yet.
 
 ## Exhaustion reversals, leader/lagger research, and call-flip tracking (added 2026-08-22)

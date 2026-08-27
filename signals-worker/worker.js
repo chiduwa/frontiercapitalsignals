@@ -394,6 +394,9 @@ export function volRegime(closes, shortN = 20, longN = 100) {
 // static baseline weight (multiplier 1) until enough history accumulates.
 export const MIN_RELIABILITY_SAMPLES = 20;
 const RELIABILITY_PRIOR_SAMPLES = 12;
+const CALIBRATION_CONFIDENCE_MIN_SAMPLES = 40;
+const DETAILED_CALIBRATION_CONFIDENCE_MIN_SAMPLES = 30;
+const ALERT_CONFIDENCE_Z = 1.645; // One-sided 95% Wilson lower bound.
 
 // reliability: optional flat map built by scripts/reliability.mjs from D1,
 // `${symbol}|${techniqueId}` -> { accuracy, total } (accuracy already
@@ -1612,6 +1615,89 @@ export function assetPredictionScore(symbol, reliability, rangeReliability) {
   const totalCount = composite.total + reversal.total + dwell.total + range.total;
   if (totalCount < MIN_RELIABILITY_SAMPLES) return null;
   return { score: Math.round(100 * totalCorrect / totalCount), samples: totalCount };
+}
+
+// A conservative one-sided Wilson bound prevents a tiny perfect-looking
+// history from being presented as an equally certain result. The returned
+// value is an evidence-aware lower estimate, not a guaranteed probability.
+export function lowerConfidenceBound(correct, total, z = ALERT_CONFIDENCE_Z) {
+  if (!Number.isFinite(correct) || !Number.isFinite(total) || !Number.isFinite(z) || total <= 0 || z < 0) return null;
+  const n = total;
+  const p = clamp(correct / n, 0, 1);
+  const zSq = z * z;
+  const denominator = 1 + zSq / n;
+  const center = p + zSq / (2 * n);
+  const margin = z * Math.sqrt((p * (1 - p) + zSq / (4 * n)) / n);
+  return clamp((center - margin) / denominator, 0, 1);
+}
+
+// Empirical confidence for THIS current directional call, not the asset's
+// whole long-run track record. It combines the score bucket's calibration
+// with this asset's own composite-call record at the matching 24h or 168h
+// horizon. Detailed calibration is preferred once it has enough evidence:
+// asset class, direction, horizon, and score bucket; the legacy pooled curve
+// remains a fallback while that cell warms up. Historical range/horizon basis
+// and current agreement are gates only, never invented probability inputs.
+export function currentSignalConfidence(signal, calibration, assetCompositeRecord) {
+  if (!signal || !(signal.dir === 1 || signal.dir === -1) || !Number.isFinite(signal.score)) return null;
+  const bucket = scoreBucket(signal.score);
+  const horizonHours = signal.horizon && Number.isFinite(signal.horizon.days)
+    ? (signal.horizon.days <= 4 ? 24 : 168)
+    : null;
+  const pooledCalibration = calibration && calibration.pooled ? calibration.pooled : calibration;
+  const detailedCalibration = calibration && calibration.detailed;
+  const detailedKey = horizonHours != null && signal.asset_class
+    ? `${signal.asset_class}|${signal.dir}|${horizonHours}|${bucket}`
+    : null;
+  const detailed = detailedKey && detailedCalibration && detailedCalibration[detailedKey];
+  const pooled = pooledCalibration && pooledCalibration[bucket];
+  const calibrationRecord = detailed && detailed.total >= DETAILED_CALIBRATION_CONFIDENCE_MIN_SAMPLES
+    ? { ...detailed, source: 'asset-class-direction-horizon' }
+    : pooled && pooled.total >= CALIBRATION_CONFIDENCE_MIN_SAMPLES
+      ? { ...pooled, source: 'pooled' }
+      : null;
+
+  const components = [];
+  const addComponent = (record, minSamples, source) => {
+    if (!record || !Number.isFinite(record.correct) || !Number.isFinite(record.total) || record.total < minSamples) return null;
+    const accuracy = clamp(record.correct / record.total, 0, 1);
+    const lowerBound = lowerConfidenceBound(record.correct, record.total);
+    if (lowerBound == null) return null;
+    const component = { accuracy, lowerBound, samples: record.total, source };
+    components.push(component);
+    return component;
+  };
+  const calibrationComponent = calibrationRecord
+    ? addComponent(calibrationRecord, calibrationRecord.source === 'pooled' ? CALIBRATION_CONFIDENCE_MIN_SAMPLES : DETAILED_CALIBRATION_CONFIDENCE_MIN_SAMPLES, calibrationRecord.source)
+    : null;
+  const assetComponent = addComponent(assetCompositeRecord, MIN_RELIABILITY_SAMPLES, 'asset-composite');
+  if (!components.length) return null;
+
+  const weightOf = (n) => Math.sqrt(Math.min(Math.max(n, 1), 400));
+  const estimatedWinRate = components.reduce((sum, c) => sum + c.lowerBound * weightOf(c.samples), 0)
+    / components.reduce((sum, c) => sum + weightOf(c.samples), 0);
+  const rawEstimatedWinRate = components.reduce((sum, c) => sum + c.accuracy * weightOf(c.samples), 0)
+    / components.reduce((sum, c) => sum + weightOf(c.samples), 0);
+  const agreementRatio = signal.total ? signal.agree / signal.total : 0;
+  const historicalBasis = !!((signal.horizon && signal.horizon.basis === 'historical') || (signal.range && signal.range.basis === 'historical'));
+  const hasAssetCompositeRecord = !!assetComponent;
+  const strongCalibration = !!(calibrationComponent && calibrationComponent.samples >= 100);
+  const actionable = estimatedWinRate >= 0.68
+    && signal.score >= (hasAssetCompositeRecord || historicalBasis ? 78 : 88)
+    && agreementRatio >= (hasAssetCompositeRecord ? 0.45 : 0.55)
+    && (historicalBasis || hasAssetCompositeRecord || strongCalibration);
+
+  return {
+    estimatedWinRate,
+    rawEstimatedWinRate,
+    bucket,
+    horizonHours,
+    agreementRatio,
+    actionable,
+    historicalBasis,
+    calibration: calibrationComponent,
+    assetCompositeRecord: assetComponent
+  };
 }
 
 // Expected price range for the horizon estimate above — a band, never a
@@ -3333,6 +3419,10 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       symbol: m.symbol,
       name: m.name,
       price: m.price,
+      dir: cc ? cc.dir : null,
+      score: cc ? cc.score : null,
+      agree: cc ? (cc.dir === 1 ? c.bull : c.bear) : 0,
+      total: c.total,
       horizon,
       range,
       ...(m.id ? { id: m.id } : {})
@@ -3576,21 +3666,25 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   // prediction score above 95/100 — see assetPredictionScore's docs for
   // exactly what's pooled. Full universe, not just this hour's top 10 per
   // side, since a strong record doesn't require currently ranking.
-  const highAccuracyFor = (list, assetClass) => list
-    .map(({ symbol, name, price, horizon, range, id }) => {
-      const s = assetPredictionScore(symbol, reliability, rangeReliability);
+  const enrichAll = (list, assetClass) => list.map((row) => ({ ...row, asset_class: assetClass, trackRecord: assetPredictionScore(row.symbol, reliability, rangeReliability) }));
+  const cryptoUniverse = enrichAll(cryptoAll || [], 'crypto');
+  const stockUniverse = enrichAll(stockAll || [], 'stock');
+  const highAccuracyFor = (list) => list
+    .map(({ symbol, name, price, horizon, range, id, trackRecord, asset_class }) => {
+      const s = trackRecord;
       if (!s) return null;
       return {
-        symbol, name, asset_class: assetClass, score: s.score, samples: s.samples,
+        symbol, name, asset_class, score: s.score, samples: s.samples,
         price, horizon, range,
         ...(id ? { id } : {})
       };
     })
     .filter((r) => r && r.score > 95);
   const highAccuracy = [
-    ...highAccuracyFor(cryptoAll || [], 'crypto'),
-    ...highAccuracyFor(stockAll || [], 'stock')
+    ...highAccuracyFor(cryptoUniverse),
+    ...highAccuracyFor(stockUniverse)
   ].sort((a, b) => b.score - a.score);
+  log.signals = [...cryptoUniverse, ...stockUniverse].filter((r) => r.dir === 1 || r.dir === -1);
 
   const payload = {
     generated_at: log.generated_at,
@@ -4652,7 +4746,7 @@ export default {
     // read is trivial by comparison and stays well inside Workers Free
     // plan's per-request limits regardless of which plan is active.
     // RSS feed of every notification actually sent (reversal/peak-bottom,
-    // hack, sudden-move — see scripts/notify.mjs) — user-requested
+    // confident-move, hack, sudden-move, consolidation — see scripts/notify.mjs) — user-requested
     // 2026-08-24, "a sort of rss feed on the side for the news and
     // notifications," a persistent, browsable/subscribable complement to
     // the ntfy push channel (which is momentary — nothing to look back
@@ -4682,7 +4776,7 @@ export default {
   <channel>
     <title>Frontier Capital Signals — Alerts</title>
     <link>https://frontiercapitalsignals.com/signals/</link>
-    <description>Peak/bottom signals, hack alerts, and sudden-move alerts from the FCS confluence engine.</description>
+    <description>Peak/bottom signals, confident move alerts, hack alerts, sudden-move alerts, and consolidation alerts from the FCS confluence engine.</description>
     <language>en-us</language>
     <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
     ${items}

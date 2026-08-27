@@ -19,6 +19,10 @@ const TOD_MATCH_TOLERANCE_MIN = 40;
 
 const HORIZONS_HOURS = [24, 168];
 const EVAL_COLUMN = { 24: 'evaluated_24', 168: 'evaluated_168' };
+// A completed forecast must be measured at its intended horizon, not at an
+// arbitrary later refresh. This allows normal scheduler jitter while rejecting
+// multi-hour gaps that would otherwise contaminate the learning record.
+const MATURITY_MATCH_MAX_LAG_MINUTES = 90;
 // A move smaller than this counts as "flat" (actual_dir 0), not a win for
 // either directional call — mirrors the deadband idea already used
 // elsewhere in the engine (e.g. Donchian's 3% proximity bands).
@@ -164,6 +168,24 @@ export async function loadCalibration(env) {
   return out;
 }
 
+// More specific than score_calibration's legacy pooled curve: the same score
+// bucket can behave differently for crypto vs equities, up vs down calls, and
+// one-day vs one-week outcomes. This table warms up alongside the pooled
+// curve; callers retain the pooled result as a fallback while a detail cell is
+// still thin.
+export async function loadDetailedCalibration(env) {
+  const rows = await d1(env, 'SELECT asset_class, dir, horizon_hours, bucket, correct, total FROM score_calibration_detail WHERE total > 0');
+  const out = {};
+  for (const r of rows) {
+    out[`${r.asset_class}|${r.dir}|${r.horizon_hours}|${r.bucket}`] = {
+      correct: r.correct,
+      total: r.total,
+      accuracy: r.total ? r.correct / r.total : 0
+    };
+  }
+  return out;
+}
+
 // Persists this run's per-asset price and per-technique directional votes,
 // to be scored once they mature (see evaluateMatured).
 export async function logRun(env, runAt, log) {
@@ -212,16 +234,84 @@ export async function loadMoveStats(env) {
   return out;
 }
 
+// Chooses the first valid observation at or after a forecast's exact target
+// instant. An observation before the target would shorten the forecast window;
+// one beyond the bounded lag window would turn an intended 24h/168h outcome
+// into a different, stale horizon. Kept pure for regression coverage.
+export function selectMaturityPrice(priceRows, targetAt, maxLagMinutes = MATURITY_MATCH_MAX_LAG_MINUTES) {
+  const targetMs = typeof targetAt === 'number' ? targetAt : Date.parse(targetAt);
+  const maxLagMs = Number(maxLagMinutes) * 60 * 1000;
+  if (!Array.isArray(priceRows) || !Number.isFinite(targetMs) || !Number.isFinite(maxLagMs) || maxLagMs < 0) return null;
+
+  let match = null;
+  for (const row of priceRows) {
+    const runAt = row && (row.run_at || row.observed_at);
+    const observedMs = Date.parse(runAt);
+    const price = Number(row && row.price);
+    if (!Number.isFinite(observedMs) || !Number.isFinite(price)) continue;
+    if (observedMs < targetMs || observedMs > targetMs + maxLagMs) continue;
+    if (!match || observedMs < match.observedMs) match = { price, run_at: runAt, observedMs };
+  }
+  return match ? { price: match.price, run_at: match.run_at } : null;
+}
+
+function maturityTarget(runAt, horizonHours) {
+  const runMs = Date.parse(runAt);
+  if (!Number.isFinite(runMs)) return null;
+  const targetMs = runMs + horizonHours * 3600 * 1000;
+  return {
+    targetAt: new Date(targetMs).toISOString(),
+    maxAt: new Date(targetMs + MATURITY_MATCH_MAX_LAG_MINUTES * 60 * 1000).toISOString()
+  };
+}
+
+async function loadForecastStartPrices(env, targets) {
+  const out = {};
+  for (const batch of chunk(targets, CHUNK)) {
+    const values = batch.map(() => '(?,?)').join(',');
+    const params = batch.flatMap((t) => [t.runAt, t.symbol]);
+    const rows = await d1(env, `
+      WITH requested(origin_run_at, symbol) AS (VALUES ${values})
+      SELECT requested.origin_run_at, requested.symbol, p.price
+      FROM requested
+      JOIN asset_price_log p ON p.run_at = requested.origin_run_at AND p.symbol = requested.symbol
+    `, params);
+    for (const r of rows) out[`${r.origin_run_at}|${r.symbol}`] = r.price;
+  }
+  return out;
+}
+
+async function loadMaturityPriceRows(env, targets) {
+  const out = {};
+  // Four parameters per requested target keep this at 60 values per query
+  // under D1's 100-bound-parameter cap (CHUNK is 15).
+  for (const batch of chunk(targets, CHUNK)) {
+    const values = batch.map(() => '(?,?,?,?)').join(',');
+    const params = batch.flatMap((t) => [t.runAt, t.symbol, t.targetAt, t.maxAt]);
+    const rows = await d1(env, `
+      WITH requested(origin_run_at, symbol, target_at, max_at) AS (VALUES ${values})
+      SELECT requested.origin_run_at, requested.symbol, p.run_at, p.price
+      FROM requested
+      JOIN asset_price_log p ON p.symbol = requested.symbol
+        AND p.run_at >= requested.target_at
+        AND p.run_at <= requested.max_at
+    `, params);
+    for (const r of rows) (out[`${r.origin_run_at}|${r.symbol}`] ??= []).push(r);
+  }
+  return out;
+}
+
 // Finds technique_votes rows old enough to have matured for each horizon
 // and not yet scored for it, compares that run's logged price against the
-// most recent price on record for the same symbol, and folds the
-// correct/incorrect outcome into technique_reliability. Also folds the
-// *realized move size* into asset_move_stats — once per (symbol, run_at,
-// horizon), not once per technique-vote row, since several techniques
-// voting on the same asset in the same hour all describe the exact same
-// underlying price move, not independent observations of it (the same
-// correlation trap fixed in horizonEstimate's confidence gate). Returns
-// how many (symbol, technique, horizon) outcomes were scored this call.
+// first price logged at its own target horizon (within normal scheduler
+// jitter), and folds the correct/incorrect outcome into
+// technique_reliability. Also folds the *realized move size* into
+// asset_move_stats — once per (symbol, run_at, horizon), not once per
+// technique-vote row, since several techniques voting on the same asset in
+// the same hour all describe the exact same underlying price move, not
+// independent observations of it (the same correlation trap fixed in
+// horizonEstimate's confidence gate). Returns how many (symbol, technique,
+// horizon) outcomes were scored this call.
 export async function evaluateMatured(env, nowIso) {
   const now = new Date(nowIso).getTime();
   let evaluatedCount = 0;
@@ -236,37 +326,41 @@ export async function evaluateMatured(env, nowIso) {
     const dueRanges = await d1(env, 'SELECT run_at, asset_class, symbol, low, high FROM range_log WHERE horizon_hours = ? AND run_at <= ?', [h, cutoff]);
     if (!due.length && !dueRanges.length) continue;
 
-    // Most recent logged price per symbol ("now"). Builds run hourly, so
-    // the set of distinct symbols among "due"/"dueRanges" rows is at most
-    // the universe size, not unbounded.
-    const symbols = [...new Set([...due.map((r) => r.symbol), ...dueRanges.map((r) => r.symbol)])];
-    const priceNow = {};
-    for (const batch of chunk(symbols, CHUNK)) {
-      const placeholders = batch.map(() => '?').join(',');
-      const rows = await d1(env, `SELECT symbol, price FROM asset_price_log WHERE symbol IN (${placeholders}) ORDER BY run_at DESC`, batch);
-      for (const r of rows) if (!(r.symbol in priceNow)) priceNow[r.symbol] = r.price; // first hit per symbol = most recent
+    // Deduplicate requests before querying: every technique vote for one
+    // (run_at, symbol) shares the same entry and horizon-target price.
+    const targetByKey = {};
+    for (const r of [...due, ...dueRanges]) {
+      const key = `${r.run_at}|${r.symbol}`;
+      if (targetByKey[key]) continue;
+      const target = maturityTarget(r.run_at, h);
+      if (target) targetByKey[key] = { runAt: r.run_at, symbol: r.symbol, ...target };
     }
-
-    // Price at forecast time. "due" rows cluster into a small number of
-    // distinct run_at values each call (roughly one per elapsed hour since
-    // this last ran), so this stays a handful of queries, not one per row.
-    const runAts = [...new Set([...due.map((r) => r.run_at), ...dueRanges.map((r) => r.run_at)])];
-    const priceBefore = {};
-    for (const runAt of runAts) {
-      const rows = await d1(env, 'SELECT symbol, price FROM asset_price_log WHERE run_at = ?', [runAt]);
-      for (const r of rows) priceBefore[`${runAt}|${r.symbol}`] = r.price;
+    const allTargets = Object.values(targetByKey);
+    const voteTargets = [...new Map(due.map((r) => {
+      const key = `${r.run_at}|${r.symbol}`;
+      return [key, targetByKey[key]];
+    }).filter(([, target]) => target)).values()];
+    const priceBefore = await loadForecastStartPrices(env, voteTargets);
+    const maturityRows = await loadMaturityPriceRows(env, allTargets);
+    const priceAtTarget = {};
+    for (const target of allTargets) {
+      const key = `${target.runAt}|${target.symbol}`;
+      const match = selectMaturityPrice(maturityRows[key], target.targetAt);
+      if (match) priceAtTarget[key] = match.price;
     }
 
     // Range containment only needs the "after" price (was it inside
     // [low, high]), not "before" — unlike technique_votes' directional
     // check, there's no direction to compare against.
     const rangeDeltas = {}; // symbol -> { hits, total, asset_class }
+    const evaluatedRangesByRunAt = {};
     for (const r of dueRanges) {
-      const after = priceNow[r.symbol];
-      if (after == null) continue; // symbol vanished from the universe; hard-cap prune handles it eventually
+      const after = priceAtTarget[`${r.run_at}|${r.symbol}`];
+      if (after == null) continue; // no valid target-time observation yet; leave pending for a later pass or hard-cap prune
       if (!rangeDeltas[r.symbol]) rangeDeltas[r.symbol] = { hits: 0, total: 0, asset_class: r.asset_class };
       rangeDeltas[r.symbol].total += 1;
       if (after >= r.low && after <= r.high) rangeDeltas[r.symbol].hits += 1;
+      (evaluatedRangesByRunAt[r.run_at] ??= new Set()).add(r.symbol);
     }
     for (const [symbol, d] of Object.entries(rangeDeltas)) {
       await d1(env, `
@@ -279,16 +373,21 @@ export async function evaluateMatured(env, nowIso) {
           updated_at = excluded.updated_at
       `, [d.asset_class, symbol, h, d.hits, d.total, d.total ? d.hits / d.total : 0, nowIso]);
     }
-    if (dueRanges.length) await d1(env, 'DELETE FROM range_log WHERE horizon_hours = ? AND run_at <= ?', [h, cutoff]);
+    for (const [runAt, symbols] of Object.entries(evaluatedRangesByRunAt)) {
+      for (const batch of chunk([...symbols], CHUNK)) {
+        const placeholders = batch.map(() => '?').join(',');
+        await d1(env, `DELETE FROM range_log WHERE horizon_hours = ? AND run_at = ? AND symbol IN (${placeholders})`, [h, runAt, ...batch]);
+      }
+    }
 
     const deltas = {}; // "symbol|technique_id" -> { correct, total, asset_class }
     const moveDeltas = {}; // "symbol" -> { n, sumPct, sumPctSq } — one realized move per (symbol, run_at), deduped across techniques
     // Decile of the composite call's own 0-100 score -> {correct, total} —
-    // pooled across both horizons here, same "blend, don't split" choice
-    // loadReliability already makes for technique_reliability. Piggybacks
-    // on this same due-rows pass (zero extra D1 reads): a composite row's
-    // score is already in hand exactly when its correctness is computed.
+    // pooled across both horizons here, matching loadReliability's blended
+    // technique records. The detailed companion below preserves the
+    // asset-class/direction/horizon split for alert calibration.
     const calibDeltas = {};
+    const detailedCalibDeltas = {};
     const seenMoves = new Set();
     const evaluatedSymbolsByRunAt = {}; // only mark rows we could actually score
     // Phase 5: which technique pairs agreed on direction this (run_at,
@@ -307,8 +406,8 @@ export async function evaluateMatured(env, nowIso) {
     const regimeDeltas = {}; // "symbol|technique_id|regime" -> { symbol, technique_id, regime, correct, total }
     for (const r of due) {
       const before = priceBefore[`${r.run_at}|${r.symbol}`];
-      const after = priceNow[r.symbol];
-      if (before == null || after == null || !before) continue; // symbol vanished from the universe; leave pending, hard-cap prune handles it eventually
+      const after = priceAtTarget[`${r.run_at}|${r.symbol}`];
+      if (before == null || after == null || !before) continue; // no exact entry/target observation; leave pending, hard-cap prune handles it eventually
       const pct = ((after / before) - 1) * 100;
       const actualDir = pct > OUTCOME_DEADBAND_PCT ? 1 : pct < -OUTCOME_DEADBAND_PCT ? -1 : 0;
       const key = `${r.symbol}|${r.technique_id}`;
@@ -322,6 +421,14 @@ export async function evaluateMatured(env, nowIso) {
         if (!calibDeltas[bucket]) calibDeltas[bucket] = { correct: 0, total: 0 };
         calibDeltas[bucket].total += 1;
         if (r.dir === actualDir) calibDeltas[bucket].correct += 1;
+        const detailedKey = `${r.asset_class}|${r.dir}|${h}|${bucket}`;
+        if (!detailedCalibDeltas[detailedKey]) {
+          detailedCalibDeltas[detailedKey] = {
+            assetClass: r.asset_class, dir: r.dir, bucket, correct: 0, total: 0
+          };
+        }
+        detailedCalibDeltas[detailedKey].total += 1;
+        if (r.dir === actualDir) detailedCalibDeltas[detailedKey].correct += 1;
       }
 
       if (r.regime) {
@@ -400,6 +507,17 @@ export async function evaluateMatured(env, nowIso) {
           total = score_calibration.total + excluded.total,
           updated_at = excluded.updated_at
       `, [Number(bucket), d.correct, d.total, nowIso]);
+    }
+
+    for (const d of Object.values(detailedCalibDeltas)) {
+      await d1(env, `
+        INSERT INTO score_calibration_detail (asset_class, dir, horizon_hours, bucket, correct, total, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (asset_class, dir, horizon_hours, bucket) DO UPDATE SET
+          correct = score_calibration_detail.correct + excluded.correct,
+          total = score_calibration_detail.total + excluded.total,
+          updated_at = excluded.updated_at
+      `, [d.assetClass, d.dir, h, d.bucket, d.correct, d.total, nowIso]);
     }
 
     for (const [key, d] of Object.entries(deltas)) {
@@ -538,33 +656,36 @@ export async function detectAndLogCallFlips(env, nowIso) {
 // that way), did it revert back toward the OLD direction (the flip was
 // whipsaw noise — the original call would have aged better), or was the
 // move too small to call either way (same OUTCOME_DEADBAND_PCT flat-zone
-// evaluateMatured already uses). Same "logged price at time X, logged
-// price now" join evaluateMatured uses — not the live API, so this is
-// exact-replay-able and doesn't cost a fetch.
+// evaluateMatured already uses). Uses the same bounded exact-target matching
+// as evaluateMatured rather than a later arbitrary current price, so a
+// "24h" flip result is actually a 24h result.
 export async function evaluateCallFlips(env, nowIso) {
   const cutoff = new Date(new Date(nowIso).getTime() - CALL_FLIP_EVAL_HORIZON_HOURS * 3600 * 1000).toISOString();
   const due = await d1(env, 'SELECT id, symbol, new_dir, flip_run_at FROM call_flip_log WHERE outcome IS NULL AND flip_run_at <= ?', [cutoff]);
   if (!due.length) return 0;
 
-  const symbols = [...new Set(due.map((r) => r.symbol))];
-  const priceNow = {};
-  for (const batch of chunk(symbols, CHUNK)) {
-    const placeholders = batch.map(() => '?').join(',');
-    const rows = await d1(env, `SELECT symbol, price FROM asset_price_log WHERE symbol IN (${placeholders}) ORDER BY run_at DESC`, batch);
-    for (const r of rows) if (!(r.symbol in priceNow)) priceNow[r.symbol] = r.price;
+  const targetByKey = {};
+  for (const r of due) {
+    const key = `${r.flip_run_at}|${r.symbol}`;
+    if (targetByKey[key]) continue;
+    const target = maturityTarget(r.flip_run_at, CALL_FLIP_EVAL_HORIZON_HOURS);
+    if (target) targetByKey[key] = { runAt: r.flip_run_at, symbol: r.symbol, ...target };
   }
-  const runAts = [...new Set(due.map((r) => r.flip_run_at))];
-  const priceAtFlip = {};
-  for (const runAt of runAts) {
-    const rows = await d1(env, 'SELECT symbol, price FROM asset_price_log WHERE run_at = ?', [runAt]);
-    for (const r of rows) priceAtFlip[`${runAt}|${r.symbol}`] = r.price;
+  const targets = Object.values(targetByKey);
+  const priceAtFlip = await loadForecastStartPrices(env, targets);
+  const maturityRows = await loadMaturityPriceRows(env, targets);
+  const priceAtTarget = {};
+  for (const target of targets) {
+    const key = `${target.runAt}|${target.symbol}`;
+    const match = selectMaturityPrice(maturityRows[key], target.targetAt);
+    if (match) priceAtTarget[key] = match.price;
   }
 
   let evaluated = 0;
   for (const r of due) {
     const before = priceAtFlip[`${r.flip_run_at}|${r.symbol}`];
-    const after = priceNow[r.symbol];
-    if (before == null || after == null) continue; // symbol vanished from the universe; hard-cap prune handles the row eventually
+    const after = priceAtTarget[`${r.flip_run_at}|${r.symbol}`];
+    if (before == null || after == null) continue; // no exact entry/target observation; leave unscored rather than mislabeling the flip
     const movePct = ((after / before) - 1) * 100;
     const actualDir = Math.abs(movePct) < OUTCOME_DEADBAND_PCT ? 0 : (movePct > 0 ? 1 : -1);
     const outcome = actualDir === 0 ? 'flat' : (actualDir === r.new_dir ? 'held' : 'reverted');
@@ -596,7 +717,7 @@ export async function loadCallFlipData(env, nowIso, withinHours = 48) {
 
   const statRows = await d1(env, `
     SELECT symbol, COUNT(*) as n, SUM(CASE WHEN outcome = 'held' THEN 1 ELSE 0 END) as held, SUM(CASE WHEN outcome = 'reverted' THEN 1 ELSE 0 END) as reverted
-    FROM call_flip_log WHERE outcome IS NOT NULL GROUP BY symbol
+    FROM call_flip_log WHERE outcome IN ('held', 'reverted') GROUP BY symbol
   `);
   const stability = {};
   for (const r of statRows) {

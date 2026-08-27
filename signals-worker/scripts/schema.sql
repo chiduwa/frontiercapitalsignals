@@ -387,6 +387,21 @@ CREATE TABLE IF NOT EXISTS score_calibration (
   PRIMARY KEY (bucket)
 );
 
+-- The more precise companion to score_calibration. It lets alert confidence
+-- distinguish crypto from equities, upward from downward calls, and 24h from
+-- 168h outcomes. score_calibration remains the warm-up fallback because this
+-- table necessarily starts with fewer observations per cell.
+CREATE TABLE IF NOT EXISTS score_calibration_detail (
+  asset_class TEXT NOT NULL,
+  dir INTEGER NOT NULL CHECK (dir IN (-1, 1)),
+  horizon_hours INTEGER NOT NULL CHECK (horizon_hours IN (24, 168)),
+  bucket INTEGER NOT NULL CHECK (bucket BETWEEN 0 AND 9),
+  correct INTEGER NOT NULL DEFAULT 0,
+  total INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (asset_class, dir, horizon_hours, bucket)
+);
+
 -- Phase 5: which technique PAIRS agreed on direction (both fired the same
 -- dir, in the same run, on the same symbol) and how often that pair's
 -- shared call was actually right — mined for free inside evaluateMatured's

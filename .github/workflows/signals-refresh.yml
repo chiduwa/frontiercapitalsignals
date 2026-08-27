@@ -62,6 +62,15 @@ jobs:
         with:
           node-version: "24"
 
+      # A manually dispatched refresh must be able to initialize the newest
+      # additive D1 tables too, not depend on a preceding Worker deployment.
+      - name: Apply D1 migrations
+        working-directory: signals-worker
+        run: npx --yes wrangler@4 d1 migrations apply frontier-capital-signals-reliability --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Build signals payload and push to KV
         working-directory: signals-worker
         run: node scripts/build-signals.mjs

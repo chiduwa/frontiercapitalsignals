@@ -30,6 +30,15 @@ jobs:
         with:
           node-version: "24"
 
+      # Schema migrations are applied before code that reads the new table is
+      # deployed. Re-running is safe: Wrangler records applied migrations.
+      - name: Apply D1 migrations
+        working-directory: signals-worker
+        run: npx --yes wrangler@4 d1 migrations apply frontier-capital-signals-reliability --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       # Enforced, not auto-fixed: wrangler deploys src/worker.js, but the
       # actual source of truth is worker.js at the signals-worker root (no
       # build step wires them together). A silent auto-copy here could

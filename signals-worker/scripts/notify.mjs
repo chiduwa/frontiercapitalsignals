@@ -9,10 +9,20 @@
 // every exported function here silently no-ops rather than throwing,
 // matching this project's established pattern for an optional,
 // user-provided credential (CMC_API_KEY, CRYPTOPANIC_API_TOKEN).
-import { d1 } from './d1-client.mjs';
-import { MIN_RELIABILITY_SAMPLES } from '../worker.js';
+import { d1, chunk } from './d1-client.mjs';
+import { MIN_RELIABILITY_SAMPLES, currentSignalConfidence } from '../worker.js';
 
 const NTFY_TIMEOUT_MS = 10000;
+const CONFIDENT_MOVE_ALERTS_PER_RUN = 5;
+
+function fmtAlertPrice(v) {
+  if (!Number.isFinite(v)) return '—';
+  const abs = Math.abs(v);
+  if (abs >= 1000) return Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (abs >= 1) return Number(v).toFixed(2);
+  if (abs >= 0.1) return Number(v).toFixed(4);
+  return Number(v).toFixed(6);
+}
 
 async function sendNtfy(topic, { title, message, priority = 'default', tags = [], click }) {
   const ctrl = new AbortController();
@@ -65,6 +75,13 @@ export async function notifyOnChange(env, kind, symbol, value, notification, now
     INSERT INTO notification_log (kind, symbol, title, message, priority, click_url, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?)
   `, [kind, symbol, notification.title, notification.message, notification.priority || 'default', notification.click || null, nowIso]);
   return true;
+}
+
+async function setNotificationState(env, kind, symbol, value, nowIso) {
+  await d1(env, `
+    INSERT INTO notification_state (kind, symbol, last_value, last_sent_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT (kind, symbol) DO UPDATE SET last_value = excluded.last_value, last_sent_at = excluded.last_sent_at
+  `, [kind, symbol, value, nowIso]);
 }
 
 // Fresh reversal detection: technique_id='reversal' composite votes are
@@ -162,6 +179,95 @@ export async function checkAndNotifyConsolidations(env, nowIso, lookbackHours = 
       priority: 'default', tags: ['hourglass_flowing_sand'],
       click: 'https://frontiercapitalsignals.com/signals/'
     }, nowIso)) sent++;
+  }
+  return sent;
+}
+
+// Reads the per-asset composite record at each fixed maturity horizon after
+// this run has evaluated due outcomes. Alerting deliberately does not reuse a
+// broader presentation score: range containment and pivot accuracy are useful
+// dashboard context but are not evidence that THIS directional composite call
+// will be right.
+async function loadCompositeRecordsForAlerts(env, signals) {
+  const symbols = [...new Set(signals.map((s) => s.symbol).filter(Boolean))];
+  const out = {};
+  for (const batch of chunk(symbols, 80)) {
+    const placeholders = batch.map(() => '?').join(',');
+    const rows = await d1(env, `
+      SELECT symbol, horizon_hours, correct, total
+      FROM technique_reliability
+      WHERE technique_id = 'composite'
+        AND horizon_hours IN (24, 168)
+        AND symbol IN (${placeholders})
+    `, batch);
+    for (const row of rows) out[`${row.symbol}|${row.horizon_hours}`] = row;
+  }
+  return out;
+}
+
+function alertHorizonHours(signal) {
+  return signal && signal.horizon && Number.isFinite(signal.horizon.days)
+    ? (signal.horizon.days <= 4 ? 24 : 168)
+    : null;
+}
+
+// Transition-based alert when the current composite call clears a stricter
+// confidence bar than the normal dashboard ranking alone: detailed
+// score-calibration plus this asset's own matching-horizon composite history,
+// with extra gates on agreement and historical horizon/range basis. State is
+// explicitly reset to 'none' when a symbol falls out of this actionable set so
+// a later re-entry can alert again without requiring the direction to change.
+export async function checkAndNotifyConfidentMoves(env, nowIso, signals, calibration) {
+  if (!env.NTFY_TOPIC || !Array.isArray(signals) || !signals.length) return 0;
+  const compositeRecords = await loadCompositeRecordsForAlerts(env, signals);
+  const ranked = signals
+    .map((s) => {
+      const horizonHours = alertHorizonHours(s);
+      return {
+        signal: s,
+        confidence: currentSignalConfidence(s, calibration, horizonHours != null ? compositeRecords[`${s.symbol}|${horizonHours}`] : null)
+      };
+    })
+    .filter((x) => x.confidence && x.confidence.actionable)
+    .sort((a, b) => b.confidence.estimatedWinRate - a.confidence.estimatedWinRate || b.signal.score - a.signal.score || a.signal.symbol.localeCompare(b.signal.symbol));
+
+  const actionable = new Map(ranked.map((x) => [x.signal.symbol, x]));
+  const activeRows = await d1(env, 'SELECT symbol, last_value FROM notification_state WHERE kind = ?', ['confidentmove']);
+  const priorState = new Map(activeRows.map((row) => [row.symbol, row.last_value]));
+  for (const row of activeRows) {
+    if (!actionable.has(row.symbol)) await setNotificationState(env, 'confidentmove', row.symbol, 'none', nowIso);
+  }
+
+  let sent = 0;
+  for (const { signal, confidence } of ranked) {
+    const stateValue = String(signal.dir);
+    if (priorState.get(signal.symbol) === stateValue) continue;
+    // On a cold start several symbols can qualify together. Record lower-ranked
+    // entrants as active without sending them, rather than turning the next few
+    // runs into a backlog of stale notifications.
+    if (sent >= CONFIDENT_MOVE_ALERTS_PER_RUN) {
+      await setNotificationState(env, 'confidentmove', signal.symbol, stateValue, nowIso);
+      continue;
+    }
+    const dirLabel = signal.dir === 1 ? 'up' : 'down';
+    const agreementPct = Math.round(confidence.agreementRatio * 100);
+    const horizon = signal.horizon ? signal.horizon.label : 'next move';
+    const calText = confidence.calibration
+      ? ` ${confidence.calibration.source === 'asset-class-direction-horizon' ? 'Matching asset-class/direction/horizon' : 'Pooled'} score bucket ${confidence.bucket * 10}-${confidence.bucket * 10 + 9} has a ${Math.round(confidence.calibration.accuracy * 100)}% raw hit rate (${confidence.calibration.samples} calls; conservative lower estimate ${Math.round(confidence.calibration.lowerBound * 100)}%).`
+      : '';
+    const assetText = confidence.assetCompositeRecord
+      ? ` ${signal.symbol}'s own ${confidence.horizonHours || 'matching'}h composite calls have a ${Math.round(confidence.assetCompositeRecord.accuracy * 100)}% raw hit rate over ${confidence.assetCompositeRecord.samples} outcomes (conservative lower estimate ${Math.round(confidence.assetCompositeRecord.lowerBound * 100)}%).`
+      : '';
+    const priceText = signal.price != null ? ` Current price: ${fmtAlertPrice(signal.price)}.` : '';
+    const rangeText = signal.range ? ` Modeled range over ${horizon}: ${fmtAlertPrice(signal.range.low)} to ${fmtAlertPrice(signal.range.high)}.` : '';
+    const notified = await notifyOnChange(env, 'confidentmove', signal.symbol, stateValue, {
+      title: `${signal.symbol}: confident ${dirLabel} move setup`,
+      message: `${signal.symbol} (${signal.asset_class}) has a high-confidence ${dirLabel} setup now: score ${signal.score}, ${signal.agree}/${signal.total} techniques aligned (${agreementPct}%). Conservative reliability estimate ${Math.round(confidence.estimatedWinRate * 100)}%.${priceText}${calText}${assetText}${rangeText} Mechanical model output only, not financial advice.`,
+      priority: confidence.estimatedWinRate >= 0.75 ? 'high' : 'default',
+      tags: [signal.dir === 1 ? 'rocket' : 'chart_with_downwards_trend'],
+      click: 'https://frontiercapitalsignals.com/signals/'
+    }, nowIso);
+    if (notified) sent++;
   }
   return sent;
 }

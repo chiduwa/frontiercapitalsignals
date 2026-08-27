@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 import { computeSwingTimeTallies, barsRowsToReturnsBySymbol, matchProtocolsToUniverse, findPivots, walkSrLevels, isYahooCryptoDataTrustworthy, fundingSnapshotToRows } from './scripts/archive.mjs';
 import { selectIntradayWatchlist, CRYPTO_WATCHLIST_SIZE } from './scripts/intraday.mjs';
 import { parseBinanceKlines } from './scripts/archive.mjs';
+import { selectMaturityPrice } from './scripts/reliability.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -354,6 +355,7 @@ check('UST2Y/UST10Y Treasury yield benchmarks reach payload.overview too', built
 check('health counts sane', built.health.stocks_ok === built.health.stocks_total && built.health.valuation_ok > 0);
 check('crypto_daily health reflects the daily-history fetch (3 of 5 succeed, solana and stellar have none stubbed)', built.health.crypto_daily_total === 5 && built.health.crypto_daily_ok === 3, `ok=${built.health.crypto_daily_ok} total=${built.health.crypto_daily_total}`);
 check('votesLog/priceLog/rangeLog/allSymbols not leaked into the public payload', built.crypto.votesLog === undefined && built.crypto.priceLog === undefined && built.crypto.rangeLog === undefined && built.crypto.allSymbols === undefined && built.stocks.votesLog === undefined && built.stocks.rangeLog === undefined && built.stocks.allSymbols === undefined);
+check('internal signal candidates are logged for alerting but not leaked into the public payload', Array.isArray(log.signals) && log.signals.every(s => (s.dir === 1 || s.dir === -1) && typeof s.score === 'number') && built.signals === undefined);
 check('log has directional votes for both asset classes', log.votes.some(v => v.asset_class === 'crypto') && log.votes.some(v => v.asset_class === 'stock'));
 check('log votes are directional only (no 0/null dir)', log.votes.every(v => v.dir === 1 || v.dir === -1));
 check('log has a price row per universe asset, both classes', log.prices.length === built.crypto.universe + built.stocks.universe);
@@ -367,14 +369,19 @@ check('crypto entries carry a CoinGecko id (for the dashboard\'s outbound link)'
 check('stock entries have no id field (not applicable, uses symbol for the Yahoo link instead)', built.stocks.breakout.every(r => r.id === undefined));
 check('every ranked row carries a horizon estimate end-to-end through buildPayload', built.crypto.breakout.concat(built.crypto.breakdown, built.stocks.breakout, built.stocks.breakdown).every(r => r.horizon && typeof r.horizon.label === 'string' && (r.horizon.basis === 'methodology' || r.horizon.basis === 'historical')));
 
-console.log('\n== engine: a qualifying highAccuracy entry carries price + its own predicted range ==');
-const qualifyingReliability = { 'BTC|composite': { correct: 25, total: 25, accuracy: 1 } };
+console.log('\n== engine: qualifying highAccuracy entries preserve asset class, price, and range ==');
+const qualifyingReliability = {
+  'BTC|composite': { correct: 25, total: 25, accuracy: 1 },
+  'AAPL|composite': { correct: 25, total: 25, accuracy: 1 }
+};
 const { payload: builtQualifying } = await mod.buildPayload({ TREFIS_OVERRIDES: '{"AAPL": 999}' }, qualifyingReliability, undefined, undefined, {});
 const btcEntry = builtQualifying.highAccuracy.find(r => r.symbol === 'BTC');
+const aaplEntry = builtQualifying.highAccuracy.find(r => r.symbol === 'AAPL');
 check('BTC clears the 95%+ bar given a synthetic 25/25 composite record', !!btcEntry, JSON.stringify(builtQualifying.highAccuracy));
 check('the qualifying entry carries a real current price, not just a bare score', btcEntry && typeof btcEntry.price === 'number' && btcEntry.price > 0);
 check('the qualifying entry carries its own predicted range (low < high) and a coin id to link out', btcEntry && btcEntry.range && btcEntry.range.low < btcEntry.range.high && typeof btcEntry.id === 'string');
 check('the qualifying entry carries a horizon label for that range\'s own period', btcEntry && btcEntry.horizon && typeof btcEntry.horizon.label === 'string');
+check('qualifying crypto and equity rows retain their asset class so the dashboard labels and links stay correct', btcEntry && btcEntry.asset_class === 'crypto' && aaplEntry && aaplEntry.asset_class === 'stock', JSON.stringify({ btc: btcEntry && btcEntry.asset_class, aapl: aaplEntry && aaplEntry.asset_class }));
 
 console.log('\n== reliability weighting: confluence() with a synthetic reliability map ==');
 const btcMetrics = mod.buildCryptoMetrics(btcCoin, { daily: btcDaily });
@@ -430,6 +437,18 @@ check('90 -> bucket 9', mod.scoreBucket(90) === 9);
 check('99 -> bucket 9', mod.scoreBucket(99) === 9);
 check('100 -> bucket 9, not 10 (clamped, not just floored)', mod.scoreBucket(100) === 9);
 check('negative input clamps to bucket 0 rather than going negative (defensive, should not happen given confluence already clamps)', mod.scoreBucket(-5) === 0);
+
+console.log('\n== selectMaturityPrice: learning only scores the exact forecast horizon ==');
+const maturityTarget = '2026-01-02T00:00:00.000Z';
+const maturityMatch = selectMaturityPrice([
+  { run_at: '2026-01-01T23:55:00.000Z', price: 80 },
+  { run_at: '2026-01-02T01:10:00.000Z', price: 130 },
+  { run_at: '2026-01-02T00:20:00.000Z', price: 110 },
+  { run_at: '2026-01-02T00:45:00.000Z', price: 120 }
+], maturityTarget);
+check('ignores an observation before the target and chooses the first valid post-target observation, not a later price', maturityMatch && maturityMatch.price === 110 && maturityMatch.run_at === '2026-01-02T00:20:00.000Z', JSON.stringify(maturityMatch));
+check('rejects a price beyond the bounded target-time lag instead of treating it as a delayed 24h/168h outcome', selectMaturityPrice([{ run_at: '2026-01-02T01:31:00.000Z', price: 110 }], maturityTarget) === null);
+check('malformed observations cannot fabricate a maturity match', selectMaturityPrice([{ run_at: 'bad timestamp', price: 110 }, { run_at: maturityTarget, price: 'not-a-number' }], maturityTarget) === null);
 
 console.log('\n== rsiSeries / rsiRecentRange ==');
 check('rsiSeries final value matches the scalar rsi()', mod.rsiSeries(dailyClose)[mod.rsiSeries(dailyClose).length - 1] === mod.rsi(dailyClose));
@@ -1630,6 +1649,42 @@ check('a symbol with only range data (no matured composite/reversal/dwell yet) s
 const perfect = mod.assetPredictionScore('Z', { 'Z|composite': { correct: 25, total: 25 } }, {});
 check('a perfect matured record scores 100, not a lower "cautious" number', perfect && perfect.score === 100 && perfect.samples === 25, JSON.stringify(perfect));
 check('assetPredictionScore itself does not apply the >95 leaderboard cutoff (that is buildPayload\'s job) — 95 is a valid returned score', rangeOnly.score === 95);
+
+console.log('\n== currentSignalConfidence: conservative, horizon-matched current-call confidence ==');
+check('no empirical support at all: returns null rather than inventing confidence from a raw score alone', mod.currentSignalConfidence({ symbol: 'X', asset_class: 'crypto', dir: 1, score: 90, agree: 7, total: 10, horizon: { days: 1, basis: 'methodology' }, range: { basis: 'methodology' } }, {}, null) === null);
+const confBlended = mod.currentSignalConfidence(
+  { symbol: 'X', asset_class: 'crypto', dir: 1, score: 84, agree: 7, total: 10, horizon: { days: 1, basis: 'historical' }, range: { basis: 'historical' } },
+  {
+    pooled: { 8: { correct: 72, total: 100, accuracy: 0.72 } },
+    detailed: { 'crypto|1|24|8': { correct: 29, total: 30, accuracy: 29 / 30 } }
+  },
+  { correct: 45, total: 50 }
+);
+check('prefers the matching asset-class/direction/horizon calibration once it has enough samples', confBlended && confBlended.calibration && confBlended.calibration.source === 'asset-class-direction-horizon', JSON.stringify(confBlended));
+check('uses a conservative lower estimate rather than the raw blended hit rate', confBlended && confBlended.estimatedWinRate < confBlended.rawEstimatedWinRate && confBlended.estimatedWinRate >= 0.68, JSON.stringify(confBlended));
+check('strong matching empirical support plus historical basis: actionable', confBlended && confBlended.actionable === true, JSON.stringify(confBlended));
+const confWeakAgreement = mod.currentSignalConfidence(
+  { symbol: 'X', asset_class: 'crypto', dir: 1, score: 84, agree: 2, total: 10, horizon: { days: 1, basis: 'historical' }, range: { basis: 'historical' } },
+  {
+    pooled: { 8: { correct: 72, total: 100, accuracy: 0.72 } },
+    detailed: { 'crypto|1|24|8': { correct: 29, total: 30, accuracy: 29 / 30 } }
+  },
+  { correct: 45, total: 50 }
+);
+check('weak current agreement blocks an alert even with decent history', confWeakAgreement && confWeakAgreement.actionable === false, JSON.stringify(confWeakAgreement));
+const confCalibrationOnly = mod.currentSignalConfidence(
+  { symbol: 'X', asset_class: 'stock', dir: -1, score: 91, agree: 7, total: 10, horizon: { days: 7, basis: 'methodology' }, range: { basis: 'methodology' } },
+  { 9: { correct: 110, total: 120, accuracy: 110 / 120 } },
+  null
+);
+check('very strong bucket calibration alone can still qualify a top-end score', confCalibrationOnly && confCalibrationOnly.actionable === true, JSON.stringify(confCalibrationOnly));
+const confThinAssetRecord = mod.currentSignalConfidence(
+  { symbol: 'X', asset_class: 'crypto', dir: 1, score: 84, agree: 7, total: 10, horizon: { days: 1, basis: 'historical' }, range: { basis: 'historical' } },
+  {},
+  { correct: 16, total: 20 }
+);
+check('a raw 80% record with only 20 outcomes does not clear the conservative alert bar', confThinAssetRecord && confThinAssetRecord.actionable === false && confThinAssetRecord.estimatedWinRate < 0.68, JSON.stringify(confThinAssetRecord));
+check('lowerConfidenceBound is below the raw rate for finite evidence, not a fabricated certainty', mod.lowerConfidenceBound(45, 50) < 0.9 && mod.lowerConfidenceBound(45, 50) > 0.68, mod.lowerConfidenceBound(45, 50));
 
 console.log('\n== api: KV populated by the "Action" (mirrors what build-signals.mjs writes) ==');
 const warmEnv = { FCS_CACHE: new MockKV() };

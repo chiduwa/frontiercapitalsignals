@@ -12,8 +12,8 @@
 // Optional env: TREFIS_OVERRIDES
 // Optional (enables reliability weighting when set): FCS_D1_DATABASE_ID
 import { buildPayload, CACHE_KEY, coingeckoSimplePrice, yahooQuote, getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST } from '../worker.js';
-import { loadReliability, loadTechniquePriors, loadComboReliability, loadMoveStats, loadRangeReliability, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, loadSwingTimeStats, loadRecentEvents, loadIvHistory, loadRegimeReliability, loadSrLevels, loadSrBreakStats, loadQualityData, loadRotationStatus, loadCallFlipData, loadLongTermBottomStatus, logRun, evaluateMatured, evaluateTimeOfDay, snapshotAssetScores, detectAndLogCallFlips, evaluateCallFlips } from './reliability.mjs';
-import { checkAndNotifyReversals, checkAndNotifySuddenMoves, checkAndNotifyConsolidations } from './notify.mjs';
+import { loadReliability, loadTechniquePriors, loadComboReliability, loadMoveStats, loadRangeReliability, loadCalibration, loadDetailedCalibration, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, loadSwingTimeStats, loadRecentEvents, loadIvHistory, loadRegimeReliability, loadSrLevels, loadSrBreakStats, loadQualityData, loadRotationStatus, loadCallFlipData, loadLongTermBottomStatus, logRun, evaluateMatured, evaluateTimeOfDay, snapshotAssetScores, detectAndLogCallFlips, evaluateCallFlips } from './reliability.mjs';
+import { checkAndNotifyReversals, checkAndNotifySuddenMoves, checkAndNotifyConsolidations, checkAndNotifyConfidentMoves } from './notify.mjs';
 import { upsertMarketSentiment, loadRecentBars, loadTvlSeries, loadMarketReturn, loadYieldSpreadChange } from './archive.mjs';
 import { selectIntradayWatchlist } from './intraday.mjs';
 
@@ -240,6 +240,21 @@ if (FCS_D1_DATABASE_ID) {
     console.log(`consolidation alerts: ${consolidationAlerts} sent${env.NTFY_TOPIC ? '' : ' (NTFY_TOPIC not set, skipped)'}`);
   } catch (e) {
     console.error('consolidation alert check failed (KV already updated, dashboard unaffected):', e.message || e);
+  }
+  try {
+    let confidentMoveAlerts = 0;
+    if (env.NTFY_TOPIC) {
+      // Reload after evaluateMatured above so an alert sees this cycle's newest
+      // exact-horizon outcomes rather than using a stale pre-build snapshot.
+      const alertCalibration = {
+        pooled: await loadCalibration(env),
+        detailed: await loadDetailedCalibration(env)
+      };
+      confidentMoveAlerts = await checkAndNotifyConfidentMoves(env, payload.generated_at, log.signals || [], alertCalibration);
+    }
+    console.log(`confident-move alerts: ${confidentMoveAlerts} sent${env.NTFY_TOPIC ? '' : ' (NTFY_TOPIC not set, skipped)'}`);
+  } catch (e) {
+    console.error('confident-move alert check failed (KV already updated, dashboard unaffected):', e.message || e);
   }
   try {
     // Reuses this run's own just-logged prices (no re-query) — see
