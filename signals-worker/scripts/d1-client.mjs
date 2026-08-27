@@ -47,6 +47,21 @@ export async function d1(env, sql, params = []) {
   return (body.result && body.result[0] && body.result[0].results) || [];
 }
 
+// D1's REST API accepts independent statements concurrently, but opening one
+// request for every write batch can rate-limit the shared API and recreate the
+// same backlog. This bounded queue is used for bulk, order-independent writes.
+export async function forEachConcurrent(items, limit, fn) {
+  const workerCount = Math.min(Math.max(1, limit), items.length);
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      await fn(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: workerCount }, worker));
+}
+
 export function chunk(arr, n) {
   const out = [];
   for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));

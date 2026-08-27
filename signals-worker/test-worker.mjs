@@ -15,6 +15,7 @@ import { computeSwingTimeTallies, barsRowsToReturnsBySymbol, matchProtocolsToUni
 import { selectIntradayWatchlist, CRYPTO_WATCHLIST_SIZE } from './scripts/intraday.mjs';
 import { parseBinanceKlines } from './scripts/archive.mjs';
 import { selectMaturityPrice } from './scripts/reliability.mjs';
+import { forEachConcurrent } from './scripts/d1-client.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -23,6 +24,22 @@ const check = (name, cond, detail = '') => {
   if (cond) console.log(`  PASS  ${name}`);
   else { failures++; console.error(`  FAIL  ${name} ${detail}`); }
 };
+
+console.log('\n== forEachConcurrent: bounded D1 bulk-write queue ==');
+const processedBatches = [];
+let concurrentBatches = 0;
+let peakConcurrentBatches = 0;
+await forEachConcurrent([1, 2, 3, 4, 5], 2, async (batch) => {
+  concurrentBatches++;
+  peakConcurrentBatches = Math.max(peakConcurrentBatches, concurrentBatches);
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  processedBatches.push(batch);
+  concurrentBatches--;
+});
+check('processes every independent batch exactly once', processedBatches.length === 5 && new Set(processedBatches).size === 5, JSON.stringify(processedBatches));
+check('never exceeds the configured bulk-write concurrency', peakConcurrentBatches <= 2, `peak=${peakConcurrentBatches}`);
+await forEachConcurrent([], 4, async () => { throw new Error('empty queue must not invoke a worker'); });
+check('empty bulk-write queue resolves without invoking a worker', true);
 
 // ---- deterministic fake upstreams -----------------------------------------
 const spark = Array.from({ length: 168 }, (_, i) => 100 + i * 0.05 + Math.sin(i / 6));

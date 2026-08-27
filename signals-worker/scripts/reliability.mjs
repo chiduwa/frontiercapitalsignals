@@ -5,7 +5,7 @@
 // the archive/backfill scripts so there's one D1 client, not a hand-copied
 // duplicate that could drift.
 import { MIN_RELIABILITY_SAMPLES, slotsForTimestamp, assetPredictionScore, scoreBucket, TOD_HORIZONS_HOURS, detectCallFlips } from '../worker.js';
-import { d1, chunk } from './d1-client.mjs';
+import { d1, chunk, forEachConcurrent } from './d1-client.mjs';
 import { computeSwingTimeTallies, upsertSwingTimeStats } from './archive.mjs';
 
 // Matches the horizons timeOfDaySignal (worker.js) checks.
@@ -39,6 +39,9 @@ const CHUNK = 15;
 // technique_votes' own insert is wider than CHUNK was sized for (7 columns
 // now, after score + regime) — see its own comment at the write site.
 const VOTES_CHUNK = 14;
+// Keep enough write requests in flight to finish a full vote log promptly,
+// without blasting Cloudflare's shared D1 REST API with hundreds at once.
+const D1_WRITE_CONCURRENCY = 4;
 // A bit past the longer 168h horizon, for the price-log join plus buffer.
 const RETENTION_HOURS = 200;
 // Hard cap regardless of evaluated status, so a symbol that drops out of
@@ -189,17 +192,17 @@ export async function loadDetailedCalibration(env) {
 // Persists this run's per-asset price and per-technique directional votes,
 // to be scored once they mature (see evaluateMatured).
 export async function logRun(env, runAt, log) {
-  for (const batch of chunk(log.prices, CHUNK)) {
+  await forEachConcurrent(chunk(log.prices, CHUNK), D1_WRITE_CONCURRENCY, async (batch) => {
     const placeholders = batch.map(() => '(?,?,?,?)').join(',');
     const params = batch.flatMap((p) => [runAt, p.asset_class, p.symbol, p.price]);
     await d1(env, `INSERT OR REPLACE INTO asset_price_log (run_at, asset_class, symbol, price) VALUES ${placeholders}`, params);
-  }
+  });
   // VOTES_CHUNK, not the shared CHUNK: this insert is now 7 columns
   // (score + regime both added after CHUNK=15 was sized for the original
   // 4-5 column shape). 15 x 7 = 105 would exceed D1's real 100-bound-param
   // cap (confirmed live once already, see CHUNK's own docs above); 14 x 7
   // = 98 stays under it.
-  for (const batch of chunk(log.votes, VOTES_CHUNK)) {
+  await forEachConcurrent(chunk(log.votes, VOTES_CHUNK), D1_WRITE_CONCURRENCY, async (batch) => {
     // score is nullable and only ever set on the synthetic 'composite' rows
     // (see rankBoards' push-site, worker.js) — null for every real
     // technique vote. regime is nullable too — null whenever the asset
@@ -208,12 +211,12 @@ export async function logRun(env, runAt, log) {
     const placeholders = batch.map(() => '(?,?,?,?,?,?,?)').join(',');
     const params = batch.flatMap((v) => [runAt, v.asset_class, v.symbol, v.technique_id, v.dir, v.score ?? null, v.regime ?? null]);
     await d1(env, `INSERT OR REPLACE INTO technique_votes (run_at, asset_class, symbol, technique_id, dir, score, regime) VALUES ${placeholders}`, params);
-  }
-  for (const batch of chunk(log.ranges || [], CHUNK)) {
+  });
+  await forEachConcurrent(chunk(log.ranges || [], CHUNK), D1_WRITE_CONCURRENCY, async (batch) => {
     const placeholders = batch.map(() => '(?,?,?,?,?,?)').join(',');
     const params = batch.flatMap((r) => [runAt, r.asset_class, r.symbol, r.horizon_hours, r.low, r.high]);
     await d1(env, `INSERT OR REPLACE INTO range_log (run_at, asset_class, symbol, horizon_hours, low, high) VALUES ${placeholders}`, params);
-  }
+  });
 }
 
 // Per-asset realized move size at each horizon, learned continuously —
