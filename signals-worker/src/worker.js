@@ -3828,6 +3828,13 @@ export async function dispatchRefreshIfStale(env) {
   return true;
 }
 
+function queueStaleCacheRefresh(env, ctx) {
+  if (!ctx || typeof ctx.waitUntil !== 'function') return;
+  ctx.waitUntil(dispatchRefreshIfStale(env).catch((error) => {
+    console.error('Stale signals payload refresh dispatch failed:', error.message);
+  }));
+}
+
 async function getCachedIntraday(env) {
   if (!env || !env.FCS_CACHE) return null;
   try {
@@ -4727,7 +4734,9 @@ export default {
     if (path === '/api/signals' || path === 'api/signals') {
       const cached = await getCached(env);
       if (cached) {
-        return json(cached, { 'X-FCS-Cache': isFresh(cached) ? 'hit' : 'stale' });
+        const fresh = isFresh(cached);
+        if (!fresh) queueStaleCacheRefresh(env, ctx);
+        return json(cached, { 'X-FCS-Cache': fresh ? 'hit' : 'stale' });
       }
       return json({ error: 'signals not yet built — waiting on the first scheduled build to populate the cache' }, { 'X-FCS-Cache': 'empty' });
     }

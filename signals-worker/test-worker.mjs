@@ -253,6 +253,27 @@ check('failed GitHub dispatch clears the retry lock', await failedDispatchEnv.FC
 const failedStatusResponse = await worker.fetch(new Request('https://x.com/signals/api/refresh-status'), failedDispatchEnv, ctx);
 const failedStatus = await failedStatusResponse.json();
 check('refresh-status reports failed dispatches with the safe HTTP error', failedStatus.result === 'failed' && failedStatus.error.includes('HTTP 503'), JSON.stringify(failedStatus));
+
+const requestFallbackCalls = [];
+global.fetch = async (url, init) => {
+  requestFallbackCalls.push({ url: String(url), init });
+  return { ok: true, status: 204 };
+};
+const staleRequestEnv = {
+  FCS_CACHE: new MockKV(),
+  GITHUB_ACTIONS_TOKEN: 'test-dispatch-token'
+};
+await staleRequestEnv.FCS_CACHE.put(mod.CACHE_KEY, JSON.stringify({
+  generated_at: new Date(Date.now() - (mod.CACHE_SECONDS + 1) * 1000).toISOString()
+}));
+let staleRequestWork;
+const staleResponse = await worker.fetch(
+  new Request('https://x.com/signals/api/signals'),
+  staleRequestEnv,
+  { waitUntil: (promise) => { staleRequestWork = promise; } }
+);
+await staleRequestWork;
+check('a stale signals API request returns immediately while queueing guarded recovery', staleResponse.headers.get('x-fcs-cache') === 'stale' && requestFallbackCalls.length === 1);
 global.fetch = originalFetch;
 
 console.log('\n== routing ==');

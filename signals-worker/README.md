@@ -64,7 +64,7 @@ Then run the schema in `scripts/schema.sql` against it (`npx wrangler d1 execute
 
 After adding `GITHUB_ACTIONS_TOKEN`, push/redeploy once so `signals-deploy.yml` copies it to the Worker and verifies the identical GitHub dispatch request used by the stale-cache monitor. That verification queues a guarded `force=false` refresh: it builds only if KV is stale, otherwise it exits without duplicate scoring or writes. Without the secret, the normal GitHub schedule remains fallback coverage but cannot self-recover from a multi-hour scheduling gap. Visit `https://frontiercapitalsignals.com/signals`.
 
-When diagnosing stale data, `https://frontiercapitalsignals.com/signals/api/refresh-status` exposes the most recent stale-cache dispatch result for up to 24 hours. It records only a timestamp and safe outcome (for example, `dispatched` or a GitHub HTTP error); it never includes the token.
+When diagnosing stale data, `https://frontiercapitalsignals.com/signals/api/refresh-status` exposes the most recent stale-cache dispatch result for up to 24 hours. It records only a timestamp and safe outcome (for example, `dispatched` or a GitHub HTTP error); it never includes the token. A request for an already-stale `/api/signals` response also queues the same guarded refresh in the background, so visitor traffic remains a fallback if the Cloudflare cron service is delayed.
 
 ## The techniques (16 at launch, 30 as of 2026-08-20 — see worker.js's TECHNIQUE_META for the current authoritative list)
 
