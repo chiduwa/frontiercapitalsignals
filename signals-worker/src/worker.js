@@ -393,6 +393,7 @@ export function volRegime(closes, shortN = 20, longN = 100) {
 // technique's measured accuracy is too noisy to act on — it keeps the
 // static baseline weight (multiplier 1) until enough history accumulates.
 export const MIN_RELIABILITY_SAMPLES = 20;
+const RELIABILITY_PRIOR_SAMPLES = 12;
 
 // reliability: optional flat map built by scripts/reliability.mjs from D1,
 // `${symbol}|${techniqueId}` -> { accuracy, total } (accuracy already
@@ -450,20 +451,37 @@ export function regimeOf(structure) {
 // the same question, not a new one, so it shouldn't need to work harder to
 // be trusted.
 export function reliabilityMultiplier(reliability, symbol, techniqueId, byRegime, regime) {
+  return reliabilityMultiplierForAssetClass(reliability, symbol, techniqueId, byRegime, regime);
+}
+
+export function techniquePriorRecord(techniquePriors, assetClass, techniqueId) {
+  if (!techniquePriors || !techniqueId) return null;
+  return (assetClass && techniquePriors.byAssetClass && techniquePriors.byAssetClass[assetClass] && techniquePriors.byAssetClass[assetClass][techniqueId])
+    || (techniquePriors.overall && techniquePriors.overall[techniqueId])
+    || null;
+}
+
+export function adjustedReliabilityAccuracy(correct, total, baselineAccuracy = 0.5, priorSamples = RELIABILITY_PRIOR_SAMPLES) {
+  if (!Number.isFinite(correct) || !Number.isFinite(total) || total <= 0) return clamp(baselineAccuracy, 0, 1);
+  const priorN = Number.isFinite(priorSamples) && priorSamples > 0 ? priorSamples : 0;
+  const priorAcc = Number.isFinite(baselineAccuracy) ? clamp(baselineAccuracy, 0, 1) : 0.5;
+  return clamp((correct + priorAcc * priorN) / (total + priorN), 0, 1);
+}
+
+export function reliabilityMultiplierForAssetClass(reliability, symbol, techniqueId, byRegime, regime, assetClass, techniquePriors) {
   if (!reliability) return 1;
+  const prior = techniquePriorRecord(techniquePriors, assetClass, techniqueId);
+  const priorSamples = Math.min(RELIABILITY_PRIOR_SAMPLES, prior && Number.isFinite(prior.total) ? prior.total : 0);
   if (regime && byRegime && byRegime[regime]) {
     const rrec = byRegime[regime][`${symbol}|${techniqueId}`];
     if (rrec && rrec.total >= MIN_RELIABILITY_SAMPLES && isReliabilitySignificant(rrec.correct, rrec.total)) {
-      // Shrink small samples toward a fair coin. This avoids the old
-      // discontinuity where the first significant result immediately got
-      // the full raw hit-rate multiplier.
-      return reliabilityWeight(rrec.accuracy, rrec.total);
+      return reliabilityWeight(adjustedReliabilityAccuracy(rrec.correct, rrec.total, prior && prior.accuracy, priorSamples), rrec.total);
     }
   }
   const rec = reliability[`${symbol}|${techniqueId}`];
   if (!rec || rec.total < MIN_RELIABILITY_SAMPLES) return 1;
   if (!isReliabilitySignificant(rec.correct, rec.total)) return 1;
-  return reliabilityWeight(rec.accuracy, rec.total);
+  return reliabilityWeight(adjustedReliabilityAccuracy(rec.correct, rec.total, prior && prior.accuracy, priorSamples), rec.total);
 }
 
 export function reliabilityWeight(accuracy, total) {
@@ -475,6 +493,27 @@ export function reliabilityWeight(accuracy, total) {
   if (total < 100) return clamp(0.5 + accuracy, 0.5, 1.5);
   const confidence = Math.min(1, Math.sqrt(total / 100));
   return clamp(1 + (accuracy - 0.5) * 2 * confidence, 0.5, 1.5);
+}
+
+export function comboReinforcementMultiplier(comboReliability, symbol, techniqueId, dir, activeTechniques, assetClass, techniquePriors) {
+  if (!comboReliability || !symbol || !techniqueId || !dir || !Array.isArray(activeTechniques) || activeTechniques.length < 2) return 1;
+  let best = 1;
+  for (const other of activeTechniques) {
+    if (!other || other.id === techniqueId || other.dir !== dir) continue;
+    const [a, b] = [techniqueId, other.id].sort();
+    const rec = comboReliability[`${symbol}|${a}|${b}`];
+    if (!rec || rec.total < MIN_RELIABILITY_SAMPLES || !isReliabilitySignificant(rec.correct, rec.total)) continue;
+    const priorA = techniquePriorRecord(techniquePriors, assetClass, techniqueId);
+    const priorB = techniquePriorRecord(techniquePriors, assetClass, other.id);
+    const priorAccs = [priorA && priorA.accuracy, priorB && priorB.accuracy].filter(Number.isFinite);
+    const priorTotals = [priorA && priorA.total, priorB && priorB.total].filter(Number.isFinite);
+    const priorAccuracy = priorAccs.length ? priorAccs.reduce((a_, b_) => a_ + b_, 0) / priorAccs.length : 0.5;
+    const priorSamples = Math.min(RELIABILITY_PRIOR_SAMPLES, priorTotals.length ? Math.min(...priorTotals) : 0);
+    const adjusted = adjustedReliabilityAccuracy(rec.correct, rec.total, priorAccuracy, priorSamples);
+    const boost = clamp(1 + Math.max(0, adjusted - 0.5) * 0.3, 1, 1.15);
+    if (boost > best) best = boost;
+  }
+  return best;
 }
 
 // Decile bucket (0-9) of a 0-100 composite score, for the calibration
@@ -1911,10 +1950,10 @@ export function selectWorstRecentEvent(events, nowMs, mcap, windowDays = EVENT_S
 // confluence/rankBoards unchanged, so a future new field is one extra
 // destructured name here, not a new position everywhere up the chain.
 export function evaluateTechniques(m, kind, reliability, ctx = {}) {
-  const { marketContext, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange } = ctx;
+  const { marketContext, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, techniquePriors, comboReliability } = ctx;
   const T = [];
   const regime = regimeOf(m.structure);
-  const push = (id, w, dir, note) => T.push({ id, w: w * reliabilityMultiplier(reliability, m.symbol, id, reliabilityByRegime, regime), dir, note });
+  const push = (id, w, dir, note) => T.push({ id, w: w * reliabilityMultiplierForAssetClass(reliability, m.symbol, id, reliabilityByRegime, regime, kind, techniquePriors), dir, note });
   const cS = m.chgShort, c24 = m.chg24h, c7 = m.chg7d, c30 = m.chg30d;
 
   // T1 multi-horizon momentum
@@ -2504,6 +2543,13 @@ export function evaluateTechniques(m, kind, reliability, ctx = {}) {
     else push('yieldcurve', 0.8, 0, null);
   } else {
     push('yieldcurve', 0.8, null, null);
+  }
+
+  const directional = T.filter((t) => t.dir === 1 || t.dir === -1);
+  if (directional.length >= 2 && comboReliability) {
+    for (const t of directional) {
+      t.w *= comboReinforcementMultiplier(comboReliability, m.symbol, t.id, t.dir, directional, kind, techniquePriors);
+    }
   }
 
   return T;
@@ -3397,7 +3443,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -3454,7 +3500,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   // Shared by both rankBoards calls below (crypto and stock) — see
   // evaluateTechniques' docs for why this is one object, not positional args.
   const qualityScores = computeQualityScores(qualityData || {});
-  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityScores, rotationStatus, callFlipData, longTermBottomStatus };
+  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityScores, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability };
 
   let cryptoBoards = { breakout: [], breakdown: [], universe: 0 };
   let btc = null, eth = null;
@@ -3696,7 +3742,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   a{color:var(--amber);text-decoration:none}
   a:hover{text-decoration:underline}
   :focus-visible{outline:2px solid var(--amber);outline-offset:2px;border-radius:2px}
-  .wrap{max-width:1240px;margin:0 auto;padding:0 20px}
+  .wrap{max-width:1240px;margin:0 auto;padding:0 clamp(14px,2.4vw,20px)}
 
   .statusbar{border-bottom:1px solid var(--line);background:rgba(10,16,29,.92);backdrop-filter:blur(6px);position:sticky;top:0;z-index:20}
   .statusbar .wrap{display:flex;align-items:center;gap:18px;height:38px;font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);white-space:nowrap;overflow-x:auto;scrollbar-width:none}
@@ -3710,7 +3756,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .stat.warn b{color:var(--amber)}
 
   .masthead{padding:58px 0 34px}
-  .home-link{display:inline-block;color:var(--dim);font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;text-decoration:none;margin-bottom:14px}
+  .mast-links{display:flex;flex-wrap:wrap;gap:10px 14px;margin-bottom:14px}
+  .home-link{display:inline-flex;align-items:center;color:var(--dim);font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;text-decoration:none}
   .home-link:hover{color:var(--amber)}
   .masthead h1{font-weight:900;font-size:clamp(42px,7.2vw,94px);line-height:.94;letter-spacing:-.025em;text-transform:uppercase}
   .masthead h1 .amber{color:var(--amber)}
@@ -3721,10 +3768,14 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .mast-meta b{color:var(--amber);font-weight:600}
   .mast-rule{height:2px;background:linear-gradient(90deg,var(--amber) 0,var(--amber) 180px,var(--line) 180px);margin-top:26px}
 
+  .quicknav{display:flex;flex-wrap:wrap;gap:10px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:14px 0 0;margin:0 0 26px}
+  .qnav-link{display:inline-flex;align-items:center;justify-content:center;padding:7px 10px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;background:rgba(16,24,40,.7)}
+  .qnav-link:hover{color:var(--paper);border-color:rgba(255,178,36,.35);text-decoration:none}
+
   .xp-banner{background:rgba(255,178,36,.07);border:1px solid rgba(255,178,36,.35);border-left:3px solid var(--amber);padding:12px 16px;margin:22px 0;font-family:var(--mono);font-size:11.5px;line-height:1.7;color:var(--muted)}
   .xp-banner b{color:var(--amber);text-transform:uppercase;letter-spacing:.03em}
 
-  .overview{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line);border:1px solid var(--line);margin:26px 0 40px}
+  .overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin:26px 0 40px}
   .tile{background:var(--ink-1);padding:14px 14px 12px;min-width:0}
   .tile .lbl{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:7px}
   .tile .val{font-family:var(--mono);font-weight:600;font-size:clamp(15px,1.5vw,19px);color:var(--paper);white-space:nowrap}
@@ -3736,7 +3787,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .board.long{border-top:2px solid var(--amber)}
   .board.short{border-top:2px solid var(--down)}
   .board.favorites{border-top:2px solid var(--up)}
-  .board-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:16px 18px 12px}
+  .board-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:16px 18px 12px;flex-wrap:wrap}
   .eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim)}
   .board.long .eyebrow b{color:var(--amber);font-weight:600}
   .board.short .eyebrow b{color:var(--down);font-weight:600}
@@ -3842,13 +3893,47 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   footer .legal{max-width:880px;margin-bottom:14px}
   footer .cols{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;display:flex;flex-wrap:wrap;gap:8px 26px}
 
-  @media (max-width:1080px){.overview{grid-template-columns:repeat(4,1fr)}}
+  @media (max-width:1080px){.overview{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}}
   @media (max-width:980px){.boards{grid-template-columns:1fr}}
+  @media (max-width:760px){
+    .statusbar .wrap{height:auto;min-height:38px;padding-top:8px;padding-bottom:8px;gap:10px}
+    .mast-grid{gap:18px}
+    .mast-links{gap:8px 10px}
+    .quicknav{gap:8px;padding-top:12px}
+    .qnav-link{flex:1 1 calc(50% - 8px)}
+    .board-head,.track-record,.intraday,.notice,summary,.method{padding-left:14px;padding-right:14px}
+    .tr-row{align-items:flex-start}
+    .tr-asset,.tr-range-wrap{min-width:0}
+    table{font-size:12px}
+    thead{display:none}
+    .tbl-wrap{overflow:visible}
+    tbody{display:grid;gap:10px;padding:12px}
+    tbody tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;padding:12px;border:1px solid var(--line);background:#121b2d}
+    tbody td{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:0;border:0;white-space:normal;text-align:left}
+    tbody td:nth-child(1),tbody td:nth-child(2){text-align:left}
+    tbody td.rk{grid-column:1/-1;padding-top:0;color:var(--dim);font-size:10px}
+    tbody td.asset{grid-column:1/-1;display:block}
+    tbody td.sig-td{grid-column:1/-1}
+    tbody td::before{content:attr(data-label);color:var(--dim);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;flex:0 0 auto}
+    tbody td.rk::before,tbody td.asset::before,tbody td.sig-td::before{display:none}
+    .asset .nm{display:block;margin:2px 0 0}
+    .asset .why{max-width:none}
+    .sigcell{align-items:stretch}
+    .sigrow{justify-content:space-between}
+    .range{display:inline-block;text-align:right}
+  }
   @media (max-width:620px){
-    .overview{grid-template-columns:repeat(2,1fr)}
     .masthead{padding:40px 0 26px}
     .mast-meta{text-align:left}
-    .asset .why{max-width:200px}
+    .masthead h1{font-size:clamp(34px,13vw,54px)}
+    .dek{font-size:12.5px}
+    .overview{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .tile{padding:12px}
+    .tile .val{white-space:normal}
+    .id-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .id-card{padding:10px}
+    .tr-row{gap:8px}
+    .tr-price,.tr-score,.tr-samples,.tr-class{min-width:0;text-align:left}
   }
 </style>
 </head>
@@ -3871,8 +3956,10 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   <header class="masthead">
     <div class="mast-grid">
       <div>
-        <a class="home-link" href="https://frontiercapitalsignals.com/">← Frontier Capital Signals home</a>
-        <a class="home-link rss-link" href="/signals/api/feed" title="Subscribe in any RSS reader for a persistent, browsable history of every alert — a complement to the ntfy push channel, which only shows what's live right now">📡 Alerts RSS feed</a>
+        <div class="mast-links">
+          <a class="home-link" href="https://frontiercapitalsignals.com/">← Frontier Capital Signals home</a>
+          <a class="home-link rss-link" href="/signals/api/feed" title="Subscribe in any RSS reader for a persistent, browsable history of every alert — a complement to the ntfy push channel, which only shows what's live right now">📡 Alerts RSS feed</a>
+        </div>
         <h1>Frontier Capital<br><span class="amber">Signals</span></h1>
         <p class="dek">Confluence screens across the <b>top 100 cryptos</b> and <b>61 US equities</b>. Up to <b>32 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to funding-rate percentiles, open interest, Fibonacci retracements, time-of-day/day-of-week bias, intraday swing-timing, hack/exploit severity, market sentiment, options-implied volatility, earnings-calendar risk, key support/resistance breaks, accumulation/distribution, a broad-market composite, and a yield-curve read validated against the tracked history of every major breakout and breakdown, must point the <b>same direction</b> before a signal ranks — each with an <b>expected timeframe</b> learned from its own track record. Prices, funding, and sentiment archive permanently for deep multi-year pattern analysis. <b>Analysis syncs hourly; price and 24h change tick live</b> in between.</p>
       </div>
@@ -3885,6 +3972,14 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     </div>
     <div class="mast-rule"></div>
   </header>
+
+  <nav class="quicknav" aria-label="Quick navigation">
+    <a class="qnav-link" href="#overview">Overview</a>
+    <a class="qnav-link" href="#intraday">Intraday</a>
+    <a class="qnav-link" href="#boards">Boards</a>
+    <a class="qnav-link" href="#trackRecord">Track record</a>
+    <a class="qnav-link" href="#methodology">Methodology</a>
+  </nav>
 
   <div class="xp-banner" role="note">
     <b>Experimental research project — not financial advice.</b> Every score, range, timeframe, and the day-trading signal below are mechanical outputs from an ongoing, evolving model, not recommendations. Nothing here has been reviewed by a financial professional. Trading — especially with leverage — risks losing more than you put in. Do your own research and never rely on this page alone.
@@ -3902,7 +3997,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
 
   <section class="track-record" id="trackRecord" aria-label="Prediction track record"></section>
 
-  <details>
+  <details id="methodology">
     <summary>Methodology and data</summary>
     <div class="method">
       <p><b>The confluence model.</b> Every asset is evaluated by up to 32 independent techniques. Each one votes bullish, bearish, or neutral. The breakout score measures how much weighted evidence points up net of evidence pointing down; the breakdown score mirrors it. The small fraction under each score (for example 9/32) is the raw count of techniques agreeing with that direction out of those that had enough data to vote. High score plus high agreement is the strongest read.</p>
@@ -4094,7 +4189,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   function boardHtml(cfg, rowsIn, universe){
     var spec = state.sort[cfg.boardId];
     var rows = spec ? sortRows(rowsIn, spec) : rowsIn;
-    var h='<section class="board '+cfg.side+'" aria-label="'+cfg.title+'">';
+    var h='<section class="board '+cfg.side+'" id="'+cfg.boardId+'" aria-label="'+cfg.title+'">';
     h+='<div class="board-head"><div><div class="eyebrow">'+cfg.eyebrow+'</div><div class="board-title">'+cfg.title+'</div></div>';
     h+='<div class="board-count">TOP '+(rows?rows.length:0)+' / '+(universe||0)+' SCREENED</div></div>';
     h+='<div class="tbl-wrap"><table><thead><tr>';
@@ -4149,14 +4244,14 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           : "Band width estimated from this asset's recent realized volatility, scaled to the horizon"+(r.volLookbackDays?" (a "+r.volLookbackDays+"-day lookback, calibrated to this asset)":"");
         var range = r.range ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+rangeTitle+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>' : '<span class="dim">—</span>';
         h+='<tr class="in" style="animation-delay:'+(i*30)+'ms" data-symbol="'+esc(r.symbol)+'" data-class="'+cfg.assetClass+'">'
-          +'<td class="rk">'+(i+1)+'</td>'
+          +'<td class="rk">#'+(i+1)+'</td>'
           +'<td class="asset">'+symHtml+name+why+topInd+coil+quality+rotation+flipNote+ltpNote+moveNote+'</td>'
-          +'<td class="live-price-cell"><span class="live-price">'+fmtPrice(r.price)+'</span></td>'
-          +'<td class="live-chg-cell '+pctCls(r.chg24h)+'"><span class="live-chg">'+fmtPct(r.chg24h)+'</span></td>'
-          +'<td class="'+pctCls(r.chg7d)+'">'+fmtPct(r.chg7d)+'</td>'
-          +'<td class="'+rsiCls(r.rsi)+'">'+(r.rsi!=null?r.rsi.toFixed(0):'—')+'</td>'
-          +'<td>'+range+'</td>'
-          +'<td><span class="sigcell"><span class="sigrow">'+meter(r.score)+'<span class="score">'+r.score+'</span>'+dirArrow+'</span>'+conf+horizon+'</span></td>'
+          +'<td class="live-price-cell" data-label="Price"><span class="live-price">'+fmtPrice(r.price)+'</span></td>'
+          +'<td class="live-chg-cell '+pctCls(r.chg24h)+'" data-label="24h"><span class="live-chg">'+fmtPct(r.chg24h)+'</span></td>'
+          +'<td class="'+pctCls(r.chg7d)+'" data-label="7d">'+fmtPct(r.chg7d)+'</td>'
+          +'<td class="'+rsiCls(r.rsi)+'" data-label="RSI">'+(r.rsi!=null?r.rsi.toFixed(0):'—')+'</td>'
+          +'<td data-label="Range">'+range+'</td>'
+          +'<td class="sig-td" data-label="Signal"><span class="sigcell"><span class="sigrow">'+meter(r.score)+'<span class="score">'+r.score+'</span>'+dirArrow+'</span>'+conf+horizon+'</span></td>'
           +'</tr>';
       });
     } else {

@@ -68,6 +68,31 @@ export async function loadReliability(env) {
   return { blended, byHorizon };
 }
 
+// Hierarchical prior for reliability weighting: how a technique has done
+// across the broader asset class, independent of any single symbol. This is
+// consumed only as a shrinkage prior for an asset's OWN measured record, not
+// as a standalone vote weight, so assets with no history still stay neutral.
+export async function loadTechniquePriors(env) {
+  const rows = await d1(env, 'SELECT asset_class, technique_id, SUM(correct) AS correct, SUM(total) AS total FROM technique_reliability WHERE total > 0 GROUP BY asset_class, technique_id');
+  const byAssetClass = {};
+  const overallAcc = {};
+  for (const r of rows) {
+    (byAssetClass[r.asset_class] ??= {})[r.technique_id] = {
+      correct: r.correct,
+      total: r.total,
+      accuracy: r.total ? r.correct / r.total : 0.5
+    };
+    if (!overallAcc[r.technique_id]) overallAcc[r.technique_id] = { correct: 0, total: 0 };
+    overallAcc[r.technique_id].correct += r.correct;
+    overallAcc[r.technique_id].total += r.total;
+  }
+  const overall = {};
+  for (const [techniqueId, v] of Object.entries(overallAcc)) {
+    overall[techniqueId] = { correct: v.correct, total: v.total, accuracy: v.total ? v.correct / v.total : 0.5 };
+  }
+  return { byAssetClass, overall };
+}
+
 // { trending: { "symbol|technique_id": {correct, accuracy, total} }, choppy:
 // {...} } — same blended-across-horizons shape loadReliability's own
 // `blended` uses, just grouped by regime instead of pooling everything.
@@ -94,6 +119,24 @@ export async function loadRegimeReliability(env) {
     for (const [key, v] of Object.entries(acc[regime])) {
       out[regime][key] = { correct: v.correct, accuracy: v.total ? v.correct / v.total : 0.5, total: v.total };
     }
+  }
+  return out;
+}
+
+// Same blended-across-horizons shape as loadReliability, but keyed by
+// symbol|technique_a|technique_b for technique pairs that agreed on direction
+// in the same run. evaluateMatured already writes this table; loading it here
+// lets live scoring give a SMALL bonus to proven reinforcing pairs rather than
+// treating every agreement as equally informative.
+export async function loadComboReliability(env) {
+  const rows = await d1(env, 'SELECT symbol, technique_a, technique_b, SUM(correct) AS correct, SUM(total) AS total FROM technique_combo_reliability WHERE total > 0 GROUP BY symbol, technique_a, technique_b');
+  const out = {};
+  for (const r of rows) {
+    out[`${r.symbol}|${r.technique_a}|${r.technique_b}`] = {
+      correct: r.correct,
+      total: r.total,
+      accuracy: r.total ? r.correct / r.total : 0.5
+    };
   }
   return out;
 }

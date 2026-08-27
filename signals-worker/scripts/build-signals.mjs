@@ -12,7 +12,7 @@
 // Optional env: TREFIS_OVERRIDES
 // Optional (enables reliability weighting when set): FCS_D1_DATABASE_ID
 import { buildPayload, CACHE_KEY, coingeckoSimplePrice, yahooQuote, getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST } from '../worker.js';
-import { loadReliability, loadMoveStats, loadRangeReliability, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, loadSwingTimeStats, loadRecentEvents, loadIvHistory, loadRegimeReliability, loadSrLevels, loadSrBreakStats, loadQualityData, loadRotationStatus, loadCallFlipData, loadLongTermBottomStatus, logRun, evaluateMatured, evaluateTimeOfDay, snapshotAssetScores, detectAndLogCallFlips, evaluateCallFlips } from './reliability.mjs';
+import { loadReliability, loadTechniquePriors, loadComboReliability, loadMoveStats, loadRangeReliability, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, loadSwingTimeStats, loadRecentEvents, loadIvHistory, loadRegimeReliability, loadSrLevels, loadSrBreakStats, loadQualityData, loadRotationStatus, loadCallFlipData, loadLongTermBottomStatus, logRun, evaluateMatured, evaluateTimeOfDay, snapshotAssetScores, detectAndLogCallFlips, evaluateCallFlips } from './reliability.mjs';
 import { checkAndNotifyReversals, checkAndNotifySuddenMoves, checkAndNotifyConsolidations } from './notify.mjs';
 import { upsertMarketSentiment, loadRecentBars, loadTvlSeries, loadMarketReturn, loadYieldSpreadChange } from './archive.mjs';
 import { selectIntradayWatchlist } from './intraday.mjs';
@@ -119,13 +119,17 @@ if (GITHUB_EVENT_NAME === 'schedule') {
 // succeed with today's baseline (unweighted, methodology-only-horizon,
 // volatility-only-range) scoring rather than blocking the hourly KV
 // refresh on a secondary subsystem.
-let reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus;
+let reliability, techniquePriors, comboReliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus;
 if (FCS_D1_DATABASE_ID) {
   try {
     const rel = await loadReliability(env);
     reliability = rel.blended;
     reliabilityByHorizon = rel.byHorizon;
     console.log(`loaded reliability stats for ${Object.keys(reliability).length} (symbol, technique) pairs`);
+    techniquePriors = await loadTechniquePriors(env);
+    console.log(`loaded technique priors for ${Object.keys(techniquePriors.byAssetClass.crypto || {}).length} crypto and ${Object.keys(techniquePriors.byAssetClass.stock || {}).length} stock techniques`);
+    comboReliability = await loadComboReliability(env);
+    console.log(`loaded combo reliability for ${Object.keys(comboReliability).length} (symbol, technique-pair) records`);
     moveStats = await loadMoveStats(env);
     console.log(`loaded realized-move stats for ${Object.keys(moveStats).length} (symbol, horizon) pairs`);
     rangeReliability = await loadRangeReliability(env);
@@ -170,14 +174,14 @@ if (FCS_D1_DATABASE_ID) {
     longTermBottomStatus = await loadLongTermBottomStatus(env);
     console.log(`loaded long-term potential status: ${Object.keys(longTermBottomStatus).length} symbol(s) currently near a fresh multi-month/year low`);
   } catch (e) {
-    console.error('loadReliability/loadMoveStats/loadRangeReliability/loadTimeOfDayStats/loadFundingHistory/loadSentimentMap/loadLeadLagSignals/loadSwingTimeStats/loadRecentEvents/loadTvlSeries/loadIvHistory/loadRegimeReliability/loadSrLevels/loadSrBreakStats/loadMarketReturn/loadYieldSpreadChange/loadQualityData/loadRotationStatus/loadCallFlipData/loadLongTermBottomStatus failed, continuing with baseline weights:', e.message || e);
+    console.error('loadReliability/loadTechniquePriors/loadComboReliability/loadMoveStats/loadRangeReliability/loadTimeOfDayStats/loadFundingHistory/loadSentimentMap/loadLeadLagSignals/loadSwingTimeStats/loadRecentEvents/loadTvlSeries/loadIvHistory/loadRegimeReliability/loadSrLevels/loadSrBreakStats/loadMarketReturn/loadYieldSpreadChange/loadQualityData/loadRotationStatus/loadCallFlipData/loadLongTermBottomStatus failed, continuing with baseline weights:', e.message || e);
   }
 } else {
   console.log('FCS_D1_DATABASE_ID not set — reliability weighting disabled, using baseline weights');
 }
 
 const started = Date.now();
-const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus);
+const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability);
 console.log(`built payload in ${Date.now() - started}ms — crypto ${payload.crypto.universe} assets, stocks ${payload.stocks.universe} assets`);
 console.log('health:', JSON.stringify(payload.health));
 

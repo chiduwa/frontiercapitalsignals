@@ -402,6 +402,8 @@ const notSignificantRec = { 'X|y': { accuracy: 0.7, correct: 14, total: 20 } }; 
 const significantRec = { 'X|y': { accuracy: 0.8, correct: 16, total: 20 } };
 check('14/20 clears the sample-count floor but not significance: multiplier stays neutral (1), not boosted to 1.2', mod.reliabilityMultiplier(notSignificantRec, 'X', 'y') === 1, mod.reliabilityMultiplier(notSignificantRec, 'X', 'y'));
 check('16/20 clears both bars: multiplier actually reflects the measured accuracy', mod.reliabilityMultiplier(significantRec, 'X', 'y') === mod.clamp(0.5 + 0.8, 0.5, 1.5), mod.reliabilityMultiplier(significantRec, 'X', 'y'));
+const classPrior = { byAssetClass: { crypto: { y: { accuracy: 0.6, total: 100 } } }, overall: {} };
+check('asset-class prior shrinks a significant asset-specific record toward the broader technique baseline instead of fully trusting the raw rate', mod.reliabilityMultiplierForAssetClass(significantRec, 'X', 'y', undefined, undefined, 'crypto', classPrior) < mod.reliabilityMultiplier(significantRec, 'X', 'y'));
 
 console.log('\n== regimeOf: trend/chop classification off swing structure ==');
 check('structure 1 (higher-highs/higher-lows): trending', mod.regimeOf(1) === 'trending');
@@ -465,6 +467,15 @@ const stockBottom = baseMetric({ rsi: 35, rsiPrev: 28, rsiRecentMin: 25, rsiRece
 const rStockNoVix = findTech(mod.evaluateTechniques(stockBottom, 'stock', undefined, { marketContext: {} }), 'reversal');
 const rStockHighVix = findTech(mod.evaluateTechniques(stockBottom, 'stock', undefined, { marketContext: { vixRangePos: 0.85 } }), 'reversal');
 check('stock: elevated VIX boosts weight on a bottom call', rStockHighVix.w > rStockNoVix.w, `boosted=${rStockHighVix.w} base=${rStockNoVix.w}`);
+
+console.log('\n== combo reinforcement: proven agreeing pairs get only a modest extra lift ==');
+const comboMetric = baseMetric({ symbol: 'PAIR', chgShort: 2, chg24h: 3, chg7d: 5, rsi: 50, rsiPrev: 45 });
+const comboBaseline = mod.evaluateTechniques(comboMetric, 'crypto');
+const comboBoosted = mod.evaluateTechniques(comboMetric, 'crypto', undefined, {
+  comboReliability: { 'PAIR|momentum|rsi': { correct: 18, total: 20, accuracy: 0.9 } }
+});
+check('a proven same-direction pair slightly boosts the participating techniques, not the whole model indiscriminately', findTech(comboBoosted, 'momentum').w > findTech(comboBaseline, 'momentum').w && findTech(comboBoosted, 'rsi').w > findTech(comboBaseline, 'rsi').w);
+check('the pair boost stays modest (capped well below a full extra technique)', findTech(comboBoosted, 'momentum').w < findTech(comboBaseline, 'momentum').w * 1.2, `${findTech(comboBaseline, 'momentum').w} -> ${findTech(comboBoosted, 'momentum').w}`);
 
 console.log('\n== expected timeframe: leading/lagging classification + horizon estimation ==');
 const allTechniqueIds = new Set([
