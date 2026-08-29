@@ -36,13 +36,31 @@ CREATE TABLE IF NOT EXISTS direction_baseline (
   PRIMARY KEY (asset_class, horizon_hours)
 );
 
+-- technique_reliability.votes_up / votes_down
+--
 -- A technique's own null accuracy depends on the mix of directions IT chose,
 -- not just on the market's outcome distribution: a technique that only ever
 -- votes "up" has null accuracy P(up), one that splits evenly has the average.
 -- Tracking the mix lets noSkillBaseline() compute a per-record null instead of
 -- applying one class-wide number to every technique.
-ALTER TABLE technique_reliability ADD COLUMN votes_up INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE technique_reliability ADD COLUMN votes_down INTEGER NOT NULL DEFAULT 0;
+--
+-- The two ADD COLUMN statements that belong here deliberately are NOT here.
+-- They were applied directly to the live database when this work shipped, and
+-- SQLite has no ADD COLUMN IF NOT EXISTS -- so leaving them in made this file
+-- fail with "duplicate column name: votes_up" on every subsequent run. That
+-- is not a cosmetic failure: signals-refresh.yml runs `d1 migrations apply` as
+-- its FIRST step, so a non-idempotent migration here breaks the hourly build
+-- outright, not just the deploy.
+--
+-- The column definitions live in scripts/schema.sql (the source of truth for a
+-- fresh database) instead, so both paths are covered: an existing database
+-- already has them, and a new one gets them from schema.sql. Everything left
+-- in this file is idempotent by construction -- CREATE TABLE IF NOT EXISTS and
+-- INSERT ... ON CONFLICT DO NOTHING -- so re-running it is always a no-op.
+--
+-- If you ever restore a database that predates this change, add them by hand:
+--   ALTER TABLE technique_reliability ADD COLUMN votes_up INTEGER NOT NULL DEFAULT 0;
+--   ALTER TABLE technique_reliability ADD COLUMN votes_down INTEGER NOT NULL DEFAULT 0;
 
 -- Seed, so the correction takes effect on the next build instead of waiting
 -- weeks for live outcomes to clear BASELINE_MIN_SAMPLES (until then
