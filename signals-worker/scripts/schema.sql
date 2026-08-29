@@ -36,7 +36,28 @@ CREATE TABLE IF NOT EXISTS technique_reliability (
   total INTEGER NOT NULL DEFAULT 0,
   accuracy REAL,
   updated_at TEXT NOT NULL,
+  -- Directional mix of this record's own votes, so noSkillBaseline() can work
+  -- out the null accuracy THIS technique should be judged against rather than
+  -- assuming 0.5 (see migrations/0003_direction_baseline.sql for why 0.5 is
+  -- wrong once outcomes are three-way).
+  votes_up INTEGER NOT NULL DEFAULT 0,
+  votes_down INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (symbol, technique_id, horizon_hours)
+);
+
+-- Realized up/flat/down frequencies per asset class and horizon: the no-skill
+-- line a directional call actually has to beat. Deduped per (symbol, run_at)
+-- so correlated same-hour votes count as the one price move they describe.
+-- See migrations/0003_direction_baseline.sql for the full rationale and the
+-- measured values that motivated it.
+CREATE TABLE IF NOT EXISTS direction_baseline (
+  asset_class TEXT NOT NULL,
+  horizon_hours INTEGER NOT NULL,
+  n_up INTEGER NOT NULL DEFAULT 0,
+  n_flat INTEGER NOT NULL DEFAULT 0,
+  n_down INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (asset_class, horizon_hours)
 );
 
 CREATE INDEX IF NOT EXISTS idx_technique_votes_run_at ON technique_votes(run_at);

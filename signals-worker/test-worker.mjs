@@ -266,7 +266,15 @@ try {
   failedDispatchError = error;
 }
 check('failed GitHub dispatch surfaces its HTTP status', failedDispatchError && failedDispatchError.message.includes('HTTP 503'));
-check('failed GitHub dispatch clears the retry lock', await failedDispatchEnv.FCS_CACHE.get('signals:refresh-dispatch-lock') === null);
+// Clearing the lock outright meant a persistently failing dispatch retried on
+// every single request — which is what a 403 from an unscoped token actually
+// did in production. A short cooldown stops the hammering while still letting
+// a genuine recovery retry long before the 30-minute success lock would.
+check('failed GitHub dispatch holds a cooldown rather than retrying on every request', await failedDispatchEnv.FCS_CACHE.get('signals:refresh-dispatch-lock') !== null);
+let secondDispatchAttempted = false;
+global.fetch = async () => { secondDispatchAttempted = true; return { ok: false, status: 503 }; };
+check('a dispatch inside the cooldown window does not call GitHub again', await mod.dispatchRefreshIfStale(failedDispatchEnv) === false && secondDispatchAttempted === false);
+global.fetch = async () => ({ ok: false, status: 503 });
 const failedStatusResponse = await worker.fetch(new Request('https://x.com/signals/api/refresh-status'), failedDispatchEnv, ctx);
 const failedStatus = await failedStatusResponse.json();
 check('refresh-status reports failed dispatches with the safe HTTP error', failedStatus.result === 'failed' && failedStatus.error.includes('HTTP 503'), JSON.stringify(failedStatus));
@@ -1747,20 +1755,95 @@ check('sorts chronologically internally regardless of input order', unsortedFlip
 check('fewer than 2 rows: no crash, nothing to compare', mod.detectCallFlips([{ run_at: '2026-08-22T01:00:00Z', dir: 1, score: 60 }]).length === 0);
 check('empty history: no crash', mod.detectCallFlips([]).length === 0);
 
-console.log('\n== assetPredictionScore: pooled track record across composite/pivot/range, out of 100 ==');
-check('below MIN_RELIABILITY_SAMPLES pooled outcomes: null, not a noisy guess', mod.assetPredictionScore('THIN', { 'THIN|composite': { correct: 5, total: 10 } }, {}) === null);
+console.log('\n== assetPredictionScore: DIRECTIONAL track record, measured against the no-skill baseline ==');
+check('below MIN_RELIABILITY_SAMPLES directional outcomes: null, not a noisy guess', mod.assetPredictionScore('THIN', { 'THIN|composite': { correct: 5, total: 10 } }, {}) === null);
 check('exactly one under the threshold (19 total): still null', mod.assetPredictionScore('W', { 'W|composite': { correct: 10, total: 19 } }, {}) === null);
 const pooled = mod.assetPredictionScore('X', {
   'X|composite': { correct: 9, total: 10 },
   'X|reversal': { correct: 4, total: 5 },
   'X|dwell': { correct: 3, total: 5 }
 }, { X: { hits: 8, total: 10 } });
-check('pools composite + reversal + dwell + range hits/totals correctly (24/30 = 80)', pooled && pooled.score === 80 && pooled.samples === 30, JSON.stringify(pooled));
+// Range containment is no longer averaged in with the directional records: a
+// band is BUILT to contain the price, so pooling it let containment carry the
+// headline. 16/20 directional = 80, with containment reported separately.
+check('pools the three DIRECTIONAL records only (16/20 = 80), never range containment', pooled && pooled.score === 80 && pooled.samples === 20, JSON.stringify(pooled));
+check('reports range containment separately rather than blending it into the score', pooled && pooled.range && pooled.range.containment === 80 && pooled.range.samples === 10, JSON.stringify(pooled && pooled.range));
 const rangeOnly = mod.assetPredictionScore('Y', {}, { Y: { hits: 19, total: 20 } });
-check('a symbol with only range data (no matured composite/reversal/dwell yet) still scores off what exists (19/20 = 95, right at the threshold, not yet "above 95")', rangeOnly && rangeOnly.score === 95 && rangeOnly.samples === 20, JSON.stringify(rangeOnly));
+check('a symbol with ONLY range containment has no directional track record: null, not a 95 that reads as prediction accuracy', rangeOnly === null, JSON.stringify(rangeOnly));
 const perfect = mod.assetPredictionScore('Z', { 'Z|composite': { correct: 25, total: 25 } }, {});
 check('a perfect matured record scores 100, not a lower "cautious" number', perfect && perfect.score === 100 && perfect.samples === 25, JSON.stringify(perfect));
-check('assetPredictionScore itself does not apply the >95 leaderboard cutoff (that is buildPayload\'s job) — 95 is a valid returned score', rangeOnly.score === 95);
+
+// Baseline-relative skill: the same raw accuracy means different things in
+// different classes, which is the whole point of measuring against a measured
+// no-skill line rather than a flat 0.5.
+const apsBaselines = { 'crypto|all': { n_up: 40, n_flat: 20, n_down: 40 }, 'stock|all': { n_up: 60, n_flat: 5, n_down: 35 } };
+const cryptoSkill = mod.assetPredictionScore('C', { 'C|composite': { correct: 30, total: 50, votes_up: 50, votes_down: 0 } }, {}, 'crypto', apsBaselines);
+check('crypto 60% against a 40% up-baseline is a real +20pt edge, and proven', cryptoSkill && cryptoSkill.baseline === 40 && Math.abs(cryptoSkill.edge - 20) < 0.05 && cryptoSkill.proven, JSON.stringify(cryptoSkill));
+const stockSkill = mod.assetPredictionScore('S', { 'S|composite': { correct: 30, total: 50, votes_up: 50, votes_down: 0 } }, {}, 'stock', apsBaselines);
+check('the SAME 60% against a 60% up-baseline is no edge at all, and not proven', stockSkill && stockSkill.baseline === 60 && Math.abs(stockSkill.edge) < 0.05 && !stockSkill.proven, JSON.stringify(stockSkill));
+check('an unmeasured class falls back to 0.5 rather than inventing a baseline', mod.assetPredictionScore('U', { 'U|composite': { correct: 30, total: 50 } }, {}, 'crypto', {}).baseline === 50);
+
+console.log('\n== noSkillBaseline / skillOverBaseline: the three-way-outcome correction ==');
+check('no measured distribution: falls back to a fair coin, preserving cold-start behavior', mod.noSkillBaseline(null, 10, 10) === 0.5);
+check('too few observations to trust: still falls back to 0.5', mod.noSkillBaseline({ n_up: 5, n_flat: 5, n_down: 5 }, 10, 0) === 0.5);
+const bDist = { n_up: 344, n_flat: 272, n_down: 384 };
+check('an always-up technique is judged against P(up), not 0.5', Math.abs(mod.noSkillBaseline(bDist, 100, 0) - 0.344) < 0.001);
+check('an always-down technique is judged against P(down)', Math.abs(mod.noSkillBaseline(bDist, 0, 100) - 0.384) < 0.001);
+check('an evenly-split technique gets the blend of both', Math.abs(mod.noSkillBaseline(bDist, 50, 50) - 0.364) < 0.001);
+check('no recorded mix: judged against the best constant call, the hardest honest bar', Math.abs(mod.noSkillBaseline(bDist, 0, 0) - 0.384) < 0.001);
+check('44% accuracy where guessing scores 38.4% is a POSITIVE edge, not "below average"', mod.skillOverBaseline(44, 100, 0.384).edge > 0);
+check('52% accuracy where guessing scores 52.1% is NOT an edge', mod.skillOverBaseline(52, 100, 0.521).edge < 0);
+check('a thin lucky streak has a weaker lower bound than a deep one at the same rate', mod.skillOverBaseline(6, 8, 0.4).lowerEdge < mod.skillOverBaseline(20, 25, 0.4).lowerEdge);
+
+console.log('\n== reliabilityWeight: reduces exactly to the old formula at a 0.5 baseline ==');
+check('accuracy 0.5 at the old baseline is still a neutral 1.0 weight', mod.reliabilityWeight(0.5, 50) === 1);
+check('small-record half-scale response is unchanged (0.8 -> 1.3)', Math.abs(mod.reliabilityWeight(0.8, 50) - 1.3) < 1e-9);
+check('deep-record response is unchanged (0.8, n=100 -> 1.5 clamped)', Math.abs(mod.reliabilityWeight(0.8, 100) - 1.5) < 1e-9);
+check('at a measured 0.384 baseline, 0.384 accuracy is the new neutral point', Math.abs(mod.reliabilityWeight(0.384, 50, 0.384) - 1) < 1e-9);
+check('a 44% technique is rewarded above neutral where it used to be penalised', mod.reliabilityWeight(0.44, 50, 0.384) > 1 && mod.reliabilityWeight(0.44, 50) < 1);
+
+console.log('\n== mergeLivePrices: fresh price layer over a slow model layer ==');
+const basePayload = {
+  generated_at: '2026-08-28T22:36:16Z',
+  crypto: { breakout: [{ symbol: 'BTC', price: 100, chg24h: 1, score: 70, dir: 1, rangeBounds: { low: 50, high: 150 } }], universe: 1 },
+  stocks: { breakout: [{ symbol: 'AAPL', price: 200, chg24h: 2, score: 60, dir: -1 }], universe: 1 }
+};
+const liveLayer = { crypto: { BTC: { price: 120, chg24h: 5 } }, stocks: {}, generated_at: '2026-08-29T02:30:00Z' };
+const mergedPayload = mod.mergeLivePrices(basePayload, liveLayer);
+check('replaces the price with the freshly ticked one', mergedPayload.crypto.breakout[0].price === 120);
+check('replaces chg24h alongside it', mergedPayload.crypto.breakout[0].chg24h === 5);
+check('recomputes rangePos honestly against the build’s own bounds', Math.abs(mergedPayload.crypto.breakout[0].rangePos - 0.7) < 1e-9);
+check('never touches model-computed fields (score, dir)', mergedPayload.crypto.breakout[0].score === 70 && mergedPayload.crypto.breakout[0].dir === 1);
+check('leaves rows with no live tick exactly as the build left them', mergedPayload.stocks.breakout[0].price === 200 && mergedPayload.stocks.breakout[0].chg24h === 2);
+check('keeps the model layer’s own timestamp untouched', mergedPayload.generated_at === basePayload.generated_at);
+check('reports when the displayed prices were actually refreshed', mergedPayload.prices_generated_at === '2026-08-29T02:30:00Z');
+check('no live layer at all: returns the payload unchanged rather than degrading it', mod.mergeLivePrices(basePayload, null) === basePayload);
+check('an empty live layer is also a no-op', mod.mergeLivePrices(basePayload, { generated_at: 'x' }) === basePayload);
+check('preserves non-array sections like universe counts', mergedPayload.crypto.universe === 1);
+
+console.log('\n== assetClassSkill / abstainBoards: publish a class only while it earns it ==');
+const skillBaselines = { 'crypto|all': { n_up: 405, n_flat: 169, n_down: 425 }, 'stock|all': { n_up: 521, n_flat: 52, n_down: 427 } };
+// Modelled on the live figures: crypto clears its baseline decisively, stocks
+// sit below a constant call.
+const cryptoCal = { 'crypto|1|24|8': { correct: 77, total: 97 }, 'crypto|1|168|7': { correct: 229, total: 382 } };
+const cryptoVerdict = mod.assetClassSkill(cryptoCal, skillBaselines, 'crypto');
+check('crypto is measured as having a real edge over its own baseline', cryptoVerdict && cryptoVerdict.edge > 0 && cryptoVerdict.proven, JSON.stringify(cryptoVerdict));
+const stockCal = { 'stock|1|168|7': { correct: 99, total: 188 }, 'stock|-1|168|6': { correct: 52, total: 172 } };
+const stockVerdict = mod.assetClassSkill(stockCal, skillBaselines, 'stock');
+check('stocks are measured as NOT clearing their baseline', stockVerdict && stockVerdict.edge < 0 && !stockVerdict.proven, JSON.stringify(stockVerdict));
+check('too little evidence to judge a class: null, not a verdict', mod.assetClassSkill({ 'crypto|1|24|8': { correct: 5, total: 10 } }, skillBaselines, 'crypto') === null);
+
+const boards = { breakout: [{ symbol: 'A', dir: 1, score: 80, price: 10 }], breakdown: [{ symbol: 'B', dir: -1, score: 75 }], universe: 2 };
+const kept = mod.abstainBoards(boards, cryptoVerdict);
+check('a class with proven skill publishes its directional calls untouched', kept === boards && kept.breakout[0].dir === 1);
+const abstained = mod.abstainBoards(boards, stockVerdict);
+check('a class that failed its baseline has the direction stripped', abstained.breakout[0].dir === 0 && abstained.breakdown[0].dir === 0);
+check('abstaining explains itself rather than silently blanking', abstained.breakout[0].abstained && abstained.breakout[0].abstained.reason === 'no-demonstrated-edge');
+check('abstaining keeps every descriptive field intact', abstained.breakout[0].score === 80 && abstained.breakout[0].price === 10);
+check('abstaining preserves non-array sections', abstained.universe === 2);
+// The cold-start case: no verdict yet must NOT mean "suppress everything", or a
+// fresh database would render an entirely blank dashboard.
+check('no measured verdict yet: publishes as before rather than blanking the board', mod.abstainBoards(boards, null) === boards);
 
 console.log('\n== currentSignalConfidence: conservative, horizon-matched current-call confidence ==');
 check('no empirical support at all: returns null rather than inventing confidence from a raw score alone', mod.currentSignalConfidence({ symbol: 'X', asset_class: 'crypto', dir: 1, score: 90, agree: 7, total: 10, horizon: { days: 1, basis: 'methodology' }, range: { basis: 'methodology' } }, {}, null) === null);

@@ -16,13 +16,26 @@ on:
   # UTC, peak US GitHub usage), so more slots per hour has diminishing
   # returns against a multi-hour outage rather than a single missed pick.
   #
-  # GitHub's native cron remains useful fallback coverage, but the Worker now
-  # has an independent Cloudflare cron that dispatches this workflow when the
-  # KV payload becomes stale. That dispatcher sends force=false, so this
-  # workflow preserves the same freshness gate and never turns repeated
-  # recovery attempts into repeated full rebuilds.
+  # 2026-08-29: measured again, and asking for MORE is actively counter-
+  # productive. Over the trailing ~100 scheduled firings at */5 (288 requested
+  # per day) GitHub delivered an average gap of 70 minutes, a median of 36, and
+  # a worst case of 686 minutes — while this same repo's once-daily crons
+  # (daily-intelligence.yml, signals-daily.yml) landed every single day without
+  # a miss. The companion signals-intraday.yml, also at 5 minutes, delivered
+  # 2 of its 288 requested firings on 2026-08-28. GitHub is dropping the
+  # high-frequency crons in this repo, so the */5 experiment did not just fail
+  # to help, it added scheduler pressure for nothing.
+  #
+  # So: back to one modest hourly request (matching CACHE_SECONDS), offset off
+  # the top of the hour. GitHub's cron is now FALLBACK coverage only. The
+  # freshness users actually see comes from the Worker's own Cloudflare cron,
+  # which refreshes the live price layer directly (see refreshLivePriceLayer in
+  # worker.js) and dispatches this workflow when the built payload goes stale.
+  # That dispatcher sends force=false, so this workflow preserves the same
+  # freshness gate and never turns repeated recovery attempts into repeated
+  # full rebuilds.
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       force:

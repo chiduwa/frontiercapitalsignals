@@ -19,10 +19,17 @@ name: Signals Intraday Tick
 # spacing regardless, not assume clean 5-minute sampling.
 on:
   schedule:
-    # Offset by 2 minutes from signals-refresh.yml's */5 so the two jobs'
-    # scheduled instants don't collide (GitHub queues/dedupes firings that
-    # land at the same wall-clock minute across a repo under load).
-    - cron: "2-59/5 * * * *"
+    # 2026-08-29: a 5-minute request here was delivering ~2 firings a DAY out
+    # of 288 (measured 2026-08-28), so the nominal cadence was fiction. Asking
+    # for less actually gets more from GitHub's scheduler, and reduces the
+    # repo-wide pressure that appears to be causing the drops in the first
+    # place. Offset off signals-refresh.yml's :17 so the two don't land on the
+    # same wall-clock minute.
+    #
+    # Note this pipeline still depends on GitHub because it writes D1 tick
+    # rows; the price freshness the dashboard displays no longer does (see
+    # refreshLivePriceLayer, worker.js, on Cloudflare's own cron).
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
 
 concurrency:

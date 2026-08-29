@@ -217,7 +217,7 @@ function alertHorizonHours(signal) {
 // with extra gates on agreement and historical horizon/range basis. State is
 // explicitly reset to 'none' when a symbol falls out of this actionable set so
 // a later re-entry can alert again without requiring the direction to change.
-export async function checkAndNotifyConfidentMoves(env, nowIso, signals, calibration) {
+export async function checkAndNotifyConfidentMoves(env, nowIso, signals, calibration, baselines) {
   if (!env.NTFY_TOPIC || !Array.isArray(signals) || !signals.length) return 0;
   const compositeRecords = await loadCompositeRecordsForAlerts(env, signals);
   const ranked = signals
@@ -225,7 +225,7 @@ export async function checkAndNotifyConfidentMoves(env, nowIso, signals, calibra
       const horizonHours = alertHorizonHours(s);
       return {
         signal: s,
-        confidence: currentSignalConfidence(s, calibration, horizonHours != null ? compositeRecords[`${s.symbol}|${horizonHours}`] : null)
+        confidence: currentSignalConfidence(s, calibration, horizonHours != null ? compositeRecords[`${s.symbol}|${horizonHours}`] : null, baselines)
       };
     })
     .filter((x) => x.confidence && x.confidence.actionable)

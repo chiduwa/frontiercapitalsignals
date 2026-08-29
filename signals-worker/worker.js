@@ -63,6 +63,11 @@ export const CACHE_SECONDS = 3600;
 // dispatches while a delayed GitHub job is still starting.
 const REFRESH_DISPATCH_LOCK_KEY = 'signals:refresh-dispatch-lock';
 const REFRESH_DISPATCH_LOCK_SECONDS = 30 * 60;
+// Cooldown after a FAILED dispatch. Deliberately much shorter than the success
+// lock (a failure means no build was started, so recovery should be retried
+// soon) but long enough that a broken token cannot turn every inbound request
+// into an outbound GitHub call.
+const REFRESH_DISPATCH_FAILURE_COOLDOWN_SECONDS = 5 * 60;
 const REFRESH_DISPATCH_STATUS_KEY = 'signals:refresh-dispatch-status';
 const REFRESH_DISPATCH_STATUS_SECONDS = 24 * 60 * 60;
 const GITHUB_REFRESH_DISPATCH_URL = 'https://api.github.com/repos/chiduwa/frontiercapitalsignals/actions/workflows/signals-refresh.yml/dispatches';
@@ -289,6 +294,16 @@ export function slopePct(values, n) {
   return ((num / den) / ym) * 100;
 }
 
+// The low/high of the same window rangePos measures against. Published on each
+// board row so the live price layer can recompute rangePos at the new price
+// rather than leaving a position that silently belongs to an older price.
+export function rangeBounds(values) {
+  if (!values || !values.length) return null;
+  const hi = Math.max(...values), lo = Math.min(...values);
+  if (!Number.isFinite(hi) || !Number.isFinite(lo) || hi === lo) return null;
+  return { low: lo, high: hi };
+}
+
 export function rangePos(values, price) {
   if (!values || !values.length) return null;
   const hi = Math.max(...values), lo = Math.min(...values);
@@ -410,6 +425,16 @@ const RELIABILITY_PRIOR_SAMPLES = 12;
 const CALIBRATION_CONFIDENCE_MIN_SAMPLES = 40;
 const DETAILED_CALIBRATION_CONFIDENCE_MIN_SAMPLES = 30;
 const ALERT_CONFIDENCE_Z = 1.645; // One-sided 95% Wilson lower bound.
+// Minimum demonstrated edge over the measured no-skill baseline before a call
+// is marked actionable. Expressed as an edge, not an absolute hit rate, so it
+// means the same thing in a class that guesses right 38% of the time as in one
+// that guesses right 52% of the time.
+const MIN_ACTIONABLE_EDGE = 0.18;
+// A whole asset class's composite record needs at least this many matured
+// outcomes before it is judged fit (or unfit) to publish. Well above
+// MIN_RELIABILITY_SAMPLES: suppressing an entire class is a much heavier call
+// than reweighting one technique on one asset.
+const CLASS_SKILL_MIN_SAMPLES = 150;
 
 // reliability: optional flat map built by scripts/reliability.mjs from D1,
 // `${symbol}|${techniqueId}` -> { accuracy, total } (accuracy already
@@ -436,11 +461,77 @@ const ALERT_CONFIDENCE_Z = 1.645; // One-sided 95% Wilson lower bound.
 // quietly drift apart.
 export const RELIABILITY_SIGNIFICANCE_Z = 2.576;
 
-export function isReliabilitySignificant(correct, total) {
+// The no-skill accuracy a directional record should actually be judged
+// against. NOT 0.5: outcomes are three-way (up / flat / down, the
+// OUTCOME_DEADBAND_PCT zone in reliability.mjs) while a technique only ever
+// votes +1 or -1, so a flat outcome marks an up-call and a down-call BOTH
+// wrong. That pushes every technique's ceiling below 0.5 before any question
+// of skill arises — measured live on this engine's own bars, a coin-flip
+// directional call scores ~38-42% at 24h, not 50%.
+//
+// Testing against 0.5 therefore mislabels genuinely informative techniques as
+// "worse than chance" and shrinks them toward a neutral weight, and — the
+// other half of the same error — flatters a technique in a class whose true
+// baseline sits above 0.5 (stocks at 168h: 52.1% of windows closed up, so
+// 52% accuracy there is worth nothing).
+//
+// `dist` is one { n_up, n_flat, n_down } row from direction_baseline for this
+// record's asset class and horizon. `votesUp`/`votesDown` are the record's own
+// directional mix: a technique that only ever calls "up" has null accuracy
+// P(up), one that splits evenly gets the blend. Falls back to 0.5 only when
+// there is no measured distribution yet, which preserves the previous
+// behavior for a cold database rather than inventing a number.
+export const BASELINE_MIN_SAMPLES = 60;
+
+export function noSkillBaseline(dist, votesUp, votesDown) {
+  if (!dist) return 0.5;
+  const total = (dist.n_up || 0) + (dist.n_flat || 0) + (dist.n_down || 0);
+  if (!total || total < BASELINE_MIN_SAMPLES) return 0.5;
+  const pUp = (dist.n_up || 0) / total;
+  const pDown = (dist.n_down || 0) / total;
+  const up = Number.isFinite(votesUp) ? votesUp : 0;
+  const down = Number.isFinite(votesDown) ? votesDown : 0;
+  const votes = up + down;
+  // No recorded mix (a record written before votes_up/votes_down existed):
+  // judge it against the best constant call available, which is the hardest
+  // honest bar and never flatters an unknown mix.
+  if (!votes) return clamp(Math.max(pUp, pDown), 0, 1);
+  return clamp((up * pUp + down * pDown) / votes, 0, 1);
+}
+
+// Two-sided binomial proportion test against `p0` — the measured no-skill
+// baseline rather than a fair coin. alpha=0.01 (z >= ~2.576), stricter than
+// the conventional 0.05 given how many techniques compete for weight per
+// asset; deliberately not a full Bonferroni correction, which would shift the
+// bar every time a technique is added or removed.
+export function isReliabilitySignificant(correct, total, p0 = 0.5) {
   if (!total) return false;
-  const se = Math.sqrt(0.25 / total); // sqrt(p0*(1-p0)/n) at p0=0.5
-  const z = (correct / total - 0.5) / se;
+  const base = Number.isFinite(p0) ? clamp(p0, 0.001, 0.999) : 0.5;
+  const se = Math.sqrt(base * (1 - base) / total);
+  if (!se) return false;
+  const z = (correct / total - base) / se;
   return Math.abs(z) >= RELIABILITY_SIGNIFICANCE_Z;
+}
+
+// Skill relative to the no-skill baseline, with a one-sided Wilson lower
+// bound on the record's own accuracy so a thin, lucky-looking streak cannot
+// present as a real edge. Positive `lowerEdge` is the honest bar for "this
+// has demonstrated information," and is what the publication gates below use
+// instead of a raw hit rate.
+export function skillOverBaseline(correct, total, p0) {
+  if (!Number.isFinite(correct) || !Number.isFinite(total) || total <= 0) return null;
+  const base = Number.isFinite(p0) ? clamp(p0, 0, 1) : 0.5;
+  const accuracy = clamp(correct / total, 0, 1);
+  const lower = lowerConfidenceBound(correct, total);
+  if (lower == null) return null;
+  return {
+    accuracy,
+    baseline: base,
+    edge: accuracy - base,
+    lowerEdge: lower - base,
+    samples: total,
+    significant: isReliabilitySignificant(correct, total, base)
+  };
 }
 
 // 'trending' when this asset's own swing-structure read is clearly
@@ -470,6 +561,20 @@ export function reliabilityMultiplier(reliability, symbol, techniqueId, byRegime
   return reliabilityMultiplierForAssetClass(reliability, symbol, techniqueId, byRegime, regime);
 }
 
+// Picks the direction_baseline row matching this record and turns it into the
+// null accuracy for the record's own directional mix. `baselines` is the map
+// loadDirectionBaselines (reliability.mjs) builds, keyed "assetClass|horizon";
+// a blended-across-horizons record has no single horizon, so it is judged
+// against the union of the class's horizons. Returns 0.5 when nothing has been
+// measured yet, which leaves cold-start behavior exactly as it was.
+export function baselineFor(baselines, assetClass, horizonHours, record) {
+  if (!baselines || !assetClass) return 0.5;
+  const dist = horizonHours != null
+    ? baselines[`${assetClass}|${horizonHours}`]
+    : baselines[`${assetClass}|all`];
+  return noSkillBaseline(dist, record && record.votes_up, record && record.votes_down);
+}
+
 export function techniquePriorRecord(techniquePriors, assetClass, techniqueId) {
   if (!techniquePriors || !techniqueId) return null;
   return (assetClass && techniquePriors.byAssetClass && techniquePriors.byAssetClass[assetClass] && techniquePriors.byAssetClass[assetClass][techniqueId])
@@ -484,31 +589,55 @@ export function adjustedReliabilityAccuracy(correct, total, baselineAccuracy = 0
   return clamp((correct + priorAcc * priorN) / (total + priorN), 0, 1);
 }
 
-export function reliabilityMultiplierForAssetClass(reliability, symbol, techniqueId, byRegime, regime, assetClass, techniquePriors) {
+// `baselines` (optional) is loadDirectionBaselines' map. When present, every
+// significance test and weight below is judged against the measured no-skill
+// line for this asset class instead of a fair coin — the single change that
+// stops the loop from reading a whole technique library as "below average"
+// purely because flat outcomes count against both directions.
+export function reliabilityMultiplierForAssetClass(reliability, symbol, techniqueId, byRegime, regime, assetClass, techniquePriors, baselines) {
   if (!reliability) return 1;
   const prior = techniquePriorRecord(techniquePriors, assetClass, techniqueId);
   const priorSamples = Math.min(RELIABILITY_PRIOR_SAMPLES, prior && Number.isFinite(prior.total) ? prior.total : 0);
   if (regime && byRegime && byRegime[regime]) {
     const rrec = byRegime[regime][`${symbol}|${techniqueId}`];
-    if (rrec && rrec.total >= MIN_RELIABILITY_SAMPLES && isReliabilitySignificant(rrec.correct, rrec.total)) {
-      return reliabilityWeight(adjustedReliabilityAccuracy(rrec.correct, rrec.total, prior && prior.accuracy, priorSamples), rrec.total);
+    if (rrec && rrec.total >= MIN_RELIABILITY_SAMPLES) {
+      const base = baselineFor(baselines, assetClass, null, rrec);
+      if (isReliabilitySignificant(rrec.correct, rrec.total, base)) {
+        // Shrink toward the technique's class-level record when there is one,
+        // otherwise toward the measured baseline — never toward a 0.5 that
+        // this asset class was never going to reach.
+        const priorAcc = prior && Number.isFinite(prior.accuracy) ? prior.accuracy : base;
+        return reliabilityWeight(adjustedReliabilityAccuracy(rrec.correct, rrec.total, priorAcc, priorSamples), rrec.total, base);
+      }
     }
   }
   const rec = reliability[`${symbol}|${techniqueId}`];
   if (!rec || rec.total < MIN_RELIABILITY_SAMPLES) return 1;
-  if (!isReliabilitySignificant(rec.correct, rec.total)) return 1;
-  return reliabilityWeight(adjustedReliabilityAccuracy(rec.correct, rec.total, prior && prior.accuracy, priorSamples), rec.total);
+  const base = baselineFor(baselines, assetClass, null, rec);
+  if (!isReliabilitySignificant(rec.correct, rec.total, base)) return 1;
+  const priorAcc = prior && Number.isFinite(prior.accuracy) ? prior.accuracy : base;
+  return reliabilityWeight(adjustedReliabilityAccuracy(rec.correct, rec.total, priorAcc, priorSamples), rec.total, base);
 }
 
-export function reliabilityWeight(accuracy, total) {
+// `p0` is the measured no-skill baseline for this record (noSkillBaseline
+// above), not a fair coin. Weight 1.0 now means "exactly as good as guessing
+// in this asset class at this horizon" wherever that line actually sits,
+// instead of assuming it sits at 0.5. Skill is normalized by the headroom
+// available on whichever side of the baseline the accuracy falls, so always-
+// right still maps to +1 and always-wrong to -1 for any baseline.
+// At p0 = 0.5 this reduces exactly to the previous formula.
+export function reliabilityWeight(accuracy, total, p0 = 0.5) {
   if (!Number.isFinite(accuracy) || !Number.isFinite(total) || total < MIN_RELIABILITY_SAMPLES) return 1;
+  const base = Number.isFinite(p0) ? clamp(p0, 0.001, 0.999) : 0.5;
+  const spread = accuracy >= base ? (1 - base) : base;
+  const normalized = clamp((accuracy - base) / spread, -1, 1);
   // Preserve the established, significance-gated behavior while a record is
   // still small. Once an asset/technique has a genuinely deep record, reduce
   // the influence of an extreme raw hit rate so long-lived learning does not
   // overfit one historical regime.
-  if (total < 100) return clamp(0.5 + accuracy, 0.5, 1.5);
+  if (total < 100) return clamp(1 + normalized * 0.5, 0.5, 1.5);
   const confidence = Math.min(1, Math.sqrt(total / 100));
-  return clamp(1 + (accuracy - 0.5) * 2 * confidence, 0.5, 1.5);
+  return clamp(1 + normalized * confidence, 0.5, 1.5);
 }
 
 export function comboReinforcementMultiplier(comboReliability, symbol, techniqueId, dir, activeTechniques, assetClass, techniquePriors) {
@@ -606,27 +735,51 @@ export function horizonEstimate(applicable, dir, symbol, reliabilityByHorizon) {
   if (!active.length) return null;
 
   if (reliabilityByHorizon) {
-    const acc24 = { correct: 0, total: 0 };
-    const acc168 = { correct: 0, total: 0 };
-    for (const t of active) {
-      const r24 = reliabilityByHorizon[24] && reliabilityByHorizon[24][`${symbol}|${t.id}`];
-      const r168 = reliabilityByHorizon[168] && reliabilityByHorizon[168][`${symbol}|${t.id}`];
-      // Only folds a technique's own numbers in once IT individually has
-      // matured enough outcomes — several techniques voting on the same
-      // asset in the same hour are correlated (they're marked right or
-      // wrong together, off the same underlying price move), so summing
-      // their thin counts together would let that correlation masquerade
-      // as independent confidence. Same bar as reliabilityMultiplier uses,
-      // deliberately, so "enough history to trust" means the same thing
-      // in both places.
-      if (r24 && r24.total >= MIN_RELIABILITY_SAMPLES) { acc24.correct += r24.correct; acc24.total += r24.total; }
-      if (r168 && r168.total >= MIN_RELIABILITY_SAMPLES) { acc168.correct += r168.correct; acc168.total += r168.total; }
-    }
-    if (acc24.total > 0 || acc168.total > 0) {
-      const a24 = acc24.total > 0 ? acc24.correct / acc24.total : null;
-      const a168 = acc168.total > 0 ? acc168.correct / acc168.total : null;
-      if (a24 != null && (a168 == null || a24 >= a168)) return { label: horizonLabel(1), days: 1, basis: 'historical' };
-      if (a168 != null) return { label: horizonLabel(7), days: 7, basis: 'historical' };
+    // Gating each technique on its OWN sample count (as this did before) stops
+    // a thin record from joining, but it does not fix the correlation itself:
+    // summing several techniques' counts still presents N correlated vote
+    // streams as N independent ones, because they are marked right or wrong
+    // together off the same underlying price move. So accuracy is averaged
+    // across contributors rather than pooled, and the effective sample size is
+    // the deepest single contributor, not the sum — the conservative reading
+    // of "how much independent evidence is really here."
+    const collect = (h) => {
+      const accs = [];
+      let effectiveN = 0;
+      for (const t of active) {
+        const rec = reliabilityByHorizon[h] && reliabilityByHorizon[h][`${symbol}|${t.id}`];
+        if (!rec || rec.total < MIN_RELIABILITY_SAMPLES) continue;
+        accs.push(rec.correct / rec.total);
+        if (rec.total > effectiveN) effectiveN = rec.total;
+      }
+      if (!accs.length) return null;
+      return { accuracy: accs.reduce((a, b) => a + b, 0) / accs.length, n: effectiveN };
+    };
+    const h24 = collect(24);
+    const h168 = collect(168);
+
+    // Only claim a historical basis when one horizon is measurably better than
+    // the other. Picking whichever is nominally higher — as this used to —
+    // turns a 50.1%-vs-50.0% coin flip into a confident-looking "resolves in
+    // ~1 day," which then feeds currentSignalConfidence's historicalBasis gate.
+    if (h24 && h168) {
+      const se = Math.sqrt(
+        (h24.accuracy * (1 - h24.accuracy)) / Math.max(h24.n, 1) +
+        (h168.accuracy * (1 - h168.accuracy)) / Math.max(h168.n, 1)
+      );
+      const z = se > 0 ? (h24.accuracy - h168.accuracy) / se : 0;
+      if (Math.abs(z) >= RELIABILITY_SIGNIFICANCE_Z) {
+        return z > 0
+          ? { label: horizonLabel(1), days: 1, basis: 'historical' }
+          : { label: horizonLabel(7), days: 7, basis: 'historical' };
+      }
+      // Indistinguishable: fall through to the methodology table below.
+    } else if (h24 || h168) {
+      // Only one horizon has a usable record at all, so there is nothing to
+      // compare it against — that is a real, if one-sided, historical answer.
+      return h24
+        ? { label: horizonLabel(1), days: 1, basis: 'historical' }
+        : { label: horizonLabel(7), days: 7, basis: 'historical' };
     }
   }
 
@@ -1614,20 +1767,55 @@ export function techniqueBreakdown(reliability, reliabilityByHorizon, symbol) {
 // default. Returns null below MIN_RELIABILITY_SAMPLES pooled outcomes —
 // "a reasonable number of predictions" before a score means anything,
 // the same bar every other reliability read in this engine uses.
-export function assetPredictionScore(symbol, reliability, rangeReliability) {
+// This previously pooled range containment in with the directional records
+// and reported one blended percentage as an asset's "prediction accuracy."
+// That was measuring two incomparable things: a range band is BUILT to
+// contain the price (it ran 61.2% across the live table, and rises with band
+// width), while a directional call sits near its no-skill baseline. Pooling
+// them let containment carry the average, which is what produced assets
+// showing 95%+ "prediction accuracy" on a directional leaderboard.
+//
+// The two are now reported separately and the headline is directional skill
+// measured against noSkillBaseline, not a raw hit rate. `proven` is the only
+// field that should ever gate publication: it requires the Wilson lower bound
+// on the accuracy to clear the baseline, so neither a thin lucky streak nor a
+// hit rate that merely matches what constant guessing would have achieved can
+// present as an edge.
+export function assetPredictionScore(symbol, reliability, rangeReliability, assetClass, baselines) {
   const pick = (techniqueId) => {
     const rec = reliability && reliability[`${symbol}|${techniqueId}`];
-    return rec && rec.total ? { correct: rec.correct, total: rec.total } : { correct: 0, total: 0 };
+    return rec && rec.total
+      ? { correct: rec.correct, total: rec.total, votes_up: rec.votes_up, votes_down: rec.votes_down }
+      : { correct: 0, total: 0, votes_up: 0, votes_down: 0 };
   };
-  const composite = pick('composite');
-  const reversal = pick('reversal');
-  const dwell = pick('dwell');
-  const range = (rangeReliability && rangeReliability[symbol]) || { hits: 0, total: 0 };
+  // Directional records only. 'reversal' and 'dwell' are genuine directional
+  // calls like 'composite'; containment is not, and no longer joins them.
+  const directional = ['composite', 'reversal', 'dwell'].map(pick);
+  const correct = directional.reduce((a, r) => a + r.correct, 0);
+  const total = directional.reduce((a, r) => a + r.total, 0);
+  const votesUp = directional.reduce((a, r) => a + (r.votes_up || 0), 0);
+  const votesDown = directional.reduce((a, r) => a + (r.votes_down || 0), 0);
 
-  const totalCorrect = composite.correct + reversal.correct + dwell.correct + range.hits;
-  const totalCount = composite.total + reversal.total + dwell.total + range.total;
-  if (totalCount < MIN_RELIABILITY_SAMPLES) return null;
-  return { score: Math.round(100 * totalCorrect / totalCount), samples: totalCount };
+  const rangeRec = (rangeReliability && rangeReliability[symbol]) || null;
+  const range = rangeRec && rangeRec.total
+    ? { containment: Math.round(100 * rangeRec.hits / rangeRec.total), samples: rangeRec.total }
+    : null;
+
+  if (total < MIN_RELIABILITY_SAMPLES) return null;
+
+  const dist = assetClass && baselines ? baselines[`${assetClass}|all`] : null;
+  const baseline = noSkillBaseline(dist, votesUp, votesDown);
+  const skill = skillOverBaseline(correct, total, baseline);
+
+  return {
+    score: Math.round(100 * correct / total),
+    samples: total,
+    baseline: Math.round(100 * baseline),
+    edge: skill ? Math.round(1000 * skill.edge) / 10 : null,
+    lowerEdge: skill ? Math.round(1000 * skill.lowerEdge) / 10 : null,
+    proven: !!(skill && skill.lowerEdge > 0 && skill.significant),
+    range
+  };
 }
 
 // A conservative one-sided Wilson bound prevents a tiny perfect-looking
@@ -1651,7 +1839,73 @@ export function lowerConfidenceBound(correct, total, z = ALERT_CONFIDENCE_Z) {
 // asset class, direction, horizon, and score bucket; the legacy pooled curve
 // remains a fallback while that cell warms up. Historical range/horizon basis
 // and current agreement are gates only, never invented probability inputs.
-export function currentSignalConfidence(signal, calibration, assetCompositeRecord) {
+// Whether a whole asset class has demonstrated directional skill, pooled
+// across every direction, horizon and score bucket its composite has been
+// scored on. Measured against the class's own no-skill baseline, so "no
+// demonstrated edge" means "no better than constant guessing in this class"
+// rather than "under 50%".
+//
+// Live at the time this was written: crypto cleared its baseline decisively
+// (+22.6pts at 24h, +15.0pts at 168h) while stocks sat significantly BELOW a
+// constant call (-10.2pts at both horizons, n=481). Pooling the two produced a
+// 49.8% headline that read as "no edge anywhere" and hid both results.
+//
+// Nothing here is hardcoded per class: a class is published when its own
+// numbers earn it and suppressed when they don't, so stocks re-qualify
+// automatically if they start clearing the bar.
+export function assetClassSkill(detailedCalibration, baselines, assetClass) {
+  if (!detailedCalibration || !assetClass) return null;
+  let correct = 0, total = 0, votesUp = 0, votesDown = 0;
+  for (const [key, rec] of Object.entries(detailedCalibration)) {
+    const [cls, dir] = key.split('|');
+    if (cls !== assetClass || !rec || !rec.total) continue;
+    correct += rec.correct;
+    total += rec.total;
+    if (dir === '1') votesUp += rec.total;
+    else if (dir === '-1') votesDown += rec.total;
+  }
+  if (total < CLASS_SKILL_MIN_SAMPLES) return null;
+  const dist = baselines ? baselines[`${assetClass}|all`] : null;
+  const baseline = noSkillBaseline(dist, votesUp, votesDown);
+  const skill = skillOverBaseline(correct, total, baseline);
+  if (!skill) return null;
+  return {
+    ...skill,
+    assetClass,
+    // Publish only on positive evidence. A class whose lower bound sits at or
+    // below its baseline has not shown an edge, and is abstained on rather
+    // than shipped with a caveat — the same abstain-rather-than-guess rule the
+    // engine already applies to thin per-asset records.
+    proven: skill.lowerEdge > 0
+  };
+}
+
+// Strips the directional call from a board whose asset class has not
+// demonstrated skill, while leaving every descriptive field (price, ranges,
+// indicators, track record) intact. Votes are still logged and still scored by
+// evaluateMatured, so the class keeps accumulating the evidence it needs to
+// re-qualify — abstaining from publishing a call is not the same as stopping
+// measurement of it.
+export function abstainBoards(boards, skill) {
+  // `skill === null` means "not enough evidence to judge this class yet", which
+  // is NOT the same as "judged and found wanting" — a cold database must keep
+  // publishing exactly as before rather than silently blanking every board.
+  // Only a class that has been measured (CLASS_SKILL_MIN_SAMPLES outcomes) and
+  // failed to clear its own baseline is abstained on.
+  if (!boards || !skill || skill.proven) return boards;
+  const note = {
+    reason: 'no-demonstrated-edge',
+    measured: skill ? { accuracy: Math.round(1000 * skill.accuracy) / 10, baseline: Math.round(1000 * skill.baseline) / 10, edge: Math.round(1000 * skill.edge) / 10, samples: skill.samples } : null
+  };
+  const strip = (rows) => (Array.isArray(rows) ? rows.map((r) => (
+    r && (r.dir === 1 || r.dir === -1) ? { ...r, dir: 0, abstained: note } : r
+  )) : rows);
+  const out = {};
+  for (const [k, v] of Object.entries(boards)) out[k] = strip(v);
+  return out;
+}
+
+export function currentSignalConfidence(signal, calibration, assetCompositeRecord, baselines) {
   if (!signal || !(signal.dir === 1 || signal.dir === -1) || !Number.isFinite(signal.score)) return null;
   const bucket = scoreBucket(signal.score);
   const horizonHours = signal.horizon && Number.isFinite(signal.horizon.days)
@@ -1695,7 +1949,22 @@ export function currentSignalConfidence(signal, calibration, assetCompositeRecor
   const historicalBasis = !!((signal.horizon && signal.horizon.basis === 'historical') || (signal.range && signal.range.basis === 'historical'));
   const hasAssetCompositeRecord = !!assetComponent;
   const strongCalibration = !!(calibrationComponent && calibrationComponent.samples >= 100);
-  const actionable = estimatedWinRate >= 0.68
+
+  // The bar is skill over this class's measured no-skill line, not a flat
+  // 0.68 hit rate. A flat threshold means wildly different things in different
+  // classes: at 24h a crypto call guesses right ~38% of the time with no
+  // information at all, while a stock call at 168h guesses right ~52% — so
+  // "68%" was demanding +30pts of edge in one place and +16pts in another,
+  // purely as an artifact of where each baseline happens to sit.
+  // estimatedWinRate is already a Wilson lower bound, so this reads as: at 95%
+  // confidence, at least MIN_ACTIONABLE_EDGE better than guessing.
+  const baseline = noSkillBaseline(
+    baselines && signal.asset_class ? baselines[`${signal.asset_class}|${horizonHours != null ? horizonHours : 'all'}`] : null,
+    signal.dir === 1 ? 1 : 0,
+    signal.dir === -1 ? 1 : 0
+  );
+  const edgeOverBaseline = estimatedWinRate - baseline;
+  const actionable = edgeOverBaseline >= MIN_ACTIONABLE_EDGE
     && signal.score >= (hasAssetCompositeRecord || historicalBasis ? 78 : 88)
     && agreementRatio >= (hasAssetCompositeRecord ? 0.45 : 0.55)
     && (historicalBasis || hasAssetCompositeRecord || strongCalibration);
@@ -1703,6 +1972,8 @@ export function currentSignalConfidence(signal, calibration, assetCompositeRecor
   return {
     estimatedWinRate,
     rawEstimatedWinRate,
+    baseline,
+    edgeOverBaseline,
     bucket,
     horizonHours,
     agreementRatio,
@@ -2049,10 +2320,10 @@ export function selectWorstRecentEvent(events, nowMs, mcap, windowDays = EVENT_S
 // confluence/rankBoards unchanged, so a future new field is one extra
 // destructured name here, not a new position everywhere up the chain.
 export function evaluateTechniques(m, kind, reliability, ctx = {}) {
-  const { marketContext, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, techniquePriors, comboReliability } = ctx;
+  const { marketContext, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, techniquePriors, comboReliability, directionBaselines } = ctx;
   const T = [];
   const regime = regimeOf(m.structure);
-  const push = (id, w, dir, note) => T.push({ id, w: w * reliabilityMultiplierForAssetClass(reliability, m.symbol, id, reliabilityByRegime, regime, kind, techniquePriors), dir, note });
+  const push = (id, w, dir, note) => T.push({ id, w: w * reliabilityMultiplierForAssetClass(reliability, m.symbol, id, reliabilityByRegime, regime, kind, techniquePriors, directionBaselines), dir, note });
   const cS = m.chgShort, c24 = m.chg24h, c7 = m.chg7d, c30 = m.chg30d;
 
   // T1 multi-horizon momentum
@@ -3240,6 +3511,7 @@ export function buildCryptoMetrics(item, extras = {}) {
     rsiRecentMin: rRange.min,
     rsiRecentMax: rRange.max,
     rangePos: rangePos(closes.slice(-252), price),
+    rangeBounds: rangeBounds(closes.slice(-252)),
     mean7d,
     stretch: mean7d ? ((price / mean7d) - 1) * 100 : null,
     slope: slopePct(closes, haveDaily ? 15 : 72),
@@ -3344,6 +3616,7 @@ export function buildStockMetrics(row, valuation, override, benchCloses, ivHist)
     rsiRecentMin: rRange.min,
     rsiRecentMax: rRange.max,
     rangePos: rangePos(closes.slice(-252), price),
+    rangeBounds: rangeBounds(closes.slice(-252)),
     stretch: s20 ? ((price / s20) - 1) * 100 : null,
     slope: slopePct(closes, 15),
     volRatio: avgVol20 ? (volumes[n - 1] / avgVol20) : null,
@@ -3462,6 +3735,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       rsi: x.m.rsi,
       volRatio: x.m.volRatio,
       rangePos: x.m.rangePos,
+      rangeBounds: x.m.rangeBounds,
       score,
       // Which side this specific row was built for — always matches
       // cfg.side for the regular boards (uniform by construction), but the
@@ -3546,7 +3820,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -3603,7 +3877,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   // Shared by both rankBoards calls below (crypto and stock) — see
   // evaluateTechniques' docs for why this is one object, not positional args.
   const qualityScores = computeQualityScores(qualityData || {});
-  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityScores, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability };
+  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityScores, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines };
 
   let cryptoBoards = { breakout: [], breakdown: [], universe: 0 };
   let btc = null, eth = null;
@@ -3666,8 +3940,17 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   // Pull the reliability-learning log out before the boards go into the
   // public payload — votesLog/priceLog/rangeLog/allSymbols are internal
   // bookkeeping, not something the dashboard or API consumer needs to see.
-  const { votesLog: cryptoVotes, priceLog: cryptoPrices, rangeLog: cryptoRanges, allSymbols: cryptoAll, ...cryptoPublic } = cryptoBoards;
-  const { votesLog: stockVotes, priceLog: stockPrices, rangeLog: stockRanges, allSymbols: stockAll, ...stockPublic } = stockBoards;
+  const { votesLog: cryptoVotes, priceLog: cryptoPrices, rangeLog: cryptoRanges, allSymbols: cryptoAll, ...cryptoPublicRaw } = cryptoBoards;
+  const { votesLog: stockVotes, priceLog: stockPrices, rangeLog: stockRanges, allSymbols: stockAll, ...stockPublicRaw } = stockBoards;
+
+  // Publish a class's directional calls only while its own measured record
+  // clears its own no-skill baseline. The votes above are logged either way,
+  // so a suppressed class keeps accumulating the evidence that would let it
+  // back in. See assetClassSkill/abstainBoards.
+  const cryptoSkill = assetClassSkill(detailedCalibration, directionBaselines, 'crypto');
+  const stockSkill = assetClassSkill(detailedCalibration, directionBaselines, 'stock');
+  const cryptoPublic = abstainBoards(cryptoPublicRaw, cryptoSkill);
+  const stockPublic = abstainBoards(stockPublicRaw, stockSkill);
   const log = {
     generated_at: new Date().toISOString(),
     votes: [...(cryptoVotes || []), ...(stockVotes || [])],
@@ -3675,28 +3958,38 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     ranges: [...(cryptoRanges || []), ...(stockRanges || [])]
   };
 
-  // Track record: which assets (either class) have a pooled, matured
-  // prediction score above 95/100 — see assetPredictionScore's docs for
-  // exactly what's pooled. Full universe, not just this hour's top 10 per
-  // side, since a strong record doesn't require currently ranking.
-  const enrichAll = (list, assetClass) => list.map((row) => ({ ...row, asset_class: assetClass, trackRecord: assetPredictionScore(row.symbol, reliability, rangeReliability) }));
+  // Track record: which assets (either class) have DEMONSTRATED directional
+  // skill — the Wilson lower bound on their matured directional accuracy
+  // clears the measured no-skill baseline for their class. Full universe, not
+  // just this hour's top 10 per side, since a strong record doesn't require
+  // currently ranking.
+  //
+  // The bar used to be a pooled score above 95/100, which range containment
+  // could carry on its own (see assetPredictionScore). Ranking is now by
+  // lowerEdge — proven points above baseline — so an asset with a modest but
+  // real edge outranks one with a flattering raw hit rate and no evidence.
+  const enrichAll = (list, assetClass) => list.map((row) => ({ ...row, asset_class: assetClass, trackRecord: assetPredictionScore(row.symbol, reliability, rangeReliability, assetClass, directionBaselines) }));
   const cryptoUniverse = enrichAll(cryptoAll || [], 'crypto');
   const stockUniverse = enrichAll(stockAll || [], 'stock');
   const highAccuracyFor = (list) => list
     .map(({ symbol, name, price, horizon, range, id, trackRecord, asset_class }) => {
       const s = trackRecord;
       if (!s) return null;
+      if (!s.proven) return null;
       return {
-        symbol, name, asset_class, score: s.score, samples: s.samples,
+        symbol, name, asset_class,
+        score: s.score, samples: s.samples,
+        baseline: s.baseline, edge: s.edge, lowerEdge: s.lowerEdge,
+        rangeContainment: s.range,
         price, horizon, range,
         ...(id ? { id } : {})
       };
     })
-    .filter((r) => r && r.score > 95);
+    .filter(Boolean);
   const highAccuracy = [
     ...highAccuracyFor(cryptoUniverse),
     ...highAccuracyFor(stockUniverse)
-  ].sort((a, b) => b.score - a.score);
+  ].sort((a, b) => b.lowerEdge - a.lowerEdge);
   log.signals = [...cryptoUniverse, ...stockUniverse].filter((r) => r.dir === 1 || r.dir === -1);
 
   const payload = {
@@ -3733,6 +4026,9 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     },
     crypto: cryptoPublic,
     stocks: stockPublic,
+    // Per-class measured skill, so the dashboard can say WHY a class is or
+    // isn't showing directional calls instead of silently rendering none.
+    classSkill: { crypto: cryptoSkill, stock: stockSkill },
     highAccuracy,
     // Which crypto symbols /api/prices can live-tick from Binance.US
     // instead of CoinGecko (see binanceUsTradablePairs) — computed once
@@ -3785,6 +4081,45 @@ async function getRefreshDispatchStatus(env) {
   }
 }
 
+// Overlays the cron-refreshed price layer onto a built payload without
+// touching anything the heavy engine computed. Only price and chg24h are
+// replaced (plus a recomputed rangePos where the build gave us the bounds to
+// do it honestly) — scores, directions, techniques and ranges are products of
+// the model run and must keep the timestamp they were actually computed at.
+// Returns the payload unchanged when there is no live layer, so this can never
+// make the response worse than it was.
+export function mergeLivePrices(payload, live) {
+  if (!payload || !live || (!live.crypto && !live.stocks)) return payload;
+  const apply = (rows, table) => (Array.isArray(rows) ? rows.map((r) => {
+    const tick = r && table && table[r.symbol];
+    if (!tick || tick.price == null) return r;
+    const out = { ...r, price: tick.price, price_at: live.generated_at };
+    if (tick.chg24h != null) out.chg24h = tick.chg24h;
+    // rangePos is a pure function of price against the build's own low/high,
+    // so it can be kept honest at the new price. Anything needing recomputed
+    // indicators is deliberately left alone.
+    const b = r.rangeBounds;
+    if (b && Number.isFinite(b.low) && Number.isFinite(b.high) && b.high > b.low) {
+      out.rangePos = clamp((tick.price - b.low) / (b.high - b.low), 0, 1);
+    }
+    return out;
+  }) : rows);
+  const section = (sec, table) => {
+    if (!sec || typeof sec !== 'object') return sec;
+    const out = {};
+    for (const [k, v] of Object.entries(sec)) out[k] = Array.isArray(v) ? apply(v, table) : v;
+    return out;
+  };
+  return {
+    ...payload,
+    crypto: section(payload.crypto, live.crypto),
+    stocks: section(payload.stocks, live.stocks),
+    // The model layer's own age is unchanged and still reported by
+    // generated_at; this says how fresh the numbers on screen actually are.
+    prices_generated_at: live.generated_at
+  };
+}
+
 function isFresh(payload, nowMs = Date.now()) {
   if (!payload || !payload.generated_at) return false;
   return (nowMs - new Date(payload.generated_at).getTime()) < CACHE_SECONDS * 1000;
@@ -3817,15 +4152,38 @@ export async function dispatchRefreshIfStale(env) {
     if (!response.ok) throw new Error(`GitHub signals refresh dispatch failed: HTTP ${response.status}`);
     await recordRefreshDispatchStatus(env, { result: 'dispatched' });
   } catch (error) {
+    // Previously this DELETED the lock, so a persistently failing dispatch
+    // retried on literally every request — which is exactly what happened
+    // while the token sat unscoped: a 403 per request, forever, with the
+    // failure visible only to anyone who thought to read /api/refresh-status.
+    // Hold a short cooldown instead: long enough to stop hammering GitHub,
+    // far shorter than the success lock so real recovery is not blocked.
     try {
-      await env.FCS_CACHE.delete(REFRESH_DISPATCH_LOCK_KEY);
-    } catch (deleteError) {
-      console.error('Unable to clear failed signals refresh dispatch lock:', deleteError.message);
+      await env.FCS_CACHE.put(REFRESH_DISPATCH_LOCK_KEY, new Date().toISOString(), { expirationTtl: REFRESH_DISPATCH_FAILURE_COOLDOWN_SECONDS });
+    } catch (lockError) {
+      console.error('Unable to set signals refresh dispatch cooldown:', lockError.message);
     }
     await recordRefreshDispatchStatus(env, { result: 'failed', error: error.message });
     throw error;
   }
   return true;
+}
+
+// Keeps the live price layer warm on the Cloudflare cron. Writes through the
+// same KV key /api/prices serves from, so a visitor gets an already-fresh
+// answer with no upstream call on the request path at all.
+export async function refreshLivePriceLayer(env) {
+  try {
+    const cached = await getCached(env);
+    if (!cached) return false;
+    const body = await buildLivePrices(env, cached);
+    if (!body) return false;
+    await putCachedLivePrices(env, body);
+    return true;
+  } catch (error) {
+    console.error('Live price layer refresh failed:', error.message);
+    return false;
+  }
 }
 
 function queueStaleCacheRefresh(env, ctx) {
@@ -4135,7 +4493,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           <a class="home-link rss-link" href="/signals/api/feed" title="Subscribe in any RSS reader for a persistent, browsable history of every alert — a complement to the ntfy push channel, which only shows what's live right now">📡 Alerts RSS feed</a>
         </div>
         <h1>Frontier Capital<br><span class="amber">Signals</span></h1>
-        <p class="dek">Confluence screens across the <b>top 100 cryptos</b> and <b>61 US equities</b>. Up to <b>32 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to funding-rate percentiles, open interest, Fibonacci retracements, time-of-day/day-of-week bias, intraday swing-timing, hack/exploit severity, market sentiment, options-implied volatility, earnings-calendar risk, key support/resistance breaks, accumulation/distribution, a broad-market composite, and a yield-curve read validated against the tracked history of every major breakout and breakdown, must point the <b>same direction</b> before a signal ranks — each with an <b>expected timeframe</b> learned from its own track record. Prices, funding, and sentiment archive permanently for deep multi-year pattern analysis. <b>Analysis syncs hourly; price and 24h change tick live</b> in between.</p>
+        <p class="dek">Confluence screens across the <b>top 100 cryptos</b> and <b>61 US equities</b>. Up to <b>32 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to funding-rate percentiles, open interest, Fibonacci retracements, time-of-day/day-of-week bias, intraday swing-timing, hack/exploit severity, market sentiment, options-implied volatility, earnings-calendar risk, key support/resistance breaks, accumulation/distribution, a broad-market composite, and a yield-curve read validated against the tracked history of every major breakout and breakdown, must point the <b>same direction</b> before a signal ranks — each with an <b>expected timeframe</b> learned from its own track record, and every technique weighted by how far it beats the measured no-skill baseline for its asset class rather than a nominal 50%. Prices, funding, and sentiment archive permanently for deep multi-year pattern analysis. <b>Analysis syncs hourly; price and 24h change tick live</b> in between.</p>
       </div>
       <div class="mast-meta">
         ANALYSIS REFRESH <b>HOURLY</b><br>
@@ -4450,6 +4808,17 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     }
     b+=boardHtml({side:'long', assetClass:'crypto', boardId:'crypto-long', eyebrow:'CRYPTO · <b>LONG SIDE</b>', title:'Breakout watch'}, d.crypto.breakout, d.crypto.universe);
     b+=boardHtml({side:'short', assetClass:'crypto', boardId:'crypto-short', eyebrow:'CRYPTO · <b>RISK SIDE</b>', title:'Breakdown risk'}, d.crypto.breakdown, d.crypto.universe);
+    // A class whose measured record does not clear its own no-skill baseline
+    // has its directional calls withheld (see assetClassSkill/abstainBoards).
+    // Say so plainly rather than letting a board of dir-less rows read as a
+    // rendering bug — and show the numbers behind the decision, since "we are
+    // not showing you calls" needs more justification than showing them did.
+    var cs = d.classSkill || {};
+    if(cs.stock && !cs.stock.proven){
+      b+='<div class="xp-banner" role="note"><b>Equity direction calls are withheld.</b> '
+        +'Over '+cs.stock.samples+' matured predictions this engine scored '+(100*cs.stock.accuracy).toFixed(1)+'% on US equities, against '+(100*cs.stock.baseline).toFixed(1)+'% for simply guessing the same direction every time — an edge of '+(100*cs.stock.edge).toFixed(1)+' points. '
+        +'Rankings, prices and ranges below are still real; the direction is not shown because it has not earned it. Equity calls keep being scored in the background and return automatically once they clear the baseline.</div>';
+    }
     b+=boardHtml({side:'long', assetClass:'stock', boardId:'stock-long', eyebrow:'US EQUITIES · <b>LONG SIDE</b>', title:'Breakout watch'}, d.stocks.breakout, d.stocks.universe);
     b+=boardHtml({side:'short', assetClass:'stock', boardId:'stock-short', eyebrow:'US EQUITIES · <b>RISK SIDE</b>', title:'Breakdown risk'}, d.stocks.breakdown, d.stocks.universe);
     $('boards').innerHTML=b;
@@ -4457,10 +4826,10 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
 
   function renderTrackRecord(d){
     var list = d.highAccuracy||[];
-    var head = '<div><div class="eyebrow">TRACK RECORD</div><div class="tr-title">95%+ prediction accuracy so far</div></div>';
+    var head = '<div><div class="eyebrow">TRACK RECORD</div><div class="tr-title">Proven edge over guessing</div></div>';
     var el = $('trackRecord');
     if(!list.length){
-      el.innerHTML = head + '<div class="tr-empty">No asset has crossed the 95% mark yet. Each asset needs a meaningful number of matured, scored predictions first — pooling its composite directional calls, its price-range accuracy, and its pivot-style (reversal/dwell) calls — before a score shows at all, so this fills in gradually as the hourly track record accumulates. Not empty because nothing works; empty because not enough has matured to say yet.</div>';
+      el.innerHTML = head + '<div class="tr-empty">No asset has yet demonstrated a directional edge over its own baseline. This list used to rank by a raw hit rate that pooled price-range containment in with directional calls — but a range band is built to contain the price, so containment carried the average and assets appeared here on the strength of it. An asset now qualifies only when the lower bound on its directional accuracy clears what constant guessing would have scored in its asset class, which is a much harder and more honest bar. Empty because not enough has matured to prove it, not because nothing works.</div>';
       return;
     }
     var rows = list.map(function(r){
@@ -4477,7 +4846,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         +'<span class="tr-class">'+(r.asset_class==='crypto'?'CRYPTO':'EQUITY')+'</span>'
         +'<span class="tr-price">'+fmtPrice(r.price)+'</span>'
         +'<span class="tr-range-wrap">'+rangeHtml+horizonHtml+'</span>'
-        +'<span class="tr-score">'+r.score+'%</span>'
+        +'<span class="tr-score" title="'+r.score+'% directional accuracy against a '+r.baseline+'% no-skill baseline for this asset class'+(r.rangeContainment?'; price-range containment '+r.rangeContainment.containment+'% over '+r.rangeContainment.samples+' bands, reported separately and never pooled into this figure':'')+'">+'+r.lowerEdge+' pts</span>'
         +'<span class="tr-samples">'+r.samples+' calls</span>'
         +'</div>';
     }).join('');
@@ -4521,12 +4890,25 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     hs.innerHTML='FEEDS <b>'+cg+' · '+cd+' · EQ '+eq+' · '+val+'</b>';
     hs.className='stat'+((!d.health.coingecko||d.health.stocks_ok<d.health.stocks_total*0.8)?' warn':'');
     var ageH=(Date.now()-t.getTime())/36e5;
-    $('sysState').textContent = ageH>2 ? 'STALE' : 'LIVE';
-    $('sysDot').style.background = ageH>2 ? 'var(--down)' : 'var(--amber)';
+    // Two different clocks, and collapsing them into one badge was misleading:
+    // prices are refreshed by the Worker's own Cloudflare cron every few
+    // minutes, while the learned model layer only moves when the heavy build
+    // runs. A dashboard showing minutes-old prices was being labelled STALE
+    // purely because the model behind them was hours old.
+    var pt = d.prices_generated_at ? new Date(d.prices_generated_at) : null;
+    var priceAgeM = pt ? (Date.now()-pt.getTime())/6e4 : null;
+    var pricesFresh = priceAgeM != null && priceAgeM < 15;
+    var modelStale = ageH > 2;
+    $('sysState').textContent = pricesFresh ? (modelStale ? 'LIVE PRICES' : 'LIVE') : (modelStale ? 'STALE' : 'LIVE');
+    $('sysDot').style.background = (!pricesFresh && modelStale) ? 'var(--down)' : 'var(--amber)';
     $('metaUniverse').textContent = (d.crypto.universe||0)+' + '+(d.stocks.universe||0);
-    $('stateBox').innerHTML = ageH>2
-      ? '<div class="notice"><b>Feed is stale.</b> Showing the last successful sync from '+t.toUTCString()+'. The engine rebuilds on the next request once upstream sources respond.</div>'
-      : '';
+    var fmtAge = function(h){ return h < 1 ? Math.round(h*60)+' min' : h.toFixed(1)+' h'; };
+    $('stateBox').innerHTML = !modelStale ? ''
+      : (pricesFresh
+        ? '<div class="notice"><b>Prices are live; the model layer is '+fmtAge(ageH)+' old.</b> '
+          +'Prices, changes and range positions were refreshed '+Math.round(priceAgeM)+' min ago. '
+          +'Scores, directions and technique weights are from the last full engine run at '+t.toUTCString()+' and will update on the next one.</div>'
+        : '<div class="notice"><b>Feed is stale.</b> Showing the last successful sync from '+t.toUTCString()+'. The engine rebuilds on the next request once upstream sources respond.</div>');
   }
 
   function renderError(msg){
@@ -4707,11 +5089,80 @@ function json(obj, extraHeaders) {
   });
 }
 
+// Live price/24h-change tick for whatever the current payload displays,
+// extracted from the /api/prices route so the Cloudflare cron can keep this
+// layer warm on its OWN schedule instead of only refreshing when a request
+// happens to arrive.
+//
+// This is the half of the dashboard that has to be timely. The heavy engine
+// (~130 fetches, ~260 assets, 32 techniques, ~10 minutes) runs in GitHub
+// Actions, whose scheduler drops firings under load — measured on this repo,
+// a 5-minute cron delivered 2 of 288 requested runs in a day and the worst
+// observed gap between refreshes was 686 minutes. Cloudflare's cron does not
+// have that problem, so prices, changes and range positions are refreshed here
+// on a trigger that actually fires, and only the slow-moving learned layer
+// (technique weights, calibration, reliability) waits on the heavy build.
+export async function buildLivePrices(env, cached) {
+  if (!cached) return null;
+  const cryptoRows = [...((cached.crypto && cached.crypto.breakout) || []), ...((cached.crypto && cached.crypto.breakdown) || [])];
+  const stockRows = [...((cached.stocks && cached.stocks.breakout) || []), ...((cached.stocks && cached.stocks.breakdown) || [])];
+  const cryptoIdToSymbol = new Map(cryptoRows.filter(r => r.id).map(r => [r.id, r.symbol]));
+  const stockSymbols = [...new Set(stockRows.map(r => r.symbol))];
+
+  // Split the crypto live-tick load across two independent providers
+  // (see binanceUsTradablePairs' docs) instead of sending every
+  // displayed symbol to CoinGecko alone: whichever symbols have a
+  // confirmed-tradable Binance.US USDT pair (computed once at build
+  // time, cached_provider list travels in the KV payload) go there;
+  // everything else — mostly longer-tail alts Binance.US doesn't list
+  // — still goes to CoinGecko, just a smaller batch than before.
+  const binanceUsSet = new Set(cached.binanceUsSymbols || []);
+  const binanceSymbols = [...cryptoIdToSymbol.values()].filter(s => binanceUsSet.has(s));
+  const geckoIds = [...cryptoIdToSymbol.entries()].filter(([, s]) => !binanceUsSet.has(s)).map(([id]) => id);
+
+  const [cryptoPricesById, binancePrices, stockResults] = await Promise.all([
+    coingeckoSimplePrice(geckoIds).catch(() => ({})),
+    binanceUsTicker24hr(binanceSymbols).catch(() => ({})),
+    pool(stockSymbols, 10, (s) => yahooQuote(s))
+  ]);
+
+  const crypto = {};
+  for (const [id, symbol] of cryptoIdToSymbol) {
+    if (binanceUsSet.has(symbol)) {
+      if (binancePrices[symbol]) crypto[symbol] = binancePrices[symbol];
+    } else if (cryptoPricesById[id]) {
+      crypto[symbol] = cryptoPricesById[id];
+    }
+  }
+  const stocks = {};
+  for (const r of stockResults) {
+    if (r && !r._error) stocks[r.symbol] = { price: r.price, chg24h: r.chg24h };
+  }
+  // Fall back to the hourly build's own price/chg24h for anything the
+  // live fetch missed (rate-limited, thin/renamed id, Yahoo hiccup) —
+  // still real data, just not freshly ticked, rather than a gap the
+  // dashboard has to guess how to render.
+  for (const r of cryptoRows) if (!crypto[r.symbol] && r.price != null) crypto[r.symbol] = { price: r.price, chg24h: r.chg24h };
+  for (const r of stockRows) if (!stocks[r.symbol] && r.price != null) stocks[r.symbol] = { price: r.price, chg24h: r.chg24h };
+
+  return { crypto, stocks, generated_at: new Date().toISOString() };
+}
+
 // ----------------------------- WORKER ENTRY ---------------------------------
 
 export default {
+  // Cloudflare's cron is the one scheduler in this system that actually fires
+  // on time, so it now owns the freshness that users see, rather than only
+  // forwarding a request to GitHub Actions and hoping.
+  //
+  // Two independent jobs, deliberately not chained: refreshing the live price
+  // layer must not be skipped just because a GitHub dispatch failed (which it
+  // did, silently, with HTTP 403 for as long as the token stayed unscoped).
   scheduled(_controller, env, ctx) {
-    ctx.waitUntil(dispatchRefreshIfStale(env));
+    ctx.waitUntil(refreshLivePriceLayer(env));
+    ctx.waitUntil(dispatchRefreshIfStale(env).catch((error) => {
+      console.error('Stale signals payload refresh dispatch failed:', error.message);
+    }));
   },
 
   async fetch(request, env, ctx) {
@@ -4736,7 +5187,18 @@ export default {
       if (cached) {
         const fresh = isFresh(cached);
         if (!fresh) queueStaleCacheRefresh(env, ctx);
-        return json(cached, { 'X-FCS-Cache': fresh ? 'hit' : 'stale' });
+        // Overlay the cron-refreshed price layer. The learned layer (weights,
+        // calibration, technique votes) is only as current as the last heavy
+        // build, but there is no reason to also show a stale PRICE next to it
+        // when a 5-minutes-old one is sitting in KV. Both timestamps travel
+        // with the payload so the dashboard can say which half is which
+        // instead of flattening it to one "STALE" badge.
+        const live = await getCachedLivePrices(env);
+        const merged = mergeLivePrices(cached, live);
+        return json(merged, {
+          'X-FCS-Cache': fresh ? 'hit' : 'stale',
+          'X-FCS-Prices': live ? 'live' : 'build'
+        });
       }
       return json({ error: 'signals not yet built — waiting on the first scheduled build to populate the cache' }, { 'X-FCS-Cache': 'empty' });
     }
@@ -4781,48 +5243,7 @@ export default {
       const cachedLive = await getCachedLivePrices(env);
       if (cachedLive) return json(cachedLive, { 'Cache-Control': 'no-store', 'X-FCS-Live-Cache': 'hit' });
 
-      const cryptoRows = [...((cached.crypto && cached.crypto.breakout) || []), ...((cached.crypto && cached.crypto.breakdown) || [])];
-      const stockRows = [...((cached.stocks && cached.stocks.breakout) || []), ...((cached.stocks && cached.stocks.breakdown) || [])];
-      const cryptoIdToSymbol = new Map(cryptoRows.filter(r => r.id).map(r => [r.id, r.symbol]));
-      const stockSymbols = [...new Set(stockRows.map(r => r.symbol))];
-
-      // Split the crypto live-tick load across two independent providers
-      // (see binanceUsTradablePairs' docs) instead of sending every
-      // displayed symbol to CoinGecko alone: whichever symbols have a
-      // confirmed-tradable Binance.US USDT pair (computed once at build
-      // time, cached_provider list travels in the KV payload) go there;
-      // everything else — mostly longer-tail alts Binance.US doesn't list
-      // — still goes to CoinGecko, just a smaller batch than before.
-      const binanceUsSet = new Set(cached.binanceUsSymbols || []);
-      const binanceSymbols = [...cryptoIdToSymbol.values()].filter(s => binanceUsSet.has(s));
-      const geckoIds = [...cryptoIdToSymbol.entries()].filter(([, s]) => !binanceUsSet.has(s)).map(([id]) => id);
-
-      const [cryptoPricesById, binancePrices, stockResults] = await Promise.all([
-        coingeckoSimplePrice(geckoIds).catch(() => ({})),
-        binanceUsTicker24hr(binanceSymbols).catch(() => ({})),
-        pool(stockSymbols, 10, (s) => yahooQuote(s))
-      ]);
-
-      const crypto = {};
-      for (const [id, symbol] of cryptoIdToSymbol) {
-        if (binanceUsSet.has(symbol)) {
-          if (binancePrices[symbol]) crypto[symbol] = binancePrices[symbol];
-        } else if (cryptoPricesById[id]) {
-          crypto[symbol] = cryptoPricesById[id];
-        }
-      }
-      const stocks = {};
-      for (const r of stockResults) {
-        if (r && !r._error) stocks[r.symbol] = { price: r.price, chg24h: r.chg24h };
-      }
-      // Fall back to the hourly build's own price/chg24h for anything the
-      // live fetch missed (rate-limited, thin/renamed id, Yahoo hiccup) —
-      // still real data, just not freshly ticked, rather than a gap the
-      // dashboard has to guess how to render.
-      for (const r of cryptoRows) if (!crypto[r.symbol] && r.price != null) crypto[r.symbol] = { price: r.price, chg24h: r.chg24h };
-      for (const r of stockRows) if (!stocks[r.symbol] && r.price != null) stocks[r.symbol] = { price: r.price, chg24h: r.chg24h };
-
-      const body = { crypto, stocks, generated_at: new Date().toISOString() };
+      const body = await buildLivePrices(env, cached);
       ctx.waitUntil(putCachedLivePrices(env, body));
       return json(body, { 'Cache-Control': 'no-store', 'X-FCS-Live-Cache': 'miss' });
     }

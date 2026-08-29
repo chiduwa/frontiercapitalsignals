@@ -58,21 +58,53 @@ const HARD_CAP_HOURS = 24 * 30;
 // this asset's own history actually been more accurate," which a blended
 // number can't answer.
 export async function loadReliability(env) {
-  const rows = await d1(env, 'SELECT symbol, technique_id, horizon_hours, correct, total FROM technique_reliability WHERE total > 0');
+  const rows = await d1(env, 'SELECT symbol, technique_id, horizon_hours, correct, total, votes_up, votes_down FROM technique_reliability WHERE total > 0');
   const acc = {};
   const byHorizon = { 24: {}, 168: {} };
   for (const r of rows) {
     const key = `${r.symbol}|${r.technique_id}`;
-    if (!acc[key]) acc[key] = { correct: 0, total: 0 };
+    if (!acc[key]) acc[key] = { correct: 0, total: 0, votes_up: 0, votes_down: 0 };
     acc[key].correct += r.correct;
     acc[key].total += r.total;
-    if (byHorizon[r.horizon_hours]) byHorizon[r.horizon_hours][key] = { correct: r.correct, total: r.total };
+    acc[key].votes_up += r.votes_up || 0;
+    acc[key].votes_down += r.votes_down || 0;
+    if (byHorizon[r.horizon_hours]) {
+      byHorizon[r.horizon_hours][key] = {
+        correct: r.correct, total: r.total,
+        votes_up: r.votes_up || 0, votes_down: r.votes_down || 0
+      };
+    }
   }
   const blended = {};
   for (const [key, v] of Object.entries(acc)) {
-    blended[key] = { correct: v.correct, accuracy: v.total ? v.correct / v.total : 0.5, total: v.total };
+    blended[key] = {
+      correct: v.correct,
+      accuracy: v.total ? v.correct / v.total : 0.5,
+      total: v.total,
+      votes_up: v.votes_up,
+      votes_down: v.votes_down
+    };
   }
   return { blended, byHorizon };
+}
+
+// Realized up/flat/down frequencies per asset class, keyed both per horizon
+// ("crypto|24") and pooled across horizons ("crypto|all") for the blended
+// records loadReliability returns. This is the no-skill line every
+// significance test and weight in worker.js is judged against — see
+// noSkillBaseline there, and migrations/0003_direction_baseline.sql for why
+// a hardcoded 0.5 was wrong.
+export async function loadDirectionBaselines(env) {
+  const rows = await d1(env, 'SELECT asset_class, horizon_hours, n_up, n_flat, n_down FROM direction_baseline');
+  const out = {};
+  for (const r of rows) {
+    out[`${r.asset_class}|${r.horizon_hours}`] = { n_up: r.n_up, n_flat: r.n_flat, n_down: r.n_down };
+    const all = (out[`${r.asset_class}|all`] ??= { n_up: 0, n_flat: 0, n_down: 0 });
+    all.n_up += r.n_up;
+    all.n_flat += r.n_flat;
+    all.n_down += r.n_down;
+  }
+  return out;
 }
 
 // Hierarchical prior for reliability weighting: how a technique has done
@@ -392,6 +424,7 @@ export async function evaluateMatured(env, nowIso) {
     // asset-class/direction/horizon split for alert calibration.
     const calibDeltas = {};
     const detailedCalibDeltas = {};
+    const baselineDeltas = {}; // asset_class -> { n_up, n_flat, n_down }, deduped per (run_at, symbol)
     const seenMoves = new Set();
     const evaluatedSymbolsByRunAt = {}; // only mark rows we could actually score
     // Phase 5: which technique pairs agreed on direction this (run_at,
@@ -415,9 +448,14 @@ export async function evaluateMatured(env, nowIso) {
       const pct = ((after / before) - 1) * 100;
       const actualDir = pct > OUTCOME_DEADBAND_PCT ? 1 : pct < -OUTCOME_DEADBAND_PCT ? -1 : 0;
       const key = `${r.symbol}|${r.technique_id}`;
-      if (!deltas[key]) deltas[key] = { correct: 0, total: 0, asset_class: r.asset_class };
+      if (!deltas[key]) deltas[key] = { correct: 0, total: 0, votes_up: 0, votes_down: 0, asset_class: r.asset_class };
       deltas[key].total += 1;
       if (r.dir === actualDir) deltas[key].correct += 1;
+      // Directional mix, so noSkillBaseline can judge this record against the
+      // null accuracy for the directions IT actually chose rather than a
+      // class-wide average (worker.js).
+      if (r.dir === 1) deltas[key].votes_up += 1;
+      else if (r.dir === -1) deltas[key].votes_down += 1;
       (evaluatedSymbolsByRunAt[r.run_at] ??= new Set()).add(r.symbol);
 
       if (r.technique_id === 'composite' && r.score != null) {
@@ -454,6 +492,14 @@ export async function evaluateMatured(env, nowIso) {
         moveDeltas[r.symbol].n += 1;
         moveDeltas[r.symbol].sumPct += pct;
         moveDeltas[r.symbol].sumPctSq += pct * pct;
+        // Same dedup, same reason: one realized price move is ONE observation
+        // of "what the market did," however many techniques voted on it.
+        // Counting per-vote would inflate the baseline's own sample count and
+        // make a thin window look authoritative.
+        if (!baselineDeltas[r.asset_class]) baselineDeltas[r.asset_class] = { n_up: 0, n_flat: 0, n_down: 0 };
+        if (actualDir === 1) baselineDeltas[r.asset_class].n_up += 1;
+        else if (actualDir === -1) baselineDeltas[r.asset_class].n_down += 1;
+        else baselineDeltas[r.asset_class].n_flat += 1;
       }
     }
 
@@ -527,15 +573,32 @@ export async function evaluateMatured(env, nowIso) {
     await forEachConcurrent(Object.entries(deltas), D1_WRITE_CONCURRENCY, async ([key, d]) => {
       const [symbol, techniqueId] = key.split('|');
       await d1(env, `
-        INSERT INTO technique_reliability (asset_class, symbol, technique_id, horizon_hours, correct, total, accuracy, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO technique_reliability (asset_class, symbol, technique_id, horizon_hours, correct, total, accuracy, votes_up, votes_down, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (symbol, technique_id, horizon_hours) DO UPDATE SET
           correct = technique_reliability.correct + excluded.correct,
           total = technique_reliability.total + excluded.total,
           accuracy = CAST(technique_reliability.correct + excluded.correct AS REAL) / (technique_reliability.total + excluded.total),
+          votes_up = technique_reliability.votes_up + excluded.votes_up,
+          votes_down = technique_reliability.votes_down + excluded.votes_down,
           updated_at = excluded.updated_at
-      `, [d.asset_class, symbol, techniqueId, h, d.correct, d.total, d.total ? d.correct / d.total : 0, nowIso]);
+      `, [d.asset_class, symbol, techniqueId, h, d.correct, d.total, d.total ? d.correct / d.total : 0, d.votes_up, d.votes_down, nowIso]);
       evaluatedCount += d.total;
+    });
+
+    // The no-skill baseline every weight and significance test is measured
+    // against. Accumulated forward from live outcomes rather than pinned to a
+    // constant, so it tracks regime changes on its own.
+    await forEachConcurrent(Object.entries(baselineDeltas), D1_WRITE_CONCURRENCY, async ([assetClass, d]) => {
+      await d1(env, `
+        INSERT INTO direction_baseline (asset_class, horizon_hours, n_up, n_flat, n_down, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (asset_class, horizon_hours) DO UPDATE SET
+          n_up = direction_baseline.n_up + excluded.n_up,
+          n_flat = direction_baseline.n_flat + excluded.n_flat,
+          n_down = direction_baseline.n_down + excluded.n_down,
+          updated_at = excluded.updated_at
+      `, [assetClass, h, d.n_up, d.n_flat, d.n_down, nowIso]);
     });
 
     await forEachConcurrent(Object.entries(moveDeltas), D1_WRITE_CONCURRENCY, async ([symbol, d]) => {
@@ -958,7 +1021,7 @@ export async function loadLeadLagSignals(env) {
 // own date has passed — a live-updating "today" with real history behind
 // it, not a once-a-day snapshot that could miss the day entirely if that
 // one run failed.
-export async function snapshotAssetScores(env, date, reliability, rangeReliability) {
+export async function snapshotAssetScores(env, date, reliability, rangeReliability, baselines) {
   const symbols = new Set();
   for (const key of Object.keys(reliability || {})) symbols.add(key.split('|')[0]);
   for (const symbol of Object.keys(rangeReliability || {})) symbols.add(symbol);
@@ -969,7 +1032,7 @@ export async function snapshotAssetScores(env, date, reliability, rangeReliabili
 
   const rows = [];
   for (const symbol of symbols) {
-    const score = assetPredictionScore(symbol, reliability, rangeReliability);
+    const score = assetPredictionScore(symbol, reliability, rangeReliability, classBySymbol[symbol], baselines);
     if (score && classBySymbol[symbol]) rows.push({ symbol, assetClass: classBySymbol[symbol], score: score.score, samples: score.samples });
   }
   let written = 0;
