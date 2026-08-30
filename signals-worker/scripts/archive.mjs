@@ -1470,8 +1470,21 @@ export function quantile(sorted, q) {
 // daily-refresh.mjs already performs for lead/lag and support/resistance, so
 // this adds no D1 read cost of its own.
 export function dailyRangeStatsFromRows(rows, lookbackDays = DAILY_RANGE_LOOKBACK_DAYS) {
+  // asset_daily_bars has PRIMARY KEY (symbol, date) with no asset_class in it,
+  // so two different assets sharing a ticker overwrite each other day by day
+  // and leave one interleaved series. DASH is live proof: Dash the crypto
+  // (~$41) and DoorDash the equity (~$237) alternate in the same rows. A median
+  // over that mixture is meaningless, and the resulting "move" reads as -82%.
+  //
+  // Any symbol appearing under more than one asset_class is therefore dropped
+  // outright rather than measured. This is a guard, not a repair — the archive
+  // itself still needs its key widened; see the note in schema.sql.
+  const classesBySymbol = {};
+  for (const r of rows || []) (classesBySymbol[r.symbol] ??= new Set()).add(r.asset_class);
+
   const bySymbol = {};
   for (const r of rows || []) {
+    if (classesBySymbol[r.symbol] && classesBySymbol[r.symbol].size > 1) continue;
     if (r.high == null || r.low == null || !r.close) continue;
     if (r.high < r.low) continue;                  // corrupt bar, not a range
     const pct = ((r.high - r.low) / r.close) * 100;

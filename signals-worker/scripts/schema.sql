@@ -130,6 +130,26 @@ CREATE TABLE IF NOT EXISTS range_reliability (
 -- One row per (symbol, calendar day). `source` records which upstream this
 -- bar came from (yahoo | coingecko) since the two have different depth
 -- guarantees (see backfill-history.mjs) — useful when auditing coverage.
+--
+-- KNOWN DEFECT, not yet repaired (found 2026-08-30): this PRIMARY KEY does not
+-- include asset_class, but a ticker is NOT unique across asset classes. DASH is
+-- both Dash the cryptocurrency (~$41) and DoorDash the equity (~$237), and the
+-- two overwrite each other day by day, leaving one interleaved series that
+-- alternates between the two price scales. Confirmed by scanning all 694k rows:
+-- DASH is currently the ONLY affected symbol, so the blast radius is one asset
+-- -- but any future overlap (crypto tickers reuse equity tickers freely) would
+-- silently corrupt the same way.
+--
+-- Everything derived from these bars inherits the corruption for that symbol:
+-- computeDailyRangeStats, computeLeadLag, computeSrLevelsAndBreaks and the
+-- sector composites all read this table. dailyRangeStatsFromRows now DROPS any
+-- symbol appearing under more than one asset_class rather than measuring the
+-- mixture; the other consumers do not yet have that guard.
+--
+-- The real fix is widening this key to (symbol, asset_class, date) and
+-- backfilling, which means re-keying every dependent table and recomputing the
+-- derived ones -- deliberately not done as a side effect of a day-trading
+-- feature. Until then, treat DASH's archived history as unreliable.
 CREATE TABLE IF NOT EXISTS asset_daily_bars (
   symbol TEXT NOT NULL,
   asset_class TEXT NOT NULL,

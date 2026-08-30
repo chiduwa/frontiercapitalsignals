@@ -1835,20 +1835,29 @@ check('a sub-cent token whose median rounds to 0 is excluded even though its p80
 check('an asset just above the floor is still published', arch.dailyRangeStatsFromRows(mkBars('FFF', Array(40).fill(0.3))).FFF !== undefined);
 
 console.log('\n== updateSessionExtremes: session high/low tracked off the Worker cron ==');
+const K = 'crypto|BTC';
 let sess = mod.updateSessionExtremes(null, { crypto: { BTC: { price: 100 } }, stocks: {} }, '2026-08-30T00:05:00Z');
-check('first tick of a session seeds open, high and low together', sess.bySymbol.BTC.open === 100 && sess.bySymbol.BTC.high === 100 && sess.bySymbol.BTC.low === 100);
+check('first tick of a session seeds open, high and low together', sess.bySymbol[K].open === 100 && sess.bySymbol[K].high === 100 && sess.bySymbol[K].low === 100);
 sess = mod.updateSessionExtremes(sess, { crypto: { BTC: { price: 108 } } }, '2026-08-30T04:00:00Z');
 sess = mod.updateSessionExtremes(sess, { crypto: { BTC: { price: 96 } } }, '2026-08-30T08:00:00Z');
-check('high and low both extend as the session runs', sess.bySymbol.BTC.high === 108 && sess.bySymbol.BTC.low === 96);
-check('open is pinned to the first tick, not the latest', sess.bySymbol.BTC.open === 100);
+check('high and low both extend as the session runs', sess.bySymbol[K].high === 108 && sess.bySymbol[K].low === 96);
+check('open is pinned to the first tick, not the latest', sess.bySymbol[K].open === 100);
 const rolled = mod.updateSessionExtremes(sess, { crypto: { BTC: { price: 96 } } }, '2026-08-31T00:02:00Z');
-check('a new UTC date rolls the session rather than carrying yesterday forward', rolled.date === '2026-08-31' && rolled.bySymbol.BTC.open === 96 && rolled.bySymbol.BTC.high === 96);
-check('a non-numeric tick is ignored rather than poisoning the extremes', mod.updateSessionExtremes(sess, { crypto: { BTC: { price: null } } }, '2026-08-30T09:00:00Z').bySymbol.BTC.high === 108);
+check('a new UTC date rolls the session rather than carrying yesterday forward', rolled.date === '2026-08-31' && rolled.bySymbol[K].open === 96 && rolled.bySymbol[K].high === 96);
+check('a non-numeric tick is ignored rather than poisoning the extremes', mod.updateSessionExtremes(sess, { crypto: { BTC: { price: null } } }, '2026-08-30T09:00:00Z').bySymbol[K].high === 108);
 // The live price fetch routinely misses symbols (rate limits, thin ids, Yahoo
 // hiccups). A tick that omits a symbol must not reset the day's extremes.
 const partial = mod.updateSessionExtremes(sess, { crypto: { ETH: { price: 50 } } }, '2026-08-30T10:00:00Z');
-check('a symbol missing from this tick keeps its accumulated session extremes', partial.bySymbol.BTC && partial.bySymbol.BTC.high === 108 && partial.bySymbol.BTC.low === 96, JSON.stringify(partial.bySymbol.BTC));
-check('and a newly-seen symbol still gets seeded', partial.bySymbol.ETH.open === 50);
+check('a symbol missing from this tick keeps its accumulated session extremes', partial.bySymbol[K] && partial.bySymbol[K].high === 108 && partial.bySymbol[K].low === 96, JSON.stringify(partial.bySymbol[K]));
+check('and a newly-seen symbol still gets seeded', partial.bySymbol['crypto|ETH'].open === 50);
+
+// The DASH case, live: Dash the crypto (~$41) and DoorDash the equity (~$237)
+// arrive in the SAME tick under the same ticker. Keying by bare symbol merged
+// them into one asset whose session ran $237 -> $41, produced a -82% "move",
+// and fired a candidate LONG on an equity that had barely moved.
+const collide = mod.updateSessionExtremes(null, { crypto: { DASH: { price: 41.68 } }, stocks: { DASH: { price: 236.74 } } }, '2026-08-30T00:05:00Z');
+check('a ticker shared across asset classes is tracked as two separate assets', collide.bySymbol['crypto|DASH'].open === 41.68 && collide.bySymbol['stock|DASH'].open === 236.74, JSON.stringify(collide.bySymbol));
+check('and neither one absorbs the other price as a session extreme', collide.bySymbol['crypto|DASH'].high === 41.68 && collide.bySymbol['stock|DASH'].low === 236.74);
 
 console.log('\n== dayRangeSignal: has it moved enough today to fade? ==');
 const stats = { BTC: { medianPct: 4, p80Pct: 6, samples: 90 } };
@@ -1878,16 +1887,32 @@ check('too few samples abstains', mod.dayRangeSignal('X', 100, { open: 100, high
 check('a zero median range abstains rather than making every move look extended', mod.dayRangeSignal('HTX', 101, { open: 100, high: 101, low: 100 }, { HTX: { medianPct: 0, p80Pct: 0, samples: 90 } }, { rsi: 75 }) === null);
 check('a zero median with a large p80 (the sub-cent precision case) also abstains', mod.dayRangeSignal('PEPE', 101, { open: 100, high: 101, low: 100 }, { PEPE: { medianPct: 0, p80Pct: 16.7, samples: 90 } }, { rsi: 75 }) === null);
 check('a peg-tight median abstains', mod.dayRangeSignal('GHO', 100.5, { open: 100, high: 100.5, low: 100 }, { GHO: { medianPct: 0.09, p80Pct: 0.26, samples: 90 } }, { rsi: 75 }) === null);
+// The exact live failure: a -82% "move" (19.98x a normal day) offered a
+// candidate LONG. A move this size is either bad data or a real dislocation,
+// and neither is something to mean-revert into.
+const dislocated = mod.dayRangeSignal('DASH', 41.68, { open: 236.74, high: 236.74, low: 41.68 }, { DASH: { medianPct: 4.12, p80Pct: 5.31, samples: 90 } }, { volRatio: 1.9 });
+check('a move far beyond any plausible session is marked dislocated', dislocated.state === 'dislocated', JSON.stringify({ state: dislocated.state, moveInMedians: dislocated.moveInMedians }));
+check('and offers NO entry — you do not fade a dislocation', dislocated.entry === null);
+check('while still reporting the numbers so the anomaly is visible, not hidden', Math.abs(dislocated.moveInMedians) > 8);
+const bigButReal = mod.dayRangeSignal('BTC', 93, { open: 100, high: 101, low: 93 }, { BTC: { medianPct: 4, p80Pct: 6, samples: 90 } }, { rsi: 22 });
+check('a large-but-plausible move still trades normally', bigButReal.state === 'extended-down' && bigButReal.entry.side === 'long');
 check('no session data yet abstains', mod.dayRangeSignal('BTC', 100, null, stats, {}) === null);
 
 console.log('\n== dayTradingUniverse / indexBoardRows ==');
-const dtPayload = { highAccuracy: [{ symbol: 'AAVE' }], crypto: { breakout: [{ symbol: 'BTC', rsi: 70 }] }, stocks: { breakout: [{ symbol: 'AAPL', rsi: 40 }] } };
+// highAccuracy rows always carry asset_class in the real payload (see
+// highAccuracyFor in buildPayload) — a row without one cannot be
+// class-qualified and is deliberately skipped rather than guessed at.
+const dtPayload = { highAccuracy: [{ symbol: 'AAVE', asset_class: 'crypto' }, { symbol: 'NVDA', asset_class: 'stock' }], crypto: { breakout: [{ symbol: 'BTC', rsi: 70 }] }, stocks: { breakout: [{ symbol: 'AAPL', rsi: 40 }] } };
 const uni = mod.dayTradingUniverse(dtPayload);
-check('covers the always-tracked favorites', uni.has('BTC') && uni.has('HYPE'));
-check('plus anything with a proven track record', uni.has('AAVE'));
-check('and nothing else', !uni.has('DOGE'));
+check('covers the always-tracked favorites, class-qualified', uni.has('crypto|BTC') && uni.has('crypto|HYPE'));
+check('plus anything with a proven track record, under its own class', uni.has('crypto|AAVE'));
+check('an equity with a proven record lands under the stock class', uni.has('stock|NVDA') && !uni.has('crypto|NVDA'));
+check('and nothing else', !uni.has('crypto|DOGE'));
+check('a track-record row with no asset_class is skipped, not guessed into a class', !mod.dayTradingUniverse({ highAccuracy: [{ symbol: 'ZZZ' }] }).has('crypto|ZZZ'));
 const idx = mod.indexBoardRows(dtPayload);
-check('board rows are indexed across both asset classes for confirmations', idx.BTC.rsi === 70 && idx.AAPL.rsi === 40);
+check('board rows are indexed per asset class, so a shared ticker cannot cross wires', idx['crypto|BTC'].rsi === 70 && idx['stock|AAPL'].rsi === 40);
+const collideIdx = mod.indexBoardRows({ crypto: { breakout: [{ symbol: 'DASH', rsi: 20 }] }, stocks: { breakout: [{ symbol: 'DASH', rsi: 80 }] } });
+check('DASH resolves to two distinct rows, not first-writer-wins', collideIdx['crypto|DASH'].rsi === 20 && collideIdx['stock|DASH'].rsi === 80);
 
 console.log('\n== mergeLivePrices: fresh price layer over a slow model layer ==');
 const basePayload = {

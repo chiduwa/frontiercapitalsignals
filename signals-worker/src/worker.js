@@ -4149,13 +4149,14 @@ export function attachDayRange(payload, live, session) {
   const rows = indexBoardRows(payload);
   const universe = dayTradingUniverse(payload);
   const out = {};
-  for (const symbol of universe) {
-    const tick = (live && ((live.crypto && live.crypto[symbol]) || (live.stocks && live.stocks[symbol])))
-      || (rows[symbol] ? { price: rows[symbol].price } : null);
+  for (const key of universe) {
+    const [assetClass, symbol] = key.split('|');
+    const liveTable = assetClass === 'crypto' ? (live && live.crypto) : (live && live.stocks);
+    const tick = (liveTable && liveTable[symbol]) || (rows[key] ? { price: rows[key].price } : null);
     const price = tick && tick.price;
     if (!Number.isFinite(price)) continue;
-    const sig = dayRangeSignal(symbol, price, session.bySymbol[symbol], payload.dailyRange, rows[symbol]);
-    if (sig) out[symbol] = sig;
+    const sig = dayRangeSignal(symbol, price, session.bySymbol[key], payload.dailyRange, rows[key]);
+    if (sig) out[key] = { ...sig, symbol, asset_class: assetClass };
   }
   if (!Object.keys(out).length) return payload;
   return { ...payload, dayRange: out, dayRange_session_date: session.date };
@@ -4257,7 +4258,7 @@ export async function notifyDayRangeEntries(env, entries) {
   let sent = 0;
   for (const e of entries) {
     const body = [
-      `${e.symbol} has travelled ${e.movePct >= 0 ? '+' : ''}${e.movePct.toFixed(2)}% today`,
+      `${e.symbol} (${e.assetClass === 'crypto' ? 'crypto' : 'equity'}) has travelled ${e.movePct >= 0 ? '+' : ''}${e.movePct.toFixed(2)}% today`,
       `(${Math.abs(e.moveInMedians).toFixed(2)}x its median daily range of ${e.medianPct.toFixed(2)}%).`,
       `Sitting at ${(e.posInDayRange * 100).toFixed(0)}% of today's range.`,
       `Candidate ${e.side.toUpperCase()} entry near ${e.price}.`,
@@ -4288,9 +4289,14 @@ export async function notifyDayRangeEntries(env, entries) {
 // proven it can call. Running it across all ~260 assets would multiply the
 // alert volume without improving any single entry.
 export function dayTradingUniverse(payload) {
-  const syms = new Set(FAVORITE_SYMBOLS);
-  for (const r of (payload && payload.highAccuracy) || []) if (r && r.symbol) syms.add(r.symbol);
-  return syms;
+  // Emits "assetClass|symbol" keys. FAVORITE_SYMBOLS is a crypto-only list (see
+  // its own docs), and highAccuracy rows carry their own asset_class.
+  const keys = new Set();
+  for (const sym of FAVORITE_SYMBOLS) keys.add(`crypto|${sym}`);
+  for (const r of (payload && payload.highAccuracy) || []) {
+    if (r && r.symbol && r.asset_class) keys.add(`${r.asset_class}|${r.symbol}`);
+  }
+  return keys;
 }
 
 export async function refreshLivePriceLayer(env) {
@@ -4338,17 +4344,19 @@ export async function dispatchDayRangeAlerts(env, cached, prices, session) {
   } catch { /* a lost state key costs at most one duplicate alert */ }
 
   const toSend = [];
-  for (const symbol of universe) {
-    const tick = (prices.crypto && prices.crypto[symbol]) || (prices.stocks && prices.stocks[symbol]);
+  for (const uk of universe) {
+    const [assetClass, symbol] = uk.split('|');
+    const liveTable = assetClass === 'crypto' ? prices.crypto : prices.stocks;
+    const tick = liveTable && liveTable[symbol];
     const price = tick && tick.price;
     if (!Number.isFinite(price)) continue;
-    const sig = dayRangeSignal(symbol, price, session.bySymbol && session.bySymbol[symbol], rangeStats, rowBySymbol[symbol]);
+    const sig = dayRangeSignal(symbol, price, session.bySymbol && session.bySymbol[uk], rangeStats, rowBySymbol[uk]);
     if (!sig || !sig.entry) continue;
-    const key = `${symbol}|${sig.entry.side}`;
+    const key = `${uk}|${sig.entry.side}`;
     if (state[key]) continue;
     state[key] = nowSeconds();
     toSend.push({
-      symbol, price, side: sig.entry.side, reasons: sig.entry.reasons,
+      symbol, assetClass, price, side: sig.entry.side, reasons: sig.entry.reasons,
       movePct: sig.movePct, moveInMedians: sig.moveInMedians,
       medianPct: sig.medianPct, medianAbs: sig.medianAbs, posInDayRange: sig.posInDayRange
     });
@@ -4370,11 +4378,18 @@ function nowSeconds() { return Math.floor(Date.now() / 1000); }
 // without knowing which board an asset happened to land on.
 export function indexBoardRows(payload) {
   const out = {};
-  for (const section of [payload && payload.crypto, payload && payload.stocks]) {
+  for (const [assetClass, section] of [['crypto', payload && payload.crypto], ['stock', payload && payload.stocks]]) {
     if (!section || typeof section !== 'object') continue;
     for (const v of Object.values(section)) {
       if (!Array.isArray(v)) continue;
-      for (const r of v) if (r && r.symbol && !out[r.symbol]) out[r.symbol] = r;
+      // Keyed "assetClass|symbol": a bare ticker collides across classes (DASH
+      // is both Dash and DoorDash) and the first-writer-wins map silently
+      // handed one asset's indicators to the other.
+      for (const r of v) {
+        if (!r || !r.symbol) continue;
+        const key = `${assetClass}|${r.symbol}`;
+        if (!out[key]) out[key] = r;
+      }
     }
   }
   return out;
@@ -4668,6 +4683,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     .dr-row.dr-up{background:color-mix(in srgb,var(--down) 12%,transparent)}
     .dr-row.dr-down{background:color-mix(in srgb,var(--up) 12%,transparent)}
     .dr-row.dr-quiet{opacity:.6}
+    .dr-row.dr-dislocated{background:color-mix(in srgb,var(--amber) 14%,transparent)}
+    .dr-cls{font-size:9px;font-weight:600;color:var(--muted);margin-left:4px;vertical-align:super}
     .dr-sym{font-weight:700}
     .dr-mult{font-variant-numeric:tabular-nums;font-weight:600}
     .dr-move,.dr-med,.dr-used,.dr-pos{font-variant-numeric:tabular-nums;color:var(--muted)}
@@ -5028,7 +5045,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     var dr = d.dayRange || {};
     var drSyms = Object.keys(dr);
     if(drSyms.length){
-      var order = { 'extended-up': 0, 'extended-down': 0, 'normal': 1, 'quiet': 2 };
+      var order = { 'extended-up': 0, 'extended-down': 0, 'dislocated': 1, 'normal': 2, 'quiet': 3 };
       drSyms.sort(function(a,b){
         var oa = order[dr[a].state] != null ? order[dr[a].state] : 3;
         var ob = order[dr[b].state] != null ? order[dr[b].state] : 3;
@@ -5037,15 +5054,17 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       });
       var drRows = drSyms.map(function(sym){
         var x = dr[sym];
-        var cls = x.state === 'extended-up' ? 'dr-up' : x.state === 'extended-down' ? 'dr-down' : x.state === 'quiet' ? 'dr-quiet' : '';
+        var cls = x.state === 'extended-up' ? 'dr-up' : x.state === 'extended-down' ? 'dr-down' : x.state === 'quiet' ? 'dr-quiet' : x.state === 'dislocated' ? 'dr-dislocated' : '';
         var entry = x.entry
           ? '<span class="dr-entry dr-'+x.entry.side+'">candidate '+x.entry.side.toUpperCase()+'</span>'
             +'<span class="dr-why">'+esc(x.entry.reasons.join(' · '))+'</span>'
-          : '<span class="dim">—</span>';
+          : x.state === 'dislocated'
+            ? '<span class="dr-why">move too large to fade &mdash; treated as a dislocation or bad data, not an entry</span>'
+            : '<span class="dim">—</span>';
         var moveTxt = (x.movePct>=0?'+':'')+x.movePct.toFixed(2)+'%';
         var medTxt = x.medianPct.toFixed(2)+'%';
         return '<div class="dr-row '+cls+'">'
-          +'<span class="dr-sym">'+esc(sym)+'</span>'
+          +'<span class="dr-sym">'+esc(x.symbol||sym)+(x.asset_class==='stock'?'<span class="dr-cls">EQ</span>':'')+'</span>'
           +'<span class="dr-move" title="Move from this session&#39;s first observed price">'+moveTxt+'</span>'
           +'<span class="dr-mult" title="Today&#39;s directional move divided by this asset&#39;s median daily high&minus;low range">'
             +(x.moveInMedians!=null?(x.moveInMedians>=0?'+':'')+x.moveInMedians.toFixed(2)+'x':'—')+'</span>'
@@ -5429,6 +5448,14 @@ const DAY_RANGE_MIN_SAMPLES = 20;
 const DAY_RANGE_POS_BAR = 0.75;      // must also be sitting near the day's extreme
 const DAY_RANGE_QUIET_FRACTION = 0.4; // below 40% of a normal day = nothing to fade yet
 const DAY_RANGE_MIN_MEDIAN_PCT = 0.25;  // mirrors MIN_MEANINGFUL_MEDIAN_RANGE_PCT in archive.mjs
+// Above this multiple of a normal day, do not offer a fade. Two separate
+// reasons, and both point the same way: a move this size is usually a data
+// artifact (a bad tick, a mismatched session open, two assets sharing a
+// ticker), and on the occasions it is real it is a dislocation — a hack, a
+// depeg, a delisting — which is precisely the thing you must not mean-revert
+// into. Real dislocations already have their own alerts (checkAndNotifyHacks /
+// checkAndNotifySuddenMoves); this read deliberately stays out of their way.
+const DAY_RANGE_MAX_PLAUSIBLE_MEDIANS = 8;
 
 // Confirmation, so a stretched reading never fires alone — the same discipline
 // every other technique in this engine follows. Each is independently
@@ -5479,8 +5506,13 @@ export function dayRangeSignal(symbol, price, session, rangeStats, row) {
   else if (movePct <= -bar) state = 'extended-down';
   else if (usedPct != null && usedPct < DAY_RANGE_QUIET_FRACTION * 100) state = 'quiet';
 
+  // Implausible or dislocation-sized: report the numbers, offer no entry.
+  const beyondPlausible = moveInMedians != null && Math.abs(moveInMedians) > DAY_RANGE_MAX_PLAUSIBLE_MEDIANS;
+  if (beyondPlausible) state = 'dislocated';
+
   let entry = null;
-  if (state === 'extended-up' && posInDayRange >= DAY_RANGE_POS_BAR) {
+  if (beyondPlausible) entry = null;
+  else if (state === 'extended-up' && posInDayRange >= DAY_RANGE_POS_BAR) {
     const reasons = dayRangeConfirmations(row, 'short');
     entry = reasons.length ? { side: 'short', reasons, proven: false } : null;
   } else if (state === 'extended-down' && posInDayRange <= 1 - DAY_RANGE_POS_BAR) {
@@ -5519,18 +5551,24 @@ export function updateSessionExtremes(prev, prices, nowIso) {
   // would silently reset the day's accumulated high/low, which is the one piece
   // of state here that cannot be recovered after the fact.
   const next = { ...base };
-  const merge = (table) => {
+  // Keyed "assetClass|symbol", never the bare ticker. A ticker is not unique
+  // across asset classes — DASH is Dash the crypto AND DoorDash the equity, and
+  // both arrive in the same tick. Keying by symbol alone merged them into one
+  // synthetic asset whose session ran from $237 down to $41, produced a -82%
+  // "move", and fired a candidate LONG on a stock that had not moved.
+  const merge = (table, assetClass) => {
     for (const [symbol, tick] of Object.entries(table || {})) {
       const price = tick && tick.price;
       if (!Number.isFinite(price) || price <= 0) continue;
-      const cur = next[symbol];
-      next[symbol] = cur
+      const key = `${assetClass}|${symbol}`;
+      const cur = next[key];
+      next[key] = cur
         ? { open: cur.open, high: Math.max(cur.high, price), low: Math.min(cur.low, price), last: price }
         : { open: price, high: price, low: price, last: price };
     }
   };
-  merge(prices && prices.crypto);
-  merge(prices && prices.stocks);
+  merge(prices && prices.crypto, 'crypto');
+  merge(prices && prices.stocks, 'stock');
   return { date, updated_at: nowIso, bySymbol: next };
 }
 
