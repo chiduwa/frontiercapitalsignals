@@ -1,0 +1,46 @@
+name: Signals Discovery
+
+# Continuous pattern discovery + out-of-sample re-validation across the
+# archive (scripts/discovery.mjs). Distinct from signals-correlation-research
+# .yml, which is a manual, one-shot study of a fixed hypothesis list; this one
+# maintains the research_registry lifecycle and is meant to run forever.
+#
+# Daily, not hourly. The out-of-sample check compares against bars recorded
+# after a finding was discovered, and asset_daily_bars only gains one bar per
+# symbol per day — running more often would re-read the whole archive to
+# evaluate the same evidence, which costs D1 rows and can change nothing.
+#
+# Offset well clear of signals-daily.yml (which writes the bars this reads) so
+# a run sees a complete day rather than a half-written one.
+on:
+  schedule:
+    - cron: "40 5 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: signals-discovery
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    # One full read of asset_daily_bars plus in-memory analysis. No outbound
+    # data collection at all, so this is bounded by D1 latency, not upstreams.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Run discovery and out-of-sample re-validation
+        working-directory: signals-worker
+        run: node scripts/discovery.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}

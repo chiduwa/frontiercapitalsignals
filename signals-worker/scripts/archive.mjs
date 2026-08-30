@@ -67,6 +67,10 @@ export async function yahooFullHistory(ticker) {
     if (q.close[i] != null) {
       bars.push({
         date: new Date(r.timestamp[i] * 1000).toISOString().slice(0, 10),
+        // `open` was always present in this response and simply never read.
+        // It is what makes the close-to-open ("overnight") effect testable at
+        // all — without it the archive can only see close-to-close.
+        open: q.open[i] != null ? q.open[i] : null,
         close: q.close[i],
         high: q.high[i] != null ? q.high[i] : q.close[i],
         low: q.low[i] != null ? q.low[i] : q.close[i],
@@ -180,10 +184,20 @@ export async function getExistingCoverage(env, symbols) {
 // soft write-budget guard, which is this number's only job.
 export async function upsertDailyBars(env, rows) {
   let attempted = 0;
-  for (const batch of chunk(rows, 10)) {
-    const placeholders = batch.map(() => '(?,?,?,?,?,?,?,?)').join(',');
-    const params = batch.flatMap((b) => [b.symbol, b.assetClass, b.date, b.close, b.high ?? null, b.low ?? null, b.volume ?? null, b.source]);
-    await d1(env, `INSERT OR IGNORE INTO asset_daily_bars (symbol, asset_class, date, close, high, low, volume, source) VALUES ${placeholders}`, params);
+  for (const batch of chunk(rows, 9)) {
+    const placeholders = batch.map(() => '(?,?,?,?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap((b) => [b.symbol, b.assetClass, b.date, b.open ?? null, b.close, b.high ?? null, b.low ?? null, b.volume ?? null, b.source]);
+    // Was INSERT OR IGNORE, which silently skipped existing rows — so the
+    // newly-added `open` column would have stayed NULL forever on the ~694k
+    // bars already archived. COALESCE fills only what is missing: an existing
+    // open is never overwritten, so a re-run cannot rewrite history, and price
+    // fields keep their original values either way.
+    await d1(env, `
+      INSERT INTO asset_daily_bars (symbol, asset_class, date, open, close, high, low, volume, source)
+      VALUES ${placeholders}
+      ON CONFLICT (symbol, date) DO UPDATE SET
+        open = COALESCE(asset_daily_bars.open, excluded.open)
+    `, params);
     attempted += batch.length;
   }
   return attempted;

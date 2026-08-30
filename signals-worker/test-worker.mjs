@@ -1802,6 +1802,54 @@ check('deep-record response is unchanged (0.8, n=100 -> 1.5 clamped)', Math.abs(
 check('at a measured 0.384 baseline, 0.384 accuracy is the new neutral point', Math.abs(mod.reliabilityWeight(0.384, 50, 0.384) - 1) < 1e-9);
 check('a 44% technique is rewarded above neutral where it used to be penalised', mod.reliabilityWeight(0.44, 50, 0.384) > 1 && mod.reliabilityWeight(0.44, 50) < 1);
 
+console.log('\n== discovery: family-corrected significance bar ==');
+const disc = await import('./scripts/discovery.mjs');
+check('inverse normal is accurate at the standard two-tailed 5% point', Math.abs(disc.normalQuantile(0.975) - 1.959964) < 1e-4, String(disc.normalQuantile(0.975)));
+check('and at the 1% point this engine already uses elsewhere', Math.abs(disc.normalQuantile(0.995) - 2.575829) < 1e-4);
+check('a single hypothesis gets the uncorrected 1% bar', Math.abs(disc.familyZBar(1) - 2.575829) < 1e-3);
+// The correction is the whole defence against scanning 60 symbols.
+check('60 hypotheses raise the bar from 2.58 to ~3.77', Math.abs(disc.familyZBar(60) - 3.7648) < 1e-3, String(disc.familyZBar(60)));
+check('and 420 (60 symbols x 7 weekdays) raise it further still', disc.familyZBar(420) > disc.familyZBar(60));
+check('the bar grows with family size, never shrinks', disc.familyZBar(500) > disc.familyZBar(100) && disc.familyZBar(100) > disc.familyZBar(10));
+
+console.log('\n== overnight vs intraday decomposition ==');
+// Two sessions: close 100 -> open 102 (overnight +2%), open 102 -> close 101.
+const bars = [
+  { date: '2026-01-01', open: 99, close: 100 },
+  { date: '2026-01-02', open: 102, close: 101 },
+  { date: '2026-01-03', open: 103, close: 104 }
+];
+const split = disc.overnightVsIntradaySamples(bars);
+check('overnight is measured previous close -> open', Math.abs(split.overnight[0].value - 2) < 1e-9, JSON.stringify(split.overnight[0]));
+check('intraday is measured open -> close', Math.abs(split.intraday[0].value - (101/102-1)*100) < 1e-9);
+check('the first bar has no previous close and is skipped', split.overnight.length === 2);
+check('a bar with no open is skipped rather than assumed', disc.overnightVsIntradaySamples([{ date: 'a', close: 100 }, { date: 'b', open: null, close: 101 }]).overnight.length === 0);
+// Splits and bad ticks look like enormous overnight gaps.
+check('an implausible >50% gap is dropped as a split or bad bar', disc.overnightVsIntradaySamples([{ date: 'a', close: 100 }, { date: 'b', open: 300, close: 301 }]).overnight.length === 0);
+
+console.log('\n== day-of-week split ==');
+const dowBars = Array.from({ length: 30 }, (_, i) => {
+  const d = new Date(Date.UTC(2026, 0, 5 + i));
+  return { date: d.toISOString().slice(0, 10), close: 100 + i };
+});
+const mon = disc.dayOfWeekSamples(dowBars, 1);
+check('Monday returns are separated from every other weekday', mon.on.length > 0 && mon.off.length > 0);
+check('and the two sides are disjoint and complete', mon.on.length + mon.off.length === 29);
+
+console.log('\n== out-of-sample lifecycle: the guard that makes per-symbol mining safe ==');
+const entry = { discovery_effect: 0.5, status: 'provisional' };
+const many = (v, n) => Array.from({ length: n }, (_, i) => ({ date: 'd' + i, value: v + (i % 3) * 0.01 }));
+check('too little new data yields no verdict at all, never a guess', disc.evaluateOutOfSample(entry, { a: many(1, 5), b: many(0, 5) }).verdict === 'insufficient');
+const held = disc.evaluateOutOfSample(entry, { a: many(1, 80), b: many(0, 80) });
+check('a pattern still pointing the same way out-of-sample is held', held.verdict === 'held', JSON.stringify(held));
+const flipped = disc.evaluateOutOfSample(entry, { a: many(0, 80), b: many(1, 80) });
+check('one now pointing the OTHER way is contradicted', flipped.verdict === 'contradicted', JSON.stringify(flipped));
+check('provisional is promoted only by out-of-sample evidence', disc.nextStatus('provisional', 'held') === 'confirmed');
+check('inconclusive leaves status untouched rather than promoting on silence', disc.nextStatus('provisional', 'inconclusive') === 'provisional');
+check('insufficient data never promotes', disc.nextStatus('provisional', 'insufficient') === 'provisional');
+// The dangerous case: something already trusted that quietly stops working.
+check('even a CONFIRMED finding is demoted when contradicted', disc.nextStatus('confirmed', 'contradicted') === 'decayed');
+
 console.log('\n== best trading hours: clock maths and qualification ==');
 check('hour label is zero-padded UTC', mod.hourLabelUtc(9) === '09:00 UTC' && mod.hourLabelUtc(20) === '20:00 UTC');
 check('the currently-running hour reads as 0 minutes away', mod.minutesUntilHour(20, '2026-08-30T20:14:00Z') === 0);
