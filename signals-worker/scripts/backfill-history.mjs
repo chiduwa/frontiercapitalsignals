@@ -15,7 +15,7 @@ import {
   upsertDailyBars, fundingSnapshotToRows, upsertFundingDaily,
   fearGreedHistory, insertFearGreedHistory,
   yahooHourlyBars, computeSwingTimeTallies, upsertSwingTimeStats, getSwingTimeCoverage,
-  upsertTimeOfDayStats, getTimeOfDayCoverage,
+  upsertTimeOfDayStats, getTimeOfDayCoverage, getOpenCoverage,
   binanceUsExchangeInfo, binanceUsKlines, getExistingHourlyCoverage, upsertHourlyBars,
   isYahooCryptoDataTrustworthy
 } from './archive.mjs';
@@ -89,6 +89,20 @@ async function main() {
   console.log(`universe: ${cryptoUniverse.length} crypto + ${stockUniverse.length} stock + ${benchmarkUniverse.length} benchmark = ${universe.length}`);
 
   const coverage = await getExistingCoverage(env, universe.map((u) => u.symbol));
+  // BACKFILL_OPEN=1 forces a one-time re-pull for symbols that have no open
+  // price yet. Needed because the caught-up gate below asks only "do we have
+  // recent bars", which stayed true for every symbol after `open` was added,
+  // so the column would have remained NULL on all ~694k rows forever.
+  // Env-gated rather than automatic: a symbol whose bars come from the
+  // CoinGecko fallback will never have an open, and an automatic rule would
+  // re-fetch those on every single run for eternity.
+  const backfillOpen = String(process.env.BACKFILL_OPEN || '').toLowerCase() === '1'
+    || String(process.env.BACKFILL_OPEN || '').toLowerCase() === 'true';
+  const openCoverage = backfillOpen ? await getOpenCoverage(env) : {};
+  if (backfillOpen) {
+    const missing = universe.filter((a) => !(openCoverage[a.symbol] > 0)).length;
+    console.log(`BACKFILL_OPEN set: ${missing} of ${universe.length} symbols have no open price yet and will be re-pulled`);
+  }
 
   let yahooOk = 0, cgFallback = 0;
   const priceFailed = [];
@@ -101,7 +115,8 @@ async function main() {
     // script cheap once the real backfill has landed, not just the D1-write
     // side: no point re-downloading a multi-year Yahoo response just to
     // discard nearly all of it as already-stored.
-    if (existing && daysSinceMax < 3 && existing.count >= 300) continue;
+    const needsOpen = backfillOpen && !(openCoverage[a.symbol] > 0);
+    if (existing && daysSinceMax < 3 && existing.count >= 300 && !needsOpen) continue;
 
     let bars = null, source = null;
     try {

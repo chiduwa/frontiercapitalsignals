@@ -1236,6 +1236,17 @@ export async function getSwingTimeCoverage(env) {
 // standard error, so a 29x inflation multiplies every t-statistic by sqrt(29),
 // about 5.4x. It turned unremarkable noise into apparently overwhelming
 // significance, and the live timeofday technique reads this table.
+// Per-symbol count of bars that actually carry an open price. Used to drive
+// the one-time open backfill: the normal coverage gate asks "do we have bars
+// for this symbol", which was true for all ~694k of them, so nothing re-fetched
+// and the newly-added open column stayed empty. Guard on the thing you are
+// actually filling — the same mistake, in a different table, as the swing/
+// time-of-day guard mix-up documented above.
+export async function getOpenCoverage(env) {
+  const rows = await d1(env, 'SELECT symbol, SUM(CASE WHEN open IS NOT NULL THEN 1 ELSE 0 END) AS with_open FROM asset_daily_bars GROUP BY symbol');
+  return Object.fromEntries(rows.map((r) => [r.symbol, r.with_open]));
+}
+
 export async function getTimeOfDayCoverage(env) {
   const rows = await d1(env, 'SELECT symbol, MAX(n) AS n FROM time_of_day_stats WHERE horizon_hours = 1 GROUP BY symbol');
   return Object.fromEntries(rows.map((r) => [r.symbol, r.n]));
