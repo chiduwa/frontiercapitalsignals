@@ -1230,12 +1230,21 @@ export async function getSwingTimeCoverage(env) {
 // time. Measured live before the fix: BTC and ETH, which DO clear the swing bar
 // and so ran once, sat at a correct n of ~2,540 (one per day since 2019), while
 // AAPL, MSFT, NVDA and SNOW all sat at exactly 14,393 — the same number for
-// four different companies, which is the tell. About 29x over-counted.
+// four different companies, which is the tell.
+//
+// Measured exactly after the fix: one clean bootstrap yields n=1,437 for that
+// slot, so the table had been over-counted 10.0x, not the ~29x first estimated
+// from Yahoo's 730-day window (that estimate assumed ~500 trading sessions;
+// the real per-bootstrap count is higher).
 //
 // That matters beyond tidiness: n only enters these statistics through the
-// standard error, so a 29x inflation multiplies every t-statistic by sqrt(29),
-// about 5.4x. It turned unremarkable noise into apparently overwhelming
-// significance, and the live timeofday technique reads this table.
+// standard error, so a 10x inflation multiplies every t-statistic by sqrt(10),
+// about 3.16x. SNOW's headline t of -14.06 was really -4.44. Against the ~3.9
+// that pure noise reaches across this table's ~10,000 symbol-by-slot
+// hypotheses, that is marginal rather than clearly spurious — so the honest
+// statement is that the apparent equity effects were badly overstated, not
+// that all of them were nothing. The live timeofday technique reads this
+// table, which is why the inflation mattered at all.
 // Per-symbol count of bars that actually carry an open price. Used to drive
 // the one-time open backfill: the normal coverage gate asks "do we have bars
 // for this symbol", which was true for all ~694k of them, so nothing re-fetched
