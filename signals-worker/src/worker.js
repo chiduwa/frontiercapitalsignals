@@ -4401,7 +4401,8 @@ export function dueBestHourAlerts(bestHours, nowIso, alreadyFired) {
     for (const kind of ['buy', 'sell']) {
       const w = x[kind];
       if (!w) continue;
-      const mins = minutesUntilHour(w.hour, nowIso);
+      const mins = minutesUntilSlot(w.slot, nowIso);
+      if (mins == null) continue;
       if (mins <= 0 || mins > BEST_HOUR_LEAD_MIN) continue;
       const stateKey = `${key}|${kind}|${nowIso.slice(0, 10)}`;
       if (alreadyFired && alreadyFired[stateKey]) continue;
@@ -5592,20 +5593,50 @@ export async function buildLivePrices(env, cached) {
 // the UI says exactly that rather than implying an edge that survives costs.
 const TOD_TYPICAL_ROUND_TRIP_COST_PCT = 0.12;
 
-export function hourLabelUtc(hour) {
-  const h = ((hour % 24) + 24) % 24;
-  return `${String(h).padStart(2, '0')}:00 UTC`;
+// The session boundaries worth naming, so a slot reads as "the US close"
+// rather than a bare hour the reader has to decode. Anchored to
+// exchange-local time, which is why the underlying slots must be DST-aware:
+// 16:00 in New York is a fixed thing, 20:00 UTC is not.
+const SESSION_LABELS = {
+  hour_et_00: 'midnight ET',
+  hour_et_09: 'NYSE open',
+  hour_et_16: 'NYSE close',
+  hour_ldn_08: 'LSE open',
+  hour_ldn_16: 'LSE close',
+  hour_tyo_09: 'TSE open',
+  hour_tyo_15: 'TSE close',
+  hour_utc_00: 'midnight UTC'
+};
+
+const ZONE_NAMES = { utc: 'UTC', et: 'ET', ldn: 'London', tyo: 'Tokyo' };
+
+export function slotLabel(slot) {
+  if (SESSION_LABELS[slot]) {
+    const m = /^hour_([a-z]+)_(\d{2})$/.exec(slot);
+    return `${SESSION_LABELS[slot]} (${m[2]}:00 ${ZONE_NAMES[m[1]] || m[1].toUpperCase()})`;
+  }
+  const m = /^hour_([a-z]+)_(\d{2})$/.exec(slot);
+  if (!m) return slot;
+  return `${m[2]}:00 ${ZONE_NAMES[m[1]] || m[1].toUpperCase()}`;
 }
 
-// Minutes from `nowIso` until the next occurrence of `hour` UTC. 0 means the
-// hour is currently running.
-export function minutesUntilHour(hour, nowIso) {
+// Minutes from `nowIso` until the next occurrence of a slot, resolved in that
+// slot's OWN timezone. Computed by walking forward rather than by arithmetic on
+// a fixed offset, because the offset is not fixed — a DST boundary between now
+// and the target would make a subtraction silently wrong by an hour.
+export function minutesUntilSlot(slot, nowIso) {
+  const m = /^hour_([a-z]+)_(\d{2})$/.exec(slot);
+  if (!m) return null;
+  const zone = { utc: 'UTC', et: 'America/New_York', ldn: 'Europe/London', tyo: 'Asia/Tokyo' }[m[1]];
+  if (!zone) return null;
+  const target = Number(m[2]);
   const now = new Date(nowIso);
-  const curH = now.getUTCHours();
-  const curM = now.getUTCMinutes();
-  if (curH === hour) return 0;
-  const diff = ((hour - curH + 24) % 24) * 60 - curM;
-  return diff;
+  if (hourInZone(now, zone) === target) return 0;
+  for (let mins = 1; mins <= 24 * 60; mins++) {
+    const probe = new Date(now.getTime() + mins * 60000);
+    if (hourInZone(probe, zone) === target && probe.getUTCMinutes() === 0) return mins;
+  }
+  return null;
 }
 
 // Attaches the best/worst-hour read for the covered universe, plus how long
@@ -5622,8 +5653,8 @@ export function attachBestHours(payload, nowIso) {
     if (!e || (!e.buyHour && !e.sellHour)) continue;
     const decorate = (h) => (h ? {
       ...h,
-      label: hourLabelUtc(h.hour),
-      minutesUntil: minutesUntilHour(h.hour, nowIso),
+      label: slotLabel(h.slot),
+      minutesUntil: minutesUntilSlot(h.slot, nowIso),
       // Honest about costs: an edge smaller than a round trip is reported, but
       // never as something to act on by itself.
       beatsCosts: Math.abs(h.meanPct) > TOD_TYPICAL_ROUND_TRIP_COST_PCT

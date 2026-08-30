@@ -1156,11 +1156,15 @@ export async function loadDailyRangeStats(env) {
 // here rather than shipped with a caveat — a "best time" the engine cannot
 // stand behind is worse than none.
 export async function loadTimeOfDayEdge(env) {
-  const rows = await d1(env, 'SELECT symbol, hour_utc, n, mean_pct, t_stat, win_rate, h1_mean, h2_mean FROM time_of_day_edge WHERE consistent = 1 AND ABS(t_stat) >= ?', [TOD_EDGE_SIGNIFICANCE_T]);
+  const rows = await d1(env, 'SELECT symbol, slot, n, mean_pct, t_stat, win_rate, h1_mean, h2_mean FROM time_of_day_edge WHERE consistent = 1 AND ABS(t_stat) >= ?', [TOD_EDGE_SIGNIFICANCE_T]);
   const bySymbol = {};
   for (const r of rows) {
+    // Only clock-hour slots drive the buy/sell window; dow_utc_N is a
+    // different kind of statement (a whole weekday) and is surfaced through the
+    // discovery loop's day-of-week family instead of as an intraday window.
+    if (!r.slot.startsWith('hour_')) continue;
     (bySymbol[r.symbol] ??= []).push({
-      hour: r.hour_utc, n: r.n, meanPct: r.mean_pct, t: r.t_stat,
+      slot: r.slot, n: r.n, meanPct: r.mean_pct, t: r.t_stat,
       winRate: r.win_rate, h1: r.h1_mean, h2: r.h2_mean
     });
   }

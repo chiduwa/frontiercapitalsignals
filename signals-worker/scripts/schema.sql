@@ -914,7 +914,7 @@ CREATE TABLE IF NOT EXISTS asset_daily_range (
 CREATE TABLE IF NOT EXISTS time_of_day_edge (
   symbol TEXT NOT NULL,
   asset_class TEXT NOT NULL,
-  hour_utc INTEGER NOT NULL,
+  slot TEXT NOT NULL,
   n INTEGER NOT NULL,
   mean_pct REAL NOT NULL,
   t_stat REAL NOT NULL,
@@ -923,7 +923,7 @@ CREATE TABLE IF NOT EXISTS time_of_day_edge (
   h2_mean REAL,
   consistent INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL,
-  PRIMARY KEY (symbol, hour_utc)
+  PRIMARY KEY (symbol, slot)
 );
 
 -- Continuous, self-validating research (user-requested 2026-08-30: "look for

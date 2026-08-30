@@ -1611,42 +1611,67 @@ export async function computeDailyRangeStats(env, preloadedRows, nowIso) {
 // whose 20:00 UTC edge flips from +0.188% in the first half to -0.069% in the
 // second while still looking significant pooled.
 export async function computeTimeOfDayEdge(env, nowIso) {
-  const rows = await d1(env, `
-    WITH b AS (
-      SELECT symbol, asset_class, bar_at, close,
-             LEAD(close) OVER (PARTITION BY symbol ORDER BY bar_at) AS nxt,
-             CAST(strftime('%H', bar_at) AS INTEGER) AS hr,
-             ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY bar_at) AS rn,
-             COUNT(*) OVER (PARTITION BY symbol) AS tot
-      FROM asset_hourly_bars
-    ), r AS (
-      SELECT symbol, asset_class, hr, rn, tot, (nxt/close - 1)*100 AS ret
-      FROM b WHERE nxt IS NOT NULL AND close > 0
-    )
-    SELECT symbol, asset_class, hr AS hour_utc, COUNT(*) AS n,
-           AVG(ret) AS mean_pct,
-           CASE WHEN (AVG(ret*ret) - AVG(ret)*AVG(ret)) > 0
-                THEN AVG(ret) / (SQRT(AVG(ret*ret) - AVG(ret)*AVG(ret)) / SQRT(COUNT(*)))
-                ELSE 0 END AS t_stat,
-           100.0*SUM(CASE WHEN ret > 0 THEN 1 ELSE 0 END)/COUNT(*) AS win_rate,
-           AVG(CASE WHEN rn <= tot/2 THEN ret END) AS h1_mean,
-           AVG(CASE WHEN rn >  tot/2 THEN ret END) AS h2_mean
-    FROM r GROUP BY symbol, asset_class, hr HAVING COUNT(*) >= ?
-  `, [TOD_EDGE_MIN_SAMPLES]);
+  // Pulled into Node rather than aggregated in SQL, deliberately. The first
+  // version grouped by strftime('%H'), i.e. raw UTC hour, which is not
+  // DST-aware — and that is not a detail here, it is the whole measurement.
+  //
+  // 16:00 ET is 20:00 UTC under EDT and 21:00 UTC under EST, so a pattern
+  // anchored to the US close gets split across two UTC buckets and each half
+  // measured separately. That is exactly what the first run showed: hours 20
+  // AND 21 both positive across every asset, which reads as two weak patterns
+  // when it is really one strong one cut in half by the clock change.
+  //
+  // slotsForTimestamp resolves each bar into DST-aware exchange-local slots
+  // (UTC, New York, London, Tokyo, plus day-of-week), so an effect tied to a
+  // session boundary stays in one bucket year-round. SQLite has no timezone
+  // conversion, so this has to happen in JS.
+  const rows = await d1(env, 'SELECT symbol, asset_class, bar_at, close FROM asset_hourly_bars ORDER BY symbol, bar_at');
   if (!rows.length) return 0;
+
+  // symbol -> slot -> { rets: [], firstHalfRets: [], secondHalfRets: [] }
+  const bySymbol = {};
+  for (const r of rows) (bySymbol[r.symbol] ??= { assetClass: r.asset_class, bars: [] }).bars.push(r);
+
+  const cells = [];
+  for (const [symbol, rec] of Object.entries(bySymbol)) {
+    const bars = rec.bars;
+    if (bars.length < 2) continue;
+    const mid = Math.floor((bars.length - 1) / 2);
+    const acc = {};
+    for (let i = 0; i < bars.length - 1; i++) {
+      const cur = bars[i], nxt = bars[i + 1];
+      if (!cur.close || !nxt.close || cur.close <= 0) continue;
+      const ret = (nxt.close / cur.close - 1) * 100;
+      if (!Number.isFinite(ret)) continue;
+      for (const slot of slotsForTimestamp(cur.bar_at)) {
+        const a = (acc[slot] ??= { n: 0, sum: 0, sumSq: 0, wins: 0, h1n: 0, h1sum: 0, h2n: 0, h2sum: 0 });
+        a.n += 1; a.sum += ret; a.sumSq += ret * ret;
+        if (ret > 0) a.wins += 1;
+        if (i <= mid) { a.h1n += 1; a.h1sum += ret; } else { a.h2n += 1; a.h2sum += ret; }
+      }
+    }
+    for (const [slot, a] of Object.entries(acc)) {
+      if (a.n < TOD_EDGE_MIN_SAMPLES) continue;
+      const mean = a.sum / a.n;
+      const variance = a.sumSq / a.n - mean * mean;
+      const t = variance > 0 ? mean / (Math.sqrt(variance) / Math.sqrt(a.n)) : 0;
+      const h1 = a.h1n ? a.h1sum / a.h1n : null;
+      const h2 = a.h2n ? a.h2sum / a.h2n : null;
+      const consistent = h1 != null && h2 != null && h1 !== 0 && Math.sign(h1) === Math.sign(h2) ? 1 : 0;
+      cells.push({
+        symbol, assetClass: rec.assetClass, slot, n: a.n, mean, t,
+        winRate: 100 * a.wins / a.n, h1, h2, consistent
+      });
+    }
+  }
+  if (!cells.length) return 0;
 
   await d1(env, 'DELETE FROM time_of_day_edge');
   let written = 0;
-  for (const batch of chunk(rows, 8)) {
+  for (const batch of chunk(cells, 8)) {
     const placeholders = batch.map(() => '(?,?,?,?,?,?,?,?,?,?,?)').join(',');
-    const params = batch.flatMap((r) => {
-      // Same sign in BOTH halves. A pooled mean can be carried entirely by one
-      // era; this asks the pattern to have been present in each.
-      const consistent = Number.isFinite(r.h1_mean) && Number.isFinite(r.h2_mean)
-        && Math.sign(r.h1_mean) === Math.sign(r.h2_mean) && r.h1_mean !== 0 ? 1 : 0;
-      return [r.symbol, r.asset_class, r.hour_utc, r.n, r.mean_pct, r.t_stat, r.win_rate, r.h1_mean, r.h2_mean, consistent, nowIso];
-    });
-    await d1(env, `INSERT INTO time_of_day_edge (symbol, asset_class, hour_utc, n, mean_pct, t_stat, win_rate, h1_mean, h2_mean, consistent, updated_at) VALUES ${placeholders}`, params);
+    const params = batch.flatMap((c) => [c.symbol, c.assetClass, c.slot, c.n, c.mean, c.t, c.winRate, c.h1, c.h2, c.consistent, nowIso]);
+    await d1(env, `INSERT INTO time_of_day_edge (symbol, asset_class, slot, n, mean_pct, t_stat, win_rate, h1_mean, h2_mean, consistent, updated_at) VALUES ${placeholders}`, params);
     written += batch.length;
   }
   return written;

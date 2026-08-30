@@ -1938,31 +1938,40 @@ check('a confirmed Thursday effect fires on a Thursday', thu.length === 1 && /Th
 check('and says which way it has historically gone', /-0.31/.test(thu[0].expectation), thu[0].expectation);
 check('it does not fire on other weekdays', disc.evaluateLiveTriggers([confirmedDow], {}, '2026-09-04T06:00:00Z').length === 0);
 
-console.log('\n== best trading hours: clock maths and qualification ==');
-check('hour label is zero-padded UTC', mod.hourLabelUtc(9) === '09:00 UTC' && mod.hourLabelUtc(20) === '20:00 UTC');
-check('the currently-running hour reads as 0 minutes away', mod.minutesUntilHour(20, '2026-08-30T20:14:00Z') === 0);
-check('later today counts down correctly', mod.minutesUntilHour(20, '2026-08-30T19:40:00Z') === 20);
-check('an hour already past today wraps to tomorrow, never negative', mod.minutesUntilHour(9, '2026-08-30T20:40:00Z') === 740);
-check('exactly on the hour boundary', mod.minutesUntilHour(21, '2026-08-30T20:00:00Z') === 60);
+console.log('\n== best trading hours: DST-aware slots and session labels ==');
+check('a plain slot reads as its own timezone', mod.slotLabel('hour_utc_09') === '09:00 UTC');
+// The whole point of exchange-local slots: name the boundary, not the offset.
+check('the US close is named, not left as a bare hour', mod.slotLabel('hour_et_16') === 'NYSE close (16:00 ET)');
+check('midnight ET and midnight UTC are both named', mod.slotLabel('hour_et_00') === 'midnight ET (00:00 ET)' && mod.slotLabel('hour_utc_00') === 'midnight UTC (00:00 UTC)');
+check('London and Tokyo sessions are named too', mod.slotLabel('hour_ldn_08') === 'LSE open (08:00 London)' && mod.slotLabel('hour_tyo_09') === 'TSE open (09:00 Tokyo)');
+check('an unnamed hour still labels cleanly', mod.slotLabel('hour_tyo_03') === '03:00 Tokyo');
+check('the currently-running slot reads as 0 minutes away', mod.minutesUntilSlot('hour_utc_20', '2026-08-30T20:14:00Z') === 0);
+check('later today counts down correctly', mod.minutesUntilSlot('hour_utc_20', '2026-08-30T19:40:00Z') === 20);
+check('a slot already past wraps to tomorrow, never negative', mod.minutesUntilSlot('hour_utc_09', '2026-08-30T20:40:00Z') === 740);
+// 16:00 ET is 20:00 UTC in summer and 21:00 UTC in winter. Resolving the
+// countdown in the slot's OWN zone is what stops that being an hour wrong.
+check('an ET slot resolves against New York time in summer (EDT)', mod.minutesUntilSlot('hour_et_16', '2026-07-15T19:30:00Z') === 30, String(mod.minutesUntilSlot('hour_et_16', '2026-07-15T19:30:00Z')));
+check('and against New York time in winter (EST), an hour later in UTC', mod.minutesUntilSlot('hour_et_16', '2026-01-15T20:30:00Z') === 30, String(mod.minutesUntilSlot('hour_et_16', '2026-01-15T20:30:00Z')));
+check('a malformed slot returns null rather than a wrong number', mod.minutesUntilSlot('dow_utc_4', '2026-08-30T20:00:00Z') === null);
 
 // Modelled on the real measurement: BTC's strongest hour is 20:00 UTC at
 // +0.045%/hr, which is REAL but smaller than a round trip.
 const edgePayload = {
   todEdge: { BTC: {
-    buyHour: { hour: 20, n: 2532, meanPct: 0.0454, t: 3.41, winRate: 53.5, h1: 0.06, h2: 0.031 },
-    sellHour: { hour: 22, n: 2533, meanPct: -0.0289, t: -3.4, winRate: 47.0, h1: -0.031, h2: -0.027 }
+    buyHour: { slot: 'hour_utc_20', n: 2532, meanPct: 0.0454, t: 3.41, winRate: 53.5, h1: 0.06, h2: 0.031 },
+    sellHour: { slot: 'hour_utc_22', n: 2533, meanPct: -0.0289, t: -3.4, winRate: 47.0, h1: -0.031, h2: -0.027 }
   } },
   highAccuracy: [], crypto: { breakout: [{ symbol: 'BTC', price: 100 }] }, stocks: {}
 };
 const withHours = mod.attachBestHours(edgePayload, '2026-08-30T19:55:00Z');
 check('attaches a best-hours read for a covered asset', !!withHours.bestHours['crypto|BTC']);
 const btcH = withHours.bestHours['crypto|BTC'];
-check('labels the up hour and counts down to it', btcH.buy.label === '20:00 UTC' && btcH.buy.minutesUntil === 5);
+check('labels the up hour and counts down to it', btcH.buy.label === '20:00 UTC' && btcH.buy.minutesUntil === 5, JSON.stringify({l:btcH.buy.label,m:btcH.buy.minutesUntil}));
 check('carries the down hour too', btcH.sell.label === '22:00 UTC');
 // The honesty flag: a real edge that still loses to fees must say so.
 check('a 0.045%/hr edge is correctly flagged as NOT beating a ~0.12% round trip', btcH.buy.beatsCosts === false);
 check('and the assumed cost travels with it so the claim is checkable', btcH.assumedRoundTripCostPct > 0);
-check('a genuinely large edge would clear the cost bar', mod.attachBestHours({ ...edgePayload, todEdge: { BTC: { buyHour: { hour: 20, n: 2532, meanPct: 0.9, t: 5, winRate: 60 }, sellHour: null } } }, '2026-08-30T19:55:00Z').bestHours['crypto|BTC'].buy.beatsCosts === true);
+check('a genuinely large edge would clear the cost bar', mod.attachBestHours({ ...edgePayload, todEdge: { BTC: { buyHour: { slot: 'hour_utc_20', n: 2532, meanPct: 0.9, t: 5, winRate: 60 }, sellHour: null } } }, '2026-08-30T19:55:00Z').bestHours['crypto|BTC'].buy.beatsCosts === true);
 check('no measured edge at all: payload is returned untouched', mod.attachBestHours({ crypto: {}, stocks: {} }, '2026-08-30T19:55:00Z').bestHours === undefined);
 
 console.log('\n== best-hour alerts fire BEFORE the window, once per day ==');
