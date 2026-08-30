@@ -1933,6 +1933,16 @@ check('no live layer at all: returns the payload unchanged rather than degrading
 check('an empty live layer is also a no-op', mod.mergeLivePrices(basePayload, { generated_at: 'x' }) === basePayload);
 check('preserves non-array sections like universe counts', mergedPayload.crypto.universe === 1);
 
+console.log('\n== live price layer: KV lifetime is separate from the freshness window ==');
+// These were one number, and it silently defeated the whole layer: the cron
+// writes every 5 minutes but the value expired after 60 seconds, so for ~4
+// minutes in 5 /api/signals had nothing to merge and served build prices.
+check('a just-written layer is fresh enough to serve directly', mod.isLivePriceFresh({ generated_at: new Date().toISOString() }));
+check('a 90-second-old layer is no longer fresh, so the request path refetches', !mod.isLivePriceFresh({ generated_at: new Date(Date.now() - 90 * 1000).toISOString() }));
+check('but it still EXISTS to be merged — staleness is not the same as absence', mod.mergeLivePrices(basePayload, { crypto: { BTC: { price: 120 } }, generated_at: new Date(Date.now() - 90 * 1000).toISOString() }).crypto.breakout[0].price === 120);
+check('a layer with no timestamp is never treated as fresh', !mod.isLivePriceFresh({ crypto: {} }));
+check('a missing layer is not fresh', !mod.isLivePriceFresh(null));
+
 console.log('\n== assetClassSkill / abstainBoards: publish a class only while it earns it ==');
 const skillBaselines = { 'crypto|all': { n_up: 405, n_flat: 169, n_down: 425 }, 'stock|all': { n_up: 521, n_flat: 52, n_down: 427 } };
 // Modelled on the live figures: crypto clears its baseline decisively, stocks

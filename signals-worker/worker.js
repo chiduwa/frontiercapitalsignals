@@ -45,6 +45,17 @@ export const CACHE_KEY = 'signals:latest';
 // allows anyway.
 export const LIVE_PRICE_CACHE_KEY = 'signals:live-prices';
 const LIVE_PRICE_CACHE_SECONDS = 60;
+// How long the live-price value SURVIVES in KV, as distinct from how long it is
+// considered fresh enough to serve without refetching (LIVE_PRICE_CACHE_SECONDS
+// above). These were the same number, which quietly broke the thing this whole
+// layer exists for: the cron writes every 5 minutes but the value expired after
+// 60 seconds, so for roughly four minutes in five /api/signals found nothing to
+// merge and fell back to the last heavy build's prices — hours old whenever the
+// model layer was stale. Now the value persists across several cron intervals
+// (surviving a couple of missed ticks), while the request path still refetches
+// once it is older than LIVE_PRICE_CACHE_SECONDS, so CoinGecko rate-limit
+// protection is unchanged.
+const LIVE_PRICE_KV_TTL_SECONDS = 15 * 60;
 // Written by scripts/intraday-tick.mjs (its own ~5-minute cron, not this
 // Worker) — a single pre-computed KV read here, same "Worker never
 // computes, only serves" shape as CACHE_KEY/getCached below, just a
@@ -4423,10 +4434,15 @@ async function getCachedLivePrices(env) {
   } catch { return null; }
 }
 
+export function isLivePriceFresh(payload, nowMs = Date.now()) {
+  if (!payload || !payload.generated_at) return false;
+  return (nowMs - new Date(payload.generated_at).getTime()) < LIVE_PRICE_CACHE_SECONDS * 1000;
+}
+
 async function putCachedLivePrices(env, body) {
   if (!env || !env.FCS_CACHE) return;
   try {
-    await env.FCS_CACHE.put(LIVE_PRICE_CACHE_KEY, JSON.stringify(body), { expirationTtl: LIVE_PRICE_CACHE_SECONDS });
+    await env.FCS_CACHE.put(LIVE_PRICE_CACHE_KEY, JSON.stringify(body), { expirationTtl: LIVE_PRICE_KV_TTL_SECONDS });
   } catch { /* best-effort — a failed cache write just means the next request fetches fresh again */ }
 }
 
@@ -5666,7 +5682,11 @@ export default {
       // not a retry. Response is identical to a fresh fetch either way —
       // X-FCS-Live-Cache just says which path served it.
       const cachedLive = await getCachedLivePrices(env);
-      if (cachedLive) return json(cachedLive, { 'Cache-Control': 'no-store', 'X-FCS-Live-Cache': 'hit' });
+      // Age-based, not expiry-based: the value deliberately outlives its
+      // freshness window so /api/signals always has something to merge.
+      if (cachedLive && isLivePriceFresh(cachedLive)) {
+        return json(cachedLive, { 'Cache-Control': 'no-store', 'X-FCS-Live-Cache': 'hit' });
+      }
 
       const body = await buildLivePrices(env, cached);
       ctx.waitUntil(putCachedLivePrices(env, body));
