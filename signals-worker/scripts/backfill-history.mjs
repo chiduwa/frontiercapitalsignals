@@ -29,6 +29,12 @@ const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = proc
 // trading sessions for an equity and ~730 for 24/7 crypto, so 300 clears a
 // genuine first bootstrap while still blocking every repeat.
 const TOD_BOOTSTRAP_COVERAGE_TARGET = 300;
+
+// How far back the one-time open backfill rewrites. ~6 years of sessions —
+// ample for the overnight research (which needs 60+ per side, and splits in
+// half) while keeping a one-off rewrite to ~90k rows across the equity
+// universe rather than the ~694k a full-depth rewrite would touch.
+const OPEN_BACKFILL_MAX_BARS = Number(process.env.OPEN_BACKFILL_MAX_BARS || 1500);
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
   if (!v) { console.error(`Missing required env var: ${name}`); process.exit(1); }
 }
@@ -143,7 +149,23 @@ async function main() {
     if (bars && bars.length) {
       const minExisting = existing ? existing.minDate : null;
       const maxExisting = existing ? existing.maxDate : null;
-      const fresh = bars.filter((b) => (!minExisting || b.date < minExisting) || (!maxExisting || b.date > maxExisting));
+      // Normally only dates OUTSIDE the stored range are written — re-writing
+      // bars we already hold would be pure cost. But that is also why the first
+      // open backfill wrote 32 rows in total: every historical date is already
+      // covered, so only one genuinely new bar per symbol got through, and the
+      // open column stayed NULL on everything behind it.
+      //
+      // When a symbol needs its opens, re-write its recent history instead.
+      // upsertDailyBars only COALESCEs open into rows that lack it and touches
+      // nothing else, so this fills the gap without rewriting prices.
+      //
+      // Bounded to the most recent OPEN_BACKFILL_MAX_BARS rather than full
+      // depth: Yahoo carries AAPL back to 1980, and re-writing all ~694k rows
+      // would cost far more than the research needs. Six years is many times
+      // the sample the split-half test requires.
+      const fresh = needsOpen
+        ? bars.slice(-OPEN_BACKFILL_MAX_BARS)
+        : bars.filter((b) => (!minExisting || b.date < minExisting) || (!maxExisting || b.date > maxExisting));
       if (fresh.length) {
         const toWrite = fresh.slice(0, Math.max(priceBudgetLeft(), 0)).map((b) => ({ symbol: a.symbol, assetClass: a.assetClass, ...b, source }));
         const written = await upsertDailyBars(env, toWrite);
