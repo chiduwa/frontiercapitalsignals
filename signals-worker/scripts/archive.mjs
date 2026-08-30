@@ -1205,6 +1205,28 @@ export async function getSwingTimeCoverage(env) {
   return Object.fromEntries(rows.map((r) => [r.symbol, r.total_days]));
 }
 
+// The time-of-day bootstrap needs its OWN coverage check, not swing-timing's.
+//
+// It used to share it, and that silently corrupted the table for every equity.
+// upsertTimeOfDayStats accumulates (n = n + excluded.n) and the backfill's only
+// guard was `swingCoverage[symbol] >= 600` — but computeSwingTimeTallies yields
+// a totalDays of just 17 for a stock (Yahoo's hourly window is short and only
+// complete sessions count), so that bar was NEVER reached for equities and the
+// bootstrap re-ran on every backfill, re-adding the same ~500 observations each
+// time. Measured live before the fix: BTC and ETH, which DO clear the swing bar
+// and so ran once, sat at a correct n of ~2,540 (one per day since 2019), while
+// AAPL, MSFT, NVDA and SNOW all sat at exactly 14,393 — the same number for
+// four different companies, which is the tell. About 29x over-counted.
+//
+// That matters beyond tidiness: n only enters these statistics through the
+// standard error, so a 29x inflation multiplies every t-statistic by sqrt(29),
+// about 5.4x. It turned unremarkable noise into apparently overwhelming
+// significance, and the live timeofday technique reads this table.
+export async function getTimeOfDayCoverage(env) {
+  const rows = await d1(env, 'SELECT symbol, MAX(n) AS n FROM time_of_day_stats WHERE horizon_hours = 1 GROUP BY symbol');
+  return Object.fromEntries(rows.map((r) => [r.symbol, r.n]));
+}
+
 // ----------------------------- EVENT SEVERITY (HACKS) -----------------------
 // DeFiLlama's public hacks tracker — confirmed live: 607 records back to
 // 2016-06-17, a real USD `amount` on 594 of them (top five: $3.5B/$1.4B/

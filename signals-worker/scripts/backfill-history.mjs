@@ -15,7 +15,7 @@ import {
   upsertDailyBars, fundingSnapshotToRows, upsertFundingDaily,
   fearGreedHistory, insertFearGreedHistory,
   yahooHourlyBars, computeSwingTimeTallies, upsertSwingTimeStats, getSwingTimeCoverage,
-  upsertTimeOfDayStats,
+  upsertTimeOfDayStats, getTimeOfDayCoverage,
   binanceUsExchangeInfo, binanceUsKlines, getExistingHourlyCoverage, upsertHourlyBars,
   isYahooCryptoDataTrustworthy
 } from './archive.mjs';
@@ -23,6 +23,12 @@ import { selectIntradayWatchlist } from './intraday.mjs';
 import { d1 } from './d1-client.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
+
+// A symbol whose busiest 1h slot already holds this many observations has been
+// bootstrapped. Yahoo's hourly window is ~730 calendar days, which is ~500
+// trading sessions for an equity and ~730 for 24/7 crypto, so 300 clears a
+// genuine first bootstrap while still blocking every repeat.
+const TOD_BOOTSTRAP_COVERAGE_TARGET = 300;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
   if (!v) { console.error(`Missing required env var: ${name}`); process.exit(1); }
 }
@@ -205,7 +211,7 @@ async function main() {
   // already well-bootstrapped rather than re-fetching 700 days every time.
   try {
     const swingCoverage = await getSwingTimeCoverage(env);
-    let swingOk = 0, swingSkipped = 0, todBootstrapped = 0;
+    let swingOk = 0, swingSkipped = 0, todBootstrapped = 0, todSkipped = 0;
     const swingFailed = [];
     for (const a of universe) {
       if (a.assetClass === 'benchmark') continue; // no swing-timing story for macro benchmarks — nothing trades them directly
@@ -231,7 +237,7 @@ async function main() {
       await new Promise((r) => setTimeout(r, 500));
     }
     console.log(`swing-time backfill: ok ${swingOk}, already covered ${swingSkipped}, failed ${swingFailed.length}`);
-    console.log(`time-of-day bootstrap (same fetch, no new cost): ${todBootstrapped} symbols tallied`);
+    console.log(`time-of-day bootstrap (same fetch, no new cost): ${todBootstrapped} symbols tallied, ${todSkipped} already bootstrapped (re-adding would double-count — these columns are running sums)`);
     if (swingFailed.length) console.log(`  failures: ${swingFailed.slice(0, 10).join('; ')}${swingFailed.length > 10 ? ` (+${swingFailed.length - 10} more)` : ''}`);
   } catch (e) {
     console.error('swing-time backfill failed:', e.message);
