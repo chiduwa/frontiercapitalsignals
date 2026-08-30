@@ -1148,3 +1148,41 @@ export async function loadDailyRangeStats(env) {
   }
   return out;
 }
+
+// Best/worst hour-of-day per symbol (time_of_day_edge, recomputed daily by
+// computeTimeOfDayEdge/archive.mjs). Only cells that clear BOTH bars are
+// returned: a significance bar set for the number of hypotheses tested, and
+// the chronological split-half consistency check. Everything else is dropped
+// here rather than shipped with a caveat — a "best time" the engine cannot
+// stand behind is worse than none.
+export async function loadTimeOfDayEdge(env) {
+  const rows = await d1(env, 'SELECT symbol, hour_utc, n, mean_pct, t_stat, win_rate, h1_mean, h2_mean FROM time_of_day_edge WHERE consistent = 1 AND ABS(t_stat) >= ?', [TOD_EDGE_SIGNIFICANCE_T]);
+  const bySymbol = {};
+  for (const r of rows) {
+    (bySymbol[r.symbol] ??= []).push({
+      hour: r.hour_utc, n: r.n, meanPct: r.mean_pct, t: r.t_stat,
+      winRate: r.win_rate, h1: r.h1_mean, h2: r.h2_mean
+    });
+  }
+  const out = {};
+  for (const [symbol, hours] of Object.entries(bySymbol)) {
+    hours.sort((a, b) => b.meanPct - a.meanPct);
+    const best = hours[0];
+    const worst = hours[hours.length - 1];
+    out[symbol] = {
+      hours,
+      // "Buy" = the start of the hour with the strongest positive forward
+      // return; "sell" = the start of the strongest negative one. Only offered
+      // when the sign actually points that way, never just "the least bad".
+      buyHour: best && best.meanPct > 0 ? best : null,
+      sellHour: worst && worst.meanPct < 0 ? worst : null
+    };
+  }
+  return out;
+}
+
+// ~24 hours x the tracked symbol count is a few hundred hypotheses, so the bar
+// is well above a conventional 1.96. Deliberately NOT relaxed on the grounds
+// that several assets agree: BTC, ETH, ADA, BNB, BCH and XRP are highly
+// correlated, so their agreement is closer to one observation than to six.
+const TOD_EDGE_SIGNIFICANCE_T = 3.3;

@@ -1802,6 +1802,42 @@ check('deep-record response is unchanged (0.8, n=100 -> 1.5 clamped)', Math.abs(
 check('at a measured 0.384 baseline, 0.384 accuracy is the new neutral point', Math.abs(mod.reliabilityWeight(0.384, 50, 0.384) - 1) < 1e-9);
 check('a 44% technique is rewarded above neutral where it used to be penalised', mod.reliabilityWeight(0.44, 50, 0.384) > 1 && mod.reliabilityWeight(0.44, 50) < 1);
 
+console.log('\n== best trading hours: clock maths and qualification ==');
+check('hour label is zero-padded UTC', mod.hourLabelUtc(9) === '09:00 UTC' && mod.hourLabelUtc(20) === '20:00 UTC');
+check('the currently-running hour reads as 0 minutes away', mod.minutesUntilHour(20, '2026-08-30T20:14:00Z') === 0);
+check('later today counts down correctly', mod.minutesUntilHour(20, '2026-08-30T19:40:00Z') === 20);
+check('an hour already past today wraps to tomorrow, never negative', mod.minutesUntilHour(9, '2026-08-30T20:40:00Z') === 740);
+check('exactly on the hour boundary', mod.minutesUntilHour(21, '2026-08-30T20:00:00Z') === 60);
+
+// Modelled on the real measurement: BTC's strongest hour is 20:00 UTC at
+// +0.045%/hr, which is REAL but smaller than a round trip.
+const edgePayload = {
+  todEdge: { BTC: {
+    buyHour: { hour: 20, n: 2532, meanPct: 0.0454, t: 3.41, winRate: 53.5, h1: 0.06, h2: 0.031 },
+    sellHour: { hour: 22, n: 2533, meanPct: -0.0289, t: -3.4, winRate: 47.0, h1: -0.031, h2: -0.027 }
+  } },
+  highAccuracy: [], crypto: { breakout: [{ symbol: 'BTC', price: 100 }] }, stocks: {}
+};
+const withHours = mod.attachBestHours(edgePayload, '2026-08-30T19:55:00Z');
+check('attaches a best-hours read for a covered asset', !!withHours.bestHours['crypto|BTC']);
+const btcH = withHours.bestHours['crypto|BTC'];
+check('labels the up hour and counts down to it', btcH.buy.label === '20:00 UTC' && btcH.buy.minutesUntil === 5);
+check('carries the down hour too', btcH.sell.label === '22:00 UTC');
+// The honesty flag: a real edge that still loses to fees must say so.
+check('a 0.045%/hr edge is correctly flagged as NOT beating a ~0.12% round trip', btcH.buy.beatsCosts === false);
+check('and the assumed cost travels with it so the claim is checkable', btcH.assumedRoundTripCostPct > 0);
+check('a genuinely large edge would clear the cost bar', mod.attachBestHours({ ...edgePayload, todEdge: { BTC: { buyHour: { hour: 20, n: 2532, meanPct: 0.9, t: 5, winRate: 60 }, sellHour: null } } }, '2026-08-30T19:55:00Z').bestHours['crypto|BTC'].buy.beatsCosts === true);
+check('no measured edge at all: payload is returned untouched', mod.attachBestHours({ crypto: {}, stocks: {} }, '2026-08-30T19:55:00Z').bestHours === undefined);
+
+console.log('\n== best-hour alerts fire BEFORE the window, once per day ==');
+const dueNow = mod.dueBestHourAlerts(withHours.bestHours, '2026-08-30T19:55:00Z', {});
+check('an hour opening in 5 minutes is due', dueNow.length === 1 && dueNow[0].kind === 'buy', JSON.stringify(dueNow.map(d=>d.kind)));
+check('an alert already sent today is not repeated', mod.dueBestHourAlerts(withHours.bestHours, '2026-08-30T19:55:00Z', { [dueNow[0].stateKey]: 1 }).length === 0);
+check('the same window on a NEW day is due again', mod.dueBestHourAlerts(mod.attachBestHours(edgePayload, '2026-08-31T19:55:00Z').bestHours, '2026-08-31T19:55:00Z', { [dueNow[0].stateKey]: 1 }).length === 1);
+check('too far ahead is not yet due', mod.dueBestHourAlerts(mod.attachBestHours(edgePayload, '2026-08-30T19:20:00Z').bestHours, '2026-08-30T19:20:00Z', {}).length === 0);
+// Once the window is already running the alert is useless, so it must not fire.
+check('an hour already in progress does NOT alert — too late to act on', mod.dueBestHourAlerts(mod.attachBestHours(edgePayload, '2026-08-30T20:10:00Z').bestHours, '2026-08-30T20:10:00Z', {}).length === 0);
+
 console.log('\n== dailyRangeStatsFromRows: the median daily high-low yardstick ==');
 const arch = await import('./scripts/archive.mjs');
 const mkBars = (symbol, ranges) => ranges.map((r, i) => ({

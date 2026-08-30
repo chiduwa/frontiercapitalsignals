@@ -27,7 +27,7 @@ import {
   computeYieldSpread,
   fetchDefiLlamaProtocols, matchProtocolsToUniverse, defiLlamaProtocolTvlHistory,
   fetchDeribitDvolHistory, upsertIvDaily, fetchStockAtmIv,
-  computeSrLevelsAndBreaks, replaceSrLevels, replaceSrBreakStats, computeDailyRangeStats,
+  computeSrLevelsAndBreaks, replaceSrLevels, replaceSrBreakStats, computeDailyRangeStats, computeTimeOfDayEdge,
   computeMarketComposite, upsertMarketCapTotal,
   computeOutperformanceRotations, replaceRotationStatus,
   computeLongTermBottomCandidates, replaceLongTermBottomCandidates
@@ -284,6 +284,16 @@ async function main() {
     console.log(`daily range stats: ${written} symbols with a median/p80 daily range (${Date.now() - started}ms)`);
   } catch (e) {
     console.error('daily range stats computation failed:', e.message);
+  }
+
+  // Best/worst hour of day per asset, recomputed (not accumulated) so the
+  // chronological split-half check stays possible. See computeTimeOfDayEdge.
+  try {
+    const started = Date.now();
+    const written = await computeTimeOfDayEdge(env, new Date().toISOString());
+    console.log(`time-of-day edge: ${written} (symbol, hour) cells recomputed (${Date.now() - started}ms)`);
+  } catch (e) {
+    console.error('time-of-day edge computation failed:', e.message);
   }
 
   try {

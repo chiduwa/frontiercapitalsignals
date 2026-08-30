@@ -1559,3 +1559,63 @@ export async function computeDailyRangeStats(env, preloadedRows, nowIso) {
   }
   return written;
 }
+
+// ---------------------- TIME-OF-DAY EDGE (BEST HOURS) ----------------------
+
+// Recomputes time_of_day_edge from asset_hourly_bars: for each (symbol, UTC
+// hour), the mean 1-hour-forward return, its t-statistic, its win rate, and
+// each chronological half separately.
+//
+// Done entirely in SQL rather than pulling ~352k bars into Node. D1 bills rows
+// scanned either way, but shipping them over the wire would add latency and
+// memory for no benefit — the aggregation is exactly what SQL is for.
+//
+// Why recompute daily instead of accumulating: an accumulating table cannot be
+// split chronologically after the fact, and the split-half check is the single
+// most important guardrail here. It is what separates a real pattern from one
+// that existed in 2021 and has since decayed — and it is what excluded DOGE,
+// whose 20:00 UTC edge flips from +0.188% in the first half to -0.069% in the
+// second while still looking significant pooled.
+export async function computeTimeOfDayEdge(env, nowIso) {
+  const rows = await d1(env, `
+    WITH b AS (
+      SELECT symbol, asset_class, bar_at, close,
+             LEAD(close) OVER (PARTITION BY symbol ORDER BY bar_at) AS nxt,
+             CAST(strftime('%H', bar_at) AS INTEGER) AS hr,
+             ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY bar_at) AS rn,
+             COUNT(*) OVER (PARTITION BY symbol) AS tot
+      FROM asset_hourly_bars
+    ), r AS (
+      SELECT symbol, asset_class, hr, rn, tot, (nxt/close - 1)*100 AS ret
+      FROM b WHERE nxt IS NOT NULL AND close > 0
+    )
+    SELECT symbol, asset_class, hr AS hour_utc, COUNT(*) AS n,
+           AVG(ret) AS mean_pct,
+           CASE WHEN (AVG(ret*ret) - AVG(ret)*AVG(ret)) > 0
+                THEN AVG(ret) / (SQRT(AVG(ret*ret) - AVG(ret)*AVG(ret)) / SQRT(COUNT(*)))
+                ELSE 0 END AS t_stat,
+           100.0*SUM(CASE WHEN ret > 0 THEN 1 ELSE 0 END)/COUNT(*) AS win_rate,
+           AVG(CASE WHEN rn <= tot/2 THEN ret END) AS h1_mean,
+           AVG(CASE WHEN rn >  tot/2 THEN ret END) AS h2_mean
+    FROM r GROUP BY symbol, asset_class, hr HAVING COUNT(*) >= ?
+  `, [TOD_EDGE_MIN_SAMPLES]);
+  if (!rows.length) return 0;
+
+  await d1(env, 'DELETE FROM time_of_day_edge');
+  let written = 0;
+  for (const batch of chunk(rows, 8)) {
+    const placeholders = batch.map(() => '(?,?,?,?,?,?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap((r) => {
+      // Same sign in BOTH halves. A pooled mean can be carried entirely by one
+      // era; this asks the pattern to have been present in each.
+      const consistent = Number.isFinite(r.h1_mean) && Number.isFinite(r.h2_mean)
+        && Math.sign(r.h1_mean) === Math.sign(r.h2_mean) && r.h1_mean !== 0 ? 1 : 0;
+      return [r.symbol, r.asset_class, r.hour_utc, r.n, r.mean_pct, r.t_stat, r.win_rate, r.h1_mean, r.h2_mean, consistent, nowIso];
+    });
+    await d1(env, `INSERT INTO time_of_day_edge (symbol, asset_class, hour_utc, n, mean_pct, t_stat, win_rate, h1_mean, h2_mean, consistent, updated_at) VALUES ${placeholders}`, params);
+    written += batch.length;
+  }
+  return written;
+}
+
+const TOD_EDGE_MIN_SAMPLES = 300;

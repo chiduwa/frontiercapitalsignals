@@ -3841,7 +3841,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration, dailyRangeStats) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration, dailyRangeStats, todEdge) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -4055,6 +4055,9 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     // whatever has proven skill). Scoped rather than shipping all ~260 assets:
     // the read is only offered where it was asked for, and the payload is
     // already large. The Worker's cron divides today's move by these.
+    // Best/worst hour per asset, already filtered to cells clearing both the
+    // significance and split-half bars (loadTimeOfDayEdge).
+    todEdge: todEdge && Object.keys(todEdge).length ? todEdge : null,
     dailyRange: (() => {
       if (!dailyRangeStats) return null;
       const syms = new Set([...FAVORITE_SYMBOLS, ...highAccuracy.map((r) => r.symbol)]);
@@ -4331,6 +4334,7 @@ export async function refreshLivePriceLayer(env) {
     // Alert on newly-stretched assets. Runs here rather than in notify.mjs so
     // entry alerts ride the cron that actually fires.
     await dispatchDayRangeAlerts(env, cached, body, session);
+    await dispatchBestHourAlerts(env, cached, nowIso);
     return true;
   } catch (error) {
     console.error('Live price layer refresh failed:', error.message);
@@ -4383,6 +4387,83 @@ export async function dispatchDayRangeAlerts(env, cached, prices, session) {
 }
 
 function nowSeconds() { return Math.floor(Date.now() / 1000); }
+
+// Fires shortly BEFORE a proven hour opens, since an alert sent once the window
+// has already started is not actionable. The cron runs every 5 minutes, so the
+// lead window has to be at least that wide to avoid being skipped over.
+const BEST_HOUR_LEAD_MIN = 10;
+const BEST_HOUR_ALERT_STATE_KEY = 'signals:best-hour-alert-state';
+const BEST_HOUR_ALERT_TTL_SECONDS = 26 * 3600;
+
+export function dueBestHourAlerts(bestHours, nowIso, alreadyFired) {
+  const due = [];
+  for (const [key, x] of Object.entries(bestHours || {})) {
+    for (const kind of ['buy', 'sell']) {
+      const w = x[kind];
+      if (!w) continue;
+      const mins = minutesUntilHour(w.hour, nowIso);
+      if (mins <= 0 || mins > BEST_HOUR_LEAD_MIN) continue;
+      const stateKey = `${key}|${kind}|${nowIso.slice(0, 10)}`;
+      if (alreadyFired && alreadyFired[stateKey]) continue;
+      due.push({ key, kind, stateKey, symbol: x.symbol, assetClass: x.asset_class, window: w, minutesUntil: mins });
+    }
+  }
+  return due;
+}
+
+export async function notifyBestHours(env, due) {
+  if (!env || !env.NTFY_TOPIC || !due || !due.length) return 0;
+  let sent = 0;
+  for (const d of due) {
+    const w = d.window;
+    const dir = d.kind === 'buy' ? 'risen' : 'fallen';
+    const body = [
+      `${d.symbol} (${d.assetClass === 'crypto' ? 'crypto' : 'equity'}) enters its strongest ${d.kind === 'buy' ? 'up' : 'down'} hour in ${d.minutesUntil} min (${w.label}).`,
+      `Historically ${dir} ${w.meanPct >= 0 ? '+' : ''}${w.meanPct.toFixed(3)}%/hr across ${w.n} occurrences (t=${w.t.toFixed(2)}, win rate ${w.winRate.toFixed(1)}%),`,
+      `holding the same sign in both halves of its history.`,
+      w.beatsCosts
+        ? 'This edge is larger than a typical round trip.'
+        : 'NOTE: this edge is SMALLER than a typical retail round trip (~0.12%), so it does not pay for its own fees — use it to time an entry you already wanted, not as a trade on its own.'
+    ].join(' ');
+    try {
+      const res = await fetch(`https://ntfy.sh/${env.NTFY_TOPIC}`, {
+        method: 'POST',
+        headers: {
+          Title: `${d.symbol} ${d.kind === 'buy' ? 'up' : 'down'} hour opens in ${d.minutesUntil}m`,
+          Priority: 'low',
+          Tags: d.kind === 'buy' ? 'clock3,chart_with_upwards_trend' : 'clock3,chart_with_downwards_trend'
+        },
+        body
+      });
+      if (res.ok) sent++;
+    } catch (error) {
+      console.error('Best-hour alert failed for', d.symbol, error.message);
+    }
+  }
+  return sent;
+}
+
+export async function dispatchBestHourAlerts(env, cached, nowIso) {
+  if (!env || !env.NTFY_TOPIC || !env.FCS_CACHE) return 0;
+  const withHours = attachBestHours(cached, nowIso);
+  if (!withHours || !withHours.bestHours) return 0;
+  let state = {};
+  try {
+    const raw = await env.FCS_CACHE.get(BEST_HOUR_ALERT_STATE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && parsed.fired) state = parsed.fired;
+  } catch { /* a lost state key costs at most one duplicate alert */ }
+  const due = dueBestHourAlerts(withHours.bestHours, nowIso, state);
+  if (!due.length) return 0;
+  const sent = await notifyBestHours(env, due);
+  for (const d of due) state[d.stateKey] = nowSeconds();
+  try {
+    await env.FCS_CACHE.put(BEST_HOUR_ALERT_STATE_KEY, JSON.stringify({ fired: state }), { expirationTtl: BEST_HOUR_ALERT_TTL_SECONDS });
+  } catch (error) {
+    console.error('Unable to persist best-hour alert state:', error.message);
+  }
+  return sent;
+}
 
 // Flattens every board row in a payload into one symbol -> row map, so the
 // day-range read can pick up RSI/volume/funding/range-position confirmations
@@ -4699,6 +4780,19 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     .dr-row.dr-up{background:color-mix(in srgb,var(--down) 12%,transparent)}
     .dr-row.dr-down{background:color-mix(in srgb,var(--up) 12%,transparent)}
     .dr-row.dr-quiet{opacity:.6}
+    .best-hours{margin:18px 0 8px;padding:14px 16px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+    .bh-head,.bh-row{display:grid;grid-template-columns:minmax(70px,.7fr) minmax(200px,1.4fr) minmax(200px,1.4fr);gap:10px;align-items:baseline}
+    .bh-head{font-size:10px;letter-spacing:.06em;color:var(--muted);margin-bottom:6px}
+    .bh-row{padding:6px 8px;border-radius:6px;font-size:13px}
+    .bh-row:nth-child(odd){background:color-mix(in srgb,var(--line) 22%,transparent)}
+    .bh-sym{font-weight:700}
+    .bh-cell{display:flex;gap:8px;flex-wrap:wrap;align-items:baseline}
+    .bh-buy{font-weight:700;color:var(--up)}
+    .bh-sell{font-weight:700;color:var(--down)}
+    .bh-when{font-size:11px;color:var(--muted)}
+    .bh-stat{font-variant-numeric:tabular-nums;font-size:12px}
+    .bh-cost{font-size:10px;color:var(--amber);border:1px solid var(--amber);border-radius:3px;padding:0 4px}
+    @media(max-width:720px){.bh-head{display:none}.bh-row{grid-template-columns:1fr;row-gap:2px}}
     .dr-row.dr-dislocated{background:color-mix(in srgb,var(--amber) 14%,transparent)}
     .dr-cls{font-size:9px;font-weight:600;color:var(--muted);margin-left:4px;vertical-align:super}
     .dr-sym{font-weight:700}
@@ -5056,6 +5150,44 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     // Say so plainly rather than letting a board of dir-less rows read as a
     // rendering bug — and show the numbers behind the decision, since "we are
     // not showing you calls" needs more justification than showing them did.
+    // Best trading hours, above the day-range read.
+    var bh = d.bestHours || {};
+    var bhKeys = Object.keys(bh);
+    if(bhKeys.length){
+      bhKeys.sort(function(a,b){
+        var am = bh[a].buy ? bh[a].buy.minutesUntil : 9999;
+        var bm = bh[b].buy ? bh[b].buy.minutesUntil : 9999;
+        return am - bm;
+      });
+      var bhRows = bhKeys.map(function(k){
+        var x = bh[k];
+        var fmtWin = function(w, kind){
+          if(!w) return '<span class="dim">&mdash;</span>';
+          var when = w.minutesUntil === 0 ? 'now' : (w.minutesUntil < 60 ? 'in '+w.minutesUntil+'m' : 'in '+Math.floor(w.minutesUntil/60)+'h'+(w.minutesUntil%60)+'m');
+          return '<span class="bh-'+kind+'">'+esc(w.label)+'</span>'
+            +'<span class="bh-when">'+when+'</span>'
+            +'<span class="bh-stat" title="Mean 1-hour forward return in this slot over '+w.n+' observations, t='+w.t.toFixed(2)+', win rate '+w.winRate.toFixed(1)+'%. Both chronological halves agree in sign.">'
+            +(w.meanPct>=0?'+':'')+w.meanPct.toFixed(3)+'%/hr</span>'
+            +(w.beatsCosts?'':'<span class="bh-cost" title="This edge is smaller than a typical retail round trip, so it does not survive fees and spread on its own.">under costs</span>');
+        };
+        return '<div class="bh-row">'
+          +'<span class="bh-sym">'+esc(x.symbol)+(x.asset_class==='stock'?'<span class="dr-cls">EQ</span>':'')+'</span>'
+          +'<span class="bh-cell">'+fmtWin(x.buy,'buy')+'</span>'
+          +'<span class="bh-cell">'+fmtWin(x.sell,'sell')+'</span>'
+          +'</div>';
+      }).join('');
+      b+='<section class="best-hours" id="bestHours" aria-label="Best trading hours">'
+        +'<div class="eyebrow">BEST HOURS</div>'
+        +'<div class="dr-title">When this asset has actually tended to move</div>'
+        +'<div class="dr-note">Mean 1-hour-forward return by UTC hour, measured on this engine&#39;s own hourly archive. '
+        +'An hour is only listed if it clears a significance bar set for the number of hours &times; assets tested <b>and</b> holds the same sign across both halves of its history. '
+        +'The strongest hour across the tracked coins is <b>20:00 UTC (16:00 ET)</b> &mdash; the US equity close &mdash; which matches the documented overnight effect in equities. '
+        +'<b>Read the size, not just the sign:</b> these edges are around 0.05%/hour while a retail round trip costs roughly 0.12%, so on their own most do not survive fees. '
+        +'They are better used to time an entry you were already going to make than as a strategy.</div>'
+        +'<div class="bh-head"><span>ASSET</span><span>STRONGEST UP HOUR</span><span>STRONGEST DOWN HOUR</span></div>'
+        +'<div class="bh-list">'+bhRows+'</div></section>';
+    }
+
     // Day-trading range read, above the boards: the "has it moved enough
     // today?" answer the boards themselves don't give.
     var dr = d.dayRange || {};
@@ -5438,6 +5570,75 @@ export async function buildLivePrices(env, cached) {
   return { crypto, stocks, generated_at: new Date().toISOString() };
 }
 
+// ------------------------- BEST TRADING HOURS -------------------------------
+// User-requested 2026-08-30, off the widely-repeated equity claim that buying
+// the close and selling the open captures most of the return.
+//
+// The claim is real in the literature for US equities (the "overnight effect":
+// broad-market ETFs earn their return overnight while the intraday session
+// contributes little or negative). It could NOT be tested directly on this
+// engine's own equity data, for two concrete reasons: asset_daily_bars carries
+// no `open` column, and asset_hourly_bars holds crypto only. So what is
+// published here is the crypto analogue, measured on this archive's own deep
+// hourly history rather than asserted from the equity literature.
+//
+// What that measurement found, at 20:00 UTC = 16:00 ET, the US equity close:
+// every tracked coin positive, six of seven holding sign across both
+// chronological halves. That is coherent with the same underlying story — US
+// close flows — arriving in a 24/7 market.
+//
+// The effect is ~0.05%/hour. A retail round trip costs 0.1-0.2% in fees and
+// spread, so for most traders this is real but not tradeable on its own, and
+// the UI says exactly that rather than implying an edge that survives costs.
+const TOD_TYPICAL_ROUND_TRIP_COST_PCT = 0.12;
+
+export function hourLabelUtc(hour) {
+  const h = ((hour % 24) + 24) % 24;
+  return `${String(h).padStart(2, '0')}:00 UTC`;
+}
+
+// Minutes from `nowIso` until the next occurrence of `hour` UTC. 0 means the
+// hour is currently running.
+export function minutesUntilHour(hour, nowIso) {
+  const now = new Date(nowIso);
+  const curH = now.getUTCHours();
+  const curM = now.getUTCMinutes();
+  if (curH === hour) return 0;
+  const diff = ((hour - curH + 24) % 24) * 60 - curM;
+  return diff;
+}
+
+// Attaches the best/worst-hour read for the covered universe, plus how long
+// until each window opens, so the dashboard can say "in 40 minutes" rather
+// than making the reader do UTC arithmetic.
+export function attachBestHours(payload, nowIso) {
+  const edge = payload && payload.todEdge;
+  if (!edge) return payload;
+  const universe = dayTradingUniverse(payload);
+  const out = {};
+  for (const key of universe) {
+    const [assetClass, symbol] = key.split('|');
+    const e = edge[symbol];
+    if (!e || (!e.buyHour && !e.sellHour)) continue;
+    const decorate = (h) => (h ? {
+      ...h,
+      label: hourLabelUtc(h.hour),
+      minutesUntil: minutesUntilHour(h.hour, nowIso),
+      // Honest about costs: an edge smaller than a round trip is reported, but
+      // never as something to act on by itself.
+      beatsCosts: Math.abs(h.meanPct) > TOD_TYPICAL_ROUND_TRIP_COST_PCT
+    } : null);
+    out[key] = {
+      symbol, asset_class: assetClass,
+      buy: decorate(e.buyHour),
+      sell: decorate(e.sellHour),
+      assumedRoundTripCostPct: TOD_TYPICAL_ROUND_TRIP_COST_PCT
+    };
+  }
+  if (!Object.keys(out).length) return payload;
+  return { ...payload, bestHours: out };
+}
+
 // --------------------- DAY-TRADING RANGE EXHAUSTION -------------------------
 // User-requested 2026-08-30: "tell me the asset has gone up or down enough for
 // the day so I can short or long it."
@@ -5635,7 +5836,7 @@ export default {
         // instead of flattening it to one "STALE" badge.
         const live = await getCachedLivePrices(env);
         const session = await getSessionExtremes(env);
-        const merged = attachDayRange(mergeLivePrices(cached, live), live, session);
+        const merged = attachBestHours(attachDayRange(mergeLivePrices(cached, live), live, session), new Date().toISOString());
         return json(merged, {
           'X-FCS-Cache': fresh ? 'hit' : 'stale',
           'X-FCS-Prices': live ? 'live' : 'build'
