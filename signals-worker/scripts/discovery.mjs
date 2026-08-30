@@ -142,7 +142,21 @@ export function turnOfMonthSamples(bars, lastNDays, wantBullish) {
     if (!b.close) continue;
     (byMonth[b.date.slice(0, 7)] ??= []).push(b);
   }
-  const inWindow = [], outWindow = [];
+  // BOTH samples are closing-window returns. The first version compared the
+  // closing window against THE SAME MONTH'S HEAD, and that was a selection
+  // bias severe enough to manufacture findings: months are selected precisely
+  // because their head rose (or fell), so the head's mean return is positive
+  // (or negative) BY CONSTRUCTION. Comparing anything against it is comparing
+  // unselected returns to returns hand-picked for their sign.
+  //
+  // It showed up exactly as it should have — 132 of 624 tests "passed" at a
+  // |z| >= 4.31 bar where chance is ~0.001%, split roughly half positive and
+  // half negative, i.e. the sign of the selection rather than of any pattern.
+  //
+  // Now the baseline is the closing window of months that did NOT meet the
+  // trend condition. Same part of the month on both sides, so the only thing
+  // that differs is the prior trend — which is the actual question.
+  const matching = [], other = [];
   for (const month of Object.keys(byMonth).sort()) {
     const days = byMonth[month];
     if (days.length < lastNDays + 5) continue;   // need a real month, not a stub
@@ -151,21 +165,18 @@ export function turnOfMonthSamples(bars, lastNDays, wantBullish) {
     const tail = days.slice(cut);
     const monthTrend = (head[head.length - 1].close / head[0].close - 1) * 100;
     if (!Number.isFinite(monthTrend)) continue;
-    if (wantBullish ? monthTrend <= 0 : monthTrend >= 0) continue;
-    const push = (arr, seq, prevClose) => {
-      let prev = prevClose;
-      for (const d of seq) {
-        if (prev && d.close && prev > 0) {
-          const ret = (d.close / prev - 1) * 100;
-          if (Number.isFinite(ret) && Math.abs(ret) <= 50) arr.push({ date: d.date, value: ret });
-        }
-        prev = d.close;
+    const isMatch = wantBullish ? monthTrend > 0 : monthTrend < 0;
+    const target = isMatch ? matching : other;
+    let prev = head[head.length - 1].close;
+    for (const d of tail) {
+      if (prev && d.close && prev > 0) {
+        const ret = (d.close / prev - 1) * 100;
+        if (Number.isFinite(ret) && Math.abs(ret) <= 50) target.push({ date: d.date, value: ret });
       }
-    };
-    push(inWindow, tail, head[head.length - 1].close);
-    push(outWindow, head.slice(1), head[0].close);
+      prev = d.close;
+    }
   }
-  return { a: inWindow, b: outWindow };
+  return { a: matching, b: other };
 }
 
 // Family 4 — mean reversion after a run. User's framing: "crypto will usually
@@ -423,8 +434,27 @@ async function notify(title, body, priority = 'default') {
 // --------------------------------- MAIN ------------------------------------
 
 function groupBars(rows) {
+  // asset_daily_bars has PRIMARY KEY (symbol, date) with no asset_class, so a
+  // ticker used by two different assets leaves one interleaved series. DASH is
+  // the live case: Dash the crypto (~$41) and DoorDash the equity (~$237)
+  // alternate in the same rows. The first discovery run found exactly one
+  // "overnight effect" in the whole crypto universe and it was DASH, at -5.96%
+  // with z=-12.84 — which is not a market pattern, it is two assets being
+  // differenced against each other.
+  //
+  // dailyRangeStatsFromRows already drops these; this module needs the same
+  // guard, and so will anything else built on this table until the key is
+  // widened.
+  const classes = {};
+  for (const r of rows) (classes[r.symbol] ??= new Set()).add(r.asset_class);
+  const ambiguous = Object.entries(classes).filter(([, set]) => set.size > 1).map(([sym]) => sym);
+  if (ambiguous.length) console.log(`excluded ${ambiguous.length} symbol(s) present under more than one asset class: ${ambiguous.join(', ')}`);
+
   const bySymbol = {};
-  for (const r of rows) (bySymbol[r.symbol] ??= { assetClass: r.asset_class, bars: [] }).bars.push(r);
+  for (const r of rows) {
+    if (classes[r.symbol].size > 1) continue;
+    (bySymbol[r.symbol] ??= { assetClass: r.asset_class, bars: [] }).bars.push(r);
+  }
   for (const v of Object.values(bySymbol)) v.bars.sort((a, b) => (a.date < b.date ? -1 : 1));
   return bySymbol;
 }

@@ -1842,13 +1842,19 @@ const tomBars = [];
 for (let d = 1; d <= 23; d++) {
   tomBars.push({ date: `2026-01-${String(d).padStart(2,'0')}`, close: d <= 20 ? 100 + d : 120 - (d - 20) * 3 });
 }
-const tomBull = disc.turnOfMonthSamples(tomBars, 3, true);
-check('a bullish month is picked up when asked for bullish', tomBull.a.length === 3 && tomBull.b.length > 0);
-check('the closing window returns are negative here, as constructed', tomBull.a.every((p) => p.value < 0), JSON.stringify(tomBull.a.map(p=>p.value.toFixed(2))));
-check('asking for a bearish month finds nothing in this one', disc.turnOfMonthSamples(tomBars, 3, false).a.length === 0);
-// The condition must not be built from the returns being predicted.
-check('the trend is judged on the head only, never the closing window itself', tomBull.b.every((p) => p.date <= '2026-01-20'));
-check('a stub month too short to have a real head is skipped', disc.turnOfMonthSamples([{date:'2026-02-01',close:100},{date:'2026-02-02',close:101}], 3, true).a.length === 0);
+// Two months: January rises through its head, February falls through its.
+const tomTwo = [...tomBars];
+for (let d = 1; d <= 23; d++) {
+  tomTwo.push({ date: `2026-02-${String(d).padStart(2,'0')}`, close: d <= 20 ? 120 - d : 100 + (d - 20) * 3 });
+}
+const tomBull = disc.turnOfMonthSamples(tomTwo, 3, true);
+check('the bullish month contributes its closing window to sample A', tomBull.a.length === 3);
+check('and the bearish month contributes ITS closing window to sample B', tomBull.b.length === 3);
+// The bug this replaced: comparing the closing window against the same
+// month's head, which was selected on, guarantees a result.
+check('both samples are closing-window returns, never a selected head', tomBull.a.every((p) => Number(p.date.slice(8)) > 20) && tomBull.b.every((p) => Number(p.date.slice(8)) > 20), JSON.stringify({a:tomBull.a.map(p=>p.date),b:tomBull.b.map(p=>p.date)}));
+check('asking for bearish swaps which month lands in which sample', (() => { const r = disc.turnOfMonthSamples(tomTwo, 3, false); return r.a.length === 3 && r.a.every((p) => p.date.startsWith('2026-02')); })());
+check('a stub month too short to have a real head is skipped entirely', disc.turnOfMonthSamples([{date:'2026-03-01',close:100},{date:'2026-03-02',close:101}], 3, true).a.length === 0);
 
 console.log('\n== monthly returns and run-reversal ==');
 const mkMonths = (vals) => {
