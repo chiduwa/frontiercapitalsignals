@@ -1836,6 +1836,57 @@ const mon = disc.dayOfWeekSamples(dowBars, 1);
 check('Monday returns are separated from every other weekday', mon.on.length > 0 && mon.off.length > 0);
 check('and the two sides are disjoint and complete', mon.on.length + mon.off.length === 29);
 
+console.log('\n== turn-of-month, conditioned on how the month actually went ==');
+// A month that rises through its first 20 sessions then falls in the last 3.
+const tomBars = [];
+for (let d = 1; d <= 23; d++) {
+  tomBars.push({ date: `2026-01-${String(d).padStart(2,'0')}`, close: d <= 20 ? 100 + d : 120 - (d - 20) * 3 });
+}
+const tomBull = disc.turnOfMonthSamples(tomBars, 3, true);
+check('a bullish month is picked up when asked for bullish', tomBull.a.length === 3 && tomBull.b.length > 0);
+check('the closing window returns are negative here, as constructed', tomBull.a.every((p) => p.value < 0), JSON.stringify(tomBull.a.map(p=>p.value.toFixed(2))));
+check('asking for a bearish month finds nothing in this one', disc.turnOfMonthSamples(tomBars, 3, false).a.length === 0);
+// The condition must not be built from the returns being predicted.
+check('the trend is judged on the head only, never the closing window itself', tomBull.b.every((p) => p.date <= '2026-01-20'));
+check('a stub month too short to have a real head is skipped', disc.turnOfMonthSamples([{date:'2026-02-01',close:100},{date:'2026-02-02',close:101}], 3, true).a.length === 0);
+
+console.log('\n== monthly returns and run-reversal ==');
+const mkMonths = (vals) => {
+  const bars = [];
+  vals.forEach((v, i) => {
+    const m = String(i + 1).padStart(2, '0');
+    for (let d = 1; d <= 20; d++) bars.push({ date: `2026-${m}-${String(d).padStart(2,'0')}`, close: 100 * (1 + (v / 100) * (d - 1) / 19) });
+  });
+  return bars;
+};
+const mr = disc.monthlyReturns(mkMonths([10, -5, 8]));
+check('one monthly return per month, first close to last', mr.length === 3);
+check('signs match the constructed months', Math.sign(mr[0].value) === 1 && Math.sign(mr[1].value) === -1);
+check('a month with too few sessions is dropped rather than annualised from noise', disc.monthlyReturns([{date:'2026-01-01',close:100},{date:'2026-01-02',close:101}]).length === 0);
+
+const series = [-3,-2,5,-4,-1,7,1,2,-2,-3,9,-1,-2,6].map((v,i)=>({ month:`2026-${String(i+1).padStart(2,'0')}`, value:v }));
+const afterTwoDown = disc.runReversalFromSeries(series, 2, true);
+check('months following two consecutive down months are isolated', afterTwoDown.a.length > 0 && afterTwoDown.b.length > 0);
+check('every "after" month genuinely follows two down months', afterTwoDown.a.every((p) => {
+  const i = series.findIndex((m) => m.month === p.date);
+  return i >= 2 && series[i-1].value < 0 && series[i-2].value < 0;
+}));
+check('the two sides partition the series with nothing counted twice', afterTwoDown.a.length + afterTwoDown.b.length === series.length);
+
+console.log('\n== class composite: the month is the unit, not the symbol-month ==');
+// Three near-identical coins. Pooling them would claim 3x the evidence for
+// what is really one observation per month — the correlation trap.
+const three = {
+  A: { assetClass: 'crypto', bars: mkMonths([10, -5, 8]) },
+  B: { assetClass: 'crypto', bars: mkMonths([11, -4, 9]) },
+  C: { assetClass: 'crypto', bars: mkMonths([9, -6, 7]) }
+};
+const comp = disc.classMonthlySeries(three, 'crypto');
+check('three correlated coins collapse to one series of months, not three', comp.length === 3, JSON.stringify(comp.map(c=>c.month)));
+check('the composite averages within each month', Math.abs(comp[0].value - (disc.monthlyReturns(three.A.bars)[0].value + disc.monthlyReturns(three.B.bars)[0].value + disc.monthlyReturns(three.C.bars)[0].value)/3) < 1e-9);
+check('a different asset class is excluded', disc.classMonthlySeries(three, 'stock').length === 0);
+check('a month with too few contributing symbols is dropped', disc.classMonthlySeries({ A: three.A }, 'crypto').length === 0);
+
 console.log('\n== out-of-sample lifecycle: the guard that makes per-symbol mining safe ==');
 const entry = { discovery_effect: 0.5, status: 'provisional' };
 const many = (v, n) => Array.from({ length: n }, (_, i) => ({ date: 'd' + i, value: v + (i % 3) * 0.01 }));
@@ -1849,6 +1900,43 @@ check('inconclusive leaves status untouched rather than promoting on silence', d
 check('insufficient data never promotes', disc.nextStatus('provisional', 'insufficient') === 'provisional');
 // The dangerous case: something already trusted that quietly stops working.
 check('even a CONFIRMED finding is demoted when contradicted', disc.nextStatus('confirmed', 'contradicted') === 'decayed');
+
+console.log('\n== live triggers: only confirmed setups, only when actually live ==');
+const confirmedRun = {
+  hypothesis: 'run-reversal|crypto|2|down', family: 'run-reversal', status: 'confirmed',
+  asset_class: 'crypto', symbol: null, discovery_effect: 4.2, discovery_z: 3.1, discovery_n: 14,
+  discovered_at: '2026-01-01T00:00:00Z', oos_n: 30
+};
+const downThenDown = (vals) => {
+  const bars = [];
+  vals.forEach((v, i) => {
+    const m = String(i + 1).padStart(2, '0');
+    for (let d = 1; d <= 20; d++) bars.push({ date: `2026-${m}-${String(d).padStart(2,'0')}`, close: 100 * (1 + (v / 100) * (d - 1) / 19) });
+  });
+  return { assetClass: 'crypto', bars };
+};
+// Last two closed months both negative -> setup is live.
+const liveBooks = { A: downThenDown([5, -4, -3]), B: downThenDown([6, -5, -2]), C: downThenDown([4, -3, -4]) };
+const fired = disc.evaluateLiveTriggers([confirmedRun], liveBooks, '2026-04-02T06:00:00Z');
+check('two consecutive down months fires the reversal setup', fired.length === 1 && fired[0].kind === 'run-reversal', JSON.stringify(fired.map(f=>f.kind)));
+check('the alert names the actual months, not just the rule', /2026-02/.test(fired[0].detail) && /2026-03/.test(fired[0].detail), fired[0].detail);
+// Last month positive -> run broken, must not fire.
+const notLive = { A: downThenDown([5, -4, 3]), B: downThenDown([6, -5, 2]), C: downThenDown([4, -3, 4]) };
+check('a broken run does not fire', disc.evaluateLiveTriggers([confirmedRun], notLive, '2026-04-02T06:00:00Z').length === 0);
+// The core discipline: provisional findings never alert.
+check('a PROVISIONAL finding never fires a live trigger', disc.evaluateLiveTriggers([{ ...confirmedRun, status: 'provisional' }], liveBooks, '2026-04-02T06:00:00Z').length === 0);
+check('a DECAYED finding never fires either', disc.evaluateLiveTriggers([{ ...confirmedRun, status: 'decayed' }], liveBooks, '2026-04-02T06:00:00Z').length === 0);
+
+const confirmedDow = {
+  hypothesis: 'day-of-week|AAPL|4', family: 'day-of-week', status: 'confirmed',
+  asset_class: 'stock', symbol: 'AAPL', discovery_effect: -0.31, discovery_z: 3.9, discovery_n: 400,
+  discovered_at: '2026-01-01T00:00:00Z', oos_n: 40
+};
+// 2026-09-03 is a Thursday.
+const thu = disc.evaluateLiveTriggers([confirmedDow], {}, '2026-09-03T06:00:00Z');
+check('a confirmed Thursday effect fires on a Thursday', thu.length === 1 && /Thursday/.test(thu[0].detail), JSON.stringify(thu));
+check('and says which way it has historically gone', /-0.31/.test(thu[0].expectation), thu[0].expectation);
+check('it does not fire on other weekdays', disc.evaluateLiveTriggers([confirmedDow], {}, '2026-09-04T06:00:00Z').length === 0);
 
 console.log('\n== best trading hours: clock maths and qualification ==');
 check('hour label is zero-padded UTC', mod.hourLabelUtc(9) === '09:00 UTC' && mod.hourLabelUtc(20) === '20:00 UTC');

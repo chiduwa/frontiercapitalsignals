@@ -46,6 +46,12 @@ const MIN_SAMPLE = 60;          // per side of a two-sample test
 const MIN_OOS_SAMPLE = 25;      // before an out-of-sample verdict is allowed at all
 const DISCOVERY_ALPHA = 0.01;   // family-wide, matching RELIABILITY_SIGNIFICANCE_Z's two-tailed 0.01
 const OOS_MIN_Z = 1.0;          // deliberately lenient — see evaluateOutOfSample
+// Monthly families get a lower floor purely because months are scarce: six
+// years is ~72 of them. This buys nothing statistically — the z-test already
+// accounts for sample size — it only stops the family from being skipped
+// outright before it can ever be tested. The out-of-sample stage still has to
+// pass, and with monthly data that takes real calendar time to accumulate.
+const MIN_SAMPLE_MONTHLY = 8;
 
 // Acklam's rational approximation to the inverse normal CDF. Needed because
 // the Bonferroni bar depends on the family size, which is only known at
@@ -119,10 +125,133 @@ export function dayOfWeekSamples(bars, weekday) {
   return { on, off };
 }
 
+// Family 3 — turn-of-month, conditioned on how the month has actually gone.
+// User's framing: "a drop or rise in the last few days of the month if an
+// asset was bullish or bearish all month."
+//
+// The conditioning is the interesting part and also the risk: splitting each
+// month into bullish/bearish doubles the hypothesis count, so both variants
+// are counted in the family size rather than quietly tested for free.
+//
+// `trend` is judged on the month up to the start of the closing window, never
+// including it — otherwise the condition would be partly made of the very
+// returns being predicted, which guarantees a spurious result.
+export function turnOfMonthSamples(bars, lastNDays, wantBullish) {
+  const byMonth = {};
+  for (const b of bars) {
+    if (!b.close) continue;
+    (byMonth[b.date.slice(0, 7)] ??= []).push(b);
+  }
+  const inWindow = [], outWindow = [];
+  for (const month of Object.keys(byMonth).sort()) {
+    const days = byMonth[month];
+    if (days.length < lastNDays + 5) continue;   // need a real month, not a stub
+    const cut = days.length - lastNDays;
+    const head = days.slice(0, cut);
+    const tail = days.slice(cut);
+    const monthTrend = (head[head.length - 1].close / head[0].close - 1) * 100;
+    if (!Number.isFinite(monthTrend)) continue;
+    if (wantBullish ? monthTrend <= 0 : monthTrend >= 0) continue;
+    const push = (arr, seq, prevClose) => {
+      let prev = prevClose;
+      for (const d of seq) {
+        if (prev && d.close && prev > 0) {
+          const ret = (d.close / prev - 1) * 100;
+          if (Number.isFinite(ret) && Math.abs(ret) <= 50) arr.push({ date: d.date, value: ret });
+        }
+        prev = d.close;
+      }
+    };
+    push(inWindow, tail, head[head.length - 1].close);
+    push(outWindow, head.slice(1), head[0].close);
+  }
+  return { a: inWindow, b: outWindow };
+}
+
+// Family 4 — mean reversion after a run. User's framing: "crypto will usually
+// have at least one bull month after two bear ones and vice versa."
+//
+// Tests exactly that: after `runLength` consecutive months in one direction,
+// is the NEXT month's return different from an unconditional month? Monthly
+// returns are built from the first and last close actually present in each
+// month, so a missing day never fabricates a month boundary.
+export function monthlyReturns(bars) {
+  const byMonth = {};
+  for (const b of bars) {
+    if (!b.close) continue;
+    (byMonth[b.date.slice(0, 7)] ??= []).push(b);
+  }
+  return Object.keys(byMonth).sort().map((m) => {
+    const days = byMonth[m];
+    const first = days[0].close, last = days[days.length - 1].close;
+    return { month: m, days: days.length, value: first > 0 ? (last / first - 1) * 100 : null };
+  }).filter((r) => r.value != null && Number.isFinite(r.value) && Math.abs(r.value) <= 200 && r.days >= 15);
+}
+
+export function runReversalSamples(bars, runLength, wantDownRun) {
+  const months = monthlyReturns(bars);
+  const after = [], baseline = [];
+  for (let i = 0; i < months.length; i++) {
+    if (i >= runLength) {
+      const run = months.slice(i - runLength, i);
+      const matches = run.every((m) => (wantDownRun ? m.value < 0 : m.value > 0));
+      if (matches) {
+        after.push({ date: months[i].month, value: months[i].value });
+        continue;
+      }
+    }
+    baseline.push({ date: months[i].month, value: months[i].value });
+  }
+  return { a: after, b: baseline };
+}
+
+// Equal-weight monthly return series for a whole asset class.
+//
+// The run-reversal question ("does crypto bounce after two bear months?") is
+// asked at monthly resolution, which is inherently sample-starved: six years is
+// ~72 months, and "after two down months" might occur a dozen times. The
+// tempting fix — pool 83 coins to get 83x the observations — is invalid here,
+// because crypto monthly returns are near-perfectly correlated: those are not
+// 83 independent observations of a month, they are one month observed 83 times.
+// That is the same correlation trap horizonEstimate and the class-skill gate
+// already guard against elsewhere in this engine.
+//
+// So symbols are averaged WITHIN each month first, making the month the unit of
+// observation and n the honest count of months. This produces fewer, real
+// samples instead of many fake ones, and it means these families will often
+// return nothing — which is a valid answer, not a failure.
+export function classMonthlySeries(bySymbol, assetClass) {
+  const perMonth = {};
+  for (const [, rec] of Object.entries(bySymbol)) {
+    if (rec.assetClass !== assetClass) continue;
+    for (const m of monthlyReturns(rec.bars)) {
+      (perMonth[m.month] ??= []).push(m.value);
+    }
+  }
+  return Object.keys(perMonth).sort()
+    .filter((m) => perMonth[m].length >= 3)
+    .map((m) => ({ month: m, value: perMonth[m].reduce((a, b) => a + b, 0) / perMonth[m].length }));
+}
+
+export function runReversalFromSeries(series, runLength, wantDownRun) {
+  const after = [], baseline = [];
+  for (let i = 0; i < series.length; i++) {
+    if (i >= runLength) {
+      const run = series.slice(i - runLength, i);
+      if (run.every((m) => (wantDownRun ? m.value < 0 : m.value > 0))) {
+        after.push({ date: series[i].month, value: series[i].value });
+        continue;
+      }
+    }
+    baseline.push({ date: series[i].month, value: series[i].value });
+  }
+  return { a: after, b: baseline };
+}
+
 // Runs the discovery-time guards: family-corrected pooled bar, then the
 // chronological split-half check. Returns null unless both pass.
-export function guardedDiscovery(sampleA, sampleB, zBar) {
-  if (sampleA.length < MIN_SAMPLE || sampleB.length < MIN_SAMPLE) return null;
+export function guardedDiscovery(sampleA, sampleB, zBar, minSample = MIN_SAMPLE) {
+  if (sampleA.length < minSample || sampleB.length < minSample) return null;
   const pooled = twoSampleZTest(sampleA.map((p) => p.value), sampleB.map((p) => p.value));
   if (pooled.z == null || Math.abs(pooled.z) < zBar) return null;
 
@@ -154,7 +283,8 @@ export function guardedDiscovery(sampleA, sampleB, zBar) {
 // the small |z| floor just excludes pure coin-flips.
 export function evaluateOutOfSample(entry, samples) {
   const { a, b } = samples;
-  if (!a || !b || a.length < MIN_OOS_SAMPLE || b.length < MIN_OOS_SAMPLE) {
+  const floor = samples.minSample != null ? Math.min(samples.minSample, MIN_OOS_SAMPLE) : MIN_OOS_SAMPLE;
+  if (!a || !b || a.length < floor || b.length < floor) {
     return { verdict: 'insufficient', n: (a ? a.length : 0) + (b ? b.length : 0) };
   }
   const r = twoSampleZTest(a.map((p) => p.value), b.map((p) => p.value));
@@ -178,6 +308,77 @@ export function nextStatus(current, verdict) {
   if (verdict === 'contradicted') return 'decayed';
   if (verdict === 'held') return 'confirmed';
   return current;
+}
+
+// ----------------------------- LIVE TRIGGERS -------------------------------
+
+// A confirmed pattern is only useful if you are told when its precondition is
+// actually live. This checks the CURRENT state of the archive against each
+// confirmed finding and reports the ones whose setup is in place right now.
+//
+// Confirmed only, never provisional: a provisional finding has been tested
+// solely on the data that produced it, and firing alerts off those would
+// reintroduce exactly the noise the lifecycle exists to prevent.
+export function evaluateLiveTriggers(registry, bySymbol, nowIso) {
+  const today = nowIso.slice(0, 10);
+  const out = [];
+  for (const entry of registry) {
+    if (entry.status !== 'confirmed') continue;
+    const parts = entry.hypothesis.split('|');
+    const family = parts[0];
+
+    if (family === 'run-reversal') {
+      const [, cls, rl, dir] = parts;
+      const series = classMonthlySeries(bySymbol, cls);
+      const need = Number(rl);
+      if (series.length < need) continue;
+      // The run must be COMPLETE and immediately prior — the last `need`
+      // finished months all in the same direction.
+      const run = series.slice(-need);
+      const matches = run.every((m) => (dir === 'down' ? m.value < 0 : m.value > 0));
+      if (!matches) continue;
+      out.push({
+        entry, kind: 'run-reversal',
+        detail: `${cls} has just closed ${need} consecutive ${dir} months (${run.map((m) => `${m.month} ${m.value >= 0 ? '+' : ''}${m.value.toFixed(1)}%`).join(', ')})`,
+        expectation: `after this setup the next month has averaged ${entry.discovery_effect >= 0 ? '+' : ''}${entry.discovery_effect.toFixed(2)}% versus other months`
+      });
+      continue;
+    }
+
+    if (family === 'turn-of-month') {
+      const [, symbol, win, trend] = parts;
+      const rec = bySymbol[symbol];
+      if (!rec || !rec.bars.length) continue;
+      const month = today.slice(0, 7);
+      const days = rec.bars.filter((b) => b.date.slice(0, 7) === month);
+      if (days.length < Number(win) + 5) continue;
+      // Only interesting while the closing window is approaching or open.
+      const daysLeftGuess = 30 - Number(today.slice(8, 10));
+      if (daysLeftGuess > Number(win) + 2) continue;
+      const head = days.slice(0, Math.max(1, days.length - Number(win)));
+      const monthTrend = (head[head.length - 1].close / head[0].close - 1) * 100;
+      const isBull = monthTrend > 0;
+      if ((trend === 'bull') !== isBull) continue;
+      out.push({
+        entry, kind: 'turn-of-month',
+        detail: `${symbol} is ${isBull ? 'up' : 'down'} ${monthTrend.toFixed(1)}% so far this month and its final ${win} sessions are starting`,
+        expectation: `in this setup those closing sessions have averaged ${entry.discovery_effect >= 0 ? '+' : ''}${entry.discovery_effect.toFixed(3)}%/day versus the rest of the month`
+      });
+      continue;
+    }
+
+    if (family === 'day-of-week') {
+      const [, symbol, wd] = parts;
+      if (new Date(`${today}T00:00:00Z`).getUTCDay() !== Number(wd)) continue;
+      const name = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][Number(wd)];
+      out.push({
+        entry, kind: 'day-of-week',
+        detail: `today is ${name}, ${symbol}'s confirmed ${entry.discovery_effect >= 0 ? 'strong' : 'weak'} weekday`,
+        expectation: `${name}s have averaged ${entry.discovery_effect >= 0 ? '+' : ''}${entry.discovery_effect.toFixed(3)}% versus other days`
+      });
+    }
+  }
+  return out;
 }
 
 async function loadRegistry() {
@@ -230,7 +431,23 @@ function groupBars(rows) {
 
 // Builds the two samples for a hypothesis, optionally restricted to bars after
 // `sinceDate` — which is exactly how an out-of-sample re-test is expressed.
-function samplesFor(family, param, entry, bySymbol, sinceDate) {
+function samplesFor(entry, bySymbol, sinceDate) {
+  const parts = entry.hypothesis.split('|');
+  const family = parts[0];
+
+  // Class-level family: rebuild the composite from bars after `sinceDate`.
+  if (family === 'run-reversal') {
+    const [, cls, rl, dir] = parts;
+    const sliced = {};
+    for (const [sym, rec] of Object.entries(bySymbol)) {
+      if (rec.assetClass !== cls) continue;
+      sliced[sym] = { assetClass: rec.assetClass, bars: sinceDate ? rec.bars.filter((b) => b.date > sinceDate) : rec.bars };
+    }
+    const series = classMonthlySeries(sliced, cls);
+    if (series.length < 3) return null;
+    return { ...runReversalFromSeries(series, Number(rl), dir === 'down'), minSample: MIN_SAMPLE_MONTHLY };
+  }
+
   const rec = bySymbol[entry.symbol];
   if (!rec) return null;
   const bars = sinceDate ? rec.bars.filter((b) => b.date > sinceDate) : rec.bars;
@@ -240,8 +457,11 @@ function samplesFor(family, param, entry, bySymbol, sinceDate) {
     return { a: overnight, b: intraday };
   }
   if (family === 'day-of-week') {
-    const { on, off } = dayOfWeekSamples(bars, Number(param));
+    const { on, off } = dayOfWeekSamples(bars, Number(parts[2]));
     return { a: on, b: off };
+  }
+  if (family === 'turn-of-month') {
+    return turnOfMonthSamples(bars, Number(parts[2]), parts[3] === 'bull');
   }
   return null;
 }
@@ -294,6 +514,52 @@ async function main() {
       }
     }
   }
+  // Family 3 — turn-of-month, split by how the month had gone up to that point.
+  // Two windows x two trend conditions x every symbol, all counted in the bar.
+  const tomWindows = [3, 5];
+  const tomZBar = familyZBar(dowSymbols.length * tomWindows.length * 2);
+  console.log(`family turn-of-month: ${dowSymbols.length * tomWindows.length * 2} hypotheses, corrected |z| bar = ${tomZBar.toFixed(3)}`);
+  for (const [symbol, v] of dowSymbols) {
+    for (const win of tomWindows) {
+      for (const bullish of [true, false]) {
+        const { a, b } = turnOfMonthSamples(v.bars, win, bullish);
+        const res = guardedDiscovery(a, b, tomZBar);
+        if (res) {
+          candidates.push({
+            hypothesis: `turn-of-month|${symbol}|${win}|${bullish ? 'bull' : 'bear'}`, family: 'turn-of-month',
+            assetClass: v.assetClass, symbol, horizonDays: win,
+            testsInFamily: dowSymbols.length * tomWindows.length * 2, ...res
+          });
+        }
+      }
+    }
+  }
+
+  // Family 4 — reversal after a directional run, at CLASS level (see
+  // classMonthlySeries for why this is not per-symbol).
+  const runLengths = [2, 3];
+  const classes = ['crypto', 'stock'];
+  const runZBar = familyZBar(classes.length * runLengths.length * 2);
+  console.log(`family run-reversal: ${classes.length * runLengths.length * 2} hypotheses, corrected |z| bar = ${runZBar.toFixed(3)}`);
+  for (const cls of classes) {
+    const series = classMonthlySeries(bySymbol, cls);
+    console.log(`  ${cls}: ${series.length} months of composite history`);
+    for (const rl of runLengths) {
+      for (const down of [true, false]) {
+        const { a, b } = runReversalFromSeries(series, rl, down);
+        const res = guardedDiscovery(a, b, runZBar, MIN_SAMPLE_MONTHLY);
+        console.log(`  ${cls} after ${rl} ${down ? 'down' : 'up'} months: n_after=${a.length}, n_base=${b.length}${res ? ` -> VALIDATED z=${res.z.toFixed(2)}` : ''}`);
+        if (res) {
+          candidates.push({
+            hypothesis: `run-reversal|${cls}|${rl}|${down ? 'down' : 'up'}`, family: 'run-reversal',
+            assetClass: cls, symbol: null, horizonDays: 30,
+            testsInFamily: classes.length * runLengths.length * 2, ...res
+          });
+        }
+      }
+    }
+  }
+
   console.log(`discovery: ${candidates.length} candidate(s) cleared BOTH the family-corrected bar and the split-half check`);
 
   const existing = new Set((await loadRegistry()).map((r) => r.hypothesis));
@@ -311,8 +577,7 @@ async function main() {
   const registry = await loadRegistry();
   const transitions = [];
   for (const entry of registry) {
-    const [family, , param] = entry.hypothesis.split('|');
-    const samples = samplesFor(family, param, entry, bySymbol, entry.discovered_at.slice(0, 10));
+    const samples = samplesFor(entry, bySymbol, entry.discovered_at.slice(0, 10));
     if (!samples) continue;
     const oos = evaluateOutOfSample(entry, samples);
     const next = nextStatus(entry.status, oos.verdict);
@@ -349,8 +614,23 @@ async function main() {
     }
   }
 
+  // ---- live triggers: tell the user the setup is ON, ahead of the move ----
+  const finalRegistry = await loadRegistry();
+  const triggers = evaluateLiveTriggers(finalRegistry, bySymbol, nowIso);
+  for (const t of triggers) {
+    const e = t.entry;
+    await notify(
+      `Setup live: ${e.symbol || e.asset_class} ${t.kind}`,
+      `${t.detail}. Historically, ${t.expectation} `
+      + `(discovered ${e.discovered_at.slice(0, 10)}, z=${e.discovery_z.toFixed(2)}, n=${e.discovery_n}; `
+      + `confirmed out-of-sample on ${e.oos_n} later observations). `
+      + `This is a historical tendency, not a forecast — size it against your costs.`
+    );
+  }
+  console.log(`live triggers fired: ${triggers.length}`);
+
   const counts = {};
-  for (const r of await loadRegistry()) counts[r.status] = (counts[r.status] || 0) + 1;
+  for (const r of finalRegistry) counts[r.status] = (counts[r.status] || 0) + 1;
   console.log(`registry status: ${JSON.stringify(counts)} | ${transitions.length} transition(s) notified this run`);
 }
 
