@@ -1824,6 +1824,15 @@ check('too few usable bars: no row at all rather than a noisy guess', !arch.dail
 // The HYPE case, live: CoinGecko's fallback path returns close only.
 const noHL = arch.dailyRangeStatsFromRows(Array.from({ length: 40 }, (_, i) => ({ symbol: 'HYPE', asset_class: 'crypto', date: '2026-01-' + String(i + 1).padStart(2, '0'), close: 100, high: null, low: null })));
 check('bars carrying no high/low produce no row, never a zero-width "never moves" range', !noHL.HYPE);
+// Both cases below turned up on the first live run and would have broken things.
+// A stablecoin holding its peg has no tradeable range.
+const peg = arch.dailyRangeStatsFromRows(mkBars('USDX', Array(40).fill(0.08)));
+check('a stablecoin-like 0.08% range is excluded, not published as a yardstick', !peg.USDX);
+// Sub-cent tokens: median rounds to 0 through float precision while p80 is
+// large. PEPE/SHIB/HTX/SKY were all live in exactly this state.
+const subcent = arch.dailyRangeStatsFromRows(mkBars('PEPE', [...Array(32).fill(0), ...Array(8).fill(15)]));
+check('a sub-cent token whose median rounds to 0 is excluded even though its p80 is 15%', !subcent.PEPE, JSON.stringify(subcent.PEPE));
+check('an asset just above the floor is still published', arch.dailyRangeStatsFromRows(mkBars('FFF', Array(40).fill(0.3))).FFF !== undefined);
 
 console.log('\n== updateSessionExtremes: session high/low tracked off the Worker cron ==');
 let sess = mod.updateSessionExtremes(null, { crypto: { BTC: { price: 100 } }, stocks: {} }, '2026-08-30T00:05:00Z');
@@ -1863,6 +1872,12 @@ const noConfirm = mod.dayRangeSignal('BTC', 107, { open: 100, high: 107, low: 99
 check('stretched with nothing confirming it does NOT fire — same never-fire-alone rule as every other technique', noConfirm.state === 'extended-up' && noConfirm.entry === null);
 check('an asset with no measured range abstains entirely', mod.dayRangeSignal('ZZZ', 100, { open: 100, high: 101, low: 99 }, stats, {}) === null);
 check('too few samples abstains', mod.dayRangeSignal('X', 100, { open: 100, high: 101, low: 99 }, { X: { medianPct: 4, p80Pct: 6, samples: 5 } }, {}) === null);
+// Second line of defence. With a zero median, `bar` used to fall back to 0 and
+// EVERY positive move read as extended-up — a false-alert generator. HTX, SKY
+// and UST2Y were all live in that state.
+check('a zero median range abstains rather than making every move look extended', mod.dayRangeSignal('HTX', 101, { open: 100, high: 101, low: 100 }, { HTX: { medianPct: 0, p80Pct: 0, samples: 90 } }, { rsi: 75 }) === null);
+check('a zero median with a large p80 (the sub-cent precision case) also abstains', mod.dayRangeSignal('PEPE', 101, { open: 100, high: 101, low: 100 }, { PEPE: { medianPct: 0, p80Pct: 16.7, samples: 90 } }, { rsi: 75 }) === null);
+check('a peg-tight median abstains', mod.dayRangeSignal('GHO', 100.5, { open: 100, high: 100.5, low: 100 }, { GHO: { medianPct: 0.09, p80Pct: 0.26, samples: 90 } }, { rsi: 75 }) === null);
 check('no session data yet abstains', mod.dayRangeSignal('BTC', 100, null, stats, {}) === null);
 
 console.log('\n== dayTradingUniverse / indexBoardRows ==');

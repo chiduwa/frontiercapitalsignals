@@ -1441,6 +1441,21 @@ const DAILY_RANGE_MIN_SAMPLES = 20;
 // move. Treated as missing rather than clamped — same discipline (and the same
 // reasoning) as barsRowsToReturnsBySymbol's return filter above.
 const MAX_PLAUSIBLE_DAILY_RANGE_PCT = 300;
+// Below this, a "median daily range" is not a tradeable yardstick and dividing
+// by it produces nonsense. Two real cases turned up live on the first run:
+//
+//   * stablecoins (YLDS 0.05%, USDGO 0.07%, GHO 0.09%, BFUSD 0.11%) — correct
+//     data, but there is no day-trade in an asset that holds a peg.
+//   * sub-cent tokens (PEPE, SHIB, HTX, SKY) — median 0.00% while p80 was 10%
+//     and 16.7%. That gap is the tell: at a price like $0.00001 the stored
+//     high-low rounds to zero on most days and only registers on a big move,
+//     so the median is a float-precision artifact, not a measurement. These
+//     assets genuinely do move; this archive just cannot represent how much.
+//
+// Both are excluded here rather than downstream, so no consumer has to carry a
+// divide-by-zero guard. Abstaining beats reporting a range we cannot stand
+// behind — the same rule the rest of the engine follows.
+const MIN_MEANINGFUL_MEDIAN_RANGE_PCT = 0.25;
 
 export function quantile(sorted, q) {
   if (!sorted || !sorted.length) return null;
@@ -1470,9 +1485,11 @@ export function dailyRangeStatsFromRows(rows, lookbackDays = DAILY_RANGE_LOOKBAC
     const recent = v.rows.sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-lookbackDays);
     if (recent.length < DAILY_RANGE_MIN_SAMPLES) continue;
     const sorted = recent.map((x) => x.pct).sort((a, b) => a - b);
+    const median = quantile(sorted, 0.5);
+    if (!Number.isFinite(median) || median < MIN_MEANINGFUL_MEDIAN_RANGE_PCT) continue;
     out[symbol] = {
       assetClass: v.assetClass,
-      medianRangePct: quantile(sorted, 0.5),
+      medianRangePct: median,
       p80RangePct: quantile(sorted, 0.8),
       samples: sorted.length
     };

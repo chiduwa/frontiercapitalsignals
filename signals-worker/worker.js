@@ -5048,7 +5048,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           +'<span class="dr-sym">'+esc(sym)+'</span>'
           +'<span class="dr-move" title="Move from this session&#39;s first observed price">'+moveTxt+'</span>'
           +'<span class="dr-mult" title="Today&#39;s directional move divided by this asset&#39;s median daily high&minus;low range">'
-            +(x.moveInMedians>=0?'+':'')+x.moveInMedians.toFixed(2)+'x</span>'
+            +(x.moveInMedians!=null?(x.moveInMedians>=0?'+':'')+x.moveInMedians.toFixed(2)+'x':'—')+'</span>'
           +'<span class="dr-med" title="Median daily high&minus;low over '+x.samples+' days, and what that is worth at the current price">'
             +medTxt+' ('+fmtPrice(x.medianAbs)+')</span>'
           +'<span class="dr-used" title="How much of a normal day&#39;s full range today has already travelled">'
@@ -5428,6 +5428,7 @@ export async function buildLivePrices(env, cached) {
 const DAY_RANGE_MIN_SAMPLES = 20;
 const DAY_RANGE_POS_BAR = 0.75;      // must also be sitting near the day's extreme
 const DAY_RANGE_QUIET_FRACTION = 0.4; // below 40% of a normal day = nothing to fade yet
+const DAY_RANGE_MIN_MEDIAN_PCT = 0.25;  // mirrors MIN_MEANINGFUL_MEDIAN_RANGE_PCT in archive.mjs
 
 // Confirmation, so a stretched reading never fires alone — the same discipline
 // every other technique in this engine follows. Each is independently
@@ -5455,6 +5456,12 @@ export function dayRangeConfirmations(row, side) {
 export function dayRangeSignal(symbol, price, session, rangeStats, row) {
   const stats = rangeStats && rangeStats[symbol];
   if (!stats || !Number.isFinite(stats.medianPct) || stats.samples < DAY_RANGE_MIN_SAMPLES) return null;
+  // A near-zero median is never a usable denominator: it makes every move look
+  // infinitely extended and every division produce null or Infinity.
+  // computeDailyRangeStats already filters these out at the source (stablecoins
+  // and sub-cent precision artifacts); this is the second line of defence so a
+  // stale or hand-edited row cannot turn into a stream of false entry alerts.
+  if (stats.medianPct < DAY_RANGE_MIN_MEDIAN_PCT) return null;
   if (!session || !Number.isFinite(session.open) || !session.open) return null;
   if (!Number.isFinite(price) || price <= 0) return null;
 
