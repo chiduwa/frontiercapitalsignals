@@ -1135,3 +1135,16 @@ export async function loadSrBreakStats(env) {
 }
 
 export { MIN_RELIABILITY_SAMPLES };
+
+// Median/p80 daily range per symbol (asset_daily_range, written daily by
+// computeDailyRangeStats/archive.mjs). This is the yardstick the day-trading
+// range-exhaustion read divides by — see dayRangeSignal in worker.js. Symbols
+// whose bars carry no high/low simply have no row and are abstained on.
+export async function loadDailyRangeStats(env) {
+  const rows = await d1(env, 'SELECT symbol, median_range_pct, p80_range_pct, samples FROM asset_daily_range');
+  const out = {};
+  for (const r of rows) {
+    out[r.symbol] = { medianPct: r.median_range_pct, p80Pct: r.p80_range_pct, samples: r.samples };
+  }
+  return out;
+}

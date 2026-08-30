@@ -1802,6 +1802,78 @@ check('deep-record response is unchanged (0.8, n=100 -> 1.5 clamped)', Math.abs(
 check('at a measured 0.384 baseline, 0.384 accuracy is the new neutral point', Math.abs(mod.reliabilityWeight(0.384, 50, 0.384) - 1) < 1e-9);
 check('a 44% technique is rewarded above neutral where it used to be penalised', mod.reliabilityWeight(0.44, 50, 0.384) > 1 && mod.reliabilityWeight(0.44, 50) < 1);
 
+console.log('\n== dailyRangeStatsFromRows: the median daily high-low yardstick ==');
+const arch = await import('./scripts/archive.mjs');
+const mkBars = (symbol, ranges) => ranges.map((r, i) => ({
+  symbol, asset_class: 'crypto', date: '2026-0' + (1 + Math.floor(i / 28)) + '-' + String((i % 28) + 1).padStart(2, '0'),
+  close: 100, high: 100 + r / 2, low: 100 - r / 2
+}));
+const steady = arch.dailyRangeStatsFromRows(mkBars('AAA', Array(40).fill(4)));
+check('a steady 4%-range asset measures a 4% median', Math.abs(steady.AAA.medianRangePct - 4) < 1e-9, JSON.stringify(steady.AAA));
+check('samples counts the usable bars', steady.AAA.samples === 40);
+// One corrupt bar must not move the answer -- this archive has a documented
+// stuck-price-then-jump defect, which is exactly why median beats mean here.
+const withGlitch = arch.dailyRangeStatsFromRows(mkBars('BBB', [...Array(39).fill(4), 250]));
+check('a single 250% glitch bar leaves the median at 4% (a mean would not survive it)', Math.abs(withGlitch.BBB.medianRangePct - 4) < 1e-9, JSON.stringify(withGlitch.BBB));
+const implausible = arch.dailyRangeStatsFromRows(mkBars('CCC', [...Array(39).fill(4), 900]));
+check('a range over the plausibility cap is dropped as missing, never clamped into the data', implausible.CCC.samples === 39);
+check('p80 sits at or above the median by construction', steady.AAA.p80RangePct >= steady.AAA.medianRangePct);
+const spiky = arch.dailyRangeStatsFromRows(mkBars('DDD', [...Array(32).fill(2), ...Array(8).fill(20)]));
+check('an asset that usually grinds but occasionally explodes has p80 well above its median', spiky.DDD.p80RangePct > spiky.DDD.medianRangePct * 2, JSON.stringify(spiky.DDD));
+check('too few usable bars: no row at all rather than a noisy guess', !arch.dailyRangeStatsFromRows(mkBars('EEE', Array(10).fill(4))).EEE);
+// The HYPE case, live: CoinGecko's fallback path returns close only.
+const noHL = arch.dailyRangeStatsFromRows(Array.from({ length: 40 }, (_, i) => ({ symbol: 'HYPE', asset_class: 'crypto', date: '2026-01-' + String(i + 1).padStart(2, '0'), close: 100, high: null, low: null })));
+check('bars carrying no high/low produce no row, never a zero-width "never moves" range', !noHL.HYPE);
+
+console.log('\n== updateSessionExtremes: session high/low tracked off the Worker cron ==');
+let sess = mod.updateSessionExtremes(null, { crypto: { BTC: { price: 100 } }, stocks: {} }, '2026-08-30T00:05:00Z');
+check('first tick of a session seeds open, high and low together', sess.bySymbol.BTC.open === 100 && sess.bySymbol.BTC.high === 100 && sess.bySymbol.BTC.low === 100);
+sess = mod.updateSessionExtremes(sess, { crypto: { BTC: { price: 108 } } }, '2026-08-30T04:00:00Z');
+sess = mod.updateSessionExtremes(sess, { crypto: { BTC: { price: 96 } } }, '2026-08-30T08:00:00Z');
+check('high and low both extend as the session runs', sess.bySymbol.BTC.high === 108 && sess.bySymbol.BTC.low === 96);
+check('open is pinned to the first tick, not the latest', sess.bySymbol.BTC.open === 100);
+const rolled = mod.updateSessionExtremes(sess, { crypto: { BTC: { price: 96 } } }, '2026-08-31T00:02:00Z');
+check('a new UTC date rolls the session rather than carrying yesterday forward', rolled.date === '2026-08-31' && rolled.bySymbol.BTC.open === 96 && rolled.bySymbol.BTC.high === 96);
+check('a non-numeric tick is ignored rather than poisoning the extremes', mod.updateSessionExtremes(sess, { crypto: { BTC: { price: null } } }, '2026-08-30T09:00:00Z').bySymbol.BTC.high === 108);
+// The live price fetch routinely misses symbols (rate limits, thin ids, Yahoo
+// hiccups). A tick that omits a symbol must not reset the day's extremes.
+const partial = mod.updateSessionExtremes(sess, { crypto: { ETH: { price: 50 } } }, '2026-08-30T10:00:00Z');
+check('a symbol missing from this tick keeps its accumulated session extremes', partial.bySymbol.BTC && partial.bySymbol.BTC.high === 108 && partial.bySymbol.BTC.low === 96, JSON.stringify(partial.bySymbol.BTC));
+check('and a newly-seen symbol still gets seeded', partial.bySymbol.ETH.open === 50);
+
+console.log('\n== dayRangeSignal: has it moved enough today to fade? ==');
+const stats = { BTC: { medianPct: 4, p80Pct: 6, samples: 90 } };
+const quiet = mod.dayRangeSignal('BTC', 100.5, { open: 100, high: 101, low: 99.8 }, stats, {});
+check('a normal-sized move is not an entry', quiet.entry === null && quiet.state !== 'extended-up');
+check('median range is reported in price terms at the current price, for sizing', Math.abs(quiet.medianAbs - 100.5 * 0.04) < 1e-9);
+// +7% with a 6% p80 bar, sitting at the top of the day's range.
+const stretched = mod.dayRangeSignal('BTC', 107, { open: 100, high: 107, low: 99 }, stats, { rsi: 78, volRatio: 2.1 });
+check('a move past p80 while pinned near the day high reads as extended-up', stretched.state === 'extended-up');
+check('and yields a candidate SHORT', stretched.entry && stretched.entry.side === 'short', JSON.stringify(stretched.entry));
+check('carrying its confirmations, not just a bare call', stretched.entry.reasons.length >= 2);
+check('never marked proven — it has no scored track record', stretched.entry.proven === false);
+check('reports the move as a multiple of a normal day', Math.abs(stretched.moveInMedians - 1.75) < 1e-9);
+// Same stretch, but the price has already come back off the high.
+const faded = mod.dayRangeSignal('BTC', 103, { open: 100, high: 107, low: 99 }, stats, { rsi: 78, volRatio: 2.1 });
+check('extended but no longer near the extreme: no entry (the fade already happened)', faded.entry === null);
+const down = mod.dayRangeSignal('BTC', 93, { open: 100, high: 101, low: 93 }, stats, { rsi: 22, volRatio: 1.8 });
+check('the symmetric down case yields a candidate LONG', down.state === 'extended-down' && down.entry.side === 'long', JSON.stringify(down.entry));
+// Confirmation discipline: stretched alone is not enough.
+const noConfirm = mod.dayRangeSignal('BTC', 107, { open: 100, high: 107, low: 99 }, stats, { rsi: 55, volRatio: 0.9 });
+check('stretched with nothing confirming it does NOT fire — same never-fire-alone rule as every other technique', noConfirm.state === 'extended-up' && noConfirm.entry === null);
+check('an asset with no measured range abstains entirely', mod.dayRangeSignal('ZZZ', 100, { open: 100, high: 101, low: 99 }, stats, {}) === null);
+check('too few samples abstains', mod.dayRangeSignal('X', 100, { open: 100, high: 101, low: 99 }, { X: { medianPct: 4, p80Pct: 6, samples: 5 } }, {}) === null);
+check('no session data yet abstains', mod.dayRangeSignal('BTC', 100, null, stats, {}) === null);
+
+console.log('\n== dayTradingUniverse / indexBoardRows ==');
+const dtPayload = { highAccuracy: [{ symbol: 'AAVE' }], crypto: { breakout: [{ symbol: 'BTC', rsi: 70 }] }, stocks: { breakout: [{ symbol: 'AAPL', rsi: 40 }] } };
+const uni = mod.dayTradingUniverse(dtPayload);
+check('covers the always-tracked favorites', uni.has('BTC') && uni.has('HYPE'));
+check('plus anything with a proven track record', uni.has('AAVE'));
+check('and nothing else', !uni.has('DOGE'));
+const idx = mod.indexBoardRows(dtPayload);
+check('board rows are indexed across both asset classes for confirmations', idx.BTC.rsi === 70 && idx.AAPL.rsi === 40);
+
 console.log('\n== mergeLivePrices: fresh price layer over a slow model layer ==');
 const basePayload = {
   generated_at: '2026-08-28T22:36:16Z',

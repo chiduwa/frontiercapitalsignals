@@ -1412,3 +1412,98 @@ export async function upsertHourlyBars(env, rows) {
   }
   return attempted;
 }
+
+// ---------------------------------------------------------------------------
+// Median daily range — the day-trading yardstick (user-requested 2026-08-30)
+// ---------------------------------------------------------------------------
+
+// How wide a normal day is for this asset, measured as (high - low) / close.
+// This is the denominator behind "has it already moved enough today?": a 3%
+// move means nothing for an asset that routinely travels 8% in a session, and
+// is a big day for one that usually travels 1.5%.
+//
+// Median and p80 rather than mean and stdev, for the same reason the sector
+// composites drop implausible returns: this archive has a real, recurring
+// stuck-price-then-jump defect (UNI-USD, CC, GRAM, WLD, AAVE all confirmed) and
+// one bad bar would move a mean permanently while leaving a median untouched.
+// p80 comes from the asset's own realized distribution too, so "extended" can
+// be defined against what this asset actually does rather than an arbitrary
+// multiple of its median.
+//
+// Bars with no high/low are skipped entirely, not backfilled with close: the
+// CoinGecko fallback path returns close only (HYPE is currently in exactly this
+// state), and a zero-width "range" would read as an asset that never moves,
+// which is worse than having no answer. A symbol with too few usable bars gets
+// no row at all and every consumer abstains for it.
+const DAILY_RANGE_LOOKBACK_DAYS = 90;
+const DAILY_RANGE_MIN_SAMPLES = 20;
+// A single session covering more than this is a data artifact, not a market
+// move. Treated as missing rather than clamped — same discipline (and the same
+// reasoning) as barsRowsToReturnsBySymbol's return filter above.
+const MAX_PLAUSIBLE_DAILY_RANGE_PCT = 300;
+
+export function quantile(sorted, q) {
+  if (!sorted || !sorted.length) return null;
+  if (sorted.length === 1) return sorted[0];
+  const pos = (sorted.length - 1) * q;
+  const lo = Math.floor(pos), hi = Math.ceil(pos);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+}
+
+// rows: the shared (symbol, asset_class, date, close, high, low) read that
+// daily-refresh.mjs already performs for lead/lag and support/resistance, so
+// this adds no D1 read cost of its own.
+export function dailyRangeStatsFromRows(rows, lookbackDays = DAILY_RANGE_LOOKBACK_DAYS) {
+  const bySymbol = {};
+  for (const r of rows || []) {
+    if (r.high == null || r.low == null || !r.close) continue;
+    if (r.high < r.low) continue;                  // corrupt bar, not a range
+    const pct = ((r.high - r.low) / r.close) * 100;
+    if (!Number.isFinite(pct) || pct < 0 || pct > MAX_PLAUSIBLE_DAILY_RANGE_PCT) continue;
+    (bySymbol[r.symbol] ??= { assetClass: r.asset_class, rows: [] }).rows.push({ date: r.date, pct });
+  }
+  const out = {};
+  for (const [symbol, v] of Object.entries(bySymbol)) {
+    // Most recent `lookbackDays` only: an asset's typical daily travel is a
+    // property of its current volatility regime, not of its whole history.
+    const recent = v.rows.sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-lookbackDays);
+    if (recent.length < DAILY_RANGE_MIN_SAMPLES) continue;
+    const sorted = recent.map((x) => x.pct).sort((a, b) => a - b);
+    out[symbol] = {
+      assetClass: v.assetClass,
+      medianRangePct: quantile(sorted, 0.5),
+      p80RangePct: quantile(sorted, 0.8),
+      samples: sorted.length
+    };
+  }
+  return out;
+}
+
+export async function computeDailyRangeStats(env, preloadedRows, nowIso) {
+  const rows = preloadedRows || await d1(env, 'SELECT symbol, asset_class, date, close, high, low FROM asset_daily_bars ORDER BY symbol, date');
+  const stats = dailyRangeStatsFromRows(rows);
+  const entries = Object.entries(stats);
+  if (!entries.length) return 0;
+  // 5 columns x 12 rows = 60 bound parameters, same ceiling discipline as
+  // replaceSrLevels and upsertDailyBars above.
+  const CH = 12;
+  let written = 0;
+  for (let i = 0; i < entries.length; i += CH) {
+    const batch = entries.slice(i, i + CH);
+    const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?)').join(',');
+    const params = batch.flatMap(([symbol, s]) => [symbol, s.assetClass, s.medianRangePct, s.p80RangePct, s.samples, nowIso]);
+    await d1(env, `
+      INSERT INTO asset_daily_range (symbol, asset_class, median_range_pct, p80_range_pct, samples, updated_at)
+      VALUES ${placeholders}
+      ON CONFLICT (symbol) DO UPDATE SET
+        asset_class = excluded.asset_class,
+        median_range_pct = excluded.median_range_pct,
+        p80_range_pct = excluded.p80_range_pct,
+        samples = excluded.samples,
+        updated_at = excluded.updated_at
+    `, params);
+    written += batch.length;
+  }
+  return written;
+}

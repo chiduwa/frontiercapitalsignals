@@ -27,7 +27,7 @@ import {
   computeYieldSpread,
   fetchDefiLlamaProtocols, matchProtocolsToUniverse, defiLlamaProtocolTvlHistory,
   fetchDeribitDvolHistory, upsertIvDaily, fetchStockAtmIv,
-  computeSrLevelsAndBreaks, replaceSrLevels, replaceSrBreakStats,
+  computeSrLevelsAndBreaks, replaceSrLevels, replaceSrBreakStats, computeDailyRangeStats,
   computeMarketComposite, upsertMarketCapTotal,
   computeOutperformanceRotations, replaceRotationStatus,
   computeLongTermBottomCandidates, replaceLongTermBottomCandidates
@@ -273,6 +273,17 @@ async function main() {
     console.log(`support/resistance: ${Object.keys(levelsBySymbol).length} symbols with a key level, ${levelsWritten} levels, ${breaks.length} historical break events -> ${statsWritten} calibration buckets (${Date.now() - started}ms)`);
   } catch (e) {
     console.error('support/resistance computation failed:', e.message);
+  }
+
+  // Median daily range per asset — the denominator for the day-trading
+  // "has it moved enough today?" read. Reuses the same shared bars read as
+  // lead/lag and support/resistance above, so it costs no extra D1 rows.
+  try {
+    const started = Date.now();
+    const written = await computeDailyRangeStats(env, sharedDailyBarsRows, new Date().toISOString());
+    console.log(`daily range stats: ${written} symbols with a median/p80 daily range (${Date.now() - started}ms)`);
+  } catch (e) {
+    console.error('daily range stats computation failed:', e.message);
   }
 
   try {

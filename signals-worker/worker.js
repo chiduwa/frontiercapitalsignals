@@ -68,6 +68,16 @@ const REFRESH_DISPATCH_LOCK_SECONDS = 30 * 60;
 // soon) but long enough that a broken token cannot turn every inbound request
 // into an outbound GitHub call.
 const REFRESH_DISPATCH_FAILURE_COOLDOWN_SECONDS = 5 * 60;
+// Running session extremes for the day-trading read, plus the alert state that
+// stops one stretched asset from re-notifying every 5 minutes. Both live in KV
+// rather than D1: they are written on every cron tick, and D1 bills per row
+// written (see the 2026-08-25 cost work) where KV does not.
+const SESSION_EXTREMES_KEY = 'signals:session-extremes';
+const SESSION_EXTREMES_TTL_SECONDS = 3 * 24 * 3600;
+const DAY_RANGE_ALERT_STATE_KEY = 'signals:day-range-alert-state';
+// One alert per symbol per side per session. A stretched asset stays stretched
+// for hours; re-firing every tick would make the channel useless.
+const DAY_RANGE_ALERT_TTL_SECONDS = 36 * 3600;
 const REFRESH_DISPATCH_STATUS_KEY = 'signals:refresh-dispatch-status';
 const REFRESH_DISPATCH_STATUS_SECONDS = 24 * 60 * 60;
 const GITHUB_REFRESH_DISPATCH_URL = 'https://api.github.com/repos/chiduwa/frontiercapitalsignals/actions/workflows/signals-refresh.yml/dispatches';
@@ -3820,7 +3830,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration, dailyRangeStats) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -4030,6 +4040,17 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     // isn't showing directional calls instead of silently rendering none.
     classSkill: { crypto: cryptoSkill, stock: stockSkill },
     highAccuracy,
+    // Median/p80 daily range for the day-trading universe only (favorites plus
+    // whatever has proven skill). Scoped rather than shipping all ~260 assets:
+    // the read is only offered where it was asked for, and the payload is
+    // already large. The Worker's cron divides today's move by these.
+    dailyRange: (() => {
+      if (!dailyRangeStats) return null;
+      const syms = new Set([...FAVORITE_SYMBOLS, ...highAccuracy.map((r) => r.symbol)]);
+      const out = {};
+      for (const sym of syms) if (dailyRangeStats[sym]) out[sym] = dailyRangeStats[sym];
+      return Object.keys(out).length ? out : null;
+    })(),
     // Which crypto symbols /api/prices can live-tick from Binance.US
     // instead of CoinGecko (see binanceUsTradablePairs) — computed once
     // here per hourly build so the live-price route never needs its own
@@ -4120,6 +4141,26 @@ export function mergeLivePrices(payload, live) {
   };
 }
 
+// Attaches the day-trading range read to the served payload. Computed at serve
+// time from the live price plus the cron-tracked session extremes, so it is as
+// current as the price layer rather than as stale as the last heavy build.
+export function attachDayRange(payload, live, session) {
+  if (!payload || !payload.dailyRange || !session || !session.bySymbol) return payload;
+  const rows = indexBoardRows(payload);
+  const universe = dayTradingUniverse(payload);
+  const out = {};
+  for (const symbol of universe) {
+    const tick = (live && ((live.crypto && live.crypto[symbol]) || (live.stocks && live.stocks[symbol])))
+      || (rows[symbol] ? { price: rows[symbol].price } : null);
+    const price = tick && tick.price;
+    if (!Number.isFinite(price)) continue;
+    const sig = dayRangeSignal(symbol, price, session.bySymbol[symbol], payload.dailyRange, rows[symbol]);
+    if (sig) out[symbol] = sig;
+  }
+  if (!Object.keys(out).length) return payload;
+  return { ...payload, dayRange: out, dayRange_session_date: session.date };
+}
+
 function isFresh(payload, nowMs = Date.now()) {
   if (!payload || !payload.generated_at) return false;
   return (nowMs - new Date(payload.generated_at).getTime()) < CACHE_SECONDS * 1000;
@@ -4149,7 +4190,24 @@ export async function dispatchRefreshIfStale(env) {
       },
       body: JSON.stringify({ ref: 'main', inputs: { force: 'false' } })
     });
-    if (!response.ok) throw new Error(`GitHub signals refresh dispatch failed: HTTP ${response.status}`);
+    if (!response.ok) {
+      // Capture GitHub's own explanation, not just the status code. A bare
+      // "HTTP 403" cost a whole round trip to diagnose: 403 covers a token
+      // missing Actions:write, a fine-grained token that never had this repo
+      // selected, an expired token, AND a secret that was set on the wrong
+      // Worker (this account has both `frontier-capital-signals` and
+      // `frontiercapitalsignals`, which differ only by hyphens). GitHub's body
+      // distinguishes them; the status code alone does not.
+      let detail = '';
+      try {
+        const body = await response.text();
+        if (body) {
+          const parsed = JSON.parse(body);
+          detail = parsed && parsed.message ? ` — ${parsed.message}` : ` — ${body.slice(0, 200)}`;
+        }
+      } catch { /* body unavailable or not JSON; the status alone still gets reported */ }
+      throw new Error(`GitHub signals refresh dispatch failed: HTTP ${response.status}${detail}`);
+    }
     await recordRefreshDispatchStatus(env, { result: 'dispatched' });
   } catch (error) {
     // Previously this DELETED the lock, so a persistently failing dispatch
@@ -4172,6 +4230,69 @@ export async function dispatchRefreshIfStale(env) {
 // Keeps the live price layer warm on the Cloudflare cron. Writes through the
 // same KV key /api/prices serves from, so a visitor gets an already-fresh
 // answer with no upstream call on the request path at all.
+async function getSessionExtremes(env) {
+  if (!env || !env.FCS_CACHE) return null;
+  try {
+    const raw = await env.FCS_CACHE.get(SESSION_EXTREMES_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+async function putSessionExtremes(env, value) {
+  if (!env || !env.FCS_CACHE) return;
+  try {
+    await env.FCS_CACHE.put(SESSION_EXTREMES_KEY, JSON.stringify(value), { expirationTtl: SESSION_EXTREMES_TTL_SECONDS });
+  } catch (error) {
+    console.error('Unable to persist session extremes:', error.message);
+  }
+}
+
+// Day-trading alerts are sent from the WORKER, not from scripts/notify.mjs.
+// notify.mjs runs inside the hourly GitHub build, and GitHub delivered ~6 of
+// 24 requested runs a day even after the cadence was cut — an entry alert that
+// arrives hours late is worse than none. This path rides the Cloudflare cron
+// that actually fires. Same ntfy topic, so it lands in the same channel.
+export async function notifyDayRangeEntries(env, entries) {
+  if (!env || !env.NTFY_TOPIC || !entries || !entries.length) return 0;
+  let sent = 0;
+  for (const e of entries) {
+    const body = [
+      `${e.symbol} has travelled ${e.movePct >= 0 ? '+' : ''}${e.movePct.toFixed(2)}% today`,
+      `(${Math.abs(e.moveInMedians).toFixed(2)}x its median daily range of ${e.medianPct.toFixed(2)}%).`,
+      `Sitting at ${(e.posInDayRange * 100).toFixed(0)}% of today's range.`,
+      `Candidate ${e.side.toUpperCase()} entry near ${e.price}.`,
+      `Confirmations: ${e.reasons.join('; ')}.`,
+      `A typical day is worth ~${e.medianAbs.toFixed(e.medianAbs < 1 ? 4 : 2)} at this price.`,
+      'Mean-reversion candidate, not a scored prediction — this signal has no measured track record yet.'
+    ].join(' ');
+    try {
+      const res = await fetch(`https://ntfy.sh/${env.NTFY_TOPIC}`, {
+        method: 'POST',
+        headers: {
+          Title: `${e.symbol} stretched ${e.side === 'short' ? 'up' : 'down'} — candidate ${e.side}`,
+          Priority: 'default',
+          Tags: e.side === 'short' ? 'chart_with_downwards_trend' : 'chart_with_upwards_trend'
+        },
+        body
+      });
+      if (res.ok) sent++;
+    } catch (error) {
+      console.error('Day-range alert failed for', e.symbol, error.message);
+    }
+  }
+  return sent;
+}
+
+// Which assets the day-trading read covers. Deliberately narrow, as the user
+// scoped it: the always-tracked favorites plus whatever the engine has actually
+// proven it can call. Running it across all ~260 assets would multiply the
+// alert volume without improving any single entry.
+export function dayTradingUniverse(payload) {
+  const syms = new Set(FAVORITE_SYMBOLS);
+  for (const r of (payload && payload.highAccuracy) || []) if (r && r.symbol) syms.add(r.symbol);
+  return syms;
+}
+
 export async function refreshLivePriceLayer(env) {
   try {
     const cached = await getCached(env);
@@ -4179,11 +4300,84 @@ export async function refreshLivePriceLayer(env) {
     const body = await buildLivePrices(env, cached);
     if (!body) return false;
     await putCachedLivePrices(env, body);
+
+    // Accumulate today's high/low/open from this tick. This is the only
+    // continuously-sampled input the day-trading read has, and it has to come
+    // from here: asset_hourly_bars is current for 2 of the 7 favorites, and
+    // intraday_price_ticks sits at ~8 samples/day because its GitHub cron is
+    // being dropped.
+    const nowIso = new Date().toISOString();
+    const prevSession = await getSessionExtremes(env);
+    const session = updateSessionExtremes(prevSession, body, nowIso);
+    await putSessionExtremes(env, session);
+
+    // Alert on newly-stretched assets. Runs here rather than in notify.mjs so
+    // entry alerts ride the cron that actually fires.
+    await dispatchDayRangeAlerts(env, cached, body, session);
     return true;
   } catch (error) {
     console.error('Live price layer refresh failed:', error.message);
     return false;
   }
+}
+
+// Builds the day-range read for the covered universe and fires an alert for any
+// asset that has newly become a candidate entry this session.
+export async function dispatchDayRangeAlerts(env, cached, prices, session) {
+  if (!env || !env.NTFY_TOPIC) return 0;
+  const rangeStats = cached && cached.dailyRange;
+  if (!rangeStats) return 0;
+  const universe = dayTradingUniverse(cached);
+  const rowBySymbol = indexBoardRows(cached);
+
+  let state = {};
+  try {
+    const raw = await env.FCS_CACHE.get(DAY_RANGE_ALERT_STATE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && parsed.date === session.date) state = parsed.fired || {};
+  } catch { /* a lost state key costs at most one duplicate alert */ }
+
+  const toSend = [];
+  for (const symbol of universe) {
+    const tick = (prices.crypto && prices.crypto[symbol]) || (prices.stocks && prices.stocks[symbol]);
+    const price = tick && tick.price;
+    if (!Number.isFinite(price)) continue;
+    const sig = dayRangeSignal(symbol, price, session.bySymbol && session.bySymbol[symbol], rangeStats, rowBySymbol[symbol]);
+    if (!sig || !sig.entry) continue;
+    const key = `${symbol}|${sig.entry.side}`;
+    if (state[key]) continue;
+    state[key] = nowSeconds();
+    toSend.push({
+      symbol, price, side: sig.entry.side, reasons: sig.entry.reasons,
+      movePct: sig.movePct, moveInMedians: sig.moveInMedians,
+      medianPct: sig.medianPct, medianAbs: sig.medianAbs, posInDayRange: sig.posInDayRange
+    });
+  }
+  if (!toSend.length) return 0;
+  const sent = await notifyDayRangeEntries(env, toSend);
+  try {
+    await env.FCS_CACHE.put(DAY_RANGE_ALERT_STATE_KEY, JSON.stringify({ date: session.date, fired: state }), { expirationTtl: DAY_RANGE_ALERT_TTL_SECONDS });
+  } catch (error) {
+    console.error('Unable to persist day-range alert state:', error.message);
+  }
+  return sent;
+}
+
+function nowSeconds() { return Math.floor(Date.now() / 1000); }
+
+// Flattens every board row in a payload into one symbol -> row map, so the
+// day-range read can pick up RSI/volume/funding/range-position confirmations
+// without knowing which board an asset happened to land on.
+export function indexBoardRows(payload) {
+  const out = {};
+  for (const section of [payload && payload.crypto, payload && payload.stocks]) {
+    if (!section || typeof section !== 'object') continue;
+    for (const v of Object.values(section)) {
+      if (!Array.isArray(v)) continue;
+      for (const r of v) if (r && r.symbol && !out[r.symbol]) out[r.symbol] = r;
+    }
+  }
+  return out;
 }
 
 function queueStaleCacheRefresh(env, ctx) {
@@ -4466,6 +4660,22 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     .id-card{padding:10px}
     .tr-row{gap:8px}
     .tr-price,.tr-score,.tr-samples,.tr-class{min-width:0;text-align:left}
+    .day-range{margin:18px 0 8px;padding:14px 16px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+    .dr-title{font-weight:700;margin:2px 0 6px}
+    .dr-note{font-size:12px;line-height:1.5;color:var(--muted);margin-bottom:10px}
+    .dr-list{display:flex;flex-direction:column;gap:4px}
+    .dr-row{display:grid;grid-template-columns:minmax(56px,.6fr) minmax(64px,.7fr) minmax(56px,.6fr) minmax(120px,1.2fr) minmax(84px,.9fr) minmax(104px,1fr) minmax(150px,1.6fr);gap:8px;align-items:baseline;padding:6px 8px;border-radius:6px;font-size:13px;overflow-x:auto}
+    .dr-row.dr-up{background:color-mix(in srgb,var(--down) 12%,transparent)}
+    .dr-row.dr-down{background:color-mix(in srgb,var(--up) 12%,transparent)}
+    .dr-row.dr-quiet{opacity:.6}
+    .dr-sym{font-weight:700}
+    .dr-mult{font-variant-numeric:tabular-nums;font-weight:600}
+    .dr-move,.dr-med,.dr-used,.dr-pos{font-variant-numeric:tabular-nums;color:var(--muted)}
+    .dr-entry{font-weight:700;margin-right:6px}
+    .dr-entry.dr-short{color:var(--down)}
+    .dr-entry.dr-long{color:var(--up)}
+    .dr-why{color:var(--muted);font-size:12px}
+    @media(max-width:720px){.dr-row{grid-template-columns:1fr 1fr;row-gap:2px}}
   }
 </style>
 </head>
@@ -4813,6 +5023,51 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     // Say so plainly rather than letting a board of dir-less rows read as a
     // rendering bug — and show the numbers behind the decision, since "we are
     // not showing you calls" needs more justification than showing them did.
+    // Day-trading range read, above the boards: the "has it moved enough
+    // today?" answer the boards themselves don't give.
+    var dr = d.dayRange || {};
+    var drSyms = Object.keys(dr);
+    if(drSyms.length){
+      var order = { 'extended-up': 0, 'extended-down': 0, 'normal': 1, 'quiet': 2 };
+      drSyms.sort(function(a,b){
+        var oa = order[dr[a].state] != null ? order[dr[a].state] : 3;
+        var ob = order[dr[b].state] != null ? order[dr[b].state] : 3;
+        if(oa !== ob) return oa - ob;
+        return Math.abs(dr[b].moveInMedians||0) - Math.abs(dr[a].moveInMedians||0);
+      });
+      var drRows = drSyms.map(function(sym){
+        var x = dr[sym];
+        var cls = x.state === 'extended-up' ? 'dr-up' : x.state === 'extended-down' ? 'dr-down' : x.state === 'quiet' ? 'dr-quiet' : '';
+        var entry = x.entry
+          ? '<span class="dr-entry dr-'+x.entry.side+'">candidate '+x.entry.side.toUpperCase()+'</span>'
+            +'<span class="dr-why">'+esc(x.entry.reasons.join(' · '))+'</span>'
+          : '<span class="dim">—</span>';
+        var moveTxt = (x.movePct>=0?'+':'')+x.movePct.toFixed(2)+'%';
+        var medTxt = x.medianPct.toFixed(2)+'%';
+        return '<div class="dr-row '+cls+'">'
+          +'<span class="dr-sym">'+esc(sym)+'</span>'
+          +'<span class="dr-move" title="Move from this session&#39;s first observed price">'+moveTxt+'</span>'
+          +'<span class="dr-mult" title="Today&#39;s directional move divided by this asset&#39;s median daily high&minus;low range">'
+            +(x.moveInMedians>=0?'+':'')+x.moveInMedians.toFixed(2)+'x</span>'
+          +'<span class="dr-med" title="Median daily high&minus;low over '+x.samples+' days, and what that is worth at the current price">'
+            +medTxt+' ('+fmtPrice(x.medianAbs)+')</span>'
+          +'<span class="dr-used" title="How much of a normal day&#39;s full range today has already travelled">'
+            +(x.usedPct!=null?Math.round(x.usedPct)+'% used':'—')+'</span>'
+          +'<span class="dr-pos" title="Where the price sits inside today&#39;s own range">'
+            +Math.round(x.posInDayRange*100)+'% of day range</span>'
+          +'<span class="dr-act">'+entry+'</span>'
+          +'</div>';
+      }).join('');
+      b+='<section class="day-range" id="dayRange" aria-label="Daily range exhaustion">'
+        +'<div class="eyebrow">DAY RANGE</div>'
+        +'<div class="dr-title">How much of a normal day has already moved</div>'
+        +'<div class="dr-note">Median daily range is this asset&#39;s own median high&minus;low over the last 90 days. '
+        +'&ldquo;Extended&rdquo; means today&#39;s one-way move already exceeds 80% of its complete daily ranges, and the price is sitting near the day&#39;s extreme. '
+        +'Session extremes are tracked from this page&#39;s own 5-minute price ticks, so they start at the first tick after 00:00 UTC. '
+        +'<b>These are mean-reversion candidates with no scored track record yet</b> &mdash; they are shown with their evidence, not as predictions.</div>'
+        +'<div class="dr-list">'+drRows+'</div></section>';
+    }
+
     var cs = d.classSkill || {};
     if(cs.stock && !cs.stock.proven){
       b+='<div class="xp-banner" role="note"><b>Equity direction calls are withheld.</b> '
@@ -5148,6 +5403,130 @@ export async function buildLivePrices(env, cached) {
   return { crypto, stocks, generated_at: new Date().toISOString() };
 }
 
+// --------------------- DAY-TRADING RANGE EXHAUSTION -------------------------
+// User-requested 2026-08-30: "tell me the asset has gone up or down enough for
+// the day so I can short or long it."
+//
+// The yardstick is the asset's own median daily range (high - low), from
+// asset_daily_range — a 3% move is noise for an asset that routinely travels
+// 8% in a session and a big day for one that usually travels 1.5%, so a fixed
+// percentage threshold would be meaningless across a 100-asset universe.
+//
+// Extension is measured against p80 of that distribution, not a multiple of the
+// median: "today's move in ONE direction is already larger than 80% of this
+// asset's COMPLETE daily ranges" is a statement about the asset's own realized
+// behaviour, where "1.5x the median" would just be an arbitrary constant.
+//
+// Honesty about what this is: a mean-reversion premise. The one thing this
+// engine has actually measured nearby (the intraday backtest, 2 years of
+// Binance data) found a real but modest ~54-56% reversal tilt conditional on
+// the market having moved — genuine, not dramatic. So these are surfaced as
+// candidate entries with their evidence attached, never as predictions, and
+// they carry `proven: false` until the logging below has scored enough of them
+// to say otherwise. Do not let this graduate to an actionable call on the
+// strength of the idea alone.
+const DAY_RANGE_MIN_SAMPLES = 20;
+const DAY_RANGE_POS_BAR = 0.75;      // must also be sitting near the day's extreme
+const DAY_RANGE_QUIET_FRACTION = 0.4; // below 40% of a normal day = nothing to fade yet
+
+// Confirmation, so a stretched reading never fires alone — the same discipline
+// every other technique in this engine follows. Each is independently
+// meaningful at an extreme, and only their presence is claimed, not their
+// weight.
+export function dayRangeConfirmations(row, side) {
+  const out = [];
+  if (!row) return out;
+  const rsi = row.rsi;
+  if (side === 'short' && rsi != null && rsi >= 70) out.push(`RSI ${rsi.toFixed(0)} overbought`);
+  if (side === 'long' && rsi != null && rsi <= 30) out.push(`RSI ${rsi.toFixed(0)} oversold`);
+  if (row.volRatio != null && row.volRatio >= 1.5) out.push(`volume ${row.volRatio.toFixed(1)}x average`);
+  const f = row.funding && Number.isFinite(row.funding.rate) ? row.funding.rate : null;
+  if (side === 'short' && f != null && f > 0.0005) out.push(`funding ${(f * 100).toFixed(3)}% — longs crowded`);
+  if (side === 'long' && f != null && f < -0.0005) out.push(`funding ${(f * 100).toFixed(3)}% — shorts crowded`);
+  if (side === 'short' && row.rangePos != null && row.rangePos >= 0.95) out.push('at the top of its 1-year range');
+  if (side === 'long' && row.rangePos != null && row.rangePos <= 0.05) out.push('at the bottom of its 1-year range');
+  return out;
+}
+
+// session: { open, high, low } tracked live by the Worker's own cron (see
+// updateSessionExtremes) — deliberately NOT from asset_hourly_bars, which only
+// has current data for 2 of the 7 favorites, nor from intraday_price_ticks,
+// which the dropped GitHub cron left at ~8 samples/day.
+export function dayRangeSignal(symbol, price, session, rangeStats, row) {
+  const stats = rangeStats && rangeStats[symbol];
+  if (!stats || !Number.isFinite(stats.medianPct) || stats.samples < DAY_RANGE_MIN_SAMPLES) return null;
+  if (!session || !Number.isFinite(session.open) || !session.open) return null;
+  if (!Number.isFinite(price) || price <= 0) return null;
+
+  const high = Math.max(session.high ?? price, price);
+  const low = Math.min(session.low ?? price, price);
+  const rangePct = ((high - low) / session.open) * 100;
+  const movePct = ((price - session.open) / session.open) * 100;
+  const usedPct = stats.medianPct > 0 ? (rangePct / stats.medianPct) * 100 : null;
+  const moveInMedians = stats.medianPct > 0 ? movePct / stats.medianPct : null;
+  const posInDayRange = high > low ? clamp((price - low) / (high - low), 0, 1) : 0.5;
+
+  const bar = Number.isFinite(stats.p80Pct) && stats.p80Pct > 0 ? stats.p80Pct : stats.medianPct;
+  let state = 'normal';
+  if (movePct >= bar) state = 'extended-up';
+  else if (movePct <= -bar) state = 'extended-down';
+  else if (usedPct != null && usedPct < DAY_RANGE_QUIET_FRACTION * 100) state = 'quiet';
+
+  let entry = null;
+  if (state === 'extended-up' && posInDayRange >= DAY_RANGE_POS_BAR) {
+    const reasons = dayRangeConfirmations(row, 'short');
+    entry = reasons.length ? { side: 'short', reasons, proven: false } : null;
+  } else if (state === 'extended-down' && posInDayRange <= 1 - DAY_RANGE_POS_BAR) {
+    const reasons = dayRangeConfirmations(row, 'long');
+    entry = reasons.length ? { side: 'long', reasons, proven: false } : null;
+  }
+
+  return {
+    medianPct: stats.medianPct,
+    p80Pct: stats.p80Pct,
+    samples: stats.samples,
+    // What a normal day is worth in price terms at the CURRENT price — the
+    // form that is actually usable for sizing a stop or a target.
+    medianAbs: price * stats.medianPct / 100,
+    open: session.open, high, low,
+    rangePct, usedPct, movePct, moveInMedians, posInDayRange,
+    state, entry
+  };
+}
+
+// Running session high/low/open per symbol, accumulated from the Worker's own
+// 5-minute price ticks and kept in KV. Self-sufficient by design: this is the
+// one part of the day-trading read that has to be continuously sampled, and
+// every GitHub-driven source for it is unreliable here.
+//
+// Rolls at UTC midnight. A symbol first seen mid-session gets that first tick
+// as its open, which is honest (we genuinely do not know where it opened) and
+// self-corrects at the next roll.
+export function updateSessionExtremes(prev, prices, nowIso) {
+  const date = nowIso.slice(0, 10);
+  const base = prev && prev.date === date && prev.bySymbol ? prev.bySymbol : {};
+  // Carry every symbol already tracked today forward, THEN merge this tick in.
+  // Rebuilding from only the current tick would drop any symbol the live fetch
+  // happened to miss — and it does miss them routinely (CoinGecko rate limits,
+  // a thin/renamed id, a Yahoo hiccup; see buildLivePrices' own fallback). That
+  // would silently reset the day's accumulated high/low, which is the one piece
+  // of state here that cannot be recovered after the fact.
+  const next = { ...base };
+  const merge = (table) => {
+    for (const [symbol, tick] of Object.entries(table || {})) {
+      const price = tick && tick.price;
+      if (!Number.isFinite(price) || price <= 0) continue;
+      const cur = next[symbol];
+      next[symbol] = cur
+        ? { open: cur.open, high: Math.max(cur.high, price), low: Math.min(cur.low, price), last: price }
+        : { open: price, high: price, low: price, last: price };
+    }
+  };
+  merge(prices && prices.crypto);
+  merge(prices && prices.stocks);
+  return { date, updated_at: nowIso, bySymbol: next };
+}
+
 // ----------------------------- WORKER ENTRY ---------------------------------
 
 export default {
@@ -5194,7 +5573,8 @@ export default {
         // with the payload so the dashboard can say which half is which
         // instead of flattening it to one "STALE" badge.
         const live = await getCachedLivePrices(env);
-        const merged = mergeLivePrices(cached, live);
+        const session = await getSessionExtremes(env);
+        const merged = attachDayRange(mergeLivePrices(cached, live), live, session);
         return json(merged, {
           'X-FCS-Cache': fresh ? 'hit' : 'stale',
           'X-FCS-Prices': live ? 'live' : 'build'
