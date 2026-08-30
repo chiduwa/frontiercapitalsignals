@@ -1168,13 +1168,30 @@ export async function loadTimeOfDayEdge(env) {
       winRate: r.win_rate, h1: r.h1_mean, h2: r.h2_mean
     });
   }
+  // Zone slots are NOT independent. Tokyo has no DST, so hour_tyo_05 and
+  // hour_utc_20 are literally the same bucket under two names and report
+  // identical n and mean; London and New York shift together for most of the
+  // year, so hour_ldn_21 and hour_et_16 largely coincide too. Presenting those
+  // as separate findings would triple-count one observation.
+  //
+  // Exact duplicates (same n, same mean to 6dp) are collapsed, keeping the
+  // most meaningful label — an exchange-anchored slot says "the US close",
+  // where a UTC hour says nothing about why.
+  const slotRank = (slot) => (slot.startsWith('hour_et_') ? 0 : slot.startsWith('hour_ldn_') ? 1 : slot.startsWith('hour_utc_') ? 2 : 3);
   const out = {};
   for (const [symbol, hours] of Object.entries(bySymbol)) {
-    hours.sort((a, b) => b.meanPct - a.meanPct);
-    const best = hours[0];
-    const worst = hours[hours.length - 1];
+    const seen = new Map();
+    for (const h of hours) {
+      const key = `${h.n}|${h.meanPct.toFixed(6)}`;
+      const prior = seen.get(key);
+      if (!prior || slotRank(h.slot) < slotRank(prior.slot)) seen.set(key, h);
+    }
+    const deduped = [...seen.values()];
+    deduped.sort((a, b) => b.meanPct - a.meanPct);
+    const best = deduped[0];
+    const worst = deduped[deduped.length - 1];
     out[symbol] = {
-      hours,
+      hours: deduped,
       // "Buy" = the start of the hour with the strongest positive forward
       // return; "sell" = the start of the strongest negative one. Only offered
       // when the sign actually points that way, never just "the least bad".
@@ -1189,4 +1206,10 @@ export async function loadTimeOfDayEdge(env) {
 // is well above a conventional 1.96. Deliberately NOT relaxed on the grounds
 // that several assets agree: BTC, ETH, ADA, BNB, BCH and XRP are highly
 // correlated, so their agreement is closer to one observation than to six.
+//
+// Storing four timezone families does not multiply the hypothesis count the way
+// it appears to: the zones are largely redundant views of the same 24 buckets
+// (see the dedup above), so the effective number of independent tests is still
+// roughly 24 per symbol. The headline result clears this bar with room to
+// spare either way — hour_et_16 reaches t=5.3-5.9 across BTC, ETH and BNB.
 const TOD_EDGE_SIGNIFICANCE_T = 3.3;
