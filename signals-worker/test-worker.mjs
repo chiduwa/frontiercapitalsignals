@@ -1802,6 +1802,19 @@ check('deep-record response is unchanged (0.8, n=100 -> 1.5 clamped)', Math.abs(
 check('at a measured 0.384 baseline, 0.384 accuracy is the new neutral point', Math.abs(mod.reliabilityWeight(0.384, 50, 0.384) - 1) < 1e-9);
 check('a 44% technique is rewarded above neutral where it used to be penalised', mod.reliabilityWeight(0.44, 50, 0.384) > 1 && mod.reliabilityWeight(0.44, 50) < 1);
 
+console.log('\n== anti-signal silencing: reliably-wrong techniques stop voting ==');
+// srbreak, live: 20.5% accurate over 346 outcomes against a ~36% baseline.
+check('a deep record well below its baseline is silenced, not merely halved', mod.reliabilityWeight(0.205, 346, 0.36) === 0);
+check('the old floor would have kept it voting at half weight', mod.reliabilityWeight(0.205, 346, 0.36) < 0.5);
+// Thin records must never be silenced — that is noise, not evidence.
+check('the same accuracy on a THIN record is down-weighted but never silenced — that is noise, not evidence', (() => { const w = mod.reliabilityWeight(0.205, 40, 0.36); return w > 0 && w < 1; })(), String(mod.reliabilityWeight(0.205, 40, 0.36)));
+check('slightly below baseline is down-weighted but still heard', mod.reliabilityWeight(0.33, 300, 0.36) > 0 && mod.reliabilityWeight(0.33, 300, 0.36) < 1);
+check('at baseline stays neutral', Math.abs(mod.reliabilityWeight(0.36, 300, 0.36) - 1) < 1e-9);
+check('above baseline is still rewarded', mod.reliabilityWeight(0.50, 300, 0.36) > 1);
+// Silencing is data-driven and reverses itself if the record recovers.
+check('a recovered record is no longer silenced', mod.reliabilityWeight(0.45, 346, 0.36) > 0);
+check('behaviour at the old 0.5 baseline is unchanged for healthy records', Math.abs(mod.reliabilityWeight(0.8, 100) - 1.5) < 1e-9 && mod.reliabilityWeight(0.5, 50) === 1);
+
 console.log('\n== discovery: family-corrected significance bar ==');
 const disc = await import('./scripts/discovery.mjs');
 check('inverse normal is accurate at the standard two-tailed 5% point', Math.abs(disc.normalQuantile(0.975) - 1.959964) < 1e-4, String(disc.normalQuantile(0.975)));
@@ -2100,6 +2113,40 @@ const idx = mod.indexBoardRows(dtPayload);
 check('board rows are indexed per asset class, so a shared ticker cannot cross wires', idx['crypto|BTC'].rsi === 70 && idx['stock|AAPL'].rsi === 40);
 const collideIdx = mod.indexBoardRows({ crypto: { breakout: [{ symbol: 'DASH', rsi: 20 }] }, stocks: { breakout: [{ symbol: 'DASH', rsi: 80 }] } });
 check('DASH resolves to two distinct rows, not first-writer-wins', collideIdx['crypto|DASH'].rsi === 20 && collideIdx['stock|DASH'].rsi === 80);
+
+console.log('\n== buildScalpView: only what has actually been measured ==');
+const scalpPayload = {
+  generated_at: '2026-08-31T00:00:00Z',
+  dailyRange: { BTC: { medianPct: 4, p80Pct: 6, samples: 90 } },
+  todEdge: { BTC: { buyHour: { slot: 'hour_et_16', n: 2533, meanPct: 0.067, t: 5.32, winRate: 54.9 }, sellHour: null } },
+  highAccuracy: [],
+  crypto: { breakout: [{ symbol: 'BTC', price: 107, rsi: 78, volRatio: 2.1 }] },
+  stocks: {}
+};
+const scalpLive = { crypto: { BTC: { price: 107 } }, stocks: {}, generated_at: '2026-08-31T00:04:00Z' };
+const scalpSession = { date: '2026-08-31', bySymbol: { 'crypto|BTC': { open: 100, high: 107, low: 99 } } };
+const view = mod.buildScalpView(scalpPayload, scalpLive, scalpSession, '2026-08-31T00:05:00Z');
+check('produces a day-trading view', view && view.assets.length === 1, JSON.stringify(view && view.assets && view.assets.length));
+const a = view.assets[0];
+check('carries the live price, not the build price', a.price === 107);
+check('carries the range-exhaustion read', a.range && a.range.state === 'extended-up');
+check('and a candidate entry with its confirmations', a.range.entry && a.range.entry.side === 'short' && a.range.entry.reasons.length >= 2);
+check('carries the proven hour window', a.hours && a.hours.buy && a.hours.buy.label === 'NYSE close (16:00 ET)');
+// The point of the rewrite: no invented direction call.
+check('states its basis rather than implying a forecast', /no unvalidated direction call/.test(view.basis));
+check('reports how fresh the prices actually are', view.prices_generated_at === '2026-08-31T00:04:00Z');
+// An asset with nothing measured must not appear at all.
+const bare = mod.buildScalpView({ ...scalpPayload, dailyRange: null, todEdge: null }, scalpLive, scalpSession, '2026-08-31T00:05:00Z');
+check('an asset with no measured range and no imminent window is omitted entirely', bare === null, JSON.stringify(bare));
+// Ordering: actionable first.
+const twoAssets = mod.buildScalpView(
+  { ...scalpPayload,
+    dailyRange: { BTC: { medianPct: 4, p80Pct: 6, samples: 90 }, ETH: { medianPct: 4, p80Pct: 6, samples: 90 } },
+    crypto: { breakout: [{ symbol: 'BTC', price: 107, rsi: 78, volRatio: 2.1 }, { symbol: 'ETH', price: 100.5 }] } },
+  { crypto: { BTC: { price: 107 }, ETH: { price: 100.5 } }, stocks: {}, generated_at: '2026-08-31T00:04:00Z' },
+  { date: '2026-08-31', bySymbol: { 'crypto|BTC': { open: 100, high: 107, low: 99 }, 'crypto|ETH': { open: 100, high: 101, low: 100 } } },
+  '2026-08-31T00:05:00Z');
+check('an asset with a live entry candidate sorts above a quiet one', twoAssets.assets[0].symbol === 'BTC', JSON.stringify(twoAssets.assets.map(x=>x.symbol)));
 
 console.log('\n== mergeLivePrices: fresh price layer over a slow model layer ==');
 const basePayload = {

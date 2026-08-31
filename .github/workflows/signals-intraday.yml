@@ -29,7 +29,17 @@ on:
     # Note this pipeline still depends on GitHub because it writes D1 tick
     # rows; the price freshness the dashboard displays no longer does (see
     # refreshLivePriceLayer, worker.js, on Cloudflare's own cron).
-    - cron: "7,22,37,52 * * * *"
+    # Schedule removed 2026-08-31. This pipeline fed /api/intraday, which was
+    # a day-trading surface running on a cron GitHub delivered ~2 of 288 times
+    # a day — so it served hours-old data to the one audience that cannot use
+    # it. Its central output (intradaySignal's direction call) had also been
+    # backtested at no usable edge, so reviving it was not worth the D1 writes.
+    #
+    # The live day-trading read is now /signals/api/scalp, assembled by the
+    # Worker on Cloudflare's cron from inputs that are actually current.
+    # Kept dispatchable rather than deleted: the tick history it writes still
+    # has research value, and this can be run on demand to top it up.
+    - cron: "0 6 * * *"
   workflow_dispatch:
 
 concurrency:

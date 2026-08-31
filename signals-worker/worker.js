@@ -647,9 +647,26 @@ export function reliabilityMultiplierForAssetClass(reliability, symbol, techniqu
 // available on whichever side of the baseline the accuracy falls, so always-
 // right still maps to +1 and always-wrong to -1 for any baseline.
 // At p0 = 0.5 this reduces exactly to the previous formula.
+// Below this accuracy-versus-baseline gap, with enough evidence behind it, a
+// technique is not merely unhelpful — it is anti-informative, and gets silenced
+// rather than halved. The old floor of 0.5 meant a technique could be
+// reliably, measurably wrong and still cast a vote at half weight forever.
+// Measured live: srbreak sits at 20.5% over 346 outcomes against a baseline
+// near 36%, and was still voting.
+//
+// Silenced, NOT inverted. Inverting a wrong call does not produce a right one
+// here, because a directional call can be wrong two ways — the move went the
+// other way, or it never cleared the deadband at all — and only the first
+// flips into a win. That trap is documented in the intraday backtest notes.
+const ANTI_SIGNAL_EDGE = -0.08;
+const ANTI_SIGNAL_MIN_SAMPLES = 150;
+
 export function reliabilityWeight(accuracy, total, p0 = 0.5) {
   if (!Number.isFinite(accuracy) || !Number.isFinite(total) || total < MIN_RELIABILITY_SAMPLES) return 1;
   const base = Number.isFinite(p0) ? clamp(p0, 0.001, 0.999) : 0.5;
+  // Deep record, clearly below its own no-skill line: stop listening to it.
+  // Self-healing — the weight returns the moment the measured record does.
+  if (total >= ANTI_SIGNAL_MIN_SAMPLES && (accuracy - base) <= ANTI_SIGNAL_EDGE) return 0;
   const spread = accuracy >= base ? (1 - base) : base;
   const normalized = clamp((accuracy - base) / spread, -1, 1);
   // Preserve the established, significance-gated behavior while a record is
@@ -5571,6 +5588,72 @@ export async function buildLivePrices(env, cached) {
   return { crypto, stocks, generated_at: new Date().toISOString() };
 }
 
+// ----------------------------- SCALPING VIEW --------------------------------
+// A single read for day trading, assembled from the inputs the Worker itself
+// keeps current on Cloudflare's cron: live price, session extremes, the asset's
+// own median daily range, and its proven hour windows.
+//
+// Deliberately narrower than the old GitHub intraday pipeline this replaces.
+// That pipeline had been running at ~2 of 288 requested firings a day, so
+// /api/intraday was serving 3.5-hour-old data to a scalping audience — and its
+// central output, intradaySignal's direction call, had already been backtested
+// at no usable edge (~54-56% reversal tilt conditional on movement, which is
+// not a basis for scalping). Reviving that wholesale would have been effort
+// spent on something already measured as worthless.
+//
+// So this carries only what has been measured: range exhaustion (how much of a
+// normal day is spent, and where price sits in it) and proven hour windows.
+// No direction call is invented. Where the engine has nothing measured to say,
+// it says nothing.
+export function buildScalpView(payload, live, session, nowIso) {
+  if (!payload) return null;
+  const withRange = attachDayRange(mergeLivePrices(payload, live), live, session);
+  const withHours = attachBestHours(withRange, nowIso);
+  const dayRange = withHours.dayRange || {};
+  const bestHours = withHours.bestHours || {};
+  const keys = new Set([...Object.keys(dayRange), ...Object.keys(bestHours)]);
+  if (!keys.size) return null;
+
+  const rows = indexBoardRows(withHours);
+  const assets = [];
+  for (const key of keys) {
+    const dr = dayRange[key];
+    const bh = bestHours[key];
+    const [assetClass, symbol] = key.split('|');
+    // An asset earns a place here only if something measured applies to it
+    // right now — a live range read, or an hour window opening soon.
+    const hourSoon = bh && ((bh.buy && bh.buy.minutesUntil <= 60) || (bh.sell && bh.sell.minutesUntil <= 60));
+    if (!dr && !hourSoon) continue;
+    const row = rows[key];
+    assets.push({
+      symbol, asset_class: assetClass,
+      price: row && row.price != null ? row.price : null,
+      range: dr ? {
+        state: dr.state, movePct: dr.movePct, moveInMedians: dr.moveInMedians,
+        usedPct: dr.usedPct, posInDayRange: dr.posInDayRange,
+        medianPct: dr.medianPct, medianAbs: dr.medianAbs,
+        entry: dr.entry
+      } : null,
+      hours: bh ? { buy: bh.buy, sell: bh.sell } : null
+    });
+  }
+  if (!assets.length) return null;
+  // Most actionable first: a live entry candidate, then the most stretched.
+  assets.sort((a, b) => {
+    const ae = a.range && a.range.entry ? 1 : 0;
+    const be = b.range && b.range.entry ? 1 : 0;
+    if (ae !== be) return be - ae;
+    return Math.abs((b.range && b.range.moveInMedians) || 0) - Math.abs((a.range && a.range.moveInMedians) || 0);
+  });
+  return {
+    generated_at: nowIso,
+    prices_generated_at: live ? live.generated_at : null,
+    session_date: session ? session.date : null,
+    basis: 'range-exhaustion and measured hour windows only; no unvalidated direction call',
+    assets
+  };
+}
+
 // ------------------------- BEST TRADING HOURS -------------------------------
 // User-requested 2026-08-30, off the widely-repeated equity claim that buying
 // the close and selling the open captures most of the return.
@@ -5887,10 +5970,33 @@ export default {
     // cron) with a much shorter expected freshness window. Deliberately
     // no leverage, liquidation price, or position-size figures in this
     // payload — see scripts/intraday.mjs's paper-trading section for why.
+    // Day-trading read, assembled live by this Worker. Replaces the GitHub
+    // intraday pipeline, which was delivering ~2 of 288 requested runs a day.
+    if (path === '/api/scalp' || path === 'api/scalp') {
+      const cached = await getCached(env);
+      if (!cached) return json({ error: 'signals not yet built' }, { 'Cache-Control': 'no-store' });
+      const live = await getCachedLivePrices(env);
+      const session = await getSessionExtremes(env);
+      const view = buildScalpView(cached, live, session, new Date().toISOString());
+      if (!view) return json({ error: 'no measured day-trading read available yet — needs a session of price ticks and a median daily range' }, { 'Cache-Control': 'no-store' });
+      return json(view, { 'Cache-Control': 'no-store', 'X-FCS-Prices': live ? 'live' : 'build' });
+    }
+
     if (path === '/api/intraday' || path === 'api/intraday') {
       const cached = await getCachedIntraday(env);
       if (cached) {
-        return json(cached, { 'X-FCS-Cache': isIntradayFresh(cached) ? 'hit' : 'stale' });
+        // Superseded by /api/scalp. Kept so existing consumers do not break,
+        // but its age is now stated in the body rather than only in a header —
+        // this fed a scalping audience while running hours behind.
+        const fresh = isIntradayFresh(cached);
+        const ageMin = cached.generated_at ? Math.round((Date.now() - new Date(cached.generated_at).getTime()) / 60000) : null;
+        return json({
+          ...cached,
+          deprecated: true,
+          superseded_by: '/signals/api/scalp',
+          age_minutes: ageMin,
+          warning: fresh ? null : `This payload is ${ageMin} minutes old and must not be used for day trading. Use /signals/api/scalp, which is refreshed by the Worker's own cron.`
+        }, { 'X-FCS-Cache': fresh ? 'hit' : 'stale' });
       }
       return json({ error: 'intraday signals not yet built — waiting on the first tick to populate the cache' }, { 'X-FCS-Cache': 'empty' });
     }
