@@ -35,6 +35,13 @@ const TOD_BOOTSTRAP_COVERAGE_TARGET = 300;
 // half) while keeping a one-off rewrite to ~90k rows across the equity
 // universe rather than the ~694k a full-depth rewrite would touch.
 const OPEN_BACKFILL_MAX_BARS = Number(process.env.OPEN_BACKFILL_MAX_BARS || 1500);
+
+// Its own budget, deliberately separate from the Binance one. ~61 equities x
+// ~700 days x ~7 market hours is on the order of 300k rows, so a first pass
+// spreads over several runs rather than blowing a shared cap and starving the
+// crypto leg — the exact starvation failure BINANCE_PER_SYMBOL_ROW_CAP was
+// added to fix.
+const EQUITY_HOURLY_ROW_BUDGET = Number(process.env.EQUITY_HOURLY_ROW_BUDGET || 20000);
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
   if (!v) { console.error(`Missing required env var: ${name}`); process.exit(1); }
 }
@@ -248,13 +255,40 @@ async function main() {
   // already well-bootstrapped rather than re-fetching 700 days every time.
   try {
     const swingCoverage = await getSwingTimeCoverage(env);
-    let swingOk = 0, swingSkipped = 0, todBootstrapped = 0, todSkipped = 0;
+    let swingOk = 0, swingSkipped = 0, todBootstrapped = 0, todSkipped = 0, equityHourlyWritten = 0;
+    // Guard on THIS table's coverage, not another's — the mistake that let the
+    // time-of-day bootstrap re-run indefinitely.
+    const hourlyCoverage = await getExistingHourlyCoverage(env);
     const swingFailed = [];
     for (const a of universe) {
       if (a.assetClass === 'benchmark') continue; // no swing-timing story for macro benchmarks — nothing trades them directly
       if ((swingCoverage[a.symbol] || 0) >= 600) { swingSkipped++; continue; }
       try {
         const bars = await yahooHourlyBars(a.yahooTicker);
+
+        // Persist these bars into asset_hourly_bars as well. They were already
+        // being fetched here for swing-timing and then thrown away, which left
+        // asset_hourly_bars holding crypto only — so every session-anchored
+        // analysis (the NYSE/LSE/TSE open and close slots, the whole
+        // time_of_day_edge read) could only ever be computed for crypto, and
+        // the equity version of the very question that started this could not
+        // be answered at all.
+        //
+        // Zero new fetches: same response, previously discarded. Guarded on
+        // this table's own coverage so a symbol is written once and never
+        // re-walked, and bounded by the shared row budget so a first run
+        // spreads across several rather than blowing the cap.
+        const equityHourlyLeft = () => EQUITY_HOURLY_ROW_BUDGET - equityHourlyWritten;
+        if (!(hourlyCoverage[a.symbol] > 0) && bars.length && equityHourlyLeft() > 0) {
+          const hourlyRows = bars.slice(-Math.min(bars.length, equityHourlyLeft())).map((b) => ({
+            symbol: a.symbol, assetClass: a.assetClass, bar_at: b.ts,
+            close: b.close, high: b.high, low: b.low, volume: b.volume, source: 'yahoo'
+          }));
+          if (hourlyRows.length) {
+            equityHourlyWritten += await upsertHourlyBars(env, hourlyRows);
+          }
+        }
+
         const { tallies, totalDays } = computeSwingTimeTallies(bars);
         if (totalDays > 0) await upsertSwingTimeStats(env, a.symbol, a.assetClass, tallies, totalDays, new Date().toISOString());
         // Reuses the exact same already-fetched `bars` — this is the
@@ -274,6 +308,7 @@ async function main() {
       await new Promise((r) => setTimeout(r, 500));
     }
     console.log(`swing-time backfill: ok ${swingOk}, already covered ${swingSkipped}, failed ${swingFailed.length}`);
+    console.log(`equity/hourly bars persisted from the same fetch (no new requests): ${equityHourlyWritten} rows`);
     console.log(`time-of-day bootstrap (same fetch, no new cost): ${todBootstrapped} symbols tallied, ${todSkipped} already bootstrapped (re-adding would double-count — these columns are running sums)`);
     if (swingFailed.length) console.log(`  failures: ${swingFailed.slice(0, 10).join('; ')}${swingFailed.length > 10 ? ` (+${swingFailed.length - 10} more)` : ''}`);
   } catch (e) {
