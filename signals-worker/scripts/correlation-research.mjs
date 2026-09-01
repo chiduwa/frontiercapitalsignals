@@ -16,7 +16,7 @@
 // the deliverable as the D1 rows.
 //
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID
-import { twoSampleZTest, volumeSurgeSeries, forwardReturns, chronologicalHalfSplit, sentimentExtremeForwardReturns, timeOfDaySentimentSplit, RELIABILITY_SIGNIFICANCE_Z, detectMoveEpisodes, detectExhaustionReversals, detectBottomThenMoonshot, volRegime, levelChangeBefore, isStableValueAsset } from '../worker.js';
+import { twoSampleZTest, volumeSurgeSeries, forwardReturns, chronologicalHalfSplit, sentimentExtremeForwardReturns, timeOfDaySentimentSplit, RELIABILITY_SIGNIFICANCE_Z, detectMoveEpisodes, detectExhaustionReversals, detectBottomThenMoonshot, volRegime, levelChangeBefore, isNonDirectionalAsset, pegAnchorDeviationPct } from '../worker.js';
 import { d1 } from './d1-client.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
@@ -115,11 +115,31 @@ async function main() {
   for (const [symbol, { assetClass, bars }] of Object.entries(bySymbol)) {
     if (assetClass !== 'crypto' && assetClass !== 'stock') continue; // benchmarks/pseudo-symbols (SECTOR:*, SPREAD:*, TVL:*) don't have a real per-asset volume story
     if (bars.length < VOLUME_LOOKBACK_DAYS + 30) continue; // not enough real history to say anything
-    const stable = assetClass === 'crypto' && isStableValueAsset({ symbol });
+    // Behavioural test, not the name list. Two things were wrong here and
+    // they pulled in opposite directions.
+    //
+    // First, an unknown peg — which USDG was for months — failed the name
+    // check and was therefore counted as an ordinary MARKET asset, quietly
+    // contaminating the cross-sectional return series that this very test
+    // uses as its baseline.
+    //
+    // Second, and introduced by widening the blocklist on 2026-08-31: the
+    // deviation below assumed a $1 anchor. That was survivable while the
+    // list held only dollar stablecoins, but it now also holds tokenized
+    // T-bill funds trading near $11 (USTB) and $106 (BCAP), for which
+    // |close - 1| computes a ~10,525% "depeg" on every single bar. That
+    // would have dominated the daily maximum outright and pushed every
+    // date over the 0.25% stress threshold, leaving the normal-day bucket
+    // empty and silently killing the test rather than producing a visibly
+    // wrong answer. Anchor to the asset's own median instead — see
+    // pegAnchorDeviationPct.
+    const closes = bars.map((b) => Number(b.close)).filter((v) => Number.isFinite(v) && v > 0);
+    const stable = assetClass === 'crypto' && isNonDirectionalAsset({ symbol }, closes);
     if (stable) {
       for (const bar of bars) {
         if (bar.close == null || !Number.isFinite(Number(bar.close))) continue;
-        const deviation = Math.abs(Number(bar.close) - 1) * 100;
+        const deviation = pegAnchorDeviationPct(closes, Number(bar.close));
+        if (deviation == null) continue;
         stablecoinDeviationByDate[bar.date] = Math.max(stablecoinDeviationByDate[bar.date] || 0, deviation);
       }
       continue; // stablecoins are the explanatory variable below, not market assets

@@ -2727,6 +2727,21 @@ const dailyReal = Array.from({ length: 365 }, (_, i) => 100 * Math.exp(Math.sin(
 check('a peg is still detected on DAILY bars', mod.pegBehaviour(dailyPeg).pegged, JSON.stringify(mod.pegBehaviour(dailyPeg)));
 check('a real asset on DAILY bars is not swept up', !mod.pegBehaviour(dailyReal).pegged, JSON.stringify(mod.pegBehaviour(dailyReal)));
 
+// Regression for the bug widening the blocklist introduced in
+// correlation-research.mjs: its depeg deviation assumed a $1 anchor,
+// which was fine while the list held only dollar stablecoins but not once
+// it also held T-bill funds trading near $11 and $106. Those would have
+// read ~1019% and ~10522% depegged on every bar, dominating the daily
+// maximum, pushing every date past the 0.25% stress threshold and
+// emptying the normal-day bucket — killing the test silently rather than
+// answering it wrongly.
+console.log('\n== depeg deviation is anchor-relative, not dollar-relative ==');
+const dollarPeg = Array.from({ length: 400 }, () => 1.0);
+const tbillFund = Array.from({ length: 400 }, () => 106.25);
+check('a healthy $1 peg still reads a tiny deviation', mod.pegAnchorDeviationPct(dollarPeg, 0.9994) < 0.25);
+check('a real $1 depeg still reads its true size', Math.abs(mod.pegAnchorDeviationPct(dollarPeg, 0.94) - 6) < 0.01);
+check('a $106 fund reads ~0%, not ~10522%', mod.pegAnchorDeviationPct(tbillFund, 106.22) < 0.25, String(mod.pegAnchorDeviationPct(tbillFund, 106.22)));
+
 // ---- CoinGecko 429 retry (2026-09-01) -------------------------------------
 // A single un-retried 429 took the Signals Daily job down on both
 // 2026-08-31 and 2026-09-01: daily-refresh calls getCryptoMarkets first,
