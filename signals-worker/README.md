@@ -276,6 +276,61 @@ Three traps worth knowing about, all found in review rather than in production:
 
 Results render in a **Retrospective** section placed *above* the boards, not below them — burying the engine's record of what it got wrong under the calls it is currently making would invert the honesty the section exists to provide.
 
+## Forward surge scanning, and why it warns instead of entering (added 2026-09-01)
+
+The retrospective explains moves after the fact. The obvious next question is whether the same volume tell can fire *before* one, as an entry trigger. It was measured before it was built, and the measurement said no.
+
+### The selection bias in the retrospective's own numbers
+
+Every figure the retrospective reports is **conditioned on the outcome**: it takes assets that already moved and looks back for a surge. That answers "did a tell exist?" It does not answer "when a tell fires, does a move follow?" Those diverge completely if most surges lead nowhere — and most do.
+
+Measured over **176K hourly observations across 200 Binance-global symbols** (~42 days), the naive reading is not merely weaker than it looked. It is inverted:
+
+| trigger | mean forward 24h |
+|---|---|
+| ratio ≥ 2.5, rising bar | +0.28% |
+| ratio ≥ 5 | −0.17% |
+| ratio ≥ 12 | −1.69% |
+| ratio ≥ 20 | −2.88% |
+| ratio ≥ 12 with a +3% bar | −4.71% |
+
+*(all-bar baseline: +0.33%)*
+
+Monotonic. **The bigger the volume spike into a rising bar, the worse the next day.** By the time 20x prints, the crowd is buying and the move is ending. An alerter built on "big volume means get in" would have lost money.
+
+### Two cohorts looked profitable and both failed the split
+
+Quiet accumulation (2–3x, flat bar, liquid book) and moderate surges (5–10x, liquid) beat baseline at every horizon and cleared significance pooled — z of 4.83 and 3.44 at 48h. Both **failed the chronological-half test** that `research_registry` exists to enforce:
+
+| cohort | first half | second half |
+|---|---|---|
+| quiet accumulation, 24h | −0.33% | +2.41% |
+| moderate surge, 72h | −2.13% | +5.75% |
+
+Opposite signs. The apparent edge is a bull-regime artifact of the back half of the sample, nothing more. This is precisely the trap the pooled-then-split methodology was built to catch, and it caught it.
+
+### What survived
+
+Only the exhaustion finding, and it survived convincingly — z = −8.84 at 24h with both halves negative (−3.45 / −2.11), **78% of individual symbols** and **69% of individual events** negative, median −2.78%. Broad, not a handful of outliers.
+
+Tightening it to require the spike hour to have **already run ≥5%** cut alert volume from 20.6/day to **4.4/day** across 200 symbols while more than doubling the effect to **−8.02%** (z = −8.3, halves −8.1 / −7.3). Better signal and a readable alert budget, which is not a trade-off that usually comes for free.
+
+One counter-intuitive detail worth preserving: exhaustion carries **no liquidity floor**, unlike the accumulation candidates where liquidity was the single most discriminating filter. Adding one collapses the sample to 96 events and significance disappears — exhaustion is a thin-and-mid-book pump-and-fade pattern, so screening for deep books screens out the phenomenon itself.
+
+### `scripts/live-scan.mjs` — earning the right to interrupt you
+
+Runs hourly over 250 Binance-global symbols (deliberately wider than `CRYPTO_UNIVERSE`, since the retrospective's standing finding is that ~80% of missed moves were never fetched at all).
+
+**Every** configuration is cast, logged and scored on live forward data — proven or not. That is the learning loop: an unproven candidate can only earn its way in by accumulating a real forward record, and it cannot accumulate one if it is never cast. The notification gate, in order:
+
+- **proven at discovery** → notifies (only `exhaustion20`)
+- **≥30 scored casts and a Wilson lower bound above a coin flip** → notifies, graduated on its own live evidence
+- otherwise → logged, silent
+
+`surge_config_status` carries each configuration's standing and the reason it is or is not currently allowed to speak, recomputed from `surge_signal_log` every run so it can never drift from the evidence. Scoring is directional against a 1% deadband, so a market that never moved credits neither side rather than flattering whichever was called.
+
+The alert says what the evidence says: **a warning not to chase, not an entry.**
+
 ## Editing later
 
 Change the watchlist, universe size, and filters in the config constants near the top of `worker.js`; tune technique weights in `evaluateTechniques`; adjust the embedded dashboard in the `PAGE_HTML` template near the bottom. After any edit, copy the file to `src/worker.js` too (`cp worker.js src/worker.js`) and run `node test-worker.mjs` before redeploying.

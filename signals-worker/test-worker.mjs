@@ -2812,5 +2812,56 @@ check('a correct, timely call is classified caught', mod.classifyMiss({ inUniver
 check('a call made only after the tell is classified late', mod.classifyMiss({ inUniverse: true, passedFloors: true, onBoard: true, boardSide: 1, moveDir: 1, scoredAt: '2026-08-31T20:00:00Z', detectableAt: '2026-08-30T14:00:00Z' }) === 'late');
 check('every cause emitted is in the declared vocabulary', mod.MISS_CAUSES.includes(mod.classifyMiss({ inUniverse: true, passedFloors: true, onBoard: false, moveDir: 1 })));
 
+// ---- forward surge scanning (2026-09-01) -----------------------------------
+// The measured finding these encode: mean forward return falls
+// MONOTONICALLY as a volume spike grows, so a big spike is an exhaustion
+// marker and not an entry. Only the exhaustion configuration survived both
+// the significance bar and the chronological-half split; the two
+// long-side candidates failed the split and must stay silent until their
+// own live record earns them in.
+console.log('\n== forward surge scanning ==');
+const mkSurgeBars = (n, { spikeAt = null, spikeMult = 30, spikeBarPct = 8 } = {}) =>
+  Array.from({ length: n }, (_, i) => {
+    const isSpike = spikeAt != null && i === spikeAt;
+    const open = 100;
+    return {
+      openTime: new Date(Date.UTC(2026, 8, 1, i)).toISOString(),
+      open, high: open * 1.02, low: open * 0.99,
+      close: isSpike ? open * (1 + spikeBarPct / 100) : open * 1.001,
+      volume: 1000, quoteVolume: isSpike ? 100000 * spikeMult : 100000,
+      trades: isSpike ? 500 * 6 : 500
+    };
+  });
+
+const exhaustionCfg = mod.SURGE_CONFIGS.find((c) => c.id === 'exhaustion20');
+check('exactly one configuration is proven at discovery', mod.SURGE_CONFIGS.filter((c) => c.proven).length === 1);
+check('the proven one predicts DOWN, not up — it is a warning, not an entry', exhaustionCfg.dir === -1);
+check('the long-side candidates are explicitly unproven', mod.SURGE_CONFIGS.filter((c) => c.dir === 1).every((c) => !c.proven));
+
+// Cast on the last CLOSED bar, never the forming one.
+const spikeBars = mkSurgeBars(80, { spikeAt: 78 });
+const hits = mod.scanSurgeConfigs(spikeBars);
+check('a 30x spike on a +8% bar fires the exhaustion configuration', hits.some((h) => h.config.id === 'exhaustion20'), JSON.stringify(hits.map(h => h.config.id)));
+check('the forming final bar is not scanned', mod.scanSurgeConfigs(mkSurgeBars(80, { spikeAt: 79 })).every((h) => h.config.id !== 'exhaustion20'));
+
+// A spike that has NOT yet run is not exhaustion — this is the filter that
+// took alert volume from 20.6/day to 4.4/day and doubled the effect.
+check('a 30x spike on a flat bar does NOT fire exhaustion', mod.scanSurgeConfigs(mkSurgeBars(80, { spikeAt: 78, spikeBarPct: 0.2 })).every((h) => h.config.id !== 'exhaustion20'));
+check('an ordinary quiet series fires nothing', mod.scanSurgeConfigs(mkSurgeBars(80)).length === 0);
+
+// Abstain rather than assume when the venue reports no trade counts.
+const noTrades = mkSurgeBars(80, { spikeAt: 78 }).map((b) => ({ ...b, trades: null }));
+check('a missing trade count abstains instead of passing the test', mod.scanSurgeConfigs(noTrades).every((h) => h.config.id !== 'exhaustion20'));
+
+const f = mod.surgeFeatures(spikeBars, 78);
+check('surgeFeatures reports the ratio against the trailing median', f && Math.abs(f.ratio - 30) < 0.01, JSON.stringify(f));
+check('surgeFeatures reports liquidity as the median hourly quote volume', f && Math.abs(f.liquidity - 100000) < 1);
+
+// Directional scoring: a -1 call is correct when price FALLS.
+check('a down-call is correct when price falls', mod.scoreSurgeCast(-1, 100, 92).outcome === 'correct');
+check('a down-call is wrong when price rises', mod.scoreSurgeCast(-1, 100, 108).outcome === 'wrong');
+check('a flat market credits neither side', mod.scoreSurgeCast(-1, 100, 100.4).outcome === 'flat');
+check('an up-call is correct when price rises', mod.scoreSurgeCast(1, 100, 108).outcome === 'correct');
+
 console.log(failures === 0 ? '\nWORKER INTEGRATION OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

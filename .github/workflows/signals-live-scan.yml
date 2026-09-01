@@ -1,0 +1,59 @@
+name: Signals Live Scan
+
+# The forward-looking half of the 2026-09-01 request: warn BEFORE the move
+# rather than explain it after. Hourly, because every configuration is
+# defined on hourly bars against a 48-hour trailing median — scanning more
+# often would re-evaluate the same closed bar and cast duplicates (the
+# UNIQUE (config_id, symbol, cast_at) constraint would reject them, but
+# spending the fetches to be rejected is pointless).
+#
+# Runs at :25 to stay clear of signals-refresh (:13) and the round-hour
+# boundary, per this repo's existing note on scheduling contention.
+on:
+  schedule:
+    - cron: "25 * * * *"
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "How many Binance-global symbols to scan"
+        required: false
+        default: "250"
+
+concurrency:
+  group: signals-live-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    # ~250 klines calls at 120ms pacing is ~1 minute of fetch time, plus
+    # scoring and D1 writes. Every outbound call is individually bounded by
+    # fetchWithTimeout, so this ceiling is about total time, not hangs.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      # Same convention as every other workflow here: migrations before the
+      # code that reads the new tables. Re-running is safe.
+      - name: Apply D1 migrations
+        working-directory: signals-worker
+        run: npx --yes wrangler@4 d1 migrations apply frontier-capital-signals-reliability --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Scan for surge signals, score matured casts, notify
+        working-directory: signals-worker
+        run: node scripts/live-scan.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+          LIVE_SCAN_SYMBOLS: ${{ inputs.symbols || '250' }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}

@@ -1494,6 +1494,165 @@ export function volumeSurgeSeries(bars, lookbackDays = 20) {
   return out;
 }
 
+// ----------------------- FORWARD SURGE SCANNING -----------------------------
+// User-requested 2026-09-01: "will the retrospective automatically learn
+// from all findings so it will notify me of such signals ahead of time
+// before the asset jumps or plummets?"
+//
+// It did not, and the honest reason matters more than the code. The
+// retrospective's tells were selected ON THE OUTCOME — it takes assets
+// that already moved and looks back for a volume surge. That answers "did
+// a tell exist?", never "when a tell fires, does a move follow?". Measured
+// properly over 176K hourly observations across 200 symbols on Binance
+// global, the naive reading is not merely weaker than it looked, it is
+// backwards:
+//
+//   ratio >= 2.5, rising bar    mean 24h  +0.28%    (baseline +0.33%)
+//   ratio >= 5                            -0.17%
+//   ratio >= 12                           -1.69%
+//   ratio >= 20                           -2.88%
+//
+// Monotonic. The bigger the volume spike into a green bar, the worse the
+// next day: by the time 20x prints, the crowd is buying and the move is
+// ending. Alerting on volume spikes as an entry trigger would lose money.
+//
+// Two cohorts DID look profitable pooled — quiet accumulation (2-3x, flat
+// bar, liquid book) and moderate surges (5-10x, liquid). Both FAILED the
+// chronological-half test this project already applies to every research
+// finding: their two halves have opposite signs (quiet accumulation 24h,
+// -0.33% then +2.41%), so the apparent edge is a bull-regime artifact and
+// nothing more. They are kept below as candidates precisely because they
+// are unproven — logged and forward-scored, silent until their own live
+// record earns the right to speak.
+//
+// Only the exhaustion finding survived both bars, and it survived
+// convincingly: z = -8.84 at 24h, both halves negative (-3.45 / -2.11),
+// 78% of individual symbols negative, 69% of individual events negative,
+// median -2.78%. That is the one configuration allowed to notify on day
+// one, and it is a warning not to chase, not an entry.
+//
+// Every constant below is a measurement, not a preference. Re-derive them
+// (scripts/, and the sweep documented in README.md) before changing any.
+
+// dir is what the configuration PREDICTS, not what the bar just did:
+// exhaustion fires on a rising bar and predicts weakness.
+export const SURGE_CONFIGS = [
+  {
+    id: 'exhaustion20',
+    label: 'Volume exhaustion',
+    // minBarPct, not maxBarPct: this configuration wants the bar to have
+    // ALREADY run hard. Requiring >= 5% on the spike hour cut alert volume
+    // from 20.6/day to 4.4/day across 200 symbols while more than doubling
+    // the effect (-3.13% -> -8.02% mean 24h, z = -8.3, halves -8.1/-7.3).
+    // Both a better signal and an alert budget a person will actually
+    // read, which is not a trade-off that usually comes for free.
+    minRatio: 20, maxRatio: null, minTradeRatio: 2,
+    requireRising: true, minBarPct: 5, maxBarPct: null,
+    // Deliberately NO liquidity floor, unlike the accumulation candidates
+    // below where it was the single most discriminating filter. Applying
+    // one here collapses the sample to 96 events and the effect stops
+    // being significant: exhaustion is a thin-and-mid-book pump-and-fade
+    // pattern, so screening for deep books screens out the phenomenon.
+    minLiquidity: 0,
+    dir: -1, horizonHours: 24,
+    // Cleared the significance bar AND held its sign in both chronological
+    // halves at discovery. Broad, not a few outliers: 78% of individual
+    // symbols and 69% of individual events negative. Notifies immediately.
+    proven: true,
+    note: 'a 20x+ volume spike on an hour that already ran +5% or more has historically been followed by roughly -8% over the next day. This is a warning not to chase, not an entry'
+  },
+  {
+    id: 'accum_quiet',
+    label: 'Quiet accumulation',
+    minRatio: 2, maxRatio: 3, minTradeRatio: null,
+    requireRising: true, maxBarPct: 1, minLiquidity: 50000,
+    dir: 1, horizonHours: 48,
+    // Pooled z = 4.83 at 48h but halves were -0.29 / +3.88. Unproven.
+    proven: false,
+    note: 'modest volume with price still flat on a liquid book — candidate only, failed the out-of-sample split at discovery'
+  },
+  {
+    id: 'moderate_liq',
+    label: 'Moderate surge, liquid book',
+    minRatio: 5, maxRatio: 10, minTradeRatio: 2,
+    requireRising: true, maxBarPct: null, minLiquidity: 50000,
+    dir: 1, horizonHours: 48,
+    // Pooled z = 3.44 at 48h, halves -1.01 / +4.80. Unproven.
+    proven: false,
+    note: 'candidate only, failed the out-of-sample split at discovery'
+  }
+];
+
+// Surge features for one bar against its own trailing window. Pure, so the
+// live scanner and any backtest compute the identical number — the whole
+// point, since a signal scored against features it was not cast on is not
+// being scored at all.
+export function surgeFeatures(bars, index, baselineHours = 48) {
+  if (!Array.isArray(bars) || index < baselineHours || index >= bars.length) return null;
+  const w = bars.slice(index - baselineHours, index);
+  const qv = w.map((b) => b.quoteVolume).filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+  const tr = w.map((b) => b.trades).filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+  if (qv.length < baselineHours * 0.5) return null;
+  const bar = bars[index];
+  const medQv = qv[Math.floor(qv.length / 2)];
+  const medTr = tr.length ? tr[Math.floor(tr.length / 2)] : null;
+  if (!medQv || !Number.isFinite(bar.quoteVolume) || bar.quoteVolume <= 0) return null;
+  if (!Number.isFinite(bar.open) || bar.open <= 0 || !Number.isFinite(bar.close) || bar.close <= 0) return null;
+  return {
+    at: bar.openTime,
+    close: bar.close,
+    ratio: bar.quoteVolume / medQv,
+    tradeRatio: medTr && Number.isFinite(bar.trades) ? bar.trades / medTr : null,
+    rising: bar.close > bar.open,
+    barPct: (bar.close / bar.open - 1) * 100,
+    // Median hourly quote volume of the trailing window. The single most
+    // discriminating filter in the sweep: thin books manufacture large
+    // ratios from nothing, and every cohort measured cleaner once they
+    // were excluded.
+    liquidity: medQv
+  };
+}
+
+export function surgeConfigMatches(cfg, f) {
+  if (!f) return false;
+  if (f.ratio < cfg.minRatio) return false;
+  if (cfg.maxRatio != null && f.ratio >= cfg.maxRatio) return false;
+  // A null tradeRatio means the venue reported no usable trade counts, not
+  // that the test passed. Abstain rather than assume, same discipline as
+  // pegBehaviour's sample-count gate.
+  if (cfg.minTradeRatio != null && (f.tradeRatio == null || f.tradeRatio < cfg.minTradeRatio)) return false;
+  if (cfg.requireRising && !f.rising) return false;
+  if (cfg.minBarPct != null && f.barPct < cfg.minBarPct) return false;
+  if (cfg.maxBarPct != null && f.barPct >= cfg.maxBarPct) return false;
+  if (cfg.minLiquidity && f.liquidity < cfg.minLiquidity) return false;
+  return true;
+}
+
+// Which configurations fire on the most recent CLOSED bar. The last bar
+// Binance returns is still forming, so it is dropped: casting on a partial
+// bar would compare a fraction of an hour's volume against full-hour
+// medians and fire constantly on nothing.
+export function scanSurgeConfigs(bars, configs = SURGE_CONFIGS, baselineHours = 48) {
+  if (!Array.isArray(bars) || bars.length < baselineHours + 2) return [];
+  const idx = bars.length - 2;
+  const f = surgeFeatures(bars, idx, baselineHours);
+  if (!f) return [];
+  return configs.filter((c) => surgeConfigMatches(c, f)).map((c) => ({ config: c, features: f }));
+}
+
+// Did a cast come true? Directional, against the move actually required —
+// a -1 call is correct when price fell. deadbandPct keeps a flat market
+// from being scored as a win for whichever side happened to be called;
+// it is the same "wrong_flat vs wrong_opposite" distinction
+// intraday_backtest_reliability already draws.
+export function scoreSurgeCast(dir, entryPrice, exitPrice, deadbandPct = 1) {
+  if (!(entryPrice > 0) || !(exitPrice > 0)) return null;
+  const pct = (exitPrice / entryPrice - 1) * 100;
+  if (Math.abs(pct) < deadbandPct) return { outcome: 'flat', pct };
+  const moved = pct > 0 ? 1 : -1;
+  return { outcome: moved === dir ? 'correct' : 'wrong', pct };
+}
+
 // --------------------- RETROSPECTIVE / MISS ANALYSIS -------------------------
 // User-requested 2026-08-31, from a specific observation: "arb and a couple
 // of cryptos jumped in the past couple of hours, examine that to figure out
