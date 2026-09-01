@@ -2727,6 +2727,35 @@ const dailyReal = Array.from({ length: 365 }, (_, i) => 100 * Math.exp(Math.sin(
 check('a peg is still detected on DAILY bars', mod.pegBehaviour(dailyPeg).pegged, JSON.stringify(mod.pegBehaviour(dailyPeg)));
 check('a real asset on DAILY bars is not swept up', !mod.pegBehaviour(dailyReal).pegged, JSON.stringify(mod.pegBehaviour(dailyReal)));
 
+// ---- CoinGecko 429 retry (2026-09-01) -------------------------------------
+// A single un-retried 429 took the Signals Daily job down on both
+// 2026-08-31 and 2026-09-01: daily-refresh calls getCryptoMarkets first,
+// so one rate-limited response aborted the run before any of the work
+// behind it could start.
+console.log('\n== getCryptoMarkets 429 retry ==');
+{
+  const realFetch = global.fetch;
+  let calls = 0;
+  global.fetch = async () => { calls++; return calls <= 2
+    ? { ok: false, status: 429, json: async () => ({}) }
+    : { ok: true, status: 200, json: async () => ({ recovered: true }) }; };
+  const recovered = await mod.fetchJsonRetrying429('https://example.test/a', [5, 5, 5]);
+  check('a transient 429 is retried and recovers', recovered && recovered.recovered === true && calls === 3, `calls=${calls}`);
+
+  calls = 0;
+  global.fetch = async () => { calls++; return { ok: false, status: 404, json: async () => ({}) }; };
+  let threw = false;
+  try { await mod.fetchJsonRetrying429('https://example.test/b', [5, 5, 5]); } catch { threw = true; }
+  check('a 404 is NOT retried — it will not fix itself', threw && calls === 1, `calls=${calls}`);
+
+  calls = 0;
+  global.fetch = async () => { calls++; return { ok: false, status: 429, json: async () => ({}) }; };
+  threw = false;
+  try { await mod.fetchJsonRetrying429('https://example.test/c', [5, 5]); } catch { threw = true; }
+  check('a persistent 429 gives up rather than looping forever', threw && calls === 3, `calls=${calls}`);
+  global.fetch = realFetch;
+}
+
 // ---- retrospective (2026-08-31) --------------------------------------------
 console.log('\n== retrospective: episode anchoring and miss classification ==');
 // A retroQuiet run-in, then a volume retroSurge into a rising bar, then the move.

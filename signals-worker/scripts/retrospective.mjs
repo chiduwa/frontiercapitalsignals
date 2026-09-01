@@ -45,7 +45,7 @@
 import { d1, chunk, forEachConcurrent } from './d1-client.mjs';
 import {
   binanceGlobalKlines, binanceGlobalTradablePairs, describeMissedMove, classifyMiss,
-  isNonDirectionalAsset, CRYPTO_UNIVERSE, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME
+  isNonDirectionalAsset, COINGECKO_BACKOFFS_MS, CRYPTO_UNIVERSE, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME
 } from '../worker.js';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, NTFY_TOPIC } = process.env;
@@ -71,14 +71,37 @@ const MIN_ACTIONABLE_GAIN_PCT = Number(process.env.RETRO_MIN_ACTIONABLE_GAIN_PCT
 const FETCH_TIMEOUT_MS = 20000;
 const BINANCE_PACING_MS = 250;
 
-async function fetchJson(url) {
+async function fetchJsonOnce(url) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   try {
     const res = await fetch(url, { signal: ctrl.signal, headers: { accept: 'application/json' } });
+    // "HTTP 429" prefix exactly, so the retry below can recognise it —
+    // same message shape worker.js's fetchJson uses.
     if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
     return await res.json();
   } finally { clearTimeout(t); }
+}
+
+// CoinGecko's free tier rate-limits by IP and CI runners share heavily
+// used ranges. A single un-retried 429 took the Signals Daily job down on
+// both 2026-08-31 and 2026-09-01 (see getCryptoMarkets in worker.js);
+// this job makes the same class of call on its own daily schedule and
+// would have failed identically. Only 429 is retried — a 404 will not fix
+// itself by being asked again.
+async function fetchJson(url) {
+  let lastErr;
+  for (let attempt = 0; attempt <= COINGECKO_BACKOFFS_MS.length; attempt++) {
+    try {
+      return await fetchJsonOnce(url);
+    } catch (e) {
+      lastErr = e;
+      if (!/^HTTP 429/.test(String(e && e.message)) || attempt === COINGECKO_BACKOFFS_MS.length) break;
+      console.log(`  rate-limited, backing off ${COINGECKO_BACKOFFS_MS[attempt]}ms`);
+      await new Promise((r) => setTimeout(r, COINGECKO_BACKOFFS_MS[attempt]));
+    }
+  }
+  throw lastErr;
 }
 
 // The wide scan.

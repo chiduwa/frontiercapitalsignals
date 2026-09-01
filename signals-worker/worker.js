@@ -3452,11 +3452,41 @@ export async function poolPaced(items, batchSize, delayMs, fn) {
 
 // ----------------------------- DATA SOURCES ---------------------------------
 
+// CoinGecko's free tier rate-limits by IP, and CI runners share heavily
+// used IP ranges — the same reasoning getCryptoDailyHistory's own retry
+// was written for, below. This call had no retry at all, which is how a
+// single 429 took down the whole Signals Daily job on both 2026-08-31 and
+// 2026-09-01: daily-refresh.mjs calls this first, so one rate-limited
+// response aborted the run before any of the sentiment/lead-lag/composite
+// work behind it could start.
+//
+// Shared rather than a second hand-copied backoff loop, and now also used
+// by scripts/retrospective.mjs, which makes the same class of call on its
+// own daily schedule and would have inherited the identical failure.
+export const COINGECKO_BACKOFFS_MS = [3000, 6000, 12000];
+
+export async function fetchJsonRetrying429(url, backoffsMs = COINGECKO_BACKOFFS_MS) {
+  let lastErr;
+  for (let attempt = 0; attempt <= backoffsMs.length; attempt++) {
+    try {
+      return await fetchJson(url);
+    } catch (e) {
+      lastErr = e;
+      // Only 429. A 404 or a malformed payload will not fix itself by
+      // being asked again, and retrying those would just turn a fast,
+      // legible failure into a slow one.
+      if (!/^HTTP 429/.test(String(e && e.message)) || attempt === backoffsMs.length) break;
+      await new Promise((r) => setTimeout(r, backoffsMs[attempt]));
+    }
+  }
+  throw lastErr;
+}
+
 export async function getCryptoMarkets() {
   const url = 'https://api.coingecko.com/api/v3/coins/markets'
     + `?vs_currency=usd&order=market_cap_desc&per_page=${CRYPTO_UNIVERSE}&page=1`
     + '&sparkline=true&price_change_percentage=1h,24h,7d,30d';
-  return fetchJson(url);
+  return fetchJsonRetrying429(url);
 }
 
 // Real daily bars (close + volume) per coin, so crypto's indicators mean the
