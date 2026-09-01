@@ -249,6 +249,33 @@ export async function logRun(env, runAt, log) {
     const params = batch.flatMap((r) => [runAt, r.asset_class, r.symbol, r.horizon_hours, r.low, r.high]);
     await d1(env, `INSERT OR REPLACE INTO range_log (run_at, asset_class, symbol, horizon_hours, low, high) VALUES ${placeholders}`, params);
   });
+  // The stable-value research lane (user-requested 2026-08-31). These
+  // assets are deliberately absent from every board — a peg has no
+  // breakout to call, which is what made "USDG ⏳ Consolidating ↓" wrong
+  // — but their supply and turnover are logged here anyway, because the
+  // same conversation's other half was that a stablecoin going quiet may
+  // itself say something about where the money NOT sitting in it is
+  // headed. Observation only: nothing reads this into a live signal
+  // until correlation-research.mjs shows the relationship survives
+  // out-of-sample. 8 columns x 12 = 96, under D1's 100-bound-param cap.
+  // One row per calendar day per asset (see the table's own docs). Most
+  // columns take the latest observation; peak_deviation_pct is the
+  // exception and accumulates with MAX, because a depeg is an intraday
+  // spike that a last-write-wins column would erase. 10 columns x 9 = 90,
+  // under D1's 100-bound-param cap.
+  const obsDate = runAt.slice(0, 10);
+  await forEachConcurrent(chunk(log.stableValue || [], 9), D1_WRITE_CONCURRENCY, async (batch) => {
+    await d1(env, `
+      INSERT INTO stable_value_observations
+        (obs_date, symbol, name, price, mcap, volume, median_bar_pct, chg24h, peak_deviation_pct, basis, last_seen_at)
+      VALUES ${batch.map(() => '(?,?,?,?,?,?,?,?,?,?,?)').join(',')}
+      ON CONFLICT(obs_date, symbol) DO UPDATE SET
+        price = excluded.price, mcap = excluded.mcap, volume = excluded.volume,
+        median_bar_pct = excluded.median_bar_pct, chg24h = excluded.chg24h,
+        peak_deviation_pct = MAX(COALESCE(stable_value_observations.peak_deviation_pct, 0), COALESCE(excluded.peak_deviation_pct, 0)),
+        basis = excluded.basis, last_seen_at = excluded.last_seen_at`,
+      batch.flatMap((r) => [obsDate, r.symbol, r.name ?? null, r.price ?? null, r.mcap ?? null, r.volume ?? null, r.medianBarPct ?? null, r.chg24h ?? null, r.deviationPct ?? null, r.basis, runAt]));
+  });
 }
 
 // Per-asset realized move size at each horizon, learned continuously —
@@ -1213,3 +1240,42 @@ export async function loadTimeOfDayEdge(env) {
 // roughly 24 per symbol. The headline result clears this bar with room to
 // spare either way — hour_et_16 reaches t=5.3-5.9 across BTC, ETH and BNB.
 const TOD_EDGE_SIGNIFICANCE_T = 3.3;
+
+// The retrospective's own findings, for display (user-requested
+// 2026-08-31). Two parts, and the second is the one that matters:
+// `recent` is the individual episodes, `patterns` is the cumulative
+// answer to "which failure mode dominates" — the thing that tells the
+// engine what to fix next rather than merely what it got wrong once.
+//
+// Read-only and entirely optional: the retrospective job (scripts/
+// retrospective.mjs) runs on its own daily schedule, so on a fresh
+// database — or any run before that job has fired even once — these
+// tables simply do not exist yet. That is a normal state, not an error,
+// so this returns null on any failure rather than taking the hourly build
+// down over a display-only section.
+export async function loadRetrospective(env, limit = 12) {
+  try {
+    const [patterns, recent] = await Promise.all([
+      d1(env, 'SELECT cause, n, share, avg_move_pct, avg_available_pct, avg_lead_hours, n_detected, updated_at FROM retrospective_patterns ORDER BY n DESC'),
+      d1(env, `SELECT run_at, symbol, name, mcap_rank, move_pct, cause, detected, detectable_at, surge_ratio, trade_ratio, lead_hours, gain_to_peak_pct
+                 FROM retrospective_misses ORDER BY run_at DESC, ABS(move_pct) DESC LIMIT ?`, [limit])
+    ]);
+    if (!patterns.length && !recent.length) return null;
+    return {
+      patterns: patterns.map((r) => ({
+        cause: r.cause, n: r.n, share: r.share, avgMovePct: r.avg_move_pct,
+        avgAvailablePct: r.avg_available_pct, avgLeadHours: r.avg_lead_hours,
+        nDetected: r.n_detected, updatedAt: r.updated_at
+      })),
+      recent: recent.map((r) => ({
+        runAt: r.run_at, symbol: r.symbol, name: r.name, rank: r.mcap_rank,
+        movePct: r.move_pct, cause: r.cause, detected: r.detected === 1,
+        detectableAt: r.detectable_at, surgeRatio: r.surge_ratio, tradeRatio: r.trade_ratio,
+        leadHours: r.lead_hours, gainToPeakPct: r.gain_to_peak_pct
+      }))
+    };
+  } catch (e) {
+    console.error('loadRetrospective failed (display-only, ignored):', e.message || e);
+    return null;
+  }
+}

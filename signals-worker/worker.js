@@ -145,8 +145,120 @@ export const CRYPTO_BLOCKLIST = new Set([
   // the ticker name) — stable-value assets that slipped past this list
   // and were showing up as false "long-term potential" candidates simply
   // by virtue of never moving much at all.
-  'bfusd','gho','usd1'
+  'bfusd','gho','usd1',
+  // Found live 2026-08-31, from the user's own report that USDG was being
+  // shown as "⏳ Consolidating ↓" on the breakdown board. USDG (Paxos'
+  // Global Dollar) is named neither "USD-something" in a way the regex
+  // below caught nor listed here, so it passed every gate and then
+  // trivially satisfied the T27 accum technique: a $1 peg ALWAYS has
+  // squeezed Bollinger bands and |chg7d| < 5%, so `coiled` is
+  // permanently true for it and the only thing left deciding direction
+  // is OBV — which for a stablecoin is mint/redeem flow, not
+  // accumulation. A peg cannot "consolidate"; it has nothing to
+  // consolidate toward.
+  //
+  // Checking the whole live top-100 the same way (not just USDG) turned
+  // up four more of the same class already in the fetched universe, two
+  // of which were also on live boards: FIGR_HELOC (a $21.9B tokenized
+  // HELOC, sitting on BOTH the breakdown and long-term-potential
+  // boards), U (United Stables, on long-term-potential), and USDGO —
+  // which archive.mjs's own day-trade notes had already identified as a
+  // stablecoin back on 2026-08-25 without anyone adding it here.
+  'usdg','usdgo','u','figr_heloc','ausd','usdf',
+  // Tokenized money-market/T-bill funds. Not stablecoins and not $1-
+  // anchored (USTB trades ~$11.19, BCAP ~$106.25), but identical in the
+  // only respect that matters to a directional board: they accrue yield
+  // in a straight line and never trade on sentiment. Same live top-100
+  // sweep, 2026-08-31.
+  'buidl','jtrsy','usyc','ustb','jaaa','bcap','eutbl','eursafo'
 ]);
+
+// A ticker list can only ever describe pegs that were known when it was
+// written — USDG is the direct proof of that: it sat in the top 30 by
+// market cap for months and still slipped through, because nothing about
+// the strings "USDG" or "Global Dollar" says "peg". So the list above is
+// now only the cheap fast path, and THIS is the actual gate: a
+// behavioural test that asks what the asset's price series does rather
+// than what it is called, and therefore catches a peg launched tomorrow
+// under a name nobody has seen yet.
+//
+// The measure is the MEDIAN absolute bar-over-bar return. Median, not
+// range or standard deviation, specifically because the range is not
+// robust: FIGR_HELOC's 7-day high/low band is 5.43% — wider than PAX
+// Gold's — purely from a handful of stale/outlier prints in a thin RWA
+// book, so a max-min test clears it while a median test puts it at
+// 0.0101%, exactly where it belongs.
+//
+// Calibrated against the live CoinGecko top-100 on 2026-08-31 (hourly
+// sparkline, 168 points). The two populations do not overlap or even
+// come close:
+//
+//   every peg / T-bill fund / flat RWA (24 assets)  <= 0.0101%
+//   ---------------------------- 7x gap ----------------------------
+//   LEO 0.0750%  BDX 0.0837%  HTX 0.0852%  XAUT 0.0890%  PAXG 0.0929%
+//
+// PAXG and XAUT matter as the near-miss cases worth protecting: gold is
+// genuinely low-volatility and genuinely directional, and it sits ~9x
+// above the threshold, so this test does not quietly swallow the slow
+// movers it is most at risk of swallowing. 0.03% is placed in the middle
+// of that gap on a log scale — 3x above the highest peg, 2.5x below the
+// lowest real asset.
+export const PEG_MEDIAN_BAR_RETURN_PCT = 0.03;
+// Below this many usable points the median is not a meaningful estimate
+// and the test abstains (returns pegged: false) rather than guessing —
+// same discipline as every reliability gate in this file: no opinion is
+// better than an opinion from four data points.
+export const PEG_MIN_SAMPLES = 48;
+
+// Pure and synchronous so it is directly unit-testable, same shape as
+// dailyMovementStats/realizedVolPct below. `closes` is any evenly-spaced
+// price series — the 7-day hourly sparkline every crypto row already
+// carries, or real daily bars (archive.mjs's long-term-bottom scan feeds
+// it the latter).
+//
+// The same constant is used for both intervals, but NOT because a
+// percentage return is interval-independent — it is not; a random walk's
+// per-bar return scales with the square root of the bar length, so daily
+// moves run several times larger than hourly ones. The reason one
+// threshold covers both is that a peg is pinned rather than random: it
+// mean-reverts to its anchor, so its per-bar move barely grows with the
+// interval while a real asset's grows as expected. That makes the two
+// populations separate FURTHER apart on longer bars, not closer.
+// Measured directly over 365 daily closes rather than assumed:
+//
+//   pegs     USDC 0.0085%  USDT 0.0099%  USDG 0.0101%  DAI 0.0195%
+//   real     PAXG 0.6376%  LEO 0.6735%   TRX 0.7436%   BTC 1.2486%
+//
+// A 32x gap on daily bars against 7x on hourly, with 0.03% comfortably
+// inside both. If this is ever pointed at a much shorter bar (minutes),
+// re-measure before trusting it — the argument above is about pegs not
+// scaling, and it has only been checked at these two intervals.
+// How far a pinned asset currently sits from its own anchor, in percent.
+// The anchor is the series' own median, not an assumed $1: the pegs this
+// engine actually excludes include tokenized T-bill funds anchored around
+// $11 and $106, and a hardcoded dollar would score those as permanently,
+// enormously depegged. Null when there is not enough series to say.
+export function pegAnchorDeviationPct(closes, price) {
+  const vals = (closes || []).filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+  if (!vals.length || !Number.isFinite(price) || price <= 0) return null;
+  const mid = Math.floor(vals.length / 2);
+  const anchor = vals.length % 2 ? vals[mid] : (vals[mid - 1] + vals[mid]) / 2;
+  if (!anchor) return null;
+  return Math.abs(price / anchor - 1) * 100;
+}
+
+export function pegBehaviour(closes) {
+  const moves = [];
+  for (let i = 1; i < (closes || []).length; i++) {
+    const prev = closes[i - 1], cur = closes[i];
+    if (prev > 0 && cur > 0) moves.push(Math.abs(cur / prev - 1) * 100);
+  }
+  if (moves.length < PEG_MIN_SAMPLES) return { pegged: false, medianPct: null, samples: moves.length };
+  moves.sort((a, b) => a - b);
+  const mid = Math.floor(moves.length / 2);
+  const medianPct = moves.length % 2 ? moves[mid] : (moves[mid - 1] + moves[mid]) / 2;
+  return { pegged: medianPct <= PEG_MEDIAN_BAR_RETURN_PCT, medianPct, samples: moves.length };
+}
 
 // Ticker blocklists are necessary but not sufficient: CoinGecko can add a
 // newly launched peg before it is known here. Keep obvious USD-pegged assets
@@ -157,8 +269,55 @@ export function isStableValueAsset(asset) {
   const id = String(asset?.id || '').toLowerCase();
   const name = String(asset?.name || '').toLowerCase();
   if (CRYPTO_BLOCKLIST.has(symbol)) return true;
-  if (/^(usd|usdt|usdc|usde|usds|dai|fdusd|pyusd|tusd|usdp|gusd|frax|lusd|susd|usdd|usdy|usd0|usdtb|rlusd|eurc|eurt|bfusd|gho|usd1)$/.test(symbol)) return true;
-  if (/(stablecoin|usd coin|tether|dai stablecoin|frax usd|pax dollar|trueusd|gemini dollar|usdd)/.test(name) || /(^|-)usd-?stable/.test(id)) return true;
+  if (/^(usd|usdt|usdc|usde|usds|dai|fdusd|pyusd|tusd|usdp|gusd|frax|lusd|susd|usdd|usdy|usd0|usdtb|rlusd|eurc|eurt|bfusd|gho|usd1|usdg|usdgo|ausd|usdf|usdl|usdo|usdb|usdn|deusd)$/.test(symbol)) return true;
+  if (/(stablecoin|usd coin|usd institutional|tether|dai stablecoin|frax usd|pax dollar|trueusd|gemini dollar|usdd)/.test(name)) return true;
+  if (/(^|-)usd-?stable/.test(id)) return true;
+  return false;
+}
+
+// Deliberately NOT folded into isStableValueAsset: these are suggestive
+// name patterns, not proof, and on their own they are wrong often enough
+// to matter. Caught live while calibrating this (2026-08-31): the token
+// literally named "Stable" (id stable-2) is a perfectly ordinary
+// directional asset — +7.2% in 24h, -14.9% over 30 days — and a plain
+// /\bstable\b/ name ban would have silently deleted it from the boards,
+// which is the same class of error as showing USDG a Consolidating badge,
+// just in the opposite direction and harder to notice.
+//
+// So a soft match only counts when the price series agrees, and the
+// series is always allowed to overrule the name. Kept as its own export
+// so the asymmetry is visible and testable rather than buried in a
+// boolean expression.
+export function looksLikePegByName(asset) {
+  const name = String(asset?.name || '').toLowerCase();
+  if (/\b(gold|silver|oil|commodit)/.test(name)) return false; // PAXG/XAUT trade on the metal, not a peg
+  if (/\b(dollar|stablecoins?)\b/.test(name)) return true;
+  if (/(t-bills?|treasury|money market|short duration|overnight)/.test(name)) return true;
+  return false;
+}
+
+// The gate the crypto pipeline actually calls.
+//
+//   hard name/ticker match           -> excluded outright (works with no
+//                                       history at all, e.g. a peg's
+//                                       first day of trading)
+//   behavioural match                -> excluded outright (catches pegs
+//                                       nobody has listed yet — USDG's
+//                                       whole lesson)
+//   soft name match + flat series    -> excluded (belt and braces)
+//   soft name match + moving series  -> KEPT; the prices win
+//
+// `closes` optional: with none, this degrades to the hard test only,
+// rather than failing open or guessing from the name alone.
+export function isNonDirectionalAsset(asset, closes) {
+  if (isStableValueAsset(asset)) return true;
+  const peg = pegBehaviour(closes);
+  if (peg.pegged) return true;
+  // A soft name match needs the series to at least not contradict it.
+  // 4x the peg threshold is still an extremely quiet asset in crypto
+  // terms — well under LEO, the quietest real token in the live top 100 —
+  // so this only widens the net over genuinely inert instruments.
+  if (looksLikePegByName(asset) && peg.medianPct != null && peg.medianPct <= PEG_MEDIAN_BAR_RETURN_PCT * 4) return true;
   return false;
 }
 
@@ -1333,6 +1492,178 @@ export function volumeSurgeSeries(bars, lookbackDays = 20) {
     out.push({ date: sorted[i].date, surgeRatio: sorted[i].volume / baseline });
   }
   return out;
+}
+
+// --------------------- RETROSPECTIVE / MISS ANALYSIS -------------------------
+// User-requested 2026-08-31, from a specific observation: "arb and a couple
+// of cryptos jumped in the past couple of hours, examine that to figure out
+// what you missed so we can catch it with them or other coins next time."
+// The generalisation asked for alongside it is the important half — that
+// this examination should happen automatically, every day, as a permanent
+// part of the module rather than as a thing someone does by hand after
+// noticing a move.
+//
+// The functions below are the pure, testable core of that; the job that
+// calls them and writes their output to D1 is scripts/retrospective.mjs.
+
+// The earliest hour at which a move was DETECTABLE, which is a different
+// and much more useful question than the hour the move happened.
+//
+// Given hourly bars (Binance global — see binanceGlobalKlines) and the
+// index at which the move is considered to have run, this walks BACKWARD
+// looking for the first bar where quote volume had already lifted clear of
+// its own trailing baseline. That bar is the entry the engine should have
+// been able to find; everything after it is hindsight.
+//
+// Quote volume, not base volume, and a MEDIAN baseline rather than a mean:
+// on the ARB bars this was built against, the mean baseline is dragged up
+// by the surge bars themselves the moment the window overlaps them at all,
+// which understates the surge exactly when it matters most.
+export function earliestDetectableSurge(bars, { baselineHours = 48, minRatio = 2.5, minTrades = 1.5, fromIndex = 0 } = {}) {
+  if (!Array.isArray(bars) || bars.length < baselineHours + 4) return null;
+  let first = null;
+  for (let i = Math.max(baselineHours, fromIndex); i < bars.length; i++) {
+    const window = bars.slice(Math.max(0, i - baselineHours), i);
+    const qv = window.map((b) => b.quoteVolume).filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+    const tr = window.map((b) => b.trades).filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+    if (qv.length < baselineHours * 0.5) continue;
+    const medQv = qv[Math.floor(qv.length / 2)];
+    const medTr = tr.length ? tr[Math.floor(tr.length / 2)] : null;
+    const bar = bars[i];
+    if (!medQv || !Number.isFinite(bar.quoteVolume)) continue;
+    const ratio = bar.quoteVolume / medQv;
+    const tradeRatio = medTr && Number.isFinite(bar.trades) ? bar.trades / medTr : null;
+    // Both volume AND participation, where participation is available. A
+    // single large print from one counterparty lifts quote volume without
+    // lifting the trade count, and that is noise, not a crowd arriving.
+    if (ratio < minRatio) continue;
+    if (tradeRatio != null && tradeRatio < minTrades) continue;
+    // Direction has to agree too: a volume surge into a falling bar is a
+    // liquidation, not the start of the move this is trying to catch.
+    if (!(bar.close > bar.open)) continue;
+    first = { index: i, at: bar.openTime, close: bar.close, ratio, tradeRatio, baselineQuoteVolume: medQv };
+    break;
+  }
+  return first;
+}
+
+// Locate the actual episode before asking anything about it. Without
+// this step the surge search is close to meaningless: over a 200-hour
+// window essentially every liquid asset has SOME hour at 3x its trailing
+// median, so "the first surge in the series" fires on BTC and ETH just as
+// readily as on ARB. Confirmed while building this — the unanchored
+// version put ARB's entry on 08-26 at 0.0928, five days and a -10.5%
+// drawdown before the move that actually happened.
+//
+// So: find the largest trough-to-peak run in the recent window first, and
+// only then look for the surge that preceded THAT run.
+export function findMoveEpisode(bars, { windowHours = 72, minGainPct = 8 } = {}) {
+  if (!Array.isArray(bars) || bars.length < 12) return null;
+  const recent = bars.slice(-windowHours);
+  let best = null;
+  // Running minimum, so this is one pass rather than the obvious O(n^2)
+  // pair scan — the trough for any peak is just the lowest low before it.
+  let troughIdx = 0;
+  for (let i = 1; i < recent.length; i++) {
+    if (recent[i].low < recent[troughIdx].low) troughIdx = i;
+    const gain = ((recent[i].high / recent[troughIdx].low) - 1) * 100;
+    if (gain >= minGainPct && (!best || gain > best.gainPct)) {
+      best = { gainPct: gain, startIdx: troughIdx, peakIdx: i };
+    }
+  }
+  if (!best) return null;
+  const offset = bars.length - recent.length;
+  return {
+    startIndex: offset + best.startIdx,
+    peakIndex: offset + best.peakIdx,
+    startAt: recent[best.startIdx].openTime,
+    peakAt: recent[best.peakIdx].openTime,
+    troughPrice: recent[best.startIdx].low,
+    peakPrice: recent[best.peakIdx].high,
+    gainPct: best.gainPct
+  };
+}
+
+// What the episode looked like, and — the number that actually settles
+// whether a miss mattered — how much of it was still on the table at the
+// moment it first became detectable.
+//
+// The surge search is bounded to `preHours` before the episode's own
+// start, so what comes back is the tell for THIS move rather than some
+// unrelated busy hour days earlier.
+// `moveDir` is required and not defaulted, deliberately. Caught while
+// dry-running the retrospective against live data: PROM had fallen 16%
+// over the day, and this function — which only knows how to look for
+// upward episodes — dutifully found the bull trap that preceded the drop
+// (a 19.3x volume surge into a rising bar, then -22.1%) and reported it
+// as a detectable long. Plausible-looking, and exactly backwards.
+//
+// The honest fix is to admit the asymmetry rather than paper over it: a
+// downside tell is not the mirror image of an upside one (distribution
+// shows up as volume into FALLING bars, often without the participation
+// spike that marks a bid arriving), so rather than pretend one function
+// covers both, downside episodes return detected:false with a stated
+// reason and are counted separately. Better an acknowledged gap in the
+// ledger than a confident wrong entry in it.
+export function describeMissedMove(bars, { preHours = 12, moveDir = 1 } = {}) {
+  if (moveDir !== 1) return { detected: false, reason: 'downside-analysis-not-implemented', episodeGainPct: null };
+  const ep = findMoveEpisode(bars);
+  if (!ep) return null;
+  const from = Math.max(0, ep.startIndex - preHours);
+  // +1 so a move that ignites on its own surge bar (the common case: ARB's
+  // 17:00 bar was both the volume spike and a +7.3% close) still resolves.
+  const searchable = bars.slice(0, Math.min(bars.length, ep.peakIndex + 1));
+  const surge = earliestDetectableSurge(searchable, { fromIndex: from });
+  const entryIdx = surge ? surge.index : ep.startIndex;
+  const entry = bars[entryIdx];
+  const peak = bars[ep.peakIndex];
+  const last = bars[bars.length - 1];
+  let trough = entry;
+  for (let i = entryIdx; i <= ep.peakIndex; i++) if (bars[i].low < trough.low) trough = bars[i];
+  return {
+    episodeGainPct: ep.gainPct,
+    episodeStartAt: ep.startAt,
+    // Null surge is itself a finding, not a failure: it means the move
+    // arrived with no volume warning at all, which is the one cause no
+    // amount of engine tuning can fix. Recorded as such rather than
+    // silently dropped.
+    detected: !!surge,
+    detectableAt: surge ? surge.at : ep.startAt,
+    detectablePrice: entry.close,
+    surgeRatio: surge ? surge.ratio : null,
+    tradeRatio: surge ? surge.tradeRatio : null,
+    peakAt: peak.openTime,
+    peakPrice: peak.high,
+    gainToPeakPct: ((peak.high / entry.close) - 1) * 100,
+    gainToLastPct: ((last.close / entry.close) - 1) * 100,
+    maxDrawdownPct: ((trough.low / entry.close) - 1) * 100,
+    leadHours: (new Date(peak.openTime) - new Date(surge ? surge.at : ep.startAt)) / 3600000
+  };
+}
+
+// Why a mover was missed. Deliberately a small, closed vocabulary rather
+// than free text, because the whole point of recording it is to be able to
+// count causes over time and see which one dominates — a pile of prose
+// cannot be aggregated, and the aggregate is what tells the engine what to
+// fix next.
+//
+//   out-of-universe     never fetched at all (below CRYPTO_UNIVERSE rank)
+//   filtered-out        fetched, then dropped by the mcap/volume floors
+//   unranked            scored, but never reached a board
+//   wrong-side          scored, and put on the OPPOSITE board — the worst
+//                       kind, since the engine had an opinion and it was
+//                       backwards
+//   late                on the right board, but only after the move had
+//                       substantially run
+//   caught              on the right board before the move ran
+export const MISS_CAUSES = ['out-of-universe', 'filtered-out', 'unranked', 'wrong-side', 'late', 'caught'];
+
+export function classifyMiss({ inUniverse, onBoard, boardSide, moveDir, scoredAt, detectableAt, passedFloors }) {
+  if (!inUniverse) return passedFloors === false ? 'filtered-out' : 'out-of-universe';
+  if (!onBoard) return 'unranked';
+  if (boardSide && moveDir && boardSide !== moveDir) return 'wrong-side';
+  if (scoredAt && detectableAt && new Date(scoredAt) > new Date(detectableAt)) return 'late';
+  return 'caught';
 }
 
 // Forward % return from each bar's close to the close `horizonDays` bars
@@ -2899,9 +3230,20 @@ export function evaluateTechniques(m, kind, reliability, ctx = {}) {
   // confirmation requirement, unlike T9) is the only available read on
   // which way the coiling is leaning — same 0.5 significance threshold T9
   // already uses for "a real lean, not noise."
+  //
+  // chg7d must be a real number, not merely "not big". Note the asymmetry
+  // against the `?? 0` idiom used freely elsewhere in this function: in
+  // every other case (`(c24 ?? 0) > 0`, `(m.slope ?? 0) < 0`) a missing
+  // value defaults into making the condition FALSE, so the technique
+  // abstains — the safe direction. Here the test is `|chg7d| < 5`, so a
+  // missing value would default to 0 and assert the strongest possible
+  // evidence of flatness. That is the same shape as the USDG bug fixed
+  // 2026-08-31: an asset the engine knows nothing about being reported as
+  // quietly coiling. A newly listed coin is both the likeliest source of
+  // a missing chg7d and the worst place to invent a consolidation.
   if (m.obv != null && (m.bb || m.volReg != null)) {
     const coiled = ((m.bb && m.bb.squeezed && !m.bb.expanding) || (m.volReg != null && m.volReg <= 0.65))
-      && Math.abs(m.chg7d ?? 0) < 5;
+      && Number.isFinite(m.chg7d) && Math.abs(m.chg7d) < 5;
     if (coiled && m.obv > 0.5) push('accum', 0.9, 1, 'coiled range, OBV building ahead of price');
     else if (coiled && m.obv < -0.5) push('accum', 0.9, -1, 'coiled range, OBV fading ahead of price');
     else push('accum', 0.9, 0, null);
@@ -3186,6 +3528,74 @@ export async function coingeckoSimplePrice(ids) {
 // rather than imported from archive.mjs, since worker.js is the engine
 // every other script imports FROM, never the reverse.
 const BINANCE_US_BASE = 'https://api.binance.us/api/v3';
+
+// Binance GLOBAL market data, after all — user-requested 2026-08-31.
+//
+// The comment directly above is still true of api.binance.com: every one
+// of its hosts is geo-blocked from this project's infra, re-confirmed the
+// same day (api.binance.com, api1.binance.com, api-gcp.binance.com,
+// fapi.binance.com — all HTTP 451). What had been missed is that Binance
+// publishes the identical read-only /api/v3 market-data surface on a
+// separate public data host that is NOT geo-blocked, and it answers 200
+// from here: data-api.binance.vision. Same klines/exchangeInfo/ticker
+// endpoints, same global order book behind them, no key, no account.
+//
+// Worth the addition because the difference in what the two venues can
+// see is not marginal. Checked on ARB during the 2026-08-31 move that
+// prompted this work, hour by hour:
+//
+//   Binance.US    17:00 bar = 5,504 units, and 14 of the preceding 24
+//                 hourly bars had literally ZERO volume
+//   Binance global 17:00 bar = 24,649,023 units / $2.25M / 11,955 trades
+//
+// The intraday leg was reading a venue where the move did not happen.
+// Global also lists 485 TRADING USDT pairs against Binance.US's far
+// smaller set, which is what lets the retrospective (scripts/
+// retrospective.mjs) reconstruct movers that were never in the ranked
+// universe at all — OP, CRV and JASMY on 2026-08-31 all trade here and
+// none trade usefully on Binance.US.
+//
+// Read-only and unauthenticated by design: this host serves market data
+// only, so it can never be used for the trading-bot's order flow (that
+// stays on its own authenticated endpoint). Binance.US remains the
+// fallback for live /api/prices ticks so an outage on one venue is not an
+// outage on the dashboard.
+export const BINANCE_GLOBAL_BASE = 'https://data-api.binance.vision/api/v3';
+
+// Which base symbols have a live USDT pair on Binance GLOBAL. Same
+// contract as binanceUsTradablePairs: never throws in the caller's face
+// beyond a normal fetch rejection, returns a Set of base assets.
+export async function binanceGlobalTradablePairs() {
+  const j = await fetchJson(`${BINANCE_GLOBAL_BASE}/exchangeInfo`);
+  const set = new Set();
+  for (const s of (j && j.symbols) || []) {
+    if (s.status === 'TRADING' && s.quoteAsset === 'USDT' && s.baseAsset) set.add(s.baseAsset.toUpperCase());
+  }
+  return set;
+}
+
+// Hourly (or any-interval) bars for one base symbol from Binance global.
+// Returns oldest-first rows carrying quote volume and trade count as well
+// as price, because those two are the actual signal in the retrospective
+// work: a 21.9x surge in QUOTE volume is what preceded ARB's move, and
+// base-unit volume alone would not have said the same thing on a token
+// whose price was simultaneously moving 30%.
+export async function binanceGlobalKlines(baseSymbol, interval = '1h', limit = 200) {
+  const pair = `${String(baseSymbol).toUpperCase()}USDT`;
+  const url = `${BINANCE_GLOBAL_BASE}/klines?symbol=${encodeURIComponent(pair)}&interval=${encodeURIComponent(interval)}&limit=${limit}`;
+  const j = await fetchJson(url);
+  if (!Array.isArray(j)) return [];
+  return j.map((r) => ({
+    openTime: new Date(r[0]).toISOString(),
+    open: Number(r[1]),
+    high: Number(r[2]),
+    low: Number(r[3]),
+    close: Number(r[4]),
+    volume: Number(r[5]),
+    quoteVolume: Number(r[7]),
+    trades: Number(r[8])
+  })).filter((b) => Number.isFinite(b.close) && b.close > 0);
+}
 
 // Which base symbols have a live, actively-trading USDT pair on Binance.US
 // right now. Computed once per hourly build (see buildPayload), not per
@@ -3918,6 +4328,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityScores, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines };
 
   let cryptoBoards = { breakout: [], breakdown: [], universe: 0 };
+  let cryptoStableValue = [];
   let btc = null, eth = null;
   let cryptoDailyOk = 0, cryptoDailyTotal = 0;
   if (cryptoR.status === 'fulfilled' && Array.isArray(cryptoR.value)) {
@@ -3926,8 +4337,52 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
       if (c.id === 'bitcoin') btc = { price: c.current_price, chg24h: c.price_change_percentage_24h };
       if (c.id === 'ethereum') eth = { price: c.current_price, chg24h: c.price_change_percentage_24h };
     }
-    const qualifying = raw
-      .filter(c => !isStableValueAsset(c))
+    // Split, not filter. A peg is excluded from every directional board
+    // (see isNonDirectionalAsset — a $1 asset has no breakout to call and
+    // no range to consolidate into), but it is NOT thrown away: the user's
+    // point on 2026-08-31 was that a stablecoin going quiet is itself
+    // possible information about where the money that is NOT in it is
+    // about to go, and that belongs in the research lane rather than on a
+    // board. stableValueRows is what build-signals.mjs logs to
+    // stable_value_observations for exactly that.
+    const stableValueRows = [];
+    const directional = [];
+    for (const c of raw) {
+      const spark = (c.sparkline_in_7d && c.sparkline_in_7d.price || []).filter(v => v != null);
+      // One pegBehaviour pass per asset: its result is needed both for the
+      // decision and for the logged row, and isNonDirectionalAsset would
+      // otherwise recompute the same median internally.
+      const peg = pegBehaviour(spark);
+      const known = isStableValueAsset(c);
+      if (known || peg.pegged || (looksLikePegByName(c) && peg.medianPct != null && peg.medianPct <= PEG_MEDIAN_BAR_RETURN_PCT * 4)) {
+        stableValueRows.push({
+          symbol: (c.symbol || '').toUpperCase(),
+          id: c.id,
+          name: c.name,
+          price: c.current_price,
+          mcap: c.market_cap || 0,
+          volume: c.total_volume || 0,
+          // How far off the peg it currently sits, and how tightly it is
+          // holding — the two numbers a depeg/stress study needs.
+          medianBarPct: peg.medianPct,
+          // Distance from the level this asset is actually pinned to,
+          // taken as its own 7-day median rather than a hardcoded $1 —
+          // the same test has to work for BCAP (~$106) and USTB (~$11) as
+          // for a dollar stablecoin, and none of them announce their
+          // anchor. This is the depeg-stress variable; the daily row keeps
+          // its running maximum.
+          deviationPct: pegAnchorDeviationPct(spark, c.current_price),
+          chg24h: c.price_change_percentage_24h_in_currency ?? c.price_change_percentage_24h,
+          // Why it was excluded, so a wrong exclusion is auditable later
+          // rather than invisible.
+          basis: known ? 'known' : 'behaviour'
+        });
+        continue;
+      }
+      directional.push(c);
+    }
+    cryptoStableValue = stableValueRows;
+    const qualifying = directional
       .filter(c => FAVORITE_SYMBOLS.has((c.symbol || '').toUpperCase())
         || ((c.market_cap || 0) >= CRYPTO_MIN_MCAP && (c.total_volume || 0) >= CRYPTO_MIN_VOLUME));
 
@@ -3993,7 +4448,12 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     generated_at: new Date().toISOString(),
     votes: [...(cryptoVotes || []), ...(stockVotes || [])],
     prices: [...(cryptoPrices || []), ...(stockPrices || [])],
-    ranges: [...(cryptoRanges || []), ...(stockRanges || [])]
+    ranges: [...(cryptoRanges || []), ...(stockRanges || [])],
+    // Research lane, never a board (see the split in the crypto pipeline
+    // above). build-signals.mjs writes these to stable_value_observations
+    // so peg supply/volume/tightness accumulates as a real time series to
+    // test hypotheses against, rather than being discarded at the filter.
+    stableValue: cryptoStableValue
   };
 
   // Track record: which assets (either class) have DEMONSTRATED directional
@@ -4690,6 +5150,45 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .dir-arrow.dir-up{color:var(--up)}
   .dir-arrow.dir-down{color:var(--down)}
   .coil{display:block;font-size:10px;letter-spacing:.04em;margin-top:3px;font-family:var(--disp);cursor:help}
+  /* Retrospective (2026-08-31). Spans the full grid width rather than
+     sitting in a board column: it is about the engine as a whole, not
+     about one asset class. */
+  .rt-wrap{grid-column:1/-1;background:var(--ink-1);border:1px solid var(--line);border-top:2px solid var(--muted);margin-bottom:44px}
+  .rt-head{padding:16px 18px 4px}
+  .rt-eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim)}
+  .rt-eyebrow b{color:var(--paper);font-weight:600}
+  .rt-title{font-family:var(--disp);font-size:19px;font-weight:600;margin:6px 0 0;color:var(--paper)}
+  .rt-sub{font-family:var(--mono);font-size:11px;line-height:1.8;color:var(--dim);margin:8px 0 4px;max-width:78ch}
+  .rt-table{padding:6px 18px 4px}
+  .rt-row{display:grid;grid-template-columns:minmax(160px,2fr) minmax(60px,3fr) 92px 104px 68px;gap:12px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11.5px}
+  .rt-row:last-child{border-bottom:none}
+  .rt-hdr{color:var(--dim);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;border-bottom:1px solid var(--line)}
+  .rt-cause{color:var(--muted)}
+  .rt-cause.rt-good{color:var(--up)}
+  .rt-bar{background:var(--ink-2);height:6px;position:relative;overflow:hidden}
+  .rt-fill{position:absolute;inset:0 auto 0 0;background:var(--down);opacity:.7}
+  .rt-fill.rt-fill-good{background:var(--up)}
+  .rt-n,.rt-avail,.rt-lead{text-align:right;color:var(--paper)}
+  .rt-avail{color:var(--amber);cursor:help}
+  .rt-lead{color:var(--dim);cursor:help}
+  .rt-eps{padding:10px 18px 16px;border-top:1px solid var(--line);margin-top:6px}
+  .rt-eps-h{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
+  .rt-ep{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;padding:6px 0;border-bottom:1px solid rgba(30,42,66,.5);font-family:var(--mono);font-size:11px}
+  .rt-ep:last-child{border-bottom:none}
+  .rt-sym{font-family:var(--disp);font-weight:600;font-size:13px;color:var(--paper);min-width:76px}
+  .rt-move{font-weight:600;min-width:62px}
+  .rt-move.up{color:var(--up)} .rt-move.down{color:var(--down)}
+  .rt-tag{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;padding:2px 7px;border:1px solid var(--line);color:var(--dim)}
+  .rt-tag-caught{color:var(--up);border-color:rgba(61,220,151,.4)}
+  .rt-tag-out-of-universe{color:var(--amber);border-color:rgba(255,178,36,.4)}
+  .rt-tag-wrong-side{color:var(--down);border-color:rgba(255,122,133,.4)}
+  .rt-tell{color:var(--muted);cursor:help}
+  .rt-lead-inline{color:var(--dim)}
+  .rt-avail-inline{color:var(--amber);cursor:help}
+  @media(max-width:860px){
+    .rt-row{grid-template-columns:1fr 76px 84px;gap:8px}
+    .rt-row .rt-bar,.rt-row .rt-lead{display:none}
+  }
   .coil.coil-up{color:var(--up)}
   .coil.coil-down{color:var(--down)}
   .quality{display:block;color:var(--dim);font-size:10px;margin-top:3px;font-family:var(--disp);cursor:help}
@@ -5160,6 +5659,60 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     if(d.stocks.longTermPotential && d.stocks.longTermPotential.length){
       b+='<div class="xp-banner" role="note"><b>Historical context only.</b> These equities are near a fresh long-term low; the list is not a recovery forecast or recommendation.</div>';
       b+=boardHtml({side:'favorites', assetClass:'stock', boardId:'stock-ltp', eyebrow:'EQUITIES · <b>LONG-TERM POTENTIAL</b>', title:'Possible multi-month/year lows'}, d.stocks.longTermPotential, d.stocks.longTermPotential.length);
+    }
+    // Retrospective — user-requested 2026-08-31. Deliberately placed ABOVE
+    // the boards, not tucked away at the bottom: this section is the
+    // engine's own record of what it got wrong, and burying that under
+    // the calls it is currently making would invert the honesty it exists
+    // to provide. Renders nothing at all until the daily job has run.
+    if(d.retrospective && d.retrospective.patterns && d.retrospective.patterns.length){
+      var rt = d.retrospective;
+      var causeLabel = {
+        'out-of-universe':'Never fetched (outside the ranked universe)',
+        'filtered-out':'Fetched, then dropped by the size/volume floors',
+        'unranked':'Scored, but never reached a board',
+        'wrong-side':'Called, on the opposite side',
+        'late':'Called, but only after the move had run',
+        'caught':'Called before the move'
+      };
+      var totalN = rt.patterns.reduce(function(a,p){return a+p.n;},0) || 1;
+      var pRows = rt.patterns.map(function(p){
+        var pct = p.share!=null ? p.share*100 : (p.n/totalN*100);
+        var isGood = p.cause==='caught';
+        return '<div class="rt-row">'
+          +'<span class="rt-cause'+(isGood?' rt-good':'')+'">'+esc(causeLabel[p.cause]||p.cause)+'</span>'
+          +'<span class="rt-bar"><span class="rt-fill'+(isGood?' rt-fill-good':'')+'" style="width:'+pct.toFixed(1)+'%"></span></span>'
+          +'<span class="rt-n">'+p.n+' <span class="dim">('+pct.toFixed(0)+'%)</span></span>'
+          +'<span class="rt-avail" title="Average % still available between the first detectable volume tell and the peak. This is what a miss actually cost: a move only detectable at its own top cost nothing.">'
+            +(p.avgAvailablePct!=null? (p.avgAvailablePct>=0?'+':'')+p.avgAvailablePct.toFixed(1)+'%' : '<span class="dim">&mdash;</span>')+'</span>'
+          +'<span class="rt-lead" title="Average hours between the first detectable tell and the peak.">'
+            +(p.avgLeadHours!=null? Math.round(p.avgLeadHours)+'h' : '<span class="dim">&mdash;</span>')+'</span>'
+        +'</div>';
+      }).join('');
+      var eRows = (rt.recent||[]).slice(0,8).map(function(r){
+        var tell = r.detected
+          ? '<span class="rt-tell" title="Quote volume and trade count both lifted clear of their 48-hour trailing medians into a rising bar, at this time.">vol '+(r.surgeRatio!=null?r.surgeRatio.toFixed(1):'?')+'x'
+            +(r.tradeRatio!=null?' · '+r.tradeRatio.toFixed(1)+'x trades':'')+'</span>'
+            +(r.leadHours!=null?'<span class="rt-lead-inline">'+Math.round(r.leadHours)+'h before peak</span>':'')
+          : '<span class="dim">no advance volume tell</span>';
+        return '<div class="rt-ep">'
+          +'<span class="rt-sym">'+esc(r.symbol)+'</span>'
+          +'<span class="rt-move '+(r.movePct>=0?'up':'down')+'">'+(r.movePct>=0?'+':'')+r.movePct.toFixed(1)+'%</span>'
+          +'<span class="rt-tag rt-tag-'+esc(String(r.cause))+'">'+esc(causeLabel[r.cause]||r.cause)+'</span>'
+          +tell
+          +(r.gainToPeakPct!=null && r.detected ? '<span class="rt-avail-inline" title="Available from the first tell to the peak.">+'+r.gainToPeakPct.toFixed(1)+'% available</span>' : '')
+        +'</div>';
+      }).join('');
+      b+='<section class="rt-wrap" aria-label="Retrospective">'
+        +'<div class="rt-head"><span class="rt-eyebrow">LEARNING · <b>RETROSPECTIVE</b></span>'
+        +'<h2 class="rt-title">What moved, and why it was missed</h2>'
+        +'<p class="rt-sub">Every large move is checked back against what the engine believed at the time, and against Binance global hourly bars to find the earliest hour the move was detectable. Failure causes are counted so the dominant one can be fixed, rather than argued about. This is the engine marking its own homework.</p></div>'
+        +'<div class="rt-table">'
+          +'<div class="rt-row rt-hdr"><span class="rt-cause">Cause</span><span class="rt-bar"></span><span class="rt-n">Episodes</span><span class="rt-avail">Avg available</span><span class="rt-lead">Avg lead</span></div>'
+          +pRows
+        +'</div>'
+        +(eRows?'<div class="rt-eps"><div class="rt-eps-h">Most recent episodes</div>'+eRows+'</div>':'')
+      +'</section>';
     }
     b+=boardHtml({side:'long', assetClass:'crypto', boardId:'crypto-long', eyebrow:'CRYPTO · <b>LONG SIDE</b>', title:'Breakout watch'}, d.crypto.breakout, d.crypto.universe);
     b+=boardHtml({side:'short', assetClass:'crypto', boardId:'crypto-short', eyebrow:'CRYPTO · <b>RISK SIDE</b>', title:'Breakdown risk'}, d.crypto.breakdown, d.crypto.universe);

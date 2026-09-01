@@ -2678,5 +2678,95 @@ const todsNoiseResult = mod.timeOfDaySentimentSplit(todsNoiseBars, todsNoiseSent
 const todsNoiseTest = mod.twoSampleZTest(todsNoiseResult.extreme.map(p => p.value), todsNoiseResult.normal.map(p => p.value));
 check('no real sentiment-conditional difference: does NOT trigger a significant result', todsNoiseTest.z === null || Math.abs(todsNoiseTest.z) < mod.RELIABILITY_SIGNIFICANCE_Z, JSON.stringify(todsNoiseTest));
 
+// ---- peg detection (2026-08-31) --------------------------------------------
+// The bug this replaces: USDG, a $1 stablecoin, was ranked #3 on the
+// breakdown board carrying a "⏳ Consolidating ↓" badge — a peg cannot
+// consolidate, and the T27 accum technique fires on it unconditionally
+// because a peg ALWAYS has squeezed bands and |chg7d| < 5%.
+console.log('\n== peg detection: behaviour beats the ticker list ==');
+const flatSeries = Array.from({ length: 168 }, (_, i) => 1 + Math.sin(i) * 0.00008);
+const goldSeries = Array.from({ length: 168 }, (_, i) => 4500 * (1 + Math.sin(i / 9) * 0.02));
+const movingSeries = Array.from({ length: 168 }, (_, i) => 0.09 * (1 + Math.sin(i / 5) * 0.09));
+check('a flat $1 series is detected as a peg', mod.pegBehaviour(flatSeries).pegged);
+check('gold-like low-vol but real movement is NOT a peg', !mod.pegBehaviour(goldSeries).pegged, JSON.stringify(mod.pegBehaviour(goldSeries)));
+check('an ordinary volatile alt is NOT a peg', !mod.pegBehaviour(movingSeries).pegged);
+check('too few points abstains rather than guessing', mod.pegBehaviour(flatSeries.slice(0, 10)).pegged === false && mod.pegBehaviour(flatSeries.slice(0, 10)).medianPct === null);
+
+// USDG's actual identity: nothing about the strings "USDG" or "Global
+// Dollar" says "peg", which is exactly why a ticker list alone let it
+// through for months.
+const usdg = { symbol: 'USDG', id: 'global-dollar', name: 'Global Dollar' };
+check('USDG is caught (it is now on the known list)', mod.isStableValueAsset(usdg));
+check('an UNKNOWN peg is still caught, by behaviour alone', mod.isNonDirectionalAsset({ symbol: 'NEWPEG', id: 'newpeg', name: 'Frontier Reserve Unit' }, flatSeries));
+check('an unknown peg with no history is NOT guessed at', !mod.isNonDirectionalAsset({ symbol: 'NEWPEG', id: 'newpeg', name: 'Frontier Reserve Unit' }, []));
+
+// The false positive found while calibrating: the token literally named
+// "Stable" (id stable-2) is an ordinary directional asset, and a naive
+// name ban would have silently deleted it from the boards.
+check('a MOVING asset named "Stable" survives the name heuristic', !mod.isNonDirectionalAsset({ symbol: 'STABLE', id: 'stable-2', name: 'Stable' }, movingSeries));
+check('a FLAT asset named "…Dollar" is excluded', mod.isNonDirectionalAsset({ symbol: 'ZZD', id: 'zz-dollar', name: 'Zephyr Dollar' }, flatSeries));
+check('PAX Gold is not treated as a peg by name', !mod.looksLikePegByName({ symbol: 'PAXG', name: 'PAX Gold' }));
+
+// pegAnchorDeviationPct must work off the asset's OWN anchor, not an
+// assumed $1 — the excluded set includes tokenized T-bill funds trading
+// near $11 and $106, which a hardcoded dollar would score as thousands of
+// percent depegged.
+const highAnchor = Array.from({ length: 168 }, () => 106.25);
+check('a healthy peg reads ~0% deviation at a $1 anchor', mod.pegAnchorDeviationPct(Array.from({ length: 168 }, () => 1), 0.9998) < 0.05);
+check('a healthy peg reads ~0% deviation at a $106 anchor too', mod.pegAnchorDeviationPct(highAnchor, 106.22) < 0.05, String(mod.pegAnchorDeviationPct(highAnchor, 106.22)));
+check('a real depeg is reported at its true size', Math.abs(mod.pegAnchorDeviationPct(Array.from({ length: 168 }, () => 1), 0.94) - 6) < 0.2);
+check('no series means no deviation claim', mod.pegAnchorDeviationPct([], 1) === null);
+
+// The archive's long-term-bottom scan feeds DAILY closes into the same
+// threshold the hourly sparkline uses. Verified against real 365-day
+// history rather than assumed: pegs stay pinned as the bar length grows
+// while real assets scale up, so the two populations separate further,
+// not closer (see pegBehaviour's docs for the measured figures).
+const dailyPeg = Array.from({ length: 365 }, (_, i) => 1 + Math.sin(i * 1.7) * 0.00012);
+const dailyReal = Array.from({ length: 365 }, (_, i) => 100 * Math.exp(Math.sin(i * 0.7) * 0.06 + i * 0.001));
+check('a peg is still detected on DAILY bars', mod.pegBehaviour(dailyPeg).pegged, JSON.stringify(mod.pegBehaviour(dailyPeg)));
+check('a real asset on DAILY bars is not swept up', !mod.pegBehaviour(dailyReal).pegged, JSON.stringify(mod.pegBehaviour(dailyReal)));
+
+// ---- retrospective (2026-08-31) --------------------------------------------
+console.log('\n== retrospective: episode anchoring and miss classification ==');
+// A retroQuiet run-in, then a volume retroSurge into a rising bar, then the move.
+// The unanchored version of this search picked the FIRST 3x hour anywhere
+// in the series, which fired on BTC and ETH just as readily as on ARB —
+// hence findMoveEpisode running first.
+const retroQuiet = Array.from({ length: 60 }, (_, i) => ({
+  openTime: new Date(Date.UTC(2026, 7, 20, i)).toISOString(),
+  open: 100, high: 100.4, low: 99.6, close: 100 + (i % 3) * 0.05, volume: 1000, quoteVolume: 100000, trades: 500
+}));
+const retroSurge = [];
+for (let i = 0; i < 14; i++) {
+  const base = 100 + i * 2.2;
+  retroSurge.push({
+    openTime: new Date(Date.UTC(2026, 7, 22, 12 + i)).toISOString(),
+    open: base, high: base + 2.4, low: base - 0.4, close: base + 2.0,
+    volume: 9000, quoteVolume: 900000, trades: 4200
+  });
+}
+const retroBars = [...retroQuiet, ...retroSurge];
+const retroEp = mod.findMoveEpisode(retroBars);
+check('findMoveEpisode locates the real run', retroEp && retroEp.gainPct > 15, JSON.stringify(retroEp));
+const retroDescribed = mod.describeMissedMove(retroBars);
+check('the move is reported as detectable in advance', retroDescribed && retroDescribed.detected === true);
+check('the tell lands at or before the peak', retroDescribed && new Date(retroDescribed.detectableAt) <= new Date(retroDescribed.peakAt));
+check('a meaningful gain was still available from the tell', retroDescribed && retroDescribed.gainToPeakPct > 5, JSON.stringify(retroDescribed && retroDescribed.gainToPeakPct));
+check('a flat, uneventful series produces no episode at all', mod.describeMissedMove(retroQuiet) === null);
+
+// The PROM case: a -16% day whose bull trap the upside-only search would
+// otherwise have reported as a confident long entry.
+const retroDownside = mod.describeMissedMove(retroBars, { moveDir: -1 });
+check('a downside move is NOT reported as a detectable long', retroDownside && retroDownside.detected === false && retroDownside.reason === 'downside-analysis-not-implemented');
+
+check('out-of-universe is classified', mod.classifyMiss({ inUniverse: false, passedFloors: true, onBoard: false, moveDir: 1 }) === 'out-of-universe');
+check('filtered-out is distinguished from never-fetched', mod.classifyMiss({ inUniverse: false, passedFloors: false, onBoard: false, moveDir: 1 }) === 'filtered-out');
+check('scored-but-unranked is classified', mod.classifyMiss({ inUniverse: true, passedFloors: true, onBoard: false, moveDir: 1 }) === 'unranked');
+check('a backwards call is classified wrong-side', mod.classifyMiss({ inUniverse: true, passedFloors: true, onBoard: true, boardSide: -1, moveDir: 1 }) === 'wrong-side');
+check('a correct, timely call is classified caught', mod.classifyMiss({ inUniverse: true, passedFloors: true, onBoard: true, boardSide: 1, moveDir: 1, scoredAt: '2026-08-30T10:00:00Z', detectableAt: '2026-08-30T14:00:00Z' }) === 'caught');
+check('a call made only after the tell is classified late', mod.classifyMiss({ inUniverse: true, passedFloors: true, onBoard: true, boardSide: 1, moveDir: 1, scoredAt: '2026-08-31T20:00:00Z', detectableAt: '2026-08-30T14:00:00Z' }) === 'late');
+check('every cause emitted is in the declared vocabulary', mod.MISS_CAUSES.includes(mod.classifyMiss({ inUniverse: true, passedFloors: true, onBoard: false, moveDir: 1 })));
+
 console.log(failures === 0 ? '\nWORKER INTEGRATION OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

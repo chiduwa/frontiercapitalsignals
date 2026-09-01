@@ -15,7 +15,7 @@
 // two are genuinely the same need either way: "what's in the universe" and
 // "what's each coin's live funding right now."
 import { d1, chunk } from './d1-client.mjs';
-import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, computeSpreadSeries, levelChangeBefore, detectOutperformanceRotation, detectPossibleLongTermBottom, isStableValueAsset } from '../worker.js';
+import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, computeSpreadSeries, levelChangeBefore, detectOutperformanceRotation, detectPossibleLongTermBottom, isStableValueAsset, isNonDirectionalAsset } from '../worker.js';
 
 const UA = 'Mozilla/5.0 (compatible; FrontierCapitalSignals/2.0)';
 
@@ -1025,7 +1025,15 @@ export async function computeLongTermBottomCandidates(env) {
     // a $1-pegged asset trivially sits "near its own low" forever simply
     // by never moving, a false positive this category is specifically
     // vulnerable to in a way most other techniques are not).
-    if (symbol.includes(':') || bars.length < 252 || isStableValueAsset({ symbol })) continue;
+    // Behavioural test as well as the name list, 2026-08-31. The comment
+    // above already identifies this category as specifically vulnerable to
+    // a peg sitting "near its own low" forever — but it was testing the
+    // TICKER, which is exactly what let USDG through on the live boards
+    // for months. The daily closes are already in hand here, so the much
+    // stronger test is free: isNonDirectionalAsset falls back to the same
+    // name check when the series is too short to judge.
+    if (symbol.includes(':') || bars.length < 252) continue;
+    if (isNonDirectionalAsset({ symbol }, bars.map((b) => b.close))) continue;
     const candidate = detectPossibleLongTermBottom(bars, 252, 30, 30);
     if (candidate) out.push({ symbol, ...candidate });
   }

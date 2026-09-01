@@ -209,6 +209,73 @@ Also found in the same post-mortem, unrelated to either technique: `.github/work
 - **Leader/lagger research**: does a specific asset's own exhaustion reversal happen before others', making it an early warning? Scoped to BTC and the market composite (pre-specified, not a mined scan across every symbol — see the file's own multiple-testing guard) plus, for the descriptive pass only, the top general leaders already validated by the independent `lead_lag_signals` table. Finding: BTC does NOT reliably lead this specific event type (led first in only 19% of paired cases, n=59 — these tend to be simultaneous market-wide moves). ONDO showed a 90% lead rate but only n=10 — worth watching, not yet a confirmed pattern.
 - **Call-flip tracking**: user-requested, the WLFI case — called a bottom, switched to breakdown risk a few hours later. The composite call (`dir`/`score`) was already being logged every run in `technique_votes` (`technique_id='composite'`, for the calibration curve) — no new log needed. `detectCallFlips` (worker.js) reads that existing history and finds every point a symbol's own call reversed; `detectAndLogCallFlips`/`evaluateCallFlips` (reliability.mjs) append each new flip to the small, permanent `call_flip_log` table and judge ~24h later whether the new direction held, reverted (whipsaw noise), or was too small to call. Surfaces as a `⚠️ Flipped ▲→▼ Nh ago` caution badge on the affected row, plus a held/reverted rate once a symbol has enough evaluated flips (same `MIN_RELIABILITY_SAMPLES` gate used everywhere else) — informational only, same discipline as quality/rotation, never fed back into score/dir. This is the tracking infrastructure the self-learning loop needs; it started accumulating real outcome data today, so a calibrated behavioral change (e.g. requiring a stronger score to flip an asset with a history of reverting) is a follow-up once real held/reverted rates exist, not a guess made now.
 
+## Stablecoin exclusion and the automatic retrospective (added 2026-08-31)
+
+Two fixes from one report: USDG was sitting at #3 on the breakdown board wearing a **⏳ Consolidating ↓** badge, and ARB had run +34% without the engine calling it.
+
+### Why a peg was being shown as consolidating
+
+The T27 `accum` technique fires when a range is coiled — squeezed Bollinger bands or realized vol well under baseline, with `|chg7d| < 5%` — and then reads OBV to pick a direction. A $1 stablecoin satisfies the coiled test *permanently and unconditionally*, so the only thing choosing a direction was OBV, which on a peg is mint/redeem flow rather than accumulation. A peg has nothing to consolidate toward.
+
+`isStableValueAsset` existed and was meant to prevent exactly this, but it is a ticker list plus a name regex, and nothing about the strings "USDG" or "Global Dollar" says "peg". Sweeping the live top 100 the same way found four more already inside the fetched universe, two of them also on live boards: **FIGR_HELOC** (a $21.9B tokenized HELOC, on both the breakdown *and* long-term-potential boards), **U** (United Stables), **USDGO** (which this repo's own day-trade notes had identified as a stablecoin back on 2026-08-25 without anyone adding it to the list), plus **AUSD** and **USDF**.
+
+The real fix is behavioural, not another round of ticker whack-a-mole. `pegBehaviour()` measures the **median absolute bar-over-bar return** of the 7-day hourly sparkline every crypto row already carries. Median, not range: FIGR_HELOC's high/low band is 5.43% — wider than gold's — purely from stale prints in a thin book, so a range test clears it while the median test puts it at 0.0101%.
+
+Calibrated against the live top 100 (2026-08-31), the two populations do not overlap:
+
+| | median hourly move |
+|---|---|
+| all 24 pegs / T-bill funds / flat RWAs | ≤ 0.0101% |
+| *— 7x gap —* | |
+| LEO / BDX / HTX / XAUT / **PAXG** | 0.0750% – 0.0929% |
+
+`PEG_MEDIAN_BAR_RETURN_PCT = 0.03` sits in the middle of that gap. PAX Gold is the near-miss worth protecting — genuinely low-volatility *and* genuinely directional — and it clears the threshold by 3.1x.
+
+The threshold also catches an entire class the ticker list never would: tokenized money-market and T-bill funds (BUIDL, JTRSY, USYC, USTB, JAAA, BCAP), which are not stablecoins and are not $1-anchored (USTB trades ~$11.19, BCAP ~$106.25) but are equally non-directional.
+
+One guard worth knowing about: a name heuristic alone is *not* trusted. The token literally named "Stable" (`stable-2`) is an ordinary directional asset — +7.2% in 24h, -14.9% over 30 days — and a plain `/\bstable\b/` ban would have silently deleted it from the boards. Soft name matches must be confirmed by the price series, and **the series always wins**. See `looksLikePegByName` / `isNonDirectionalAsset`.
+
+### Excluded is not ignored
+
+Pegs are split out of the directional boards, not discarded. A stablecoin's supply and turnover going quiet or surging is plausibly information about where the money *not* sitting in it is about to go — so every excluded asset is logged to `stable_value_observations` (price, market cap as a net mint/redeem proxy, volume, peg tightness, distance from its own anchor, and whether it was excluded by name or by behaviour, so a wrong exclusion stays auditable).
+
+Keyed by **date**, not by run timestamp: it bounds the table without a pruning job (~9.5K rows/year rather than 228K), it matches the grain of the question (net mint/redeem is a daily-scale flow; hourly wobble in a peg's market cap is noise on the anchor), and it makes the rows directly joinable with the stablecoin depeg series `correlation-research.mjs` already keys by calendar date. The hourly build upserts into the day's row; `peak_deviation_pct` is the one column accumulated with `MAX` rather than overwritten, because a depeg is an intraday spike that last-write-wins would erase.
+
+Anchor distance is measured against the asset's **own 7-day median**, not an assumed $1 — the excluded set includes tokenized T-bill funds trading near $11 (USTB) and $106 (BCAP), which a hardcoded dollar would score as permanently and enormously depegged. Observation only: nothing reads it into a live signal until `correlation-research.mjs` shows the relationship survives out-of-sample via `research_registry`.
+
+### Binance global, after all
+
+`api.binance.com` is geo-blocked from this project's infrastructure (HTTP 451 on every host, re-confirmed 2026-08-31). What had been missed is that Binance publishes the identical read-only `/api/v3` market-data surface on **`data-api.binance.vision`**, which is not geo-blocked and answers 200. Same klines/exchangeInfo/ticker endpoints, global order book, no key.
+
+The difference is not marginal. On ARB during the move that prompted this work:
+
+| | 17:00 bar |
+|---|---|
+| Binance.US | 5,504 units — and 14 of the preceding 24 hourly bars had **zero** volume |
+| Binance global | 24,649,023 units / $2.25M / 11,955 trades |
+
+The intraday leg had been reading a venue where the move did not happen. Global also lists 485 TRADING USDT pairs against Binance.US's much thinner set. Binance.US remains the fallback for live price ticks so one venue's outage is not the dashboard's.
+
+### `scripts/retrospective.mjs` — what moved, and why we missed it
+
+Runs daily (`signals-retrospective.yml`, 04:20 UTC). Three questions in order:
+
+1. **What actually moved?** From a scan of the top **300**, deliberately wider than the engine's own `CRYPTO_UNIVERSE = 100`. That widening is the whole point — on 2026-08-31 six of the eight biggest movers were below rank 100 and were never fetched at all, so a retrospective built on the engine's own universe would have reported a clean sheet.
+2. **Was it detectable in advance?** From Binance global hourly bars. `findMoveEpisode` locates the actual trough-to-peak run first, *then* `earliestDetectableSurge` looks for the tell within a bounded window before it — quote volume **and** trade count both clear of their 48-hour trailing medians, into a rising bar. Anchoring matters: an unanchored search fires on BTC and ETH as readily as on ARB, and put ARB's entry five days and a -10.5% drawdown before the real move.
+3. **What did the engine say at the time?** From the composite votes the hourly build had already written — not a reconstruction after the fact.
+
+Output is structured rows, not commentary, because the aggregate is the product. `MISS_CAUSES` is a closed vocabulary (`out-of-universe`, `filtered-out`, `unranked`, `wrong-side`, `late`, `caught`) specifically so causes can be **counted**: one missed move is an anecdote, "80% of misses were out-of-universe" is an instruction about what to fix. `retrospective_patterns` also tracks average % still available between the first tell and the peak — the number that decides whether a miss actually cost anything, since a move only detectable at its own top cost nothing.
+
+Downside episodes are explicitly **not** analysed rather than analysed wrongly. Caught during a dry run: PROM had fallen 16%, and the upside-only search dutifully found the bull trap that preceded the drop (19.3x volume into a rising bar, then -22.1%) and reported it as a detectable long. Distribution is not the mirror image of accumulation, so downside moves return `detected: false` with a stated reason and are counted separately. An acknowledged gap in the ledger beats a confident wrong entry in it.
+
+Three traps worth knowing about, all found in review rather than in production:
+
+- **CoinGecko pagination offset is `per_page * (page - 1)`.** Shrinking `per_page` on the last page to fit a budget re-reads earlier ranks instead of continuing past them — `per_page=250` then `per_page=50&page=2` returns ranks 1-250 followed by ranks **50-99**, never reaching 251-300. The scan would have been blind to exactly the band it exists to cover while double-counting the band it already had. `PAGE_SIZE` is fixed and results are deduped by id.
+- **A `composite` vote is written for every scored asset, not only for the ten per side that reach a board.** Treating "has a composite vote" as "was on a board" would classify almost every in-universe mover as `caught` and make `unranked` unreachable — the engine grading itself as having called moves it never showed anyone. `loadEngineStateBefore` reconstructs board membership by ranking each run's composite votes the way `sortSide` does.
+- **`Math.abs(m.chg7d ?? 0) < 5`** in the `accum` technique inverted the safe default. Everywhere else in `evaluateTechniques` the `?? 0` idiom makes a missing value fail the test and the technique abstain; here it made a missing value assert *perfect flatness*, the strongest possible evidence of coiling. Latent (every live top-100 asset currently reports a 7d change) but the same shape as the USDG bug, and a newly listed coin is both the likeliest source of a missing `chg7d` and the worst place to invent a consolidation. Now requires `Number.isFinite`.
+
+Results render in a **Retrospective** section placed *above* the boards, not below them — burying the engine's record of what it got wrong under the calls it is currently making would invert the honesty the section exists to provide.
+
 ## Editing later
 
 Change the watchlist, universe size, and filters in the config constants near the top of `worker.js`; tune technique weights in `evaluateTechniques`; adjust the embedded dashboard in the `PAGE_HTML` template near the bottom. After any edit, copy the file to `src/worker.js` too (`cp worker.js src/worker.js`) and run `node test-worker.mjs` before redeploying.

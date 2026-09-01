@@ -1,0 +1,72 @@
+name: Signals Retrospective
+
+# "What moved, and why didn't we call it?" — the automatic learning pass
+# the user asked for on 2026-08-31, after ARB (+34%) and five other movers
+# ran without the engine flagging them.
+#
+# Its own workflow rather than a step inside signals-daily.yml, following
+# the same split-by-cadence-and-blast-radius convention the rest of this
+# repo already uses: this job scans a WIDER universe than the engine does
+# (top 300 vs the engine's top 100) and pulls Binance-global hourly bars
+# per mover, so its failure modes are entirely its own and should not be
+# able to take the archive refresh down with them.
+on:
+  schedule:
+    # 04:20 UTC — after signals-daily (02:37) has refreshed the archive,
+    # and off both the hourly job's :13 mark and every round-hour boundary,
+    # per this repo's existing note on scheduling contention.
+    - cron: "20 4 * * *"
+  workflow_dispatch:
+    inputs:
+      min_move_pct:
+        description: "Minimum 24h move to treat as an episode worth explaining"
+        required: false
+        default: "12"
+      scan_ranks:
+        description: "How deep into the market-cap ranking to scan for movers"
+        required: false
+        default: "300"
+
+concurrency:
+  group: signals-retrospective
+  cancel-in-progress: false
+
+jobs:
+  retrospective:
+    runs-on: ubuntu-latest
+    # Two CoinGecko pages plus one Binance-global klines call per mover at
+    # 250ms pacing. A busy day is a few dozen movers, so single-digit
+    # minutes; the ceiling is headroom, and every outbound call already has
+    # its own AbortController bound.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      # Same convention as signals-deploy.yml and signals-refresh.yml:
+      # migrations are applied before code that reads the new tables runs.
+      # This job owns retrospective_misses/retrospective_patterns, so it
+      # cannot assume another workflow has already created them — and
+      # re-running is safe, since Wrangler records what it has applied.
+      - name: Apply D1 migrations
+        working-directory: signals-worker
+        run: npx --yes wrangler@4 d1 migrations apply frontier-capital-signals-reliability --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Analyse what the engine missed
+        working-directory: signals-worker
+        run: node scripts/retrospective.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+          RETRO_MIN_MOVE_PCT: ${{ inputs.min_move_pct || '12' }}
+          RETRO_SCAN_RANKS: ${{ inputs.scan_ranks || '300' }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
