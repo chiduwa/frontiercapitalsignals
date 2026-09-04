@@ -9,13 +9,13 @@
 // Optional env: BACKFILL_ROW_BUDGET (default 15000 — free-D1-tier-safe;
 //   raise once Workers Paid is confirmed active, see the plan),
 //   BINANCE_ROW_BUDGET (default 15000, same reasoning)
-import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, BENCHMARK_SYMBOLS, computeTimeOfDayTallies } from '../worker.js';
+import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, BENCHMARK_SYMBOLS, computeTimeOfDayTallies, hasCrossClassTickerCollision } from '../worker.js';
 import {
   yahooFullHistory, coingeckoDailyBars, getExistingCoverage,
   upsertDailyBars, fundingSnapshotToRows, upsertFundingDaily,
   fearGreedHistory, insertFearGreedHistory,
-  yahooHourlyBars, computeSwingTimeTallies, upsertSwingTimeStats, getSwingTimeCoverage,
-  upsertTimeOfDayStats, getTimeOfDayCoverage, getOpenCoverage,
+  yahooHourlyBars, computeSwingTimeTallies, replaceSwingTimeBootstrap, getSwingTimeCoverage,
+  replaceTimeOfDayBootstrap, getTimeOfDayCoverage, getOpenCoverage,
   binanceUsExchangeInfo, binanceUsKlines, getExistingHourlyCoverage, upsertHourlyBars,
   isYahooCryptoDataTrustworthy
 } from './archive.mjs';
@@ -80,6 +80,7 @@ async function main() {
   const cryptoRaw = await getCryptoMarkets();
   const cryptoUniverse = cryptoRaw
     .filter((c) => !CRYPTO_BLOCKLIST.has((c.symbol || '').toLowerCase()))
+    .filter((c) => !hasCrossClassTickerCollision(c.symbol))
     .filter((c) => (c.market_cap || 0) >= CRYPTO_MIN_MCAP && (c.total_volume || 0) >= CRYPTO_MIN_VOLUME)
     .map((c) => ({ symbol: (c.symbol || '').toUpperCase(), id: c.id, assetClass: 'crypto', yahooTicker: `${(c.symbol || '').toUpperCase()}-USD`, refPrice: c.current_price ?? null }));
   const stockUniverse = STOCK_WATCHLIST.map((s) => ({ symbol: s, assetClass: 'stock', yahooTicker: s }));
@@ -255,6 +256,7 @@ async function main() {
   // already well-bootstrapped rather than re-fetching 700 days every time.
   try {
     const swingCoverage = await getSwingTimeCoverage(env);
+    const todCoverage = await getTimeOfDayCoverage(env);
     let swingOk = 0, swingSkipped = 0, todBootstrapped = 0, todSkipped = 0, equityHourlyWritten = 0;
     // Guard on THIS table's coverage, not another's — the mistake that let the
     // time-of-day bootstrap re-run indefinitely.
@@ -262,7 +264,15 @@ async function main() {
     const swingFailed = [];
     for (const a of universe) {
       if (a.assetClass === 'benchmark') continue; // no swing-timing story for macro benchmarks — nothing trades them directly
-      if ((swingCoverage[a.symbol] || 0) >= 600) { swingSkipped++; continue; }
+      const coverageKey = `${a.assetClass}|${a.symbol}`;
+      const minBarsPerDay = a.assetClass === 'stock' ? 6 : 12;
+      const swingTarget = a.assetClass === 'stock' ? 300 : 600;
+      const needsSwing = (swingCoverage[coverageKey] || 0) < swingTarget;
+      const needsTod = (todCoverage[coverageKey] || 0) < TOD_BOOTSTRAP_COVERAGE_TARGET;
+      const needsHourlyArchive = !(hourlyCoverage[a.symbol] > 0);
+      if (!needsSwing) swingSkipped++;
+      if (!needsTod) todSkipped++;
+      if (!needsSwing && !needsTod && !needsHourlyArchive) continue;
       try {
         const bars = await yahooHourlyBars(a.yahooTicker);
 
@@ -289,19 +299,26 @@ async function main() {
           }
         }
 
-        const { tallies, totalDays } = computeSwingTimeTallies(bars);
-        if (totalDays > 0) await upsertSwingTimeStats(env, a.symbol, a.assetClass, tallies, totalDays, new Date().toISOString());
+        const updatedAt = new Date().toISOString();
+        if (needsSwing) {
+          const { tallies, totalDays } = computeSwingTimeTallies(bars, minBarsPerDay);
+          if (totalDays > 0) {
+            await replaceSwingTimeBootstrap(env, a.symbol, a.assetClass, tallies, totalDays, updatedAt);
+            swingOk++;
+          }
+        }
         // Reuses the exact same already-fetched `bars` — this is the
         // "zero new fetches" time-of-day bootstrap (see computeTimeOfDayTallies's
         // docs in worker.js): everywhere this loop already gives a symbol
         // real hourly depth for swing-timing also feeds time_of_day_stats,
         // the table the live timeOfDaySignal technique reads.
-        const todTallies = computeTimeOfDayTallies(bars);
-        if (Object.keys(todTallies).length) {
-          await upsertTimeOfDayStats(env, a.symbol, a.assetClass, todTallies, new Date().toISOString());
-          todBootstrapped++;
+        if (needsTod) {
+          const todTallies = computeTimeOfDayTallies(bars);
+          if (Object.keys(todTallies).length) {
+            await replaceTimeOfDayBootstrap(env, a.symbol, a.assetClass, todTallies, updatedAt);
+            todBootstrapped++;
+          }
         }
-        swingOk++;
       } catch (e) {
         swingFailed.push(`${a.symbol} (${e.message})`);
       }
@@ -362,12 +379,11 @@ async function main() {
           const written = await upsertHourlyBars(env, toWrite);
           binanceRowsWritten += written;
           rowsWrittenThisRun += written;
-          // Same zero-extra-fetch time-of-day bootstrap as the Yahoo-hourly
-          // leg above, just against Binance's deeper, more regime-diverse
-          // history (spans the 2020 crash, 2021 top, 2022 bear — Yahoo's
-          // 700-day window sits entirely inside one recent stretch).
-          const todTallies = computeTimeOfDayTallies(toWrite.map((b) => ({ ts: b.bar_at, close: b.close })));
-          if (Object.keys(todTallies).length) await upsertTimeOfDayStats(env, w.symbol, 'crypto', todTallies, new Date().toISOString());
+          // Do not also add this overlapping history to time_of_day_stats.
+          // Yahoo's atomic snapshot above owns the live behavioral profile;
+          // these deeper bars are retained for the purged research engine.
+          // Adding both sources used to count the same hour twice and made
+          // weak clock effects look more certain than they were.
         }
         binanceOk++;
       } catch (e) {

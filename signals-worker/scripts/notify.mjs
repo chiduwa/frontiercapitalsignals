@@ -10,10 +10,11 @@
 // matching this project's established pattern for an optional,
 // user-provided credential (CMC_API_KEY, CRYPTOPANIC_API_TOKEN).
 import { d1, chunk } from './d1-client.mjs';
-import { MIN_RELIABILITY_SAMPLES, currentSignalConfidence } from '../worker.js';
+import { MIN_RELIABILITY_SAMPLES, currentSignalConfidence, noSkillBaseline, skillOverBaseline } from '../worker.js';
 
 const NTFY_TIMEOUT_MS = 10000;
 const CONFIDENT_MOVE_ALERTS_PER_RUN = 5;
+const REVERSAL_ALERT_COOLDOWN_HOURS = 6;
 
 function fmtAlertPrice(v) {
   if (!Number.isFinite(v)) return '—';
@@ -97,7 +98,26 @@ async function setNotificationState(env, kind, symbol, value, nowIso) {
 // adjacent pair), while a bottom that just keeps holding hour after hour
 // does not spam. `lookbackHours` needs only to comfortably span 2-3 real
 // build cycles.
-export async function checkAndNotifyReversals(env, nowIso, lookbackHours = 4) {
+// Chooses an exact-horizon, exact-direction reversal record only when its
+// conservative lower bound clears that market's measured no-skill baseline.
+// Rows come from forecast_outcomes, whose windows are non-overlapping; this is
+// intentionally not compatible with the old pooled 24h+168h counter.
+export function selectReliableReversalEvidence(rows, baselines, assetClass, symbol, dir) {
+  const qualified = [];
+  for (const row of rows || []) {
+    if (row.asset_class !== assetClass || row.symbol !== symbol || Number(row.dir) !== Number(dir)) continue;
+    if (!Number.isFinite(Number(row.correct)) || Number(row.total) < MIN_RELIABILITY_SAMPLES) continue;
+    const horizonHours = Number(row.horizon_hours);
+    const baseline = noSkillBaseline(baselines && baselines[`${assetClass}|${horizonHours}`], dir === 1 ? 1 : 0, dir === -1 ? 1 : 0);
+    const skill = skillOverBaseline(Number(row.correct), Number(row.total), baseline);
+    if (!skill || !skill.significant || skill.lowerEdge <= 0) continue;
+    qualified.push({ ...row, horizon_hours: horizonHours, ...skill });
+  }
+  qualified.sort((a, b) => b.lowerEdge - a.lowerEdge || a.horizon_hours - b.horizon_hours);
+  return qualified[0] || null;
+}
+
+export async function checkAndNotifyReversals(env, nowIso, lookbackHours = 6) {
   if (!env.NTFY_TOPIC) return 0;
   const cutoff = new Date(new Date(nowIso).getTime() - lookbackHours * 3600 * 1000).toISOString();
   const rows = await d1(env, `
@@ -106,13 +126,17 @@ export async function checkAndNotifyReversals(env, nowIso, lookbackHours = 4) {
   `, [cutoff]);
 
   const bySymbol = {};
-  for (const r of rows) (bySymbol[r.symbol] ??= { assetClass: r.asset_class, rows: [] }).rows.push(r);
+  for (const r of rows) (bySymbol[`${r.asset_class}|${r.symbol}`] ??= { symbol: r.symbol, assetClass: r.asset_class, rows: [] }).rows.push(r);
 
   const fresh = [];
-  for (const [symbol, { assetClass, rows: symRows }] of Object.entries(bySymbol)) {
+  for (const { symbol, assetClass, rows: symRows } of Object.values(bySymbol)) {
     if (symRows.length < 2) continue;
     const prev = symRows[symRows.length - 2], cur = symRows[symRows.length - 1];
-    if ((cur.dir === 1 || cur.dir === -1) && cur.dir !== prev.dir) {
+    const beforePrev = symRows.length >= 3 ? symRows[symRows.length - 3] : null;
+    // One full subsequent build must confirm the same side. This turns a
+    // one-hour PEPE-style up/down whipsaw into an invalidated research event,
+    // not a stream of categorical "bottomed / peaked" alerts.
+    if ((cur.dir === 1 || cur.dir === -1) && cur.dir === prev.dir && (!beforePrev || beforePrev.dir !== cur.dir)) {
       fresh.push({ symbol, assetClass, dir: cur.dir, runAt: cur.run_at });
     }
 
@@ -122,34 +146,38 @@ export async function checkAndNotifyReversals(env, nowIso, lookbackHours = 4) {
   const symbols = fresh.map((f) => f.symbol);
   const placeholders = symbols.map(() => '?').join(',');
   const priceNow = {};
-  const priceRows = await d1(env, `SELECT symbol, price FROM asset_price_log WHERE symbol IN (${placeholders}) ORDER BY run_at DESC`, symbols);
-  for (const r of priceRows) if (!(r.symbol in priceNow)) priceNow[r.symbol] = r.price;
+  const priceRows = await d1(env, `SELECT symbol, asset_class, price FROM asset_price_log WHERE symbol IN (${placeholders}) ORDER BY run_at DESC`, symbols);
+  for (const r of priceRows) {
+    const key = `${r.asset_class}|${r.symbol}`;
+    if (!(key in priceNow)) priceNow[key] = r.price;
+  }
 
-  // This asset's OWN measured accuracy for the 'reversal' technique
-  // specifically -- already computed and maintained by the existing
-  // adaptive-weighting loop (technique_reliability, evaluateMatured), not
-  // new data collection. Pooled across both scored horizons, same blended
-  // shape loadReliability itself uses. Gated on the SAME
-  // MIN_RELIABILITY_SAMPLES bar the live engine already requires before
-  // trusting an asset-specific number anywhere else -- an alert still
-  // fires below that bar (a new or thin-history asset shouldn't be
-  // silenced), it just can't yet say how much to trust it.
-  const relRows = await d1(env, `SELECT symbol, SUM(correct) as correct, SUM(total) as total FROM technique_reliability WHERE technique_id = 'reversal' AND symbol IN (${placeholders}) GROUP BY symbol`, symbols);
-  const reliability = {};
-  for (const r of relRows) reliability[r.symbol] = { correct: r.correct, total: r.total };
+  const relRows = await d1(env, `
+    SELECT symbol, asset_class, dir, horizon_minutes / 60 AS horizon_hours,
+           SUM(correct) AS correct, COUNT(*) AS total
+    FROM forecast_outcomes
+    WHERE series_kind = 'technique' AND series_key = 'reversal'
+      AND aggregated = 1 AND symbol IN (${placeholders})
+    GROUP BY symbol, asset_class, dir, horizon_minutes
+  `, symbols);
+  const baselineRows = await d1(env, 'SELECT asset_class, horizon_hours, n_up, n_flat, n_down FROM direction_baseline');
+  const baselines = Object.fromEntries(baselineRows.map((row) => [`${row.asset_class}|${row.horizon_hours}`, row]));
+  const stateRows = await d1(env, `SELECT symbol, last_sent_at FROM notification_state WHERE kind = 'reversal' AND symbol IN (${placeholders})`, symbols);
+  const lastSent = Object.fromEntries(stateRows.map((row) => [row.symbol, Date.parse(row.last_sent_at)]));
 
   let sent = 0;
   for (const f of fresh) {
-    const price = priceNow[f.symbol];
-    const label = f.dir === 1 ? 'bottomed' : 'peaked';
+    if (Number.isFinite(lastSent[f.symbol]) && Date.parse(nowIso) - lastSent[f.symbol] < REVERSAL_ALERT_COOLDOWN_HOURS * 3600 * 1000) continue;
+    const evidence = selectReliableReversalEvidence(relRows, baselines, f.assetClass, f.symbol, f.dir);
+    if (!evidence) continue; // thin/unproven means wait and keep learning, not alert with an invented claim
+    const price = priceNow[`${f.assetClass}|${f.symbol}`];
+    const label = f.dir === 1 ? 'bottom' : 'top';
     const emoji = f.dir === 1 ? 'chart_with_upwards_trend' : 'chart_with_downwards_trend';
-    const rel = reliability[f.symbol];
-    const trackRecord = rel && rel.total >= MIN_RELIABILITY_SAMPLES
-      ? ` This asset's own reversal calls have been right ${Math.round((rel.correct / rel.total) * 100)}% of the time (${rel.total} prior calls).`
-      : '';
+    const horizonLabel = evidence.horizon_hours === 24 ? '24h' : `${Math.round(evidence.horizon_hours / 24)}d`;
+    const checkpoint = new Date(Date.parse(f.runAt) + evidence.horizon_hours * 3600 * 1000).toISOString();
     const notified = await notifyOnChange(env, 'reversal', f.symbol, `${f.dir}@${f.runAt}`, {
-      title: `${f.symbol} ${label}`,
-      message: `${f.symbol} (${f.assetClass}) flagged a ${label} reversal` + (price != null ? ` near ${price}` : '') + ` -- RSI turned, confirmed by an independent signal.${trackRecord}`,
+      title: `${f.symbol}: possible ${label} reversal watch`,
+      message: `${f.symbol} (${f.assetClass}) produced a two-build ${label}-reversal setup` + (price != null ? ` near ${fmtAlertPrice(price)}` : '') + `. Its same-direction ${horizonLabel} record is ${Math.round(evidence.accuracy * 100)}% across ${evidence.total} non-overlapping outcomes; the conservative lower estimate is ${Math.round((evidence.lowerEdge + evidence.baseline) * 100)}% versus a ${Math.round(evidence.baseline * 100)}% no-skill baseline. This does not identify the exact ${label}. Next evaluation checkpoint: ${checkpoint}. No validated target or invalidation level is available, so wait for price/volume confirmation rather than treating this as an entry.`,
       priority: 'default',
       tags: [emoji],
       click: 'https://frontiercapitalsignals.com/signals/'
@@ -325,8 +353,8 @@ export async function checkAndNotifySuddenMoves(env, nowIso, windowHours = 6, cr
     if (Math.abs(medianPct) >= marketThresholdPct) {
       const dir = medianPct > 0 ? 1 : -1;
       const notified = await notifyOnChange(env, 'marketmove', 'CRYPTO_MARKET', `${dir}@${dateBucket}`, {
-        title: dir === 1 ? 'Crypto market surging' : 'Crypto market dropping',
-        message: `The tracked crypto market's median move is ${medianPct > 0 ? '+' : ''}${medianPct.toFixed(1)}% over the last ~${windowHours}h (${cryptoMoves.length} assets) -- broad, not one asset.`,
+        title: dir === 1 ? 'Post-move crypto surge detected' : 'Post-move crypto drop detected',
+        message: `Observed after the move: the tracked crypto market's median changed ${medianPct > 0 ? '+' : ''}${medianPct.toFixed(1)}% over the prior ~${windowHours}h (${cryptoMoves.length} assets). This is an anomaly notice, not an advance prediction or entry/exit signal.`,
         priority: 'high',
         tags: [dir === 1 ? 'rocket' : 'chart_with_downwards_trend'],
         click: 'https://frontiercapitalsignals.com/signals/'
@@ -340,8 +368,8 @@ export async function checkAndNotifySuddenMoves(env, nowIso, windowHours = 6, cr
     if (Math.abs(m.pct) < threshold) continue;
     const dir = m.pct > 0 ? 1 : -1;
     const notified = await notifyOnChange(env, 'suddenmove', m.symbol, `${dir}@${dateBucket}`, {
-      title: `${m.symbol}: sudden ${dir === 1 ? 'spike' : 'drop'}`,
-      message: `${m.symbol} (${m.assetClass}) moved ${m.pct > 0 ? '+' : ''}${m.pct.toFixed(1)}% in ~${windowHours}h -- abrupt enough that something likely just happened. Worth checking for news.`,
+      title: `${m.symbol}: post-move ${dir === 1 ? 'spike' : 'drop'} detected`,
+      message: `Observed after the move: ${m.symbol} (${m.assetClass}) changed ${m.pct > 0 ? '+' : ''}${m.pct.toFixed(1)}% over the prior ~${windowHours}h. This does not predict continuation or reversal and is not an entry/exit signal; check verified news, liquidity, spread, and volume before acting.`,
       priority: dir === 1 ? 'high' : 'urgent',
       tags: [dir === 1 ? 'rocket' : 'warning'],
       click: 'https://frontiercapitalsignals.com/signals/'

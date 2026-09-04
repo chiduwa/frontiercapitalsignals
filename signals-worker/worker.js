@@ -62,7 +62,6 @@ const LIVE_PRICE_KV_TTL_SECONDS = 15 * 60;
 // separate key and a shorter freshness window (the intraday pipeline is
 // meant to be far fresher than the hourly-ish engine).
 export const INTRADAY_CACHE_KEY = 'signals:intraday';
-const INTRADAY_FRESH_SECONDS = 45 * 60;
 
 // ----------------------------- CONFIG ---------------------------------------
 
@@ -79,16 +78,10 @@ const REFRESH_DISPATCH_LOCK_SECONDS = 30 * 60;
 // soon) but long enough that a broken token cannot turn every inbound request
 // into an outbound GitHub call.
 const REFRESH_DISPATCH_FAILURE_COOLDOWN_SECONDS = 5 * 60;
-// Running session extremes for the day-trading read, plus the alert state that
-// stops one stretched asset from re-notifying every 5 minutes. Both live in KV
-// rather than D1: they are written on every cron tick, and D1 bills per row
-// written (see the 2026-08-25 cost work) where KV does not.
+// Running session extremes for the descriptive day-trading read. This lives in
+// KV rather than D1 because it is written on every cron tick.
 const SESSION_EXTREMES_KEY = 'signals:session-extremes';
 const SESSION_EXTREMES_TTL_SECONDS = 3 * 24 * 3600;
-const DAY_RANGE_ALERT_STATE_KEY = 'signals:day-range-alert-state';
-// One alert per symbol per side per session. A stretched asset stays stretched
-// for hours; re-firing every tick would make the channel useless.
-const DAY_RANGE_ALERT_TTL_SECONDS = 36 * 3600;
 const REFRESH_DISPATCH_STATUS_KEY = 'signals:refresh-dispatch-status';
 const REFRESH_DISPATCH_STATUS_SECONDS = 24 * 60 * 60;
 const GITHUB_REFRESH_DISPATCH_URL = 'https://api.github.com/repos/chiduwa/frontiercapitalsignals/actions/workflows/signals-refresh.yml/dispatches';
@@ -351,6 +344,18 @@ export const STOCK_WATCHLIST = [
   'COIN','HOOD','MSTR','DASH','UBER','LCID','SNAP'
 ];
 
+// Operational/archive tables created before asset_class was part of every key
+// cannot safely hold a crypto and an equity with the same ticker. DASH (Dash
+// and DoorDash) exposed the defect by producing an impossible interleaved
+// price series. Until the key migration is complete, fail closed for any
+// crypto ticker present in the equity universe rather than corrupting both
+// assets' learning records. This is dynamic, so the next collision is caught
+// before it lands rather than added to a one-off denylist after damage.
+export const CROSS_CLASS_TICKER_COLLISIONS = new Set(STOCK_WATCHLIST);
+export function hasCrossClassTickerCollision(symbol) {
+  return CROSS_CLASS_TICKER_COLLISIONS.has(String(symbol || '').toUpperCase());
+}
+
 export const OVERVIEW_SYMBOLS = ['SPY', 'QQQ', '^VIX'];
 
 // Macro benchmarks: not screened against the confluence score like crypto/
@@ -604,6 +609,9 @@ export const MIN_RELIABILITY_SAMPLES = 20;
 const RELIABILITY_PRIOR_SAMPLES = 12;
 const CALIBRATION_CONFIDENCE_MIN_SAMPLES = 40;
 const DETAILED_CALIBRATION_CONFIDENCE_MIN_SAMPLES = 30;
+const RANGE_CALIBRATION_MIN_SAMPLES = 30;
+const RANGE_NOMINAL_COVERAGE = 0.68;
+const RANGE_MAX_CALIBRATION_ERROR = 0.15;
 const ALERT_CONFIDENCE_Z = 1.645; // One-sided 95% Wilson lower bound.
 // Minimum demonstrated edge over the measured no-skill baseline before a call
 // is marked actionable. Expressed as an edge, not an absolute hit rate, so it
@@ -775,14 +783,20 @@ export function adjustedReliabilityAccuracy(correct, total, baselineAccuracy = 0
 // stops the loop from reading a whole technique library as "below average"
 // purely because flat outcomes count against both directions.
 export function reliabilityMultiplierForAssetClass(reliability, symbol, techniqueId, byRegime, regime, assetClass, techniquePriors, baselines) {
-  if (!reliability) return 1;
+  // A static heuristic is still logged and evaluated while it warms up, but it
+  // is not allowed to influence a published direction until its own
+  // out-of-sample record demonstrates positive edge. This separates research
+  // candidates from production signals instead of treating "unknown" as a
+  // neutral 1.0 vote weight.
+  if (!reliability) return 0;
   const prior = techniquePriorRecord(techniquePriors, assetClass, techniqueId);
   const priorSamples = Math.min(RELIABILITY_PRIOR_SAMPLES, prior && Number.isFinite(prior.total) ? prior.total : 0);
   if (regime && byRegime && byRegime[regime]) {
     const rrec = byRegime[regime][`${symbol}|${techniqueId}`];
     if (rrec && rrec.total >= MIN_RELIABILITY_SAMPLES) {
       const base = baselineFor(baselines, assetClass, null, rrec);
-      if (isReliabilitySignificant(rrec.correct, rrec.total, base)) {
+      const regimeAccuracy = Number.isFinite(rrec.accuracy) ? rrec.accuracy : rrec.correct / rrec.total;
+      if (regimeAccuracy > base && isReliabilitySignificant(rrec.correct, rrec.total, base)) {
         // Shrink toward the technique's class-level record when there is one,
         // otherwise toward the measured baseline — never toward a 0.5 that
         // this asset class was never going to reach.
@@ -792,9 +806,10 @@ export function reliabilityMultiplierForAssetClass(reliability, symbol, techniqu
     }
   }
   const rec = reliability[`${symbol}|${techniqueId}`];
-  if (!rec || rec.total < MIN_RELIABILITY_SAMPLES) return 1;
+  if (!rec || rec.total < MIN_RELIABILITY_SAMPLES) return 0;
   const base = baselineFor(baselines, assetClass, null, rec);
-  if (!isReliabilitySignificant(rec.correct, rec.total, base)) return 1;
+  const accuracy = Number.isFinite(rec.accuracy) ? rec.accuracy : rec.correct / rec.total;
+  if (accuracy <= base || !isReliabilitySignificant(rec.correct, rec.total, base)) return 0;
   const priorAcc = prior && Number.isFinite(prior.accuracy) ? prior.accuracy : base;
   return reliabilityWeight(adjustedReliabilityAccuracy(rec.correct, rec.total, priorAcc, priorSamples), rec.total, base);
 }
@@ -821,7 +836,7 @@ const ANTI_SIGNAL_EDGE = -0.08;
 const ANTI_SIGNAL_MIN_SAMPLES = 150;
 
 export function reliabilityWeight(accuracy, total, p0 = 0.5) {
-  if (!Number.isFinite(accuracy) || !Number.isFinite(total) || total < MIN_RELIABILITY_SAMPLES) return 1;
+  if (!Number.isFinite(accuracy) || !Number.isFinite(total) || total < MIN_RELIABILITY_SAMPLES) return 0;
   const base = Number.isFinite(p0) ? clamp(p0, 0.001, 0.999) : 0.5;
   // Deep record, clearly below its own no-skill line: stop listening to it.
   // Self-healing — the weight returns the moment the measured record does.
@@ -832,9 +847,12 @@ export function reliabilityWeight(accuracy, total, p0 = 0.5) {
   // still small. Once an asset/technique has a genuinely deep record, reduce
   // the influence of an extreme raw hit rate so long-lived learning does not
   // overfit one historical regime.
-  if (total < 100) return clamp(1 + normalized * 0.5, 0.5, 1.5);
-  const confidence = Math.min(1, Math.sqrt(total / 100));
-  return clamp(1 + normalized * confidence, 0.5, 1.5);
+  // Cap historical reweighting at +/-50%. The former deep-record branch used
+  // min(1, sqrt(total/100)), which is exactly 1 for every total >=100 and
+  // therefore doubled the influence abruptly at n=100—the opposite of its
+  // anti-overfitting comment. Significance decides whether a vote may enter;
+  // this bounded multiplier only sizes it once admitted.
+  return clamp(1 + normalized * 0.5, 0.5, 1.5);
 }
 
 export function comboReinforcementMultiplier(comboReliability, symbol, techniqueId, dir, activeTechniques, assetClass, techniquePriors) {
@@ -913,6 +931,8 @@ export const TECHNIQUE_META = {
 };
 
 export function horizonLabel(days) {
+  if (days < 0.5) return `~${Math.max(1, Math.round(days * 24))} hours`;
+  if (days < 1) return 'within 24h';
   if (days <= 1.5) return '~1 day';
   if (days <= 3.5) return '1-3 days';
   if (days <= 6) return '3-6 days';
@@ -927,8 +947,10 @@ export function horizonLabel(days) {
 // direction — over the static methodology table, once there's enough of
 // that asset's own history to trust (same MIN_RELIABILITY_SAMPLES gate as
 // the weighting itself). Returns null only when nothing applicable voted.
-export function horizonEstimate(applicable, dir, symbol, reliabilityByHorizon) {
-  const active = applicable.filter(t => t.dir === dir);
+export function horizonEstimate(applicable, dir, symbol, reliabilityByHorizon, assetClass, baselines) {
+  // A zero-weight vote is a research candidate, not production evidence. It
+  // still gets logged and scored, but must not manufacture a timeframe.
+  const active = applicable.filter(t => t.dir === dir && t.w > 0);
   if (!active.length) return null;
 
   if (reliabilityByHorizon) {
@@ -944,9 +966,17 @@ export function horizonEstimate(applicable, dir, symbol, reliabilityByHorizon) {
       const accs = [];
       let effectiveN = 0;
       for (const t of active) {
-        const rec = reliabilityByHorizon[h] && reliabilityByHorizon[h][`${symbol}|${t.id}`];
+        // Timing is conditional on side. A technique that historically worked
+        // for this asset's longs has not thereby established a clock for its
+        // shorts (or vice versa). The loader derives these exact cells from the
+        // append-only independent-outcome ledger.
+        const rec = reliabilityByHorizon[h]
+          && reliabilityByHorizon[h][`${assetClass}|${symbol}|${t.id}|${dir}`];
         if (!rec || rec.total < MIN_RELIABILITY_SAMPLES) continue;
-        accs.push(rec.correct / rec.total);
+        const baseline = baselineFor(baselines, assetClass, h, rec);
+        const skill = skillOverBaseline(rec.correct, rec.total, baseline);
+        if (!skill || !skill.significant || skill.lowerEdge <= 0) continue;
+        accs.push(skill.accuracy);
         if (rec.total > effectiveN) effectiveN = rec.total;
       }
       if (!accs.length) return null;
@@ -970,7 +1000,9 @@ export function horizonEstimate(applicable, dir, symbol, reliabilityByHorizon) {
           ? { label: horizonLabel(1), days: 1, basis: 'historical' }
           : { label: horizonLabel(7), days: 7, basis: 'historical' };
       }
-      // Indistinguishable: fall through to the methodology table below.
+      // Both horizons work but neither is demonstrably better. Say exactly
+      // that instead of picking a precise-looking clock from a static table.
+      return { label: '1-7 days (not yet distinguishable)', days: null, minDays: 1, maxDays: 7, basis: 'historical-ambiguous' };
     } else if (h24 || h168) {
       // Only one horizon has a usable record at all, so there is nothing to
       // compare it against — that is a real, if one-sided, historical answer.
@@ -980,15 +1012,10 @@ export function horizonEstimate(applicable, dir, symbol, reliabilityByHorizon) {
     }
   }
 
-  let wSum = 0, hSum = 0;
-  for (const t of active) {
-    const meta = TECHNIQUE_META[t.id];
-    if (!meta) continue;
-    wSum += t.w; hSum += t.w * meta.horizonDays;
-  }
-  if (!wSum) return null;
-  const days = hSum / wSum;
-  return { label: horizonLabel(days), days, basis: 'methodology' };
+  // The technique metadata remains useful documentation, but it is not
+  // empirical evidence for this asset. Withhold a trade clock until the
+  // asset's own independent 24h/168h outcomes establish one.
+  return null;
 }
 
 // Realized daily volatility (stdev of daily pct returns, over the trailing
@@ -2234,14 +2261,19 @@ export function seasonalAnalog(closes, cycleLength, windowDays = 90, forwardDays
 // one exists with enough of its own matured history to trust (same bar as
 // reliabilityMultiplier/horizonEstimate). Returns null, not a guess, until
 // then.
-export function topIndicator(reliability, symbol) {
+export function topIndicator(reliability, symbol, assetClass, baselines) {
   if (!reliability) return null;
   let best = null;
   for (const id of Object.keys(TECHNIQUE_META)) {
     const rec = reliability[`${symbol}|${id}`];
-    if (rec && rec.total >= MIN_RELIABILITY_SAMPLES && (!best || rec.accuracy > best.accuracy)) {
-      best = { id, accuracy: rec.accuracy, total: rec.total };
-    }
+    if (!rec || rec.total < MIN_RELIABILITY_SAMPLES) continue;
+    const baseline = baselineFor(baselines, assetClass, null, rec);
+    const skill = skillOverBaseline(rec.correct, rec.total, baseline);
+    if (!skill || !skill.significant || skill.lowerEdge <= 0) continue;
+    if (!best || skill.lowerEdge > best.lowerEdge) best = {
+      id, accuracy: rec.correct / rec.total, total: rec.total,
+      baseline, lowerEdge: skill.lowerEdge
+    };
   }
   return best;
 }
@@ -2316,9 +2348,11 @@ export function assetPredictionScore(symbol, reliability, rangeReliability, asse
       ? { correct: rec.correct, total: rec.total, votes_up: rec.votes_up, votes_down: rec.votes_down }
       : { correct: 0, total: 0, votes_up: 0, votes_down: 0 };
   };
-  // Directional records only. 'reversal' and 'dwell' are genuine directional
-  // calls like 'composite'; containment is not, and no longer joins them.
-  const directional = ['composite', 'reversal', 'dwell'].map(pick);
+  // Headline skill is the composite call alone. Reversal and dwell are inputs
+  // to that same composite and are scored on the same underlying moves; pooling
+  // them here counted correlated components as extra predictions. Their own
+  // records remain visible in the technique drill-down.
+  const directional = ['composite'].map(pick);
   const correct = directional.reduce((a, r) => a + r.correct, 0);
   const total = directional.reduce((a, r) => a + r.total, 0);
   const votesUp = directional.reduce((a, r) => a + (r.votes_up || 0), 0);
@@ -2395,16 +2429,25 @@ export function assetClassSkill(detailedCalibration, baselines, assetClass) {
   if (total < CLASS_SKILL_MIN_SAMPLES) return null;
   const dist = baselines ? baselines[`${assetClass}|all`] : null;
   const baseline = noSkillBaseline(dist, votesUp, votesDown);
-  const skill = skillOverBaseline(correct, total, baseline);
+  // Cross-sectional calls cast in the same market window are correlated. When
+  // the loader supplies a count of independent time clusters, use that smaller
+  // effective n for uncertainty while retaining the raw hit rate.
+  const classMeta = detailedCalibration.__classMeta && detailedCalibration.__classMeta[assetClass];
+  const effectiveSamples = classMeta && Number.isFinite(classMeta.independentPeriods)
+    ? Math.min(total, classMeta.independentPeriods)
+    : total;
+  if (effectiveSamples < CLASS_SKILL_MIN_SAMPLES) return null;
+  const accuracy = correct / total;
+  const skill = skillOverBaseline(accuracy * effectiveSamples, effectiveSamples, baseline);
   if (!skill) return null;
   return {
-    ...skill,
+    ...skill, accuracy, samples: total, effectiveSamples,
     assetClass,
     // Publish only on positive evidence. A class whose lower bound sits at or
     // below its baseline has not shown an edge, and is abstained on rather
     // than shipped with a caveat — the same abstain-rather-than-guess rule the
     // engine already applies to thin per-asset records.
-    proven: skill.lowerEdge > 0
+    proven: skill.lowerEdge > 0 && skill.significant
   };
 }
 
@@ -2415,25 +2458,172 @@ export function assetClassSkill(detailedCalibration, baselines, assetClass) {
 // re-qualify — abstaining from publishing a call is not the same as stopping
 // measurement of it.
 export function abstainBoards(boards, skill) {
-  // `skill === null` means "not enough evidence to judge this class yet", which
-  // is NOT the same as "judged and found wanting" — a cold database must keep
-  // publishing exactly as before rather than silently blanking every board.
-  // Only a class that has been measured (CLASS_SKILL_MIN_SAMPLES outcomes) and
-  // failed to clear its own baseline is abstained on.
-  if (!boards || !skill || skill.proven) return boards;
+  if (!boards || (skill && skill.proven)) return boards;
   const note = {
-    reason: 'no-demonstrated-edge',
+    reason: skill ? 'no-demonstrated-edge' : 'insufficient-evidence',
     measured: skill ? { accuracy: Math.round(1000 * skill.accuracy) / 10, baseline: Math.round(1000 * skill.baseline) / 10, edge: Math.round(1000 * skill.edge) / 10, samples: skill.samples } : null
   };
   const strip = (rows) => (Array.isArray(rows) ? rows.map((r) => (
-    r && (r.dir === 1 || r.dir === -1) ? { ...r, dir: 0, abstained: note } : r
+    r && (r.dir === 1 || r.dir === -1)
+      ? { ...r, dir: 0, horizon: null, range: null, abstained: note }
+      : r
   )) : rows);
   const out = {};
   for (const [k, v] of Object.entries(boards)) out[k] = strip(v);
   return out;
 }
 
-export function currentSignalConfidence(signal, calibration, assetCompositeRecord, baselines) {
+// Even when an asset class is broadly useful, a particular row is not a trade
+// call until this exact direction/score/horizon has both calibrated class-level
+// evidence and the asset's own independent composite record. This prevents a
+// good class aggregate from laundering a cold or weak symbol into a call.
+export function gateBoardsBySignalConfidence(boards, assetClass, reliabilityByHorizon, calibration, baselines, rangeReliability) {
+  if (!boards) return boards;
+  const gate = (rows) => (Array.isArray(rows) ? rows.map((row) => {
+    if (!row || !(row.dir === 1 || row.dir === -1)) return row;
+    const horizonHours = row.horizon && Number.isFinite(row.horizon.days)
+      ? (row.horizon.days <= 4 ? 24 : 168)
+      : null;
+    const assetRecord = horizonHours != null && reliabilityByHorizon && reliabilityByHorizon[horizonHours]
+      ? reliabilityByHorizon[horizonHours][`${assetClass}|${row.symbol}|composite|${row.dir}`]
+      : null;
+    const rangeRecord = horizonHours != null && rangeReliability
+      ? rangeReliability[`${assetClass}|${row.symbol}|${horizonHours}`]
+      : null;
+    const signal = {
+      ...row,
+      asset_class: assetClass,
+      agree: row.conf && row.conf.agree,
+      total: row.conf && row.conf.total
+    };
+    const confidence = currentSignalConfidence(signal, calibration, assetRecord, baselines, rangeRecord);
+    if (!confidence || !confidence.actionable) {
+      const measured = confidence ? {
+        conservative_win_rate: Math.round(confidence.estimatedWinRate * 1000) / 10,
+        baseline: Math.round(confidence.baseline * 1000) / 10,
+        edge: Math.round(confidence.edgeOverBaseline * 1000) / 10,
+        asset_samples: confidence.assetCompositeRecord && confidence.assetCompositeRecord.samples,
+        calibration_samples: confidence.calibration && confidence.calibration.samples
+      } : null;
+      return {
+        ...row,
+        dir: 0,
+        horizon: null,
+        range: null,
+        abstained: { reason: 'unproven-current-setup', measured }
+      };
+    }
+    return {
+      ...row,
+      confidence: {
+        conservative_win_rate: confidence.estimatedWinRate,
+        raw_win_rate: confidence.rawEstimatedWinRate,
+        baseline: confidence.baseline,
+        conservative_edge: confidence.edgeOverBaseline,
+        agreement: confidence.agreementRatio,
+        asset_samples: confidence.assetCompositeRecord.samples,
+        asset_effective_samples: confidence.assetCompositeRecord.effectiveSamples,
+        calibration_samples: confidence.calibration.samples,
+        calibration_effective_samples: confidence.calibration.effectiveSamples,
+        calibration_source: confidence.calibration.source,
+        asset_record_scope: confidence.assetCompositeRecord.source,
+        range_coverage: confidence.rangeCalibration.accuracy,
+        range_samples: confidence.rangeCalibration.samples,
+        range_effective_samples: confidence.rangeCalibration.effectiveSamples,
+        range_nominal_coverage: confidence.rangeCalibration.nominalCoverage,
+        range_calibrated: confidence.rangeCalibration.qualified
+      }
+    };
+  }) : rows);
+  return Object.fromEntries(Object.entries(boards).map(([key, value]) => [key, gate(value)]));
+}
+
+// Last-line publication invariant. The scoring path already performs these
+// gates; this sanitizer protects against an old KV payload, a future rendering
+// path that bypasses rankBoards, or a partial refactor. It intentionally strips
+// only trade-like fields and leaves descriptive measurements available.
+export function sanitizePayloadForPublication(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  const out = typeof structuredClone === 'function'
+    ? structuredClone(payload)
+    : JSON.parse(JSON.stringify(payload));
+  const skills = out.classSkill || {};
+  for (const [sectionName, assetClass] of [['crypto', 'crypto'], ['stocks', 'stock']]) {
+    const section = out[sectionName];
+    if (!section || typeof section !== 'object') continue;
+    for (const value of Object.values(section)) {
+      if (!Array.isArray(value)) continue;
+      for (const row of value) {
+        if (!row || typeof row !== 'object') continue;
+        const exactEvidence = row.confidence
+          && row.confidence.calibration_source === 'asset-class-direction-horizon'
+          && Number(row.confidence.asset_effective_samples) >= MIN_RELIABILITY_SAMPLES
+          && row.confidence.asset_record_scope === 'asset-direction-horizon'
+          && Number(row.confidence.calibration_effective_samples) >= DETAILED_CALIBRATION_CONFIDENCE_MIN_SAMPLES
+          && row.confidence.range_calibrated === true
+          && Number(row.confidence.range_effective_samples) >= RANGE_CALIBRATION_MIN_SAMPLES;
+        const authorized = skills[assetClass] && skills[assetClass].proven === true
+          && (row.dir === 1 || row.dir === -1)
+          && exactEvidence
+          && row.horizon && row.horizon.basis === 'historical' && Number.isFinite(row.horizon.days)
+          && row.range && row.range.basis === 'historical';
+        if (!authorized) {
+          row.dir = 0;
+          row.horizon = null;
+          row.range = null;
+          row.confidence = null;
+          row.abstained = row.abstained || { reason: 'publication-invariant' };
+        }
+      }
+    }
+  }
+  // This is a lifetime track-record panel, never a statement about today's
+  // setup. Current clocks/bands from the raw universe cannot leak through it.
+  if (Array.isArray(out.highAccuracy)) {
+    for (const row of out.highAccuracy) {
+      if (!row || typeof row !== 'object') continue;
+      delete row.dir;
+      delete row.side;
+      delete row.entry;
+      delete row.target;
+      delete row.horizon;
+      delete row.range;
+    }
+  }
+  if (out.dayRange && typeof out.dayRange === 'object') {
+    for (const row of Object.values(out.dayRange)) {
+      if (!row || typeof row !== 'object') continue;
+      delete row.entry;
+      delete row.side;
+      delete row.target;
+    }
+  }
+  return out;
+}
+
+export function rangeCalibrationEvidence(record) {
+  if (!record || !Number.isFinite(record.hits) || !Number.isFinite(record.total)
+    || record.total < RANGE_CALIBRATION_MIN_SAMPLES) return null;
+  const effectiveSamples = Number.isFinite(record.effectiveSamples)
+    ? Math.max(1, Math.min(record.total, record.effectiveSamples))
+    : record.total;
+  if (effectiveSamples < RANGE_CALIBRATION_MIN_SAMPLES) return null;
+  const accuracy = clamp(record.hits / record.total, 0, 1);
+  const lowerBound = lowerConfidenceBound(accuracy * effectiveSamples, effectiveSamples);
+  const calibrationError = Math.abs(accuracy - RANGE_NOMINAL_COVERAGE);
+  // A high containment rate is not automatically good: without a separate
+  // sharpness model it can simply mean the interval is too wide to be useful.
+  // Require both non-trivial coverage and proximity to the declared 68% band.
+  const qualified = lowerBound != null && lowerBound >= 0.50
+    && calibrationError <= RANGE_MAX_CALIBRATION_ERROR;
+  return {
+    accuracy, lowerBound, calibrationError,
+    samples: record.total, effectiveSamples,
+    nominalCoverage: RANGE_NOMINAL_COVERAGE, qualified
+  };
+}
+
+export function currentSignalConfidence(signal, calibration, assetCompositeRecord, baselines, rangeRecord) {
   if (!signal || !(signal.dir === 1 || signal.dir === -1) || !Number.isFinite(signal.score)) return null;
   const bucket = scoreBucket(signal.score);
   const horizonHours = signal.horizon && Number.isFinite(signal.horizon.days)
@@ -2456,27 +2646,37 @@ export function currentSignalConfidence(signal, calibration, assetCompositeRecor
   const addComponent = (record, minSamples, source) => {
     if (!record || !Number.isFinite(record.correct) || !Number.isFinite(record.total) || record.total < minSamples) return null;
     const accuracy = clamp(record.correct / record.total, 0, 1);
-    const lowerBound = lowerConfidenceBound(record.correct, record.total);
+    const effectiveSamples = Number.isFinite(record.effectiveSamples)
+      ? Math.max(1, Math.min(record.total, record.effectiveSamples))
+      : record.total;
+    if (effectiveSamples < minSamples) return null;
+    const lowerBound = lowerConfidenceBound(accuracy * effectiveSamples, effectiveSamples);
     if (lowerBound == null) return null;
-    const component = { accuracy, lowerBound, samples: record.total, source };
+    const component = { accuracy, lowerBound, samples: record.total, effectiveSamples, source };
     components.push(component);
     return component;
   };
   const calibrationComponent = calibrationRecord
     ? addComponent(calibrationRecord, calibrationRecord.source === 'pooled' ? CALIBRATION_CONFIDENCE_MIN_SAMPLES : DETAILED_CALIBRATION_CONFIDENCE_MIN_SAMPLES, calibrationRecord.source)
     : null;
-  const assetComponent = addComponent(assetCompositeRecord, MIN_RELIABILITY_SAMPLES, 'asset-composite');
+  const assetComponent = addComponent(assetCompositeRecord, MIN_RELIABILITY_SAMPLES, 'asset-direction-horizon');
+  const rangeCalibration = rangeCalibrationEvidence(rangeRecord);
   if (!components.length) return null;
 
-  const weightOf = (n) => Math.sqrt(Math.min(Math.max(n, 1), 400));
-  const estimatedWinRate = components.reduce((sum, c) => sum + c.lowerBound * weightOf(c.samples), 0)
-    / components.reduce((sum, c) => sum + weightOf(c.samples), 0);
-  const rawEstimatedWinRate = components.reduce((sum, c) => sum + c.accuracy * weightOf(c.samples), 0)
-    / components.reduce((sum, c) => sum + weightOf(c.samples), 0);
+  // Calibration and the asset record are computed from overlapping subsets of
+  // the same calls, so averaging them pretends they are independent evidence.
+  // Use the weaker lower bound (and weaker raw rate) instead.
+  const estimatedWinRate = Math.min(...components.map((c) => c.lowerBound));
+  const rawEstimatedWinRate = Math.min(...components.map((c) => c.accuracy));
   const agreementRatio = signal.total ? signal.agree / signal.total : 0;
-  const historicalBasis = !!((signal.horizon && signal.horizon.basis === 'historical') || (signal.range && signal.range.basis === 'historical'));
+  const historicalHorizon = !!(signal.horizon && signal.horizon.basis === 'historical' && Number.isFinite(signal.horizon.days));
+  const historicalRange = !!(signal.range && signal.range.basis === 'historical');
+  const historicalBasis = historicalHorizon && historicalRange;
   const hasAssetCompositeRecord = !!assetComponent;
-  const strongCalibration = !!(calibrationComponent && calibrationComponent.samples >= 100);
+  // A pooled score bucket is useful diagnostic context, but it is not evidence
+  // for this exact class + side + horizon. Only the matching detailed cell may
+  // authorize publication; otherwise the row keeps learning while withheld.
+  const hasExactCalibration = !!(calibrationComponent && calibrationComponent.source === 'asset-class-direction-horizon');
 
   // The bar is skill over this class's measured no-skill line, not a flat
   // 0.68 hit rate. A flat threshold means wildly different things in different
@@ -2492,10 +2692,11 @@ export function currentSignalConfidence(signal, calibration, assetCompositeRecor
     signal.dir === -1 ? 1 : 0
   );
   const edgeOverBaseline = estimatedWinRate - baseline;
-  const actionable = edgeOverBaseline >= MIN_ACTIONABLE_EDGE
+  const actionable = !!(assetComponent && hasExactCalibration && rangeCalibration && rangeCalibration.qualified)
+    && edgeOverBaseline >= MIN_ACTIONABLE_EDGE
     && signal.score >= (hasAssetCompositeRecord || historicalBasis ? 78 : 88)
     && agreementRatio >= (hasAssetCompositeRecord ? 0.45 : 0.55)
-    && (historicalBasis || hasAssetCompositeRecord || strongCalibration);
+    && historicalBasis;
 
   return {
     estimatedWinRate,
@@ -2508,7 +2709,8 @@ export function currentSignalConfidence(signal, calibration, assetCompositeRecor
     actionable,
     historicalBasis,
     calibration: calibrationComponent,
-    assetCompositeRecord: assetComponent
+    assetCompositeRecord: assetComponent,
+    rangeCalibration
   };
 }
 
@@ -3496,8 +3698,8 @@ export function confluence(m, kind, reliability, ctx = {}) {
     total: applicable.length,
     longNotes: notes(1),
     shortNotes: notes(-1),
-    longHorizon: horizonEstimate(applicable, 1, m.symbol, reliabilityByHorizon),
-    shortHorizon: horizonEstimate(applicable, -1, m.symbol, reliabilityByHorizon),
+    longHorizon: horizonEstimate(applicable, 1, m.symbol, reliabilityByHorizon, kind, ctx.directionBaselines),
+    shortHorizon: horizonEstimate(applicable, -1, m.symbol, reliabilityByHorizon, kind, ctx.directionBaselines),
     // Directional-only (dir 0/null are not falsifiable predictions), for
     // scripts/reliability.mjs to log and later score against actual outcomes.
     // Not part of the served payload — rankBoards/buildPayload strip this
@@ -4128,6 +4330,10 @@ export function buildCryptoMetrics(item, extras = {}) {
     symbol,
     id: item.id,
     name: item.name,
+    inputInterval: haveDaily ? '1d' : 'about-1h',
+    historySource: haveDaily ? 'coingecko-daily' : 'coingecko-7d-sparkline',
+    historyObservations: closes.length,
+    dataQuality: haveDaily ? 'model-ready' : 'cadence-mismatch',
     dwell,
     corr,
     seasonal,
@@ -4236,6 +4442,10 @@ export function buildStockMetrics(row, valuation, override, benchCloses, ivHist)
   return {
     symbol,
     name: symbol,
+    inputInterval: '1d',
+    historySource: row.source || 'yahoo-daily',
+    historyObservations: closes.length,
+    dataQuality: 'model-ready',
     price,
     volPct,
     volLookbackDays: volLookback ? volLookback.lookback : null,
@@ -4348,6 +4558,14 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       total: c.total,
       horizon,
       range,
+      analysis: {
+        input_interval: m.inputInterval || null,
+        history_source: m.historySource || null,
+        observations: m.historyObservations || null,
+        data_quality: m.dataQuality || 'unknown',
+        reference_price: m.price,
+        analyzed_at: ctx.nowIso || null
+      },
       ...(m.id ? { id: m.id } : {})
     });
   }
@@ -4402,7 +4620,15 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       drivers: side === 'long' ? x.c.longNotes : x.c.shortNotes,
       horizon,
       range: horizon ? predictedRange(x.m.price, horizon.days, score, dir, moveStats, x.m.symbol, x.m.volPct) : null,
-      topIndicator: topIndicator(reliability, x.m.symbol),
+      analysis: {
+        input_interval: x.m.inputInterval || null,
+        history_source: x.m.historySource || null,
+        observations: x.m.historyObservations || null,
+        data_quality: x.m.dataQuality || 'unknown',
+        reference_price: x.m.price,
+        analyzed_at: ctx.nowIso || null
+      },
+      topIndicator: topIndicator(reliability, x.m.symbol, kind, ctx.directionBaselines),
       ...(x.m.val ? { val: { target: x.m.val.target, upside: x.m.val.upside, recKey: x.m.val.recKey, source: x.m.val.source } } : {}),
       ...(x.m.daysToEarnings != null ? { daysToEarnings: Math.round(x.m.daysToEarnings * 10) / 10 } : {}),
       ...(x.m.funding != null ? { funding: x.m.funding } : {}),
@@ -4457,7 +4683,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration, dailyRangeStats, todEdge) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration, dailyRangeStats, todEdge, scoreCalibration) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -4568,7 +4794,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
         });
         continue;
       }
-      directional.push(c);
+      if (!hasCrossClassTickerCollision(c.symbol)) directional.push(c);
     }
     cryptoStableValue = stableValueRows;
     const qualifying = directional
@@ -4592,7 +4818,11 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
         const daily = h && !h._error ? h : null;
         return buildCryptoMetrics(c, { funding: funding[sym], fundingHistory: fundingHistory && fundingHistory[sym], ivHistory: ivHistory && ivHistory[sym], sentimentScore: sentimentMap && sentimentMap[sym], trending: trending.has(sym), daily, benchCloses: btcCloses });
       })
-      .filter(Boolean);
+      // Never run day-based RSI/MACD/reversal logic on CoinGecko's hourly
+      // fallback and then label/calibrate it as a daily forecast. Assets whose
+      // daily fetch failed simply wait for a later build; the separate scalp
+      // view handles genuinely intraday observations.
+      .filter((m) => m && m.inputInterval === '1d');
     cryptoBoards = rankBoards(metrics, 'crypto', reliability, ctx);
   }
 
@@ -4631,8 +4861,13 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   // back in. See assetClassSkill/abstainBoards.
   const cryptoSkill = assetClassSkill(detailedCalibration, directionBaselines, 'crypto');
   const stockSkill = assetClassSkill(detailedCalibration, directionBaselines, 'stock');
-  const cryptoPublic = abstainBoards(cryptoPublicRaw, cryptoSkill);
-  const stockPublic = abstainBoards(stockPublicRaw, stockSkill);
+  const calibration = { pooled: scoreCalibration || {}, detailed: detailedCalibration || {} };
+  const cryptoPublic = cryptoSkill && cryptoSkill.proven
+    ? gateBoardsBySignalConfidence(cryptoPublicRaw, 'crypto', reliabilityByHorizon, calibration, directionBaselines, rangeReliability)
+    : abstainBoards(cryptoPublicRaw, cryptoSkill);
+  const stockPublic = stockSkill && stockSkill.proven
+    ? gateBoardsBySignalConfidence(stockPublicRaw, 'stock', reliabilityByHorizon, calibration, directionBaselines, rangeReliability)
+    : abstainBoards(stockPublicRaw, stockSkill);
   const log = {
     generated_at: new Date().toISOString(),
     votes: [...(cryptoVotes || []), ...(stockVotes || [])],
@@ -4659,7 +4894,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   const cryptoUniverse = enrichAll(cryptoAll || [], 'crypto');
   const stockUniverse = enrichAll(stockAll || [], 'stock');
   const highAccuracyFor = (list) => list
-    .map(({ symbol, name, price, horizon, range, id, trackRecord, asset_class }) => {
+    .map(({ symbol, name, price, id, trackRecord, asset_class }) => {
       const s = trackRecord;
       if (!s) return null;
       if (!s.proven) return null;
@@ -4668,7 +4903,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
         score: s.score, samples: s.samples,
         baseline: s.baseline, edge: s.edge, lowerEdge: s.lowerEdge,
         rangeContainment: s.range,
-        price, horizon, range,
+        price,
         ...(id ? { id } : {})
       };
     })
@@ -4683,7 +4918,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     generated_at: log.generated_at,
     cache_seconds: CACHE_SECONDS,
     build_ms: Date.now() - started,
-    model: 'confluence-v6 (32 techniques, directional agreement)',
+    model: 'confluence-v7 (independent outcomes, calibrated abstention)',
     health: {
       coingecko: cryptoR.status === 'fulfilled',
       global: globalR.status === 'fulfilled' && !!globalR.value,
@@ -4756,7 +4991,7 @@ async function getCached(env) {
   if (!env || !env.FCS_CACHE) return null;
   try {
     const raw = await env.FCS_CACHE.get(CACHE_KEY);
-    return raw ? JSON.parse(raw) : null;
+    return raw ? sanitizePayloadForPublication(JSON.parse(raw)) : null;
   } catch { return null; }
 }
 
@@ -4794,7 +5029,14 @@ export function mergeLivePrices(payload, live) {
   const apply = (rows, table) => (Array.isArray(rows) ? rows.map((r) => {
     const tick = r && table && table[r.symbol];
     if (!tick || tick.price == null) return r;
-    const out = { ...r, price: tick.price, price_at: live.generated_at };
+    const analysis = {
+      ...(r.analysis || {}),
+      reference_price: r.analysis && Number.isFinite(r.analysis.reference_price)
+        ? r.analysis.reference_price
+        : r.price,
+      analyzed_at: r.analysis && r.analysis.analyzed_at ? r.analysis.analyzed_at : payload.generated_at
+    };
+    const out = { ...r, analysis, price: tick.price, price_at: live.generated_at };
     if (tick.chg24h != null) out.chg24h = tick.chg24h;
     // rangePos is a pure function of price against the build's own low/high,
     // so it can be kept honest at the new price. Anything needing recomputed
@@ -4928,42 +5170,6 @@ async function putSessionExtremes(env, value) {
   }
 }
 
-// Day-trading alerts are sent from the WORKER, not from scripts/notify.mjs.
-// notify.mjs runs inside the hourly GitHub build, and GitHub delivered ~6 of
-// 24 requested runs a day even after the cadence was cut — an entry alert that
-// arrives hours late is worse than none. This path rides the Cloudflare cron
-// that actually fires. Same ntfy topic, so it lands in the same channel.
-export async function notifyDayRangeEntries(env, entries) {
-  if (!env || !env.NTFY_TOPIC || !entries || !entries.length) return 0;
-  let sent = 0;
-  for (const e of entries) {
-    const body = [
-      `${e.symbol} (${e.assetClass === 'crypto' ? 'crypto' : 'equity'}) has travelled ${e.movePct >= 0 ? '+' : ''}${e.movePct.toFixed(2)}% today`,
-      `(${Math.abs(e.moveInMedians).toFixed(2)}x its median daily range of ${e.medianPct.toFixed(2)}%).`,
-      `Sitting at ${(e.posInDayRange * 100).toFixed(0)}% of today's range.`,
-      `Candidate ${e.side.toUpperCase()} entry near ${e.price}.`,
-      `Confirmations: ${e.reasons.join('; ')}.`,
-      `A typical day is worth ~${e.medianAbs.toFixed(e.medianAbs < 1 ? 4 : 2)} at this price.`,
-      'Mean-reversion candidate, not a scored prediction — this signal has no measured track record yet.'
-    ].join(' ');
-    try {
-      const res = await fetch(`https://ntfy.sh/${env.NTFY_TOPIC}`, {
-        method: 'POST',
-        headers: {
-          Title: `${e.symbol} stretched ${e.side === 'short' ? 'up' : 'down'} — candidate ${e.side}`,
-          Priority: 'default',
-          Tags: e.side === 'short' ? 'chart_with_downwards_trend' : 'chart_with_upwards_trend'
-        },
-        body
-      });
-      if (res.ok) sent++;
-    } catch (error) {
-      console.error('Day-range alert failed for', e.symbol, error.message);
-    }
-  }
-  return sent;
-}
-
 // Which assets the day-trading read covers. Deliberately narrow, as the user
 // scoped it: the always-tracked favorites plus whatever the engine has actually
 // proven it can call. Running it across all ~260 assets would multiply the
@@ -4997,59 +5203,15 @@ export async function refreshLivePriceLayer(env) {
     const session = updateSessionExtremes(prevSession, body, nowIso);
     await putSessionExtremes(env, session);
 
-    // Alert on newly-stretched assets. Runs here rather than in notify.mjs so
-    // entry alerts ride the cron that actually fires.
-    await dispatchDayRangeAlerts(env, cached, body, session);
+    // Range exhaustion remains visible as a measurement. It deliberately does
+    // not notify a long/short entry until a separately scored setup earns that
+    // direction; freshness cannot compensate for missing predictive evidence.
     await dispatchBestHourAlerts(env, cached, nowIso);
     return true;
   } catch (error) {
     console.error('Live price layer refresh failed:', error.message);
     return false;
   }
-}
-
-// Builds the day-range read for the covered universe and fires an alert for any
-// asset that has newly become a candidate entry this session.
-export async function dispatchDayRangeAlerts(env, cached, prices, session) {
-  if (!env || !env.NTFY_TOPIC) return 0;
-  const rangeStats = cached && cached.dailyRange;
-  if (!rangeStats) return 0;
-  const universe = dayTradingUniverse(cached);
-  const rowBySymbol = indexBoardRows(cached);
-
-  let state = {};
-  try {
-    const raw = await env.FCS_CACHE.get(DAY_RANGE_ALERT_STATE_KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (parsed && parsed.date === session.date) state = parsed.fired || {};
-  } catch { /* a lost state key costs at most one duplicate alert */ }
-
-  const toSend = [];
-  for (const uk of universe) {
-    const [assetClass, symbol] = uk.split('|');
-    const liveTable = assetClass === 'crypto' ? prices.crypto : prices.stocks;
-    const tick = liveTable && liveTable[symbol];
-    const price = tick && tick.price;
-    if (!Number.isFinite(price)) continue;
-    const sig = dayRangeSignal(symbol, price, session.bySymbol && session.bySymbol[uk], rangeStats, rowBySymbol[uk]);
-    if (!sig || !sig.entry) continue;
-    const key = `${uk}|${sig.entry.side}`;
-    if (state[key]) continue;
-    state[key] = nowSeconds();
-    toSend.push({
-      symbol, assetClass, price, side: sig.entry.side, reasons: sig.entry.reasons,
-      movePct: sig.movePct, moveInMedians: sig.moveInMedians,
-      medianPct: sig.medianPct, medianAbs: sig.medianAbs, posInDayRange: sig.posInDayRange
-    });
-  }
-  if (!toSend.length) return 0;
-  const sent = await notifyDayRangeEntries(env, toSend);
-  try {
-    await env.FCS_CACHE.put(DAY_RANGE_ALERT_STATE_KEY, JSON.stringify({ date: session.date, fired: state }), { expirationTtl: DAY_RANGE_ALERT_TTL_SECONDS });
-  } catch (error) {
-    console.error('Unable to persist day-range alert state:', error.message);
-  }
-  return sent;
 }
 
 function nowSeconds() { return Math.floor(Date.now() / 1000); }
@@ -5159,19 +5321,6 @@ function queueStaleCacheRefresh(env, ctx) {
   ctx.waitUntil(dispatchRefreshIfStale(env).catch((error) => {
     console.error('Stale signals payload refresh dispatch failed:', error.message);
   }));
-}
-
-async function getCachedIntraday(env) {
-  if (!env || !env.FCS_CACHE) return null;
-  try {
-    const raw = await env.FCS_CACHE.get(INTRADAY_CACHE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
-}
-
-function isIntradayFresh(payload) {
-  if (!payload || !payload.generated_at) return false;
-  return (Date.now() - new Date(payload.generated_at).getTime()) < INTRADAY_FRESH_SECONDS * 1000;
 }
 
 async function getCachedLivePrices(env) {
@@ -5292,6 +5441,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .board.long{border-top:2px solid var(--amber)}
   .board.short{border-top:2px solid var(--down)}
   .board.favorites{border-top:2px solid var(--up)}
+  .board.withheld{border-top:2px solid var(--muted)}
   .board-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:16px 18px 12px;flex-wrap:wrap}
   .eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim)}
   .board.long .eyebrow b{color:var(--amber);font-weight:600}
@@ -5326,6 +5476,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .board.long .meter i.on{background:var(--amber);box-shadow:0 0 5px rgba(255,178,36,.45)}
   .board.short .meter i.on{background:var(--down);box-shadow:0 0 5px rgba(255,122,133,.4)}
   .board.favorites .meter i.on{background:var(--up);box-shadow:0 0 5px rgba(61,220,151,.45)}
+  .board.withheld .meter i.on{background:var(--muted);box-shadow:none}
   .score{font-weight:600;min-width:24px;color:var(--paper)}
   .conf{font-size:9.5px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
   .horizon{font-size:9.5px;letter-spacing:.06em;padding:1px 6px;border-radius:3px;border:1px solid var(--line);cursor:help}
@@ -5338,6 +5489,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .dir-arrow{font-size:11px;margin-left:5px;cursor:help}
   .dir-arrow.dir-up{color:var(--up)}
   .dir-arrow.dir-down{color:var(--down)}
+  .dir-arrow.dir-neutral{color:var(--muted);font-weight:700;letter-spacing:.05em}
+  .abstain-note{display:block;max-width:270px;color:var(--amber);font-family:var(--disp);font-size:10px;line-height:1.4;white-space:normal;text-align:right}
+  .class-withheld{grid-column:1/-1;margin-top:0}
   .coil{display:block;font-size:10px;letter-spacing:.04em;margin-top:3px;font-family:var(--disp);cursor:help}
   /* Retrospective (2026-08-31). Spans the full grid width rather than
      sitting in a board column: it is about the engine as a whole, not
@@ -5405,12 +5559,11 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .id-card{background:var(--ink-1);padding:10px 12px;min-width:0}
   .id-sym{font-family:var(--mono);font-weight:700;font-size:12.5px;letter-spacing:.03em}
   .id-price{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:2px}
-  .id-dir{font-size:20px;line-height:1;margin:6px 0 4px}
-  .id-meta{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
-  .id-conf{font-family:var(--mono);font-size:10px;color:var(--dim)}
-  .id-flag{font-family:var(--mono);font-size:9px;letter-spacing:.1em;padding:1px 5px;border-radius:3px;font-weight:700}
-  .id-flag.id-peaked{color:var(--down);border:1px solid rgba(255,122,133,.35)}
-  .id-flag.id-bottomed{color:var(--up);border:1px solid rgba(61,220,151,.35)}
+  .id-state{font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--amber);margin:8px 0 5px}
+  .id-read{font-family:var(--mono);font-size:10.5px;color:var(--muted);line-height:1.55}
+  .id-window{border-top:1px solid var(--line);margin-top:8px;padding-top:7px;font-family:var(--mono);font-size:10px;line-height:1.55;color:var(--dim)}
+  .id-window b{color:var(--paper);font-weight:600}
+  .id-fresh{margin-top:12px;font-family:var(--mono);font-size:10px;color:var(--dim);line-height:1.6}
   .id-track{margin-top:14px;font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.7}
   .id-track.dim{color:var(--dim)}
   .id-tr-item{margin-right:18px}
@@ -5464,6 +5617,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     .asset .why{max-width:none}
     .sigcell{align-items:stretch}
     .sigrow{justify-content:space-between}
+    .abstain-note{text-align:left;max-width:none}
     .range{display:inline-block;text-align:right}
   }
   @media (max-width:620px){
@@ -5536,7 +5690,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           <a class="home-link rss-link" href="/signals/api/feed" title="Subscribe in any RSS reader for a persistent, browsable history of every alert — a complement to the ntfy push channel, which only shows what's live right now">📡 Alerts RSS feed</a>
         </div>
         <h1>Frontier Capital<br><span class="amber">Signals</span></h1>
-        <p class="dek">Confluence screens across the <b>top 100 cryptos</b> and <b>61 US equities</b>. Up to <b>32 independent techniques</b> per asset, from RSI, MACD and Bollinger structure to funding-rate percentiles, open interest, Fibonacci retracements, time-of-day/day-of-week bias, intraday swing-timing, hack/exploit severity, market sentiment, options-implied volatility, earnings-calendar risk, key support/resistance breaks, accumulation/distribution, a broad-market composite, and a yield-curve read validated against the tracked history of every major breakout and breakdown, must point the <b>same direction</b> before a signal ranks — each with an <b>expected timeframe</b> learned from its own track record, and every technique weighted by how far it beats the measured no-skill baseline for its asset class rather than a nominal 50%. Prices, funding, and sentiment archive permanently for deep multi-year pattern analysis. <b>Analysis syncs hourly; price and 24h change tick live</b> in between.</p>
+        <p class="dek">Quant screens across the <b>top 100 cryptos</b> and <b>61 US equities</b>. Up to <b>32 candidate evidence sources</b> are measured, but an unknown or unproven source receives zero live weight. A direction, timeframe, and range are published only when the asset class and the <b>exact asset/side/score/horizon setup</b> beat their measured no-skill baselines on independent outcomes. Otherwise the page says <b>withheld</b>. <b>Analysis syncs hourly; price and 24h change tick live</b> in between.</p>
       </div>
       <div class="mast-meta">
         ANALYSIS REFRESH <b>HOURLY</b><br>
@@ -5553,17 +5707,19 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     <a class="qnav-link" href="#intraday">Intraday</a>
     <a class="qnav-link" href="#boards">Boards</a>
     <a class="qnav-link" href="#trackRecord">Track record</a>
+    <a class="qnav-link" href="#marketContext">Cycle context</a>
+    <a class="qnav-link" href="#quantResearch">Quant research</a>
     <a class="qnav-link" href="#methodology">Methodology</a>
   </nav>
 
   <div class="xp-banner" role="note">
-    <b>Experimental research project — not financial advice.</b> Every score, range, timeframe, and the day-trading signal below are mechanical outputs from an ongoing, evolving model, not recommendations. Nothing here has been reviewed by a financial professional. Trading — especially with leverage — risks losing more than you put in. Do your own research and never rely on this page alone.
+    <b>Experimental research project — not financial advice.</b> Every score, range, timeframe, and measured scalp context below is a mechanical output from an ongoing, evolving model, not a recommendation. Nothing here has been reviewed by a financial professional. Trading — especially with leverage — risks losing more than you put in. Do your own research and never rely on this page alone.
   </div>
 
   <section class="overview" id="overview" aria-label="Market overview">
   </section>
 
-  <section class="intraday" id="intraday" aria-label="Day-trading intraday signal"></section>
+  <section class="intraday" id="intraday" aria-label="Measured scalp context"></section>
 
   <div id="stateBox"></div>
 
@@ -5572,33 +5728,36 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
 
   <section class="track-record" id="trackRecord" aria-label="Prediction track record"></section>
 
+  <section class="track-record" id="marketContext" aria-label="Market cycle context"></section>
+
+  <section class="track-record" id="quantResearch" aria-label="Automatic quant research"></section>
+
   <details id="methodology">
     <summary>Methodology and data</summary>
     <div class="method">
-      <p><b>The confluence model.</b> Every asset is evaluated by up to 32 independent techniques. Each one votes bullish, bearish, or neutral. The breakout score measures how much weighted evidence points up net of evidence pointing down; the breakdown score mirrors it. The small fraction under each score (for example 9/32) is the raw count of techniques agreeing with that direction out of those that had enough data to vote. High score plus high agreement is the strongest read.</p>
+      <p><b>The confluence model.</b> Every asset is evaluated by up to 32 candidate techniques. They are not assumed statistically independent. Each raw vote is logged for learning, but unknown, weak, or baseline-level techniques receive zero live weight. A board direction survives only when class-level evidence and the exact current asset/side/score/horizon calibration both have enough independent periods and a conservative edge over the measured no-skill baseline.</p>
       <p><b>The 32 techniques.</b> Multi-horizon momentum alignment; Wilder RSI(14) regime and direction; MACD(12/26/9) histogram level and direction; moving-average stack (SMA20/50/200, computed from real daily bars for both equities and crypto); Bollinger %B with squeeze-and-expansion detection; stochastic (14,3) crosses; Donchian 20-bar breakout or breakdown proximity; volume confirmation versus baseline; on-balance volume trend; swing structure of higher-highs and higher-lows; a momentum divergence proxy that flags new price extremes without RSI support; a volatility regime read separating coiled compression from climactic expansion; a reversal-pattern read (below); how long an asset has been coiled at its own long-run high or low and whether it's decoupled from the broader market (below); a seasonal-analog read comparing the current pattern against the asset's own history one or more years back (below); a valuation-or-positioning layer, positioning now weighted by this asset's own funding-rate percentile once enough of its own history exists rather than a fixed global threshold; a Fibonacci retracement read off the asset's most recent swing, direction-aware and never firing without independent confirmation; open interest relative to this asset's own recent history, paired with price direction to separate real participation from a thin, untrusted move; a time-of-day and day-of-week behavioral profile (UTC, New York, London, and Tokyo session hours — which alone captures midnight ET and the NYSE's 9am/4pm hours — and day of week), learned per asset once a slot has real sample depth and a real effect size; market sentiment (Fear &amp; Greed for crypto, VIX's position in its own recent range for equities, pooled with per-asset community/news sentiment where available); a swing-timing read that separately learns what time of day this specific asset's own daily high or low tends to land, firing only when that proven timing pattern and the asset's current price position both confirm; a hack/exploit-severity read that turns a recent, matched security incident from a public hacks tracker into a bearish signal sized to the dollar loss relative to this asset's own market cap, decaying over roughly two weeks; a cross-asset and cross-sector lead/lag read that looks up whichever other assets or curated crypto-sector composites (DeFi, layer-1s, layer-2s, governance tokens, gaming/metaverse, meme, and other baskets) — in either asset class, including the dollar, gold, oil, and the 2-year/10-year Treasury yield spread — have proven, over the full historical archive, to predict this one's moves some number of days later; for crypto, sustained capital flowing into or out of a matched DeFi protocol's on-chain total value locked, paired with price direction before it fires; options-implied volatility (Deribit's DVOL for Bitcoin and Ether, the front-month options chain for equities) at an extreme relative to that asset's own history, a contrarian fear-or-euphoria read that only fires alongside a genuinely stretched price; for equities, an earnings-calendar awareness read that never votes a direction, only flags elevated gap risk and pulls down conviction accordingly, whenever a stock's next reported earnings date falls inside a call's own expected timeframe; a key support/resistance break read that only counts a level once price has reversed off it more than once, sized by how far this asset has historically moved in the 24 hours after that same kind of break; an accumulation/distribution read that looks for a genuinely coiled range — tightening Bollinger bands or realized volatility well under its own baseline, with price itself still flat — and asks which way on-balance volume is quietly leaning inside it, before that lean shows up in price at all; for crypto, a broad-market-outlier read that compares this asset's own 7-day move against the whole tracked crypto market's, voting only when the asset is genuinely decoupled — moving well beyond, or opposite to, what the market itself is doing — not when it's simply riding the same wave everything else is; and, for crypto, a yield-curve read: the one candidate, out of nineteen tested against the full historical record of every major crypto breakout and breakdown, that actually held up independently in both halves of that history — the 2-year/10-year Treasury spread moving more negative over the preceding five days measurably precedes a crypto breakdown, and only that direction, since the mirror case for breakouts did not hold up the same way.</p>
       <p><b>Reversal detection.</b> A separate read from plain RSI level: it looks for RSI having actually bottomed or topped over the last ~10 bars and turned back, confirmed by at least one independent signal (a stochastic cross, a Bollinger band extreme, swing structure, on-balance volume, or the divergence proxy) — it never fires on RSI alone. Market-wide sentiment adds confidence on top when it lines up: extreme fear on the Fear &amp; Greed index for a crypto bottom, or VIX sitting high in its own recent range for an equity bottom (and the mirror image — extreme greed or a complacent VIX — for tops).</p>
       <p><b>Dwell time and market correlation.</b> Real 52-week (or as much history as exists) highs and lows, and specifically how many days an asset has been sitting within a few percent of one, not just whether it currently is — a fresh one-day touch and a multi-week base at the same level are different setups. Long dwell at a low is read as stored energy for a bounce, the mirror at a high for a pullback, and it carries extra weight when the asset has also decoupled from its usual correlation with the broader market (BTC for crypto, SPY for equities) over the last 30 days, since a move happening on its own is a different setup than one just riding the market. This is a starting assumption, not a fixed rule — the adaptive weighting above corrects it per asset from what actually happens next.</p>
       <p><b>Seasonal analogs.</b> Where an asset has enough of its own history, the current pattern over the last ~90 days is compared against the same-length window roughly one, two, or more years back, using the same correlation math as the market-correlation read above but against the asset's own past. A real resemblance has to clear a fairly high bar (a correlation of at least 0.5) before it counts at all, since only a handful of candidate years exist to compare against and a looser bar would just be fitting noise. When one clears that bar, what happened in the days right after that historical analog becomes a genuine, data-grounded forward hint. In practice this only applies to equities: CoinGecko's free tier caps crypto history at 365 days, which isn't enough to compare against even one year back, so this abstains for every crypto asset rather than reaching for a shorter, less meaningful comparison.</p>
       <p><b>The valuation layer.</b> For equities, Wall Street consensus mean price targets and recommendation ratings: trading well below a buy-rated consensus target votes bullish, trading above the consensus target votes bearish. Trefis does not publish a public API, so consensus targets stand in for model-based estimates; site operators can supply Trefis or other model values through a server-side override, in which case the payload labels the source. For crypto, the layer uses perpetual futures funding rates (crowded positive funding on a parabolic move votes bearish, skeptical funding during an uptrend votes bullish) and trending-list crowding.</p>
-      <p><b>Adaptive weighting.</b> Every hour's directional calls are logged and checked back against what the asset's price actually did 24 hours and 7 days later. Once a technique has enough scored history for a specific asset, its weight for that asset going forward is nudged up if it has been reliably right and down if it has been reliably wrong, capped at plus or minus 50%. A technique that is only a coin flip for a given asset keeps its plain baseline weight.</p>
-      <p><b>Leading vs. lagging, and the expected timeframe.</b> Techniques are split into two kinds. Leading techniques try to anticipate a move before it's confirmed: RSI, Bollinger squeeze, stochastic crosses, OBV, the divergence proxy, the volatility regime read, reversal-pattern detection, the valuation/positioning layer, trending-list crowding, how long an asset has dwelled at its own extreme, the seasonal-analog read, Fibonacci retracement, the time-of-day/day-of-week read, the swing-timing read, sentiment, the hack/exploit-severity read, the cross-asset and cross-sector lead/lag read, on-chain TVL trend, options-implied volatility, the earnings-calendar risk flag, the accumulation/distribution read, the broad-market-outlier read, and the yield-curve read. Lagging (confirming) techniques describe a move already underway: momentum alignment, MACD, the moving-average stack, Donchian breakout proximity, volume confirmation, swing structure, open interest, and the support/resistance break read. This is a methodology classification, not the last word for a given asset — where enough of that asset's own history exists, its measured accuracy at each horizon (below) is the real, asset-specific answer to which of its own signals actually lead versus lag, which can and does differ from this general table. The small window shown next to each score (for example <b>1-3 days</b>) is this engine's estimate of when that specific call is expected to resolve, built from whichever techniques are actually voting on that asset right now. Where an asset has enough of its own scored history, the window uses that asset's real measured accuracy at the 24-hour versus 7-day mark (marked with a check and shown in amber) instead of a generic estimate — the same historical record the adaptive weighting above draws on, just answering "how soon" instead of "how much weight." Without enough history yet, it falls back to a weighted average of the active techniques' typical horizons (shown in gray) — an informed estimate, not a measurement.</p>
-      <p><b>Expected range.</b> The Range column is a band around the current price, not a point prediction, for the same timeframe as the horizon chip next to it. Its width comes from real volatility: this asset's own historical realized move size at that horizon once evaluateMatured has scored enough of its own outcomes (amber, marked historical), or its recent realized daily volatility scaled by the square root of time otherwise (gray, marked methodology) — the standard random-walk approximation for "how far a price plausibly wanders in N days." The band's center only shifts toward the called direction once the score shows real conviction, and the shift is capped well inside the band, so a weak score gives a wide, roughly symmetric range rather than a false point estimate.</p>
-      <p><b>How far back the methodology-basis range looks.</b> The gray (methodology) band isn't measured over a single fixed number of days for every asset — it's calibrated per asset. Several candidate lookback windows (10, 20, 30, 60, and 90 days) are backtested against that asset's own price history every hour: for each candidate, the tool checks whether the volatility estimate it would have produced at many past points actually matched what happened next, and keeps whichever window comes closest to correctly sized (hovering your cursor over a gray band shows which one won). A too-short lookback whipsaws on noise; a too-long one smooths over a real shift in how much an asset has started moving. This is a fast, within-run check using history already being fetched — distinct from, and much quicker to react than, the slower live-outcome learning loop described above — so it needs a real backtest sample to trust (an asset too young for that, common at crypto's 365-day history cap, just keeps the plain 30-day default).</p>
+      <p><b>Adaptive weighting.</b> Every raw vote is logged, then evaluated at an exact target time. Repeated hourly versions of a 24-hour or 7-day forecast are not counted as separate trials: only non-overlapping outcomes enter the append-only ledger. Aggregate updates and the ledger flag commit in one transaction, so a retry cannot learn twice. A technique earns positive weight only when its conservative record beats the relevant baseline; coin-flip, weak, missing, and negatively skilled evidence stays at zero live weight while continuing to learn.</p>
+      <p><b>Leading vs. lagging, and the expected timeframe.</b> Technique labels describe intent, not proof. The displayed timeframe comes only from this asset's independent 24-hour versus 7-day outcomes for the active, positively skilled evidence. If neither horizon clears its baseline, the timeframe is withheld. If both qualify but are not distinguishable, the model reports only a broad 1–7 day uncertainty window and does not permit that ambiguity to become a trade call.</p>
+      <p><b>Expected range, top, and bottom.</b> A displayed band is an empirical move interval for the validated horizon, anchored to the model's timestamped reference price. It is not an exact top, bottom, target, or stop. Volatility-only fallback bands may still be logged for calibration, but they are not shown as trade metrics. If the exact current setup lacks a reliable historical horizon or range record, both fields are withheld rather than manufactured.</p>
       <p><b>Which indicator this asset leans on.</b> "Leans on X (n%)" under an asset's name names whichever technique has, on its own, the strongest individually-proven track record for that specific asset — some assets really are better predicted by one kind of signal than another, and this surfaces that once a technique has enough of its own scored history to say so, using the same adaptive-weighting data above.</p>
-      <p><b>Prediction-score track record (95%+ list).</b> Below the boards, a running scorecard pools three kinds of matured, falsifiable calls per asset: whether its overall composite call (not any single technique) pointed the right direction by the horizon's end; whether the predicted price range actually contained the real price at maturity; and whether its pivot-style calls (the reversal and dwell techniques above) panned out. Every matured outcome across those three counts as one equally-weighted vote rather than a hand-picked blend — a made-up weighting scheme would just be a different kind of guess — so the score is simply correct-calls divided by total-calls, out of 100. An asset only appears once it has a reasonable number of matured predictions behind it (the same minimum-sample bar used everywhere else in this engine); below that, it's left off the list rather than shown with a noisy, overconfident number. This is a track record of this engine's own past calls, not a forecast that the streak continues. Each listed asset also shows its current price and a predicted range for its own next call — the same horizon-and-range machinery every board row uses, so the period covered varies asset to asset (whatever that asset's own active techniques and history currently point to, typically on the order of a day to a few weeks) rather than one fixed window applied to everyone. All of this is still built from daily price bars, not intraday data, so the shortest period this engine can honestly speak to is about a day, not hours.</p>
+      <p><b>Prediction track record.</b> Directional accuracy, range containment, reversal outcomes, and intraday results remain separate metrics; a high-containment range can no longer inflate a directional hit rate. The list requires a conservative directional edge over the asset-class baseline and enough independent periods. Historical skill does not automatically validate today's setup, which must pass its own calibration gate.</p>
       <p><b>Data.</b> CoinGecko free API for the top 100 coins by market cap with real daily price and volume history per coin, plus global stats and trending (stablecoins and wrappers excluded), alternative.me Fear &amp; Greed, Bybit linear perp funding rates, Yahoo Finance daily OHLCV with Stooq CSV fallback, and Yahoo analyst estimates. Free feeds can lag or drop symbols; the feeds counter in the status bar shows current coverage, and any technique without data simply abstains rather than guessing.</p>
       <p><b>Refresh mechanics.</b> A scheduled job rebuilds the full payload — scores, ranges, horizons, every technique call — hourly and writes it to this page's cache; every visit reads that cache, so the page itself never runs the engine. This page also re-checks every 10 minutes so a new hour's data appears without a reload. Price and 24-hour change are the one exception: this page separately polls a lightweight endpoint roughly every 20 seconds for a live tick, straight from CoinGecko and Yahoo, without touching the hourly analysis — so the number in the Price column can move between rebuilds, but the score, range, and every technique read next to it stay fixed until the next hourly rebuild.</p>
-      <p><b>What the scores are not.</b> A score of 70 with 10/16 agreement is a strong mechanical setup, not a 70% probability; the timeframe next to it is an estimate of when the setup should resolve, not a guarantee it will; and the range is a plausible band from real volatility, not a target price. The model has no knowledge of token unlocks, earnings dates, lawsuits, or macro events.</p>
+      <p><b>What the scores are not.</b> A score of 70 is not a 70% probability. Only the separately labelled conservative win estimate is calibrated, and even that is uncertain. News, sentiment, earnings, security incidents, positioning, and macro data are incomplete third-party observations, not omniscience. Missing or stale inputs abstain. The automatic research engine tests calendar, event, cross-asset, regime, and strategy rules with family correction, disjoint walk-forward folds, explicit costs, drawdown, and post-discovery confirmation; it does not publish a pattern merely because an in-sample simulation looked profitable.</p>
     </div>
   </details>
 
   <footer>
-    <p class="legal">Frontier Capital Signals is an experimental, ongoing research project — an informational tool, not a finished or audited product. Nothing on this page is investment advice, a recommendation, or a solicitation to buy or sell any asset. Scores are mechanical indicator composites with no knowledge of news, fundamentals beyond analyst consensus, token unlocks or earnings. The day-trading intraday signal is a further experimental layer on top of that, back-tested and continuously re-scored against its own real-world outcomes rather than a proven method; its paper-trading track record is a transparency readout of the model's own simulated performance, never a projection of real returns. Crypto and equity markets involve substantial risk of loss, and leveraged trading specifically can lose more than the amount put in. Data is provided by third-party feeds without warranty and may be delayed or incomplete. Do your own research, and do not treat any output on this page as a substitute for professional financial advice.</p>
+    <p class="legal">Frontier Capital Signals is an experimental, ongoing research project — an informational tool, not a finished or audited product. Nothing on this page is investment advice, a recommendation, or a solicitation to buy or sell any asset. Inputs include market, positioning, news/sentiment, event, and selected fundamental context, but coverage can be delayed or incomplete and the system abstains when evidence is not reliable. The scalp panel is descriptive and deliberately makes no current direction, entry, target, top, or bottom call. Crypto and equity markets involve substantial risk of loss, and leveraged trading can lose more than the amount put in. Do your own research and do not rely on this page alone.</p>
     <div class="cols">
       <span>© <span id="yr"></span> Frontier Capital Signals</span>
-      <span>Data: CoinGecko · alternative.me · Bybit · Yahoo Finance / Stooq</span>
-      <span>Model: confluence-v6</span>
+      <span>Data: CoinGecko · CoinMetrics · CMC · alternative.me · Yahoo Finance / Stooq</span>
+      <span>Model: confluence-v7</span>
     </div>
   </footer>
 
@@ -5616,7 +5775,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   var BASE = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/';
   var DATA_URL = BASE + 'api/signals';
   var PRICES_URL = BASE + 'api/prices';
-  var INTRADAY_URL = BASE + 'api/intraday';
+  var SCALP_URL = BASE + 'api/scalp';
 
   var $ = function(id){ return document.getElementById(id); };
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -5672,59 +5831,152 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     $('overview').innerHTML=html;
   }
 
-  // Day-trading intraday signal: a separate, much-higher-frequency read
-  // than everything above (see /api/intraday's own docs) — its own render
-  // function and its own poll loop (loadIntraday/INTRADAY_MS below) so a
-  // missed or slow intraday tick never blocks or disturbs the main
-  // hourly-cadence dashboard.
-  function dirArrow(dir){ return dir===1?'▲':dir===-1?'▼':'●'; }
-  function dirCls(dir){ return dir===1?'up':dir===-1?'down':'flat'; }
-  function renderIntraday(d){
-    var el=$('intraday');
+  function renderMarketContext(d){
+    var el=$('marketContext');
     if(!el) return;
-    if(!d||!d.watchlist||!d.watchlist.length){
-      el.innerHTML='<div class="eyebrow">DAY-TRADING SIGNAL</div><div class="id-empty">Intraday signals are still warming up — the first tick history needs to accumulate before a call can be made.</div>';
+    var ctx=d&&d.marketContext;
+    var head='<div><div class="eyebrow">MARKET CYCLE · SHADOW RESEARCH</div><div class="tr-title">Context being tested, not assumed</div></div>';
+    if(!ctx||!ctx.metrics||!Object.keys(ctx.metrics).length){
+      el.innerHTML=head+'<div class="tr-empty">No point-in-time cycle context has been archived yet. No cycle value is inferred or substituted while the daily history warms up.</div>';
       return;
     }
-    var head='<div class="id-head"><div><div class="eyebrow">DAY-TRADING SIGNAL</div><div class="board-title">Intraday direction, refreshed every few minutes</div></div></div>';
-    var cards=d.watchlist.map(function(w){
-      var flag = w.peaked?'<span class="id-flag id-peaked">PEAKED</span>':w.bottomed?'<span class="id-flag id-bottomed">BOTTOMED</span>':'';
-      var horizonTitle = w.basis==='historical'
-        ? "This asset's own measured accuracy at this horizon"
-        : "Not enough of this asset's own history yet to measure — shortest horizon shown as a default, not a claim";
-      var horizon='<span class="horizon '+(w.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+horizonTitle+'">'+esc(w.horizonLabel)+(w.basis==='historical'?' ✓':'')+'</span>';
-      var conf = w.confidence!=null ? '<span class="id-conf">'+Math.round(w.confidence*100)+'%</span>' : '';
-      return '<div class="id-card" data-symbol="'+esc(w.symbol)+'" data-class="'+esc(w.assetClass)+'">'
-        +'<div class="id-sym">'+esc(w.symbol)+'</div>'
-        +'<div class="id-price">'+fmtPrice(w.price)+'</div>'
-        +'<div class="id-dir '+dirCls(w.dir)+'">'+dirArrow(w.dir)+'</div>'
-        +'<div class="id-meta">'+horizon+conf+flag+'</div>'
+    var labels={btc_mvrv:'BTC MVRV',btc_mayer_multiple:'Mayer / 200DMA',altcoin_season_index:'Altcoin breadth',btc_dominance_pct:'BTC dominance'};
+    var order=['btc_mvrv','btc_mayer_multiple','altcoin_season_index','btc_dominance_pct'];
+    var rows=order.filter(function(key){return ctx.metrics[key];}).map(function(key){
+      var x=ctx.metrics[key];
+      var value=(key==='altcoin_season_index'?Number(x.value).toFixed(0)+'/100':key==='btc_dominance_pct'?Number(x.value).toFixed(1)+'%':Number(x.value).toFixed(3));
+      var percentile=x.percentile!=null&&isFinite(x.percentile)&&x.trainingN>=30?Math.round(x.percentile*100)+'th prior-history percentile':'percentile warming up';
+      var freshness=x.fresh?'<span class="up">fresh</span>':'<span class="down">stale — ignored</span>';
+      return '<div class="tr-row">'
+        +'<span class="tr-asset"><span class="sym">'+esc(labels[key]||key)+'</span></span>'
+        +'<span class="tr-price">'+value+'</span>'
+        +'<span class="tr-range-wrap">'+esc(percentile)+'</span>'
+        +'<span class="tr-class">'+freshness+'</span>'
+        +'<span class="tr-samples">as of '+esc(x.date)+'</span>'
         +'</div>';
     }).join('');
-    var tr=d.trackRecord||{};
-    var trLine=['crypto','stock'].map(function(cls){
-      var t=tr[cls];
-      if(!t||!t.total) return '';
-      var label=cls==='crypto'?'CRYPTO':'EQUITY';
-      var avg=t.avgReturnPct==null?'—':((t.avgReturnPct>=0?'+':'')+t.avgReturnPct.toFixed(1)+'%');
-      return '<span class="id-tr-item">'+label+' self-experiment: '+t.wins+'W&ndash;'+t.losses+'L ('+Math.round((t.winRate||0)*100)+'%), '+t.total+' closed, avg '+avg+' return</span>';
-    }).filter(Boolean).join(' &middot; ');
-    var trBlock = trLine
-      ? '<div class="id-track">'+trLine+'</div>'
-      : '<div class="id-track dim">No paper trades have closed yet &mdash; the self-experiment track record fills in as signals mature.</div>';
-    el.innerHTML=head+'<div class="id-grid">'+cards+'</div>'+trBlock;
+    el.innerHTML=head+'<div class="tr-empty">MVRV is the distinct on-chain valuation candidate; Mayer is its transparent moving-average control. Altcoin breadth and dominance are rotation context only. These values have <b>no live vote</b> unless a family-corrected, non-overlapping, after-cost test later confirms them on data recorded after discovery.</div><div class="tr-list">'+rows+'</div>';
   }
-  function loadIntraday(){
-    fetch(INTRADAY_URL,{cache:'no-store'})
+
+  function renderQuantResearch(d){
+    var el=$('quantResearch');
+    if(!el) return;
+    var q=d&&d.quantResearch;
+    var head='<div><div class="eyebrow">AUTOMATIC LEARNING · QUANT RESEARCH</div><div class="tr-title">Strategies must earn promotion</div></div>';
+    if(!q){
+      el.innerHTML=head+'<div class="tr-empty">The research registry is unavailable. No strategy is promoted while its evidence cannot be loaded.</div>';
+      return;
+    }
+    var confirmed=(q.decisions&&q.decisions.confirmed)||0;
+    var provisional=(q.decisions&&q.decisions.provisional)||0;
+    var abstain=(q.decisions&&q.decisions.abstain)||0;
+    var summary='<div class="tr-empty"><b>'+confirmed+' confirmed</b> · '+provisional+' provisional · '+abstain+' abstained/decayed. '+esc(q.promotionRule||'')+'. A profitable-looking backtest alone never triggers a live setup.</div>';
+    var rows=(q.rows||[]).slice(0,12).map(function(r){
+      var tone=r.decision==='confirmed'?'up':r.decision==='provisional'?'amber-t':'down';
+      var expectancy=r.netLower95Pct!=null&&isFinite(r.netLower95Pct)
+        ? 'net '+fmtPct(Number(r.netMeanPct),3)+' · lower 95% '+fmtPct(Number(r.netLower95Pct),3)
+        : 'after-cost edge not established';
+      return '<div class="tr-row">'
+        +'<span class="tr-asset"><span class="sym">'+esc(r.symbol||r.assetClass||'market')+'</span><span class="tr-name">'+esc(r.family)+'</span></span>'
+        +'<span class="tr-class '+tone+'">'+esc(String(r.decision).toUpperCase())+'</span>'
+        +'<span class="tr-price">'+esc(String(r.side).toUpperCase())+' · '+r.horizonDays+'d</span>'
+        +'<span class="tr-range-wrap">'+esc(expectancy)+'</span>'
+        +'<span class="tr-score">'+r.trades+' OOS</span>'
+        +'<span class="tr-samples" title="'+esc(r.reason)+'">'+esc(r.walkForward)+'</span>'
+        +'</div>';
+    }).join('');
+    el.innerHTML=head+summary+(rows?'<div class="tr-list">'+rows+'</div>':'');
+  }
+
+  // A separate, higher-frequency measurement layer. This deliberately has no
+  // current direction call: it reports live range usage and historically
+  // validated hour windows. Missing or stale live prices fail closed so an old
+  // card can never masquerade as usable scalp timing.
+  var SCALP_MAX_PRICE_AGE_MS = 15*60*1000;
+  function renderScalpUnavailable(detail){
+    var el=$('intraday');
+    if(!el) return;
+    el.innerHTML='<div class="eyebrow">MEASURED SCALP CONTEXT</div>'
+      +'<div class="board-title">No live scalp context shown</div>'
+      +'<div class="id-empty"><b>Fail-closed:</b> '+esc(detail||'No current measured read is available.')
+      +' No direction, entry, target, top, or bottom is inferred while the feed is unavailable.</div>';
+  }
+  function scalpPricesAreFresh(d){
+    if(!d||!d.prices_generated_at) return false;
+    var stamp=new Date(d.prices_generated_at).getTime();
+    var age=Date.now()-stamp;
+    return isFinite(stamp)&&age>=-60000&&age<=SCALP_MAX_PRICE_AGE_MS;
+  }
+  function scalpStateLabel(state){
+    return state==='extended-up'?'Range extended upward'
+      :state==='extended-down'?'Range extended downward'
+      :state==='dislocated'?'Dislocated move — do not fade'
+      :state==='quiet'?'Quiet session':'Inside normal daily range';
+  }
+  function untilText(minutes){
+    if(minutes==null||!isFinite(minutes)) return '';
+    if(minutes<=0) return 'now';
+    return minutes<60?'in '+Math.round(minutes)+'m':'in '+Math.floor(minutes/60)+'h '+Math.round(minutes%60)+'m';
+  }
+  function scalpWindow(w,label){
+    if(!w) return '';
+    var mean=w.meanPct!=null&&isFinite(w.meanPct)?(w.meanPct>=0?'+':'')+w.meanPct.toFixed(3)+'%/hr':'—';
+    var win=w.winRate!=null&&isFinite(w.winRate)?w.winRate.toFixed(1)+'% positive':'—';
+    var samples=w.n!=null?'n='+w.n:'sample count unavailable';
+    var cost=w.beatsCosts?'historically above modeled costs':'historical mean is under modeled retail costs';
+    return '<div class="id-window"><b>'+label+':</b> '+esc(w.label||w.slot||'measured hour')+' '+untilText(w.minutesUntil)
+      +'<br>'+mean+' · '+win+' · '+samples+' · '+cost+'</div>';
+  }
+  function renderScalp(d){
+    var el=$('intraday');
+    if(!el) return;
+    if(!d||!d.assets||!d.assets.length){
+      renderScalpUnavailable('No asset currently has both a measured range context and a relevant validated hour window.');
+      return;
+    }
+    var head='<div class="id-head"><div><div class="eyebrow">MEASURED SCALP CONTEXT · NO DIRECTION CALL</div>'
+      +'<div class="board-title">Live range state and validated time windows</div></div></div>';
+    var cards=d.assets.map(function(a){
+      var r=a.range;
+      var state=r?scalpStateLabel(r.state):'No current range read';
+      var read=r
+        ? 'Observed session move '+fmtPct(r.movePct,2)+' · '+(r.usedPct!=null?Math.round(r.usedPct)+'%':'—')+' of a normal daily range used'
+          +' · '+(r.posInDayRange!=null?Math.round(r.posInDayRange*100)+'%':'—')+' of today’s range'
+          +(r.medianPct!=null?' · median daily range '+r.medianPct.toFixed(2)+'%':'')
+        : 'A validated hour window is near, but a live range measurement is not available.';
+      var windows=scalpWindow(a.hours&&a.hours.buy,'Historically strongest upward hour')
+        +scalpWindow(a.hours&&a.hours.sell,'Historically strongest downward hour');
+      return '<div class="id-card" data-symbol="'+esc(a.symbol)+'" data-class="'+esc(a.asset_class)+'">'
+        +'<div class="id-sym">'+esc(a.symbol)+' <span class="dim">'+(a.asset_class==='stock'?'EQUITY':'CRYPTO')+'</span></div>'
+        +'<div class="id-price">'+fmtPrice(a.price)+'</div>'
+        +'<div class="id-state">'+esc(state)+'</div>'
+        +'<div class="id-read">'+read+'</div>'
+        +windows
+        +'</div>';
+    }).join('');
+    var pt=new Date(d.prices_generated_at);
+    var fresh='<div class="id-fresh"><b>Observation only:</b> no current long/short call, entry, target, top, or bottom is produced here. '
+      +'Hour effects are historical averages, not a promise that this hour repeats. Live prices measured '+pt.toUTCString()+'.</div>';
+    el.innerHTML=head+'<div class="id-grid">'+cards+'</div>'+fresh;
+  }
+  function loadScalp(){
+    fetch(SCALP_URL,{cache:'no-store'})
       .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-      .then(function(d){ if(d&&!d.error) renderIntraday(d); })
-      .catch(function(){ /* silent: a missed intraday tick isn't a feed error, same reasoning as updateLivePrices */ });
+      .then(function(d){
+        if(!d||d.error) throw new Error(d&&d.error?d.error:'empty response');
+        if(!scalpPricesAreFresh(d)){
+          renderScalpUnavailable('The live price timestamp is missing or more than 15 minutes old.');
+          return;
+        }
+        renderScalp(d);
+      })
+      .catch(function(e){ renderScalpUnavailable('The measured scalp feed is unavailable: '+String(e&&e.message||e)); });
   }
 
   function meter(score){
     var on=Math.round((score||0)/10), h='';
     for(var i=0;i<10;i++) h+='<i class="'+(i<on?'on':'')+'"></i>';
-    return '<span class="meter" role="img" aria-label="signal '+score+' of 100">'+h+'</span>';
+    return '<span class="meter" role="img" aria-label="screen score '+score+' of 100">'+h+'</span>';
   }
   function rsiCls(v){ if(v==null) return ''; if(v>=70) return 'rsi-hi'; if(v<=30) return 'rsi-lo'; return ''; }
 
@@ -5741,7 +5993,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     {key:'chg7d', label:'7d', dir:-1},
     {key:'rsi', label:'RSI', dir:-1}
   ];
-  var SIGNAL_COL = {key:'score', label:'Signal', dir:-1};
+  var SIGNAL_COL = {key:'score', label:'Screen', dir:-1};
   function sortableTh(c, spec, boardId){
     var active = spec&&spec.key===c.key;
     var arrow = active ? (spec.dir===1?' ▲':' ▼') : '';
@@ -5761,11 +6013,47 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     });
   }
 
+  function abstentionText(row, fallbackReason){
+    var a=row&&row.abstained;
+    var reason=(a&&a.reason)||fallbackReason||'insufficient-evidence';
+    var measured=a&&a.measured;
+    if(reason==='no-demonstrated-edge'){
+      var numbers=measured&&isFinite(measured.accuracy)&&isFinite(measured.baseline)
+        ? ' ('+Number(measured.accuracy).toFixed(1)+'% measured vs '+Number(measured.baseline).toFixed(1)+'% baseline'+(measured.samples!=null?', n='+measured.samples:'')+')'
+        : '';
+      return 'Direction withheld: no demonstrated edge over baseline'+numbers+'.';
+    }
+    if(reason==='unproven-current-setup'){
+      var setupNumbers=measured&&isFinite(measured.conservative_win_rate)&&isFinite(measured.baseline)
+        ? ' (conservative '+Number(measured.conservative_win_rate).toFixed(1)+'% vs '+Number(measured.baseline).toFixed(1)+'% baseline)'
+        : '';
+      return 'Direction withheld: this exact asset, side, score, and horizon has not cleared the calibrated evidence gate'+setupNumbers+'.';
+    }
+    if(reason==='insufficient-evidence') return 'Direction withheld: insufficient independent matured outcomes.';
+    return 'Direction withheld: '+String(reason).replace(/-/g,' ')+'.';
+  }
+
+  function classWithheldBanner(assetClass, skill){
+    if(skill&&skill.proven===true) return '';
+    var label=assetClass==='crypto'?'Crypto':'Equity';
+    var detail;
+    if(skill&&isFinite(skill.accuracy)&&isFinite(skill.baseline)){
+      detail='Across '+(skill.samples||0)+' raw outcomes ('+(skill.effectiveSamples||skill.samples||0)+' independent time periods), measured accuracy is '+(100*skill.accuracy).toFixed(1)+'% versus a '+(100*skill.baseline).toFixed(1)+'% no-skill baseline'
+        +(isFinite(skill.edge)?' ('+(100*skill.edge>=0?'+':'')+(100*skill.edge).toFixed(1)+' points)':'')+'.';
+    }else{
+      detail='There are not yet enough independent matured outcomes to establish an edge over the no-skill baseline.';
+    }
+    return '<div class="xp-banner class-withheld" role="note" data-withheld-class="'+assetClass+'"><b>'+label+' direction calls are withheld.</b> '
+      +detail+' Rankings, prices, and descriptive measurements remain visible; long/short arrows, trade timeframes, and projected ranges stay hidden until the class and current setup earn them.</div>';
+  }
+
   function boardHtml(cfg, rowsIn, universe){
     var spec = state.sort[cfg.boardId];
     var rows = spec ? sortRows(rowsIn, spec) : rowsIn;
-    var h='<section class="board '+cfg.side+'" id="'+cfg.boardId+'" aria-label="'+cfg.title+'">';
-    h+='<div class="board-head"><div><div class="eyebrow">'+cfg.eyebrow+'</div><div class="board-title">'+cfg.title+'</div></div>';
+    var visualSide=cfg.callsWithheld?'withheld':cfg.side;
+    var eyebrow=cfg.callsWithheld?(cfg.assetClass==='crypto'?'CRYPTO':'US EQUITIES')+' · <b>SCREEN ONLY</b>':cfg.eyebrow;
+    var h='<section class="board '+visualSide+'" id="'+cfg.boardId+'" aria-label="'+cfg.title+'">';
+    h+='<div class="board-head"><div><div class="eyebrow">'+eyebrow+'</div><div class="board-title">'+cfg.title+'</div></div>';
     h+='<div class="board-count">TOP '+(rows?rows.length:0)+' / '+(universe||0)+' SCREENED</div></div>';
     h+='<div class="tbl-wrap"><table><thead><tr>';
     h+='<th>#</th>';
@@ -5776,7 +6064,10 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     if(rows&&rows.length){
       rows.forEach(function(r,i){
         var url = assetUrl(cfg.assetClass, r);
-        var rowSide = r.dir===-1 ? 'short' : 'long'; // per-row, not cfg.side — the favorites board mixes both
+        // Three states, not a boolean. The old fallback treated dir=0 as long,
+        // turning the model's correct abstention into a visible bullish call.
+        var rowSide = (!cfg.callsWithheld&&!r.abstained&&r.dir===1)?'long'
+          :(!cfg.callsWithheld&&!r.abstained&&r.dir===-1)?'short':'withheld';
         var symHtml = url
           ? '<a class="sym-link" target="_blank" rel="noopener noreferrer" href="'+url+'" data-symbol="'+esc(r.symbol)+'" data-class="'+cfg.assetClass+'" data-side="'+rowSide+'" data-rank="'+(i+1)+'" data-score="'+r.score+'"><span class="sym">'+esc(r.symbol)+'</span></a>'
           : '<span class="sym">'+esc(r.symbol)+'</span>';
@@ -5811,13 +6102,24 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var moveNote = moves
           ? '<span class="move-note" title="Computed from the archived daily bars for this asset ('+moves.samples+' daily moves).">1d '+(moves.highestGain.pct>=0?'+':'')+moves.highestGain.pct.toFixed(1)+'% ('+fmtPrice(moves.highestGain.dollar)+') '+esc(moves.highestGain.date||'')+' · low '+moves.highestLoss.pct.toFixed(1)+'% ('+fmtPrice(moves.highestLoss.dollar)+') '+esc(moves.highestLoss.date||'')+' · median |move| '+moves.medianAbsPct.toFixed(2)+'%</span>'
           : '';
-        var dirArrow = '<span class="dir-arrow '+(rowSide==='long'?'dir-up':'dir-down')+'" title="'+(rowSide==='long'?'Leaning up':'Leaning down')+'">'+(rowSide==='long'?'▲':'▼')+'</span>';
-        var conf = r.conf ? '<span class="conf">'+r.conf.agree+'/'+r.conf.total+' aligned</span>' : '';
-        var horizon = r.horizon ? '<span class="horizon '+(r.horizon.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+(r.horizon.basis==='historical'?"Based on this asset's own historical accuracy by horizon":"Methodology estimate, not yet enough of this asset's own history to say")+'">'+esc(r.horizon.label)+(r.horizon.basis==='historical'?' ✓':'')+'</span>' : '';
-        var rangeTitle = r.range && r.range.basis==='historical'
-          ? "Band width from this asset's own historical move size at this horizon"
-          : "Band width estimated from this asset's recent realized volatility, scaled to the horizon"+(r.volLookbackDays?" (a "+r.volLookbackDays+"-day lookback, calibrated to this asset)":"");
-        var range = r.range ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+rangeTitle+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>' : '<span class="dim">—</span>';
+        var directionMark = rowSide==='long'
+          ? '<span class="dir-arrow dir-up" title="Leaning up">▲</span>'
+          : rowSide==='short'
+            ? '<span class="dir-arrow dir-down" title="Leaning down">▼</span>'
+            : '<span class="dir-arrow dir-neutral" title="No directional edge has been demonstrated">— WITHHELD</span>';
+        var conf = r.conf ? '<span class="conf">'+r.conf.agree+'/'+r.conf.total+' '+(rowSide==='withheld'?'screen factors':'aligned')+'</span>' : '';
+        if(rowSide!=='withheld'&&r.confidence){
+          conf+='<span class="conf" title="One-sided conservative estimate after requiring both this asset’s own record and matching score calibration; not a guarantee">conservative win estimate '+Math.round(r.confidence.conservative_win_rate*100)+'% · '+Math.round(r.confidence.conservative_edge*100)+'pts over baseline</span>';
+        }
+        var horizon = rowSide==='withheld'
+          ? '<span class="horizon hz-meth" title="A trade-resolution timeframe is not shown without a validated direction call">timeframe withheld</span>'
+          : r.horizon ? '<span class="horizon hz-hist" title="Based on this exact setup family&#39;s independent historical outcomes by horizon">'+esc(r.horizon.label)+' ✓</span>' : '';
+        var abstain = rowSide==='withheld' ? '<span class="abstain-note">'+esc(abstentionText(r,cfg.withheldReason))+'</span>' : '';
+        var rangeTitle = "Band width from this asset's independent historical move size at this validated horizon";
+        var referencePrice=r.analysis&&isFinite(r.analysis.reference_price)?' Model reference price '+fmtPrice(r.analysis.reference_price)+' at '+esc(r.analysis.analyzed_at||'the model build')+'.':'';
+        var range = rowSide==='withheld'
+          ? '<span class="dim" title="A projected price band is not shown without a validated current setup">withheld</span>'
+          : r.range ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+rangeTitle+'. This is an expected-move band, not an exact top, bottom, target, or stop.'+referencePrice+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>' : '<span class="dim">—</span>';
         h+='<tr class="in" style="animation-delay:'+(i*30)+'ms" data-symbol="'+esc(r.symbol)+'" data-class="'+cfg.assetClass+'">'
           +'<td class="rk">#'+(i+1)+'</td>'
           +'<td class="asset">'+symHtml+name+why+topInd+coil+quality+rotation+flipNote+ltpNote+moveNote+'</td>'
@@ -5826,7 +6128,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           +'<td class="'+pctCls(r.chg7d)+'" data-label="7d">'+fmtPct(r.chg7d)+'</td>'
           +'<td class="'+rsiCls(r.rsi)+'" data-label="RSI">'+(r.rsi!=null?r.rsi.toFixed(0):'—')+'</td>'
           +'<td data-label="Range">'+range+'</td>'
-          +'<td class="sig-td" data-label="Signal"><span class="sigcell"><span class="sigrow">'+meter(r.score)+'<span class="score">'+r.score+'</span>'+dirArrow+'</span>'+conf+horizon+'</span></td>'
+          +'<td class="sig-td" data-label="Screen"><span class="sigcell"><span class="sigrow">'+meter(r.score)+'<span class="score">'+r.score+'</span>'+directionMark+'</span>'+conf+horizon+abstain+'</span></td>'
           +'</tr>';
       });
     } else {
@@ -5838,16 +6140,24 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
 
   function renderBoards(d){
     var b='';
+    var cs=d.classSkill||{};
+    // Missing evidence is not permission to publish. This UI gate is a second
+    // fail-closed layer over abstainBoards, and also protects clients viewing a
+    // payload written by an older build that did not strip the row directions.
+    var cryptoCallsWithheld=!(cs.crypto&&cs.crypto.proven===true);
+    var stockCallsWithheld=!(cs.stock&&cs.stock.proven===true);
+    var cryptoWithheldReason=cryptoCallsWithheld&&cs.crypto?'no-demonstrated-edge':'insufficient-evidence';
+    var stockWithheldReason=stockCallsWithheld&&cs.stock?'no-demonstrated-edge':'insufficient-evidence';
     if(d.crypto.favorites && d.crypto.favorites.length){
-      b+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-favorites', eyebrow:'CRYPTO · <b>FAVORITES</b>', title:'Always tracked'}, d.crypto.favorites, d.crypto.favorites.length);
+      b+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-favorites', eyebrow:'CRYPTO · <b>FAVORITES</b>', title:'Always tracked', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.favorites, d.crypto.favorites.length);
     }
     if(d.crypto.longTermPotential && d.crypto.longTermPotential.length){
       b+='<div class="xp-banner" role="note"><b>Not a recommendation, not guaranteed, not financial advice.</b> Long-term candidates are descriptive historical lows only; no tested signal reliably predicts which specific asset will recover.</div>';
-      b+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-ltp', eyebrow:'CRYPTO · <b>LONG-TERM POTENTIAL</b>', title:'Possible multi-month/year lows'}, d.crypto.longTermPotential, d.crypto.longTermPotential.length);
+      b+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-ltp', eyebrow:'CRYPTO · <b>LONG-TERM POTENTIAL</b>', title:'Possible multi-month/year lows', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.longTermPotential, d.crypto.longTermPotential.length);
     }
     if(d.stocks.longTermPotential && d.stocks.longTermPotential.length){
       b+='<div class="xp-banner" role="note"><b>Historical context only.</b> These equities are near a fresh long-term low; the list is not a recovery forecast or recommendation.</div>';
-      b+=boardHtml({side:'favorites', assetClass:'stock', boardId:'stock-ltp', eyebrow:'EQUITIES · <b>LONG-TERM POTENTIAL</b>', title:'Possible multi-month/year lows'}, d.stocks.longTermPotential, d.stocks.longTermPotential.length);
+      b+=boardHtml({side:'favorites', assetClass:'stock', boardId:'stock-ltp', eyebrow:'EQUITIES · <b>LONG-TERM POTENTIAL</b>', title:'Possible multi-month/year lows', callsWithheld:stockCallsWithheld, withheldReason:stockWithheldReason}, d.stocks.longTermPotential, d.stocks.longTermPotential.length);
     }
     // Retrospective — user-requested 2026-08-31. Deliberately placed ABOVE
     // the boards, not tucked away at the bottom: this section is the
@@ -5903,8 +6213,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         +(eRows?'<div class="rt-eps"><div class="rt-eps-h">Most recent episodes</div>'+eRows+'</div>':'')
       +'</section>';
     }
-    b+=boardHtml({side:'long', assetClass:'crypto', boardId:'crypto-long', eyebrow:'CRYPTO · <b>LONG SIDE</b>', title:'Breakout watch'}, d.crypto.breakout, d.crypto.universe);
-    b+=boardHtml({side:'short', assetClass:'crypto', boardId:'crypto-short', eyebrow:'CRYPTO · <b>RISK SIDE</b>', title:'Breakdown risk'}, d.crypto.breakdown, d.crypto.universe);
+    b+=classWithheldBanner('crypto',cs.crypto);
+    b+=boardHtml({side:'long', assetClass:'crypto', boardId:'crypto-long', eyebrow:'CRYPTO · <b>LONG SIDE</b>', title:'Breakout watch', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.breakout, d.crypto.universe);
+    b+=boardHtml({side:'short', assetClass:'crypto', boardId:'crypto-short', eyebrow:'CRYPTO · <b>RISK SIDE</b>', title:'Breakdown risk', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.breakdown, d.crypto.universe);
     // A class whose measured record does not clear its own no-skill baseline
     // has its directional calls withheld (see assetClassSkill/abstainBoards).
     // Say so plainly rather than letting a board of dir-less rows read as a
@@ -5963,9 +6274,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       var drRows = drSyms.map(function(sym){
         var x = dr[sym];
         var cls = x.state === 'extended-up' ? 'dr-up' : x.state === 'extended-down' ? 'dr-down' : x.state === 'quiet' ? 'dr-quiet' : x.state === 'dislocated' ? 'dr-dislocated' : '';
-        var entry = x.entry
-          ? '<span class="dr-entry dr-'+x.entry.side+'">candidate '+x.entry.side.toUpperCase()+'</span>'
-            +'<span class="dr-why">'+esc(x.entry.reasons.join(' · '))+'</span>'
+        var entry = x.watch
+          ? '<span class="dr-entry">watch only</span>'
+            +'<span class="dr-why">'+esc(x.watch.reasons.join(' · '))+' · direction intentionally withheld until independently validated</span>'
           : x.state === 'dislocated'
             ? '<span class="dr-why">move too large to fade &mdash; treated as a dislocation or bad data, not an entry</span>'
             : '<span class="dim">—</span>';
@@ -5991,18 +6302,13 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         +'<div class="dr-note">Median daily range is this asset&#39;s own median high&minus;low over the last 90 days. '
         +'&ldquo;Extended&rdquo; means today&#39;s one-way move already exceeds 80% of its complete daily ranges, and the price is sitting near the day&#39;s extreme. '
         +'Session extremes are tracked from this page&#39;s own 5-minute price ticks, so they start at the first tick after 00:00 UTC. '
-        +'<b>These are mean-reversion candidates with no scored track record yet</b> &mdash; they are shown with their evidence, not as predictions.</div>'
+        +'<b>These are unvalidated range observations, not long/short calls</b> &mdash; they are shown with their evidence while the proposed fade direction stays withheld until it earns an independent track record.</div>'
         +'<div class="dr-list">'+drRows+'</div></section>';
     }
 
-    var cs = d.classSkill || {};
-    if(cs.stock && !cs.stock.proven){
-      b+='<div class="xp-banner" role="note"><b>Equity direction calls are withheld.</b> '
-        +'Over '+cs.stock.samples+' matured predictions this engine scored '+(100*cs.stock.accuracy).toFixed(1)+'% on US equities, against '+(100*cs.stock.baseline).toFixed(1)+'% for simply guessing the same direction every time — an edge of '+(100*cs.stock.edge).toFixed(1)+' points. '
-        +'Rankings, prices and ranges below are still real; the direction is not shown because it has not earned it. Equity calls keep being scored in the background and return automatically once they clear the baseline.</div>';
-    }
-    b+=boardHtml({side:'long', assetClass:'stock', boardId:'stock-long', eyebrow:'US EQUITIES · <b>LONG SIDE</b>', title:'Breakout watch'}, d.stocks.breakout, d.stocks.universe);
-    b+=boardHtml({side:'short', assetClass:'stock', boardId:'stock-short', eyebrow:'US EQUITIES · <b>RISK SIDE</b>', title:'Breakdown risk'}, d.stocks.breakdown, d.stocks.universe);
+    b+=classWithheldBanner('stock',cs.stock);
+    b+=boardHtml({side:'long', assetClass:'stock', boardId:'stock-long', eyebrow:'US EQUITIES · <b>LONG SIDE</b>', title:'Breakout watch', callsWithheld:stockCallsWithheld, withheldReason:stockWithheldReason}, d.stocks.breakout, d.stocks.universe);
+    b+=boardHtml({side:'short', assetClass:'stock', boardId:'stock-short', eyebrow:'US EQUITIES · <b>RISK SIDE</b>', title:'Breakdown risk', callsWithheld:stockCallsWithheld, withheldReason:stockWithheldReason}, d.stocks.breakdown, d.stocks.universe);
     $('boards').innerHTML=b;
   }
 
@@ -6019,15 +6325,11 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       var symHtml = url
         ? '<a class="sym-link" target="_blank" rel="noopener noreferrer" href="'+url+'"><span class="sym">'+esc(r.symbol)+'</span></a>'
         : '<span class="sym">'+esc(r.symbol)+'</span>';
-      var rangeHtml = r.range
-        ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+(r.range.basis==='historical'?"Band from this asset's own historical move size at this horizon":"Band from recent realized volatility, scaled to the horizon")+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>'
-        : '<span class="dim">—</span>';
-      var horizonHtml = r.horizon ? '<span class="horizon '+(r.horizon.basis==='historical'?'hz-hist':'hz-meth')+'">'+esc(r.horizon.label)+'</span>' : '';
       return '<div class="tr-row">'
         +'<span class="tr-asset">'+symHtml+'<span class="tr-name">'+esc(r.name||'')+'</span></span>'
         +'<span class="tr-class">'+(r.asset_class==='crypto'?'CRYPTO':'EQUITY')+'</span>'
         +'<span class="tr-price">'+fmtPrice(r.price)+'</span>'
-        +'<span class="tr-range-wrap">'+rangeHtml+horizonHtml+'</span>'
+        +'<span class="tr-range-wrap"><span class="dim">historical record only</span></span>'
         +'<span class="tr-score" title="'+r.score+'% directional accuracy against a '+r.baseline+'% no-skill baseline for this asset class'+(r.rangeContainment?'; price-range containment '+r.rangeContainment.containment+'% over '+r.rangeContainment.samples+' bands, reported separately and never pooled into this figure':'')+'">+'+r.lowerEdge+' pts</span>'
         +'<span class="tr-samples">'+r.samples+' calls</span>'
         +'</div>';
@@ -6109,7 +6411,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   }
 
   var LIVE_MS = 20*1000;
-  var INTRADAY_MS = 60*1000;
+  var SCALP_MS = 60*1000;
   function flashCell(el){
     if(!el) return;
     el.classList.remove('flash');
@@ -6160,7 +6462,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       .then(function(r){ cacheState=r.headers.get('x-fcs-cache'); if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(d){
         state.data=d; state.error=null;
-        renderStatus(d); renderOverview(d.overview); renderBoards(d); renderTrackRecord(d);
+        renderStatus(d); renderOverview(d.overview); renderBoards(d); renderTrackRecord(d); renderMarketContext(d); renderQuantResearch(d);
         if(!firstLoadTracked){
           firstLoadTracked=true;
           pushEvent('signals_data_loaded',{
@@ -6181,7 +6483,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       .finally(function(){ nextCheckAt = Date.now()+REFETCH_MS; });
   }
   load();
-  loadIntraday();
+  loadScalp();
   setTimeout(updateLivePrices, 2000); // small delay so the boards exist to patch into
   var methodologyEl=document.querySelector('details');
   if(methodologyEl) methodologyEl.addEventListener('toggle',function(){
@@ -6189,7 +6491,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   });
   setInterval(load, REFETCH_MS);
   setInterval(updateLivePrices, LIVE_MS);
-  setInterval(loadIntraday, INTRADAY_MS);
+  setInterval(loadScalp, SCALP_MS);
 })();
 </script>
 </body>
@@ -6374,16 +6676,17 @@ export function buildScalpView(payload, live, session, nowIso) {
         state: dr.state, movePct: dr.movePct, moveInMedians: dr.moveInMedians,
         usedPct: dr.usedPct, posInDayRange: dr.posInDayRange,
         medianPct: dr.medianPct, medianAbs: dr.medianAbs,
-        entry: dr.entry
+        confirmations: dr.watch ? dr.watch.reasons : []
       } : null,
       hours: bh ? { buy: bh.buy, sell: bh.sell } : null
     });
   }
   if (!assets.length) return null;
-  // Most actionable first: a live entry candidate, then the most stretched.
+  // Most informative first: independently observed confirmations, then the
+  // most stretched measurement. Neither ordering is a trade direction.
   assets.sort((a, b) => {
-    const ae = a.range && a.range.entry ? 1 : 0;
-    const be = b.range && b.range.entry ? 1 : 0;
+    const ae = a.range && a.range.confirmations && a.range.confirmations.length ? 1 : 0;
+    const be = b.range && b.range.confirmations && b.range.confirmations.length ? 1 : 0;
     if (ae !== be) return be - ae;
     return Math.abs((b.range && b.range.moveInMedians) || 0) - Math.abs((a.range && a.range.moveInMedians) || 0);
   });
@@ -6510,13 +6813,10 @@ export function attachBestHours(payload, nowIso) {
 // behaviour, where "1.5x the median" would just be an arbitrary constant.
 //
 // Honesty about what this is: a mean-reversion premise. The one thing this
-// engine has actually measured nearby (the intraday backtest, 2 years of
-// Binance data) found a real but modest ~54-56% reversal tilt conditional on
-// the market having moved — genuine, not dramatic. So these are surfaced as
-// candidate entries with their evidence attached, never as predictions, and
-// they carry `proven: false` until the logging below has scored enough of them
-// to say otherwise. Do not let this graduate to an actionable call on the
-// strength of the idea alone.
+  // engine has actually measured nearby did not establish a usable after-cost
+  // edge. These are therefore observations with confirming measurements, never
+  // candidate entries. A separate versioned forecast would have to earn a
+  // directional record before any long/short field could be added.
 const DAY_RANGE_MIN_SAMPLES = 20;
 const DAY_RANGE_POS_BAR = 0.75;      // must also be sitting near the day's extreme
 const DAY_RANGE_QUIET_FRACTION = 0.4; // below 40% of a normal day = nothing to fade yet
@@ -6579,18 +6879,18 @@ export function dayRangeSignal(symbol, price, session, rangeStats, row) {
   else if (movePct <= -bar) state = 'extended-down';
   else if (usedPct != null && usedPct < DAY_RANGE_QUIET_FRACTION * 100) state = 'quiet';
 
-  // Implausible or dislocation-sized: report the numbers, offer no entry.
+  // Implausible or dislocation-sized: report the numbers, offer no inference.
   const beyondPlausible = moveInMedians != null && Math.abs(moveInMedians) > DAY_RANGE_MAX_PLAUSIBLE_MEDIANS;
   if (beyondPlausible) state = 'dislocated';
 
-  let entry = null;
-  if (beyondPlausible) entry = null;
+  let watch = null;
+  if (beyondPlausible) watch = null;
   else if (state === 'extended-up' && posInDayRange >= DAY_RANGE_POS_BAR) {
     const reasons = dayRangeConfirmations(row, 'short');
-    entry = reasons.length ? { side: 'short', reasons, proven: false } : null;
+    watch = reasons.length ? { reasons } : null;
   } else if (state === 'extended-down' && posInDayRange <= 1 - DAY_RANGE_POS_BAR) {
     const reasons = dayRangeConfirmations(row, 'long');
-    entry = reasons.length ? { side: 'long', reasons, proven: false } : null;
+    watch = reasons.length ? { reasons } : null;
   }
 
   return {
@@ -6602,7 +6902,7 @@ export function dayRangeSignal(symbol, price, session, rangeStats, row) {
     medianAbs: price * stats.medianPct / 100,
     open: session.open, high, low,
     rangePct, usedPct, movePct, moveInMedians, posInDayRange,
-    state, entry
+    state, watch
   };
 }
 
@@ -6725,22 +7025,14 @@ export default {
     }
 
     if (path === '/api/intraday' || path === 'api/intraday') {
-      const cached = await getCachedIntraday(env);
-      if (cached) {
-        // Superseded by /api/scalp. Kept so existing consumers do not break,
-        // but its age is now stated in the body rather than only in a header —
-        // this fed a scalping audience while running hours behind.
-        const fresh = isIntradayFresh(cached);
-        const ageMin = cached.generated_at ? Math.round((Date.now() - new Date(cached.generated_at).getTime()) / 60000) : null;
-        return json({
-          ...cached,
-          deprecated: true,
-          superseded_by: '/signals/api/scalp',
-          age_minutes: ageMin,
-          warning: fresh ? null : `This payload is ${ageMin} minutes old and must not be used for day trading. Use /signals/api/scalp, which is refreshed by the Worker's own cron.`
-        }, { 'X-FCS-Cache': fresh ? 'hit' : 'stale' });
-      }
-      return json({ error: 'intraday signals not yet built — waiting on the first tick to populate the cache' }, { 'X-FCS-Cache': 'empty' });
+      return json({
+        deprecated: true,
+        direction: null,
+        horizon: null,
+        target: null,
+        superseded_by: '/signals/api/scalp',
+        warning: 'The former directional intraday model did not demonstrate a usable edge and is no longer published. The scalp endpoint contains fresh measurements only.'
+      }, { 'Cache-Control': 'no-store', 'X-FCS-Cache': 'disabled' });
     }
 
     // Live price ticks between hourly rebuilds — deliberately the one

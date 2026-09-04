@@ -116,6 +116,48 @@ CREATE TABLE IF NOT EXISTS range_reliability (
   PRIMARY KEY (symbol, horizon_hours)
 );
 
+-- Independent, append-only scored-outcome ledger. Live aggregation uses this
+-- as its idempotency boundary: no overlapping forecast windows, and no
+-- increment can commit without the row being marked aggregated in the same D1
+-- batch transaction. See migrations/0009_independent_retry_safe_outcomes.sql.
+CREATE TABLE IF NOT EXISTS forecast_outcomes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_at TEXT NOT NULL,
+  asset_class TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  horizon_minutes INTEGER NOT NULL,
+  series_kind TEXT NOT NULL CHECK (series_kind IN ('technique', 'combo', 'market', 'range', 'intraday')),
+  series_key TEXT NOT NULL,
+  dir INTEGER,
+  actual_dir INTEGER,
+  correct INTEGER NOT NULL CHECK (correct IN (0, 1)),
+  score REAL,
+  regime TEXT,
+  return_pct REAL,
+  target_at TEXT,
+  observed_at TEXT,
+  entry_price REAL CHECK (entry_price IS NULL OR entry_price > 0),
+  exit_price REAL CHECK (exit_price IS NULL OR exit_price > 0),
+  path_high_pct REAL,
+  path_low_pct REAL,
+  minutes_to_high REAL CHECK (minutes_to_high IS NULL OR minutes_to_high >= 0),
+  minutes_to_low REAL CHECK (minutes_to_low IS NULL OR minutes_to_low >= 0),
+  model_version TEXT NOT NULL DEFAULT 'confluence-v7',
+  label_version TEXT NOT NULL DEFAULT 'direction-deadband-0.5pct-v1',
+  evaluated_at TEXT NOT NULL,
+  aggregated INTEGER NOT NULL DEFAULT 0 CHECK (aggregated IN (-1, 0, 1)),
+  CHECK (horizon_minutes > 0),
+  CHECK (dir IS NULL OR dir IN (-1, 0, 1)),
+  CHECK (actual_dir IS NULL OR actual_dir IN (-1, 0, 1)),
+  CHECK (observed_at IS NULL OR target_at IS NULL OR observed_at >= target_at)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_forecast_outcomes_unique
+  ON forecast_outcomes(run_at, asset_class, symbol, horizon_minutes, series_kind, series_key);
+CREATE INDEX IF NOT EXISTS idx_forecast_outcomes_latest
+  ON forecast_outcomes(asset_class, symbol, horizon_minutes, series_kind, series_key, run_at DESC);
+CREATE INDEX IF NOT EXISTS idx_forecast_outcomes_pending
+  ON forecast_outcomes(aggregated, id) WHERE aggregated = 0;
+
 -- ===========================================================================
 -- Permanent historical archive. Deliberately separate from the operational
 -- tables above (asset_price_log etc.), which are short-retention by design
@@ -131,25 +173,13 @@ CREATE TABLE IF NOT EXISTS range_reliability (
 -- bar came from (yahoo | coingecko) since the two have different depth
 -- guarantees (see backfill-history.mjs) — useful when auditing coverage.
 --
--- KNOWN DEFECT, not yet repaired (found 2026-08-30): this PRIMARY KEY does not
--- include asset_class, but a ticker is NOT unique across asset classes. DASH is
--- both Dash the cryptocurrency (~$41) and DoorDash the equity (~$237), and the
--- two overwrite each other day by day, leaving one interleaved series that
--- alternates between the two price scales. Confirmed by scanning all 694k rows:
--- DASH is currently the ONLY affected symbol, so the blast radius is one asset
--- -- but any future overlap (crypto tickers reuse equity tickers freely) would
--- silently corrupt the same way.
---
--- Everything derived from these bars inherits the corruption for that symbol:
--- computeDailyRangeStats, computeLeadLag, computeSrLevelsAndBreaks and the
--- sector composites all read this table. dailyRangeStatsFromRows now DROPS any
--- symbol appearing under more than one asset_class rather than measuring the
--- mixture; the other consumers do not yet have that guard.
---
--- The real fix is widening this key to (symbol, asset_class, date) and
--- backfilling, which means re-keying every dependent table and recomputing the
--- derived ones -- deliberately not done as a side effect of a day-trading
--- feature. Until then, treat DASH's archived history as unreliable.
+-- Legacy constraint: this key predates asset_class and therefore cannot hold
+-- two instruments with the same ticker. DASH exposed that defect (Dash crypto
+-- versus DoorDash equity). Migration 0012 clears the contaminated series and
+-- the runtime now quarantines any crypto ticker present in STOCK_WATCHLIST
+-- before it can be logged. That deliberately sacrifices coverage for the
+-- colliding crypto until all dependent keys can be widened; it never permits
+-- an interleaved series to masquerade as a market pattern.
 CREATE TABLE IF NOT EXISTS asset_daily_bars (
   symbol TEXT NOT NULL,
   asset_class TEXT NOT NULL,
@@ -975,6 +1005,92 @@ CREATE TABLE IF NOT EXISTS research_registry (
 );
 
 CREATE INDEX IF NOT EXISTS idx_research_registry_status ON research_registry(status, family);
+
+-- Quant execution/risk layer for each discovered hypothesis (migration 0010).
+-- Statistical significance and tradeability are deliberately separate: only
+-- a `confirmed` trade_decision has survived genuine post-discovery data AND a
+-- conservative after-cost confidence bar. Everything else abstains.
+CREATE TABLE IF NOT EXISTS research_strategy_metrics (
+  hypothesis TEXT PRIMARY KEY,
+  strategy_direction TEXT NOT NULL CHECK (strategy_direction IN ('long', 'short', 'abstain')),
+  assumed_round_trip_cost_pct REAL NOT NULL CHECK (assumed_round_trip_cost_pct >= 0),
+  discovery_trade_n INTEGER NOT NULL DEFAULT 0,
+  discovery_gross_mean_pct REAL,
+  discovery_net_mean_pct REAL,
+  discovery_net_lower_95_pct REAL,
+  discovery_win_rate_pct REAL,
+  discovery_profit_factor REAL,
+  discovery_compound_return_pct REAL,
+  discovery_max_drawdown_pct REAL,
+  discovery_worst_trade_pct REAL,
+  walk_forward_verdict TEXT NOT NULL DEFAULT 'insufficient'
+    CHECK (walk_forward_verdict IN ('passed', 'failed', 'insufficient')),
+  walk_forward_folds INTEGER NOT NULL DEFAULT 0,
+  walk_forward_positive_folds INTEGER NOT NULL DEFAULT 0,
+  walk_forward_net_mean_pct REAL,
+  walk_forward_net_lower_95_pct REAL,
+  walk_forward_max_drawdown_pct REAL,
+  oos_trade_n INTEGER NOT NULL DEFAULT 0,
+  oos_checkpoint_n INTEGER NOT NULL DEFAULT 0,
+  oos_gross_mean_pct REAL,
+  oos_net_mean_pct REAL,
+  oos_net_lower_95_pct REAL,
+  oos_win_rate_pct REAL,
+  oos_profit_factor REAL,
+  oos_compound_return_pct REAL,
+  oos_max_drawdown_pct REAL,
+  oos_worst_trade_pct REAL,
+  trade_decision TEXT NOT NULL DEFAULT 'abstain'
+    CHECK (trade_decision IN ('abstain', 'provisional', 'confirmed')),
+  decision_reason TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (hypothesis) REFERENCES research_registry(hypothesis) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_research_strategy_decision
+  ON research_strategy_metrics(trade_decision, oos_net_lower_95_pct DESC);
+
+CREATE TABLE IF NOT EXISTS research_strategy_metric_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  hypothesis TEXT NOT NULL,
+  trade_decision TEXT NOT NULL,
+  decision_reason TEXT NOT NULL,
+  oos_trade_n INTEGER NOT NULL DEFAULT 0,
+  oos_checkpoint_n INTEGER NOT NULL DEFAULT 0,
+  oos_net_mean_pct REAL,
+  oos_net_lower_95_pct REAL,
+  oos_compound_return_pct REAL,
+  oos_max_drawdown_pct REAL,
+  computed_at TEXT NOT NULL,
+  FOREIGN KEY (hypothesis) REFERENCES research_registry(hypothesis) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_research_strategy_history
+  ON research_strategy_metric_history(hypothesis, computed_at DESC);
+
+-- Market-cycle inputs are archived as context, not pre-approved signals.
+-- `known_at` is essential: a historical provider reconstruction ingested
+-- today may be used to discover a provisional hypothesis, but it must never
+-- masquerade as information the engine possessed on that historical date.
+CREATE TABLE IF NOT EXISTS market_context_daily (
+  metric TEXT NOT NULL,
+  context_date TEXT NOT NULL,
+  value REAL NOT NULL,
+  source_timestamp TEXT NOT NULL,
+  known_at TEXT NOT NULL,
+  ingested_at TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  method_version TEXT NOT NULL,
+  raw_hash TEXT NOT NULL,
+  training_percentile REAL,
+  training_n INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (metric, provider, method_version, context_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_context_latest
+  ON market_context_daily(metric, provider, method_version, context_date DESC);
+CREATE INDEX IF NOT EXISTS idx_market_context_known
+  ON market_context_daily(metric, known_at, context_date);
 -- Automatic retrospective (scripts/retrospective.mjs) + the stablecoin
 -- research lane. User-requested 2026-08-31.
 --

@@ -17,7 +17,7 @@
 // Optional env: CMC_API_KEY, CRYPTOPANIC_API_TOKEN, NTFY_TOPIC — all three
 //   simply produce/send nothing (not an error) when unset, same pattern
 //   as TREFIS_OVERRIDES elsewhere in this pipeline.
-import { getCryptoMarkets, getGlobal, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, mapCategoriesToSectors, STOCK_WATCHLIST, getCrumb } from '../worker.js';
+import { getCryptoMarkets, getGlobal, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, mapCategoriesToSectors, STOCK_WATCHLIST, getCrumb, hasCrossClassTickerCollision } from '../worker.js';
 import {
   coingeckoSentiment, cryptoPanicSentiment, cmcFearGreed,
   upsertAssetSentiment, upsertMarketSentiment,
@@ -35,6 +35,7 @@ import {
 import { d1 } from './d1-client.mjs';
 import { evaluateYesterdaySwingTimes } from './reliability.mjs';
 import { notifyOnNewHacks } from './notify.mjs';
+import { refreshMarketContext } from './market-context.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, CMC_API_KEY, CRYPTOPANIC_API_TOKEN, NTFY_TOPIC } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
@@ -55,6 +56,7 @@ async function main() {
   const cryptoRaw = await getCryptoMarkets();
   const fullUniverse = cryptoRaw
     .filter((c) => !CRYPTO_BLOCKLIST.has((c.symbol || '').toLowerCase()))
+    .filter((c) => !hasCrossClassTickerCollision(c.symbol))
     .filter((c) => (c.market_cap || 0) >= CRYPTO_MIN_MCAP && (c.total_volume || 0) >= CRYPTO_MIN_VOLUME)
     .map((c) => ({ symbol: (c.symbol || '').toUpperCase(), id: c.id, name: c.name || '' }));
   // Sentiment specifically stays capped at MAX_SYMBOLS (per-coin fetches
@@ -178,16 +180,30 @@ async function main() {
     console.error('long-term potential computation failed:', e.message);
   }
 
+  let latestGlobal = null;
   try {
-    const global = await getGlobal();
-    if (global && global.total_mcap != null) {
-      const written = await upsertMarketCapTotal(env, today, global.total_mcap);
-      console.log(`real total market cap (MCAP:TOTAL): $${(global.total_mcap / 1e9).toFixed(1)}B, ${written} row attempted`);
+    latestGlobal = await getGlobal();
+    if (latestGlobal && latestGlobal.total_mcap != null) {
+      const written = await upsertMarketCapTotal(env, today, latestGlobal.total_mcap);
+      console.log(`real total market cap (MCAP:TOTAL): $${(latestGlobal.total_mcap / 1e9).toFixed(1)}B, ${written} row attempted`);
     } else {
       console.log('real total market cap: getGlobal() returned nothing usable this run');
     }
   } catch (e) {
     console.error('real total market cap fetch failed:', e.message);
+  }
+
+  // Archive cycle/rotation context, but do not turn it into another live
+  // technique. discovery.mjs owns promotion and requires purged walk-forward,
+  // after-cost, and genuinely post-discovery evidence first.
+  try {
+    const context = await refreshMarketContext(env, {
+      btcDominance: latestGlobal && latestGlobal.btc_dominance,
+      dominanceTimestamp: new Date().toISOString()
+    });
+    console.log(`market-cycle context: ${context.attempted} immutable row(s) attempted; ${JSON.stringify(context.status)}`);
+  } catch (e) {
+    console.error('market-cycle context refresh failed (no value fabricated; remaining legs continue):', e.message);
   }
 
   try {

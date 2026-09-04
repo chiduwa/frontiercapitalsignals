@@ -5,7 +5,7 @@
 // the archive/backfill scripts so there's one D1 client, not a hand-copied
 // duplicate that could drift.
 import { MIN_RELIABILITY_SAMPLES, slotsForTimestamp, assetPredictionScore, scoreBucket, TOD_HORIZONS_HOURS, detectCallFlips } from '../worker.js';
-import { d1, chunk, forEachConcurrent } from './d1-client.mjs';
+import { d1, d1Batch, chunk, forEachConcurrent } from './d1-client.mjs';
 import { computeSwingTimeTallies, upsertSwingTimeStats } from './archive.mjs';
 
 // Matches the horizons timeOfDaySignal (worker.js) checks.
@@ -48,24 +48,84 @@ const RETENTION_HOURS = 200;
 // the universe (delisted stock, coin falls out of top-100) can't leave
 // orphaned rows growing forever.
 const HARD_CAP_HOURS = 24 * 30;
+// forecast_outcomes has 23 writable columns including exact target/observation
+// provenance, within-window extrema, and model/label versions. Four rows use
+// 92 bound values, safely
+// below D1's real 100-parameter ceiling.
+const OUTCOME_INSERT_CHUNK = 4;
+export const OUTCOME_MODEL_VERSION = 'confluence-v7';
+export const OUTCOME_LABEL_VERSION = 'direction-deadband-0.5pct-v1';
+// A composite outcome expands to at most five statements (base reliability,
+// regime, pooled calibration, detailed calibration, ledger commit). Eight
+// outcomes therefore stay comfortably bounded while amortizing REST latency.
+const OUTCOME_AGGREGATE_CHUNK = 8;
 
-// Returns { blended, byHorizon }. `blended` sums raw correct/total across
-// horizons (equivalent to a total-weighted average of each horizon's
-// accuracy, so a horizon with more matured samples gets proportionally
-// more say) — this is what evaluateTechniques() uses to weight a
-// technique's vote. `byHorizon` keeps 24h and 168h separate — this is what
+function outcomeSeriesIdentity(row) {
+  return `${row.asset_class}|${row.symbol}|${row.horizon_minutes}|${row.series_kind}|${row.series_key}`;
+}
+
+// Partitions a time-ordered stream into statistically independent forecast
+// windows. A 24h forecast repeated hourly is one usable trial per 24h, not 24
+// trials whose outcomes share almost the entire price path. `lastAcceptedByKey`
+// may come from the permanent outcome ledger, making the rule stable across
+// process restarts. The input and prior-state object are never mutated.
+export function selectNonOverlappingForecasts(
+  rows,
+  horizonMinutes,
+  lastAcceptedByKey = {},
+  keyOf = outcomeSeriesIdentity,
+  timeField = 'run_at'
+) {
+  const gapMs = Number(horizonMinutes) * 60 * 1000;
+  const last = { ...lastAcceptedByKey };
+  const accepted = [];
+  const skipped = [];
+  if (!Array.isArray(rows) || !(gapMs > 0)) return { accepted, skipped: Array.isArray(rows) ? rows.slice() : [], lastAcceptedByKey: last };
+
+  const sorted = rows.slice().sort((a, b) => Date.parse(a && a[timeField]) - Date.parse(b && b[timeField]));
+  for (const row of sorted) {
+    const at = Date.parse(row && row[timeField]);
+    const key = keyOf(row);
+    if (!Number.isFinite(at) || !key) {
+      skipped.push(row);
+      continue;
+    }
+    const previous = Date.parse(last[key]);
+    if (Number.isFinite(previous) && at - previous < gapMs) {
+      skipped.push(row);
+      continue;
+    }
+    accepted.push(row);
+    last[key] = new Date(at).toISOString();
+  }
+  return { accepted, skipped, lastAcceptedByKey: last };
+}
+
+// Returns { blended, byHorizon }. `blended` averages each horizon's hit rate
+// but uses only the deepest horizon as its effective sample size: 24h and
+// 168h outcomes from the same forecast are related evidence, not two
+// independent calls. `byHorizon` keeps 24h and 168h separate — this is what
 // confluence()'s horizonEstimate() uses to answer "at which horizon has
 // this asset's own history actually been more accurate," which a blended
 // number can't answer.
 export async function loadReliability(env) {
-  const rows = await d1(env, 'SELECT symbol, technique_id, horizon_hours, correct, total, votes_up, votes_down FROM technique_reliability WHERE total > 0');
+  const rows = await d1(env, `
+    SELECT asset_class, symbol, series_key AS technique_id,
+           horizon_minutes / 60 AS horizon_hours,
+           SUM(correct) AS correct, COUNT(*) AS total,
+           SUM(CASE WHEN dir = 1 THEN 1 ELSE 0 END) AS votes_up,
+           SUM(CASE WHEN dir = -1 THEN 1 ELSE 0 END) AS votes_down
+    FROM forecast_outcomes
+    WHERE series_kind = 'technique' AND aggregated = 1
+      AND model_version = ? AND label_version = ?
+    GROUP BY asset_class, symbol, series_key, horizon_minutes
+  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
   const acc = {};
   const byHorizon = { 24: {}, 168: {} };
   for (const r of rows) {
     const key = `${r.symbol}|${r.technique_id}`;
-    if (!acc[key]) acc[key] = { correct: 0, total: 0, votes_up: 0, votes_down: 0 };
-    acc[key].correct += r.correct;
-    acc[key].total += r.total;
+    if (!acc[key]) acc[key] = { records: [], votes_up: 0, votes_down: 0 };
+    acc[key].records.push(r);
     acc[key].votes_up += r.votes_up || 0;
     acc[key].votes_down += r.votes_down || 0;
     if (byHorizon[r.horizon_hours]) {
@@ -77,12 +137,39 @@ export async function loadReliability(env) {
   }
   const blended = {};
   for (const [key, v] of Object.entries(acc)) {
+    const accuracy = v.records.reduce((sum, r) => sum + r.correct / r.total, 0) / v.records.length;
+    const total = Math.max(...v.records.map((r) => r.total));
+    const rawDirectional = v.votes_up + v.votes_down;
     blended[key] = {
-      correct: v.correct,
-      accuracy: v.total ? v.correct / v.total : 0.5,
-      total: v.total,
-      votes_up: v.votes_up,
-      votes_down: v.votes_down
+      correct: accuracy * total,
+      accuracy,
+      total,
+      votes_up: rawDirectional ? total * v.votes_up / rawDirectional : 0,
+      votes_down: rawDirectional ? total * v.votes_down / rawDirectional : 0
+    };
+  }
+  // Publication and timing need the exact asset + side + horizon record.
+  // The legacy aggregate table does not contain direction, so derive these
+  // cells from the append-only ledger instead of treating a symbol's long and
+  // short outcomes as interchangeable evidence.
+  const directionalRows = await d1(env, `
+    SELECT asset_class, symbol, series_key AS technique_id, dir,
+           horizon_minutes / 60 AS horizon_hours,
+           AVG(correct) AS accuracy, COUNT(*) AS total,
+           COUNT(DISTINCT substr(run_at, 1, 10)) AS effective_samples
+    FROM forecast_outcomes
+    WHERE series_kind = 'technique' AND aggregated = 1 AND dir IN (-1, 1)
+      AND model_version = ? AND label_version = ?
+    GROUP BY asset_class, symbol, series_key, dir, horizon_minutes
+  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
+  for (const row of directionalRows) {
+    const horizon = Number(row.horizon_hours);
+    if (!byHorizon[horizon]) continue;
+    const accuracy = Number(row.accuracy);
+    const total = Number(row.total);
+    const effectiveSamples = Math.min(total, Number(row.effective_samples) || total);
+    byHorizon[horizon][`${row.asset_class}|${row.symbol}|${row.technique_id}|${row.dir}`] = {
+      correct: accuracy * total, total, accuracy, effectiveSamples
     };
   }
   return { blended, byHorizon };
@@ -95,7 +182,16 @@ export async function loadReliability(env) {
 // noSkillBaseline there, and migrations/0003_direction_baseline.sql for why
 // a hardcoded 0.5 was wrong.
 export async function loadDirectionBaselines(env) {
-  const rows = await d1(env, 'SELECT asset_class, horizon_hours, n_up, n_flat, n_down FROM direction_baseline');
+  const rows = await d1(env, `
+    SELECT asset_class, horizon_minutes / 60 AS horizon_hours,
+           SUM(CASE WHEN actual_dir = 1 THEN 1 ELSE 0 END) AS n_up,
+           SUM(CASE WHEN actual_dir = 0 THEN 1 ELSE 0 END) AS n_flat,
+           SUM(CASE WHEN actual_dir = -1 THEN 1 ELSE 0 END) AS n_down
+    FROM forecast_outcomes
+    WHERE series_kind = 'market' AND aggregated = 1
+      AND model_version = ? AND label_version = ?
+    GROUP BY asset_class, horizon_minutes
+  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
   const out = {};
   for (const r of rows) {
     out[`${r.asset_class}|${r.horizon_hours}`] = { n_up: r.n_up, n_flat: r.n_flat, n_down: r.n_down };
@@ -112,22 +208,37 @@ export async function loadDirectionBaselines(env) {
 // consumed only as a shrinkage prior for an asset's OWN measured record, not
 // as a standalone vote weight, so assets with no history still stay neutral.
 export async function loadTechniquePriors(env) {
-  const rows = await d1(env, 'SELECT asset_class, technique_id, SUM(correct) AS correct, SUM(total) AS total FROM technique_reliability WHERE total > 0 GROUP BY asset_class, technique_id');
+  // Cross-sectional forecasts on one market date and the 24h/168h labels are
+  // correlated. Use the ledger to retain the empirical hit rate but size its
+  // uncertainty by independent dates, then average horizons instead of summing
+  // them as extra trials.
+  const rows = await d1(env, `
+    SELECT asset_class, series_key AS technique_id, horizon_minutes,
+           AVG(correct) AS accuracy,
+           COUNT(DISTINCT substr(run_at, 1, 10)) AS effective_periods
+    FROM forecast_outcomes
+    WHERE series_kind = 'technique' AND aggregated = 1
+      AND model_version = ? AND label_version = ?
+    GROUP BY asset_class, series_key, horizon_minutes
+  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
+  const grouped = {};
+  for (const row of rows) (grouped[`${row.asset_class}|${row.technique_id}`] ??= []).push(row);
   const byAssetClass = {};
   const overallAcc = {};
-  for (const r of rows) {
-    (byAssetClass[r.asset_class] ??= {})[r.technique_id] = {
-      correct: r.correct,
-      total: r.total,
-      accuracy: r.total ? r.correct / r.total : 0.5
-    };
-    if (!overallAcc[r.technique_id]) overallAcc[r.technique_id] = { correct: 0, total: 0 };
-    overallAcc[r.technique_id].correct += r.correct;
-    overallAcc[r.technique_id].total += r.total;
+  for (const [key, records] of Object.entries(grouped)) {
+    const split = key.indexOf('|');
+    const assetClass = key.slice(0, split), techniqueId = key.slice(split + 1);
+    const accuracy = records.reduce((sum, row) => sum + Number(row.accuracy), 0) / records.length;
+    const total = Math.max(...records.map((row) => Number(row.effective_periods) || 0));
+    const rec = { correct: accuracy * total, total, accuracy };
+    (byAssetClass[assetClass] ??= {})[techniqueId] = rec;
+    (overallAcc[techniqueId] ??= []).push(rec);
   }
   const overall = {};
-  for (const [techniqueId, v] of Object.entries(overallAcc)) {
-    overall[techniqueId] = { correct: v.correct, total: v.total, accuracy: v.total ? v.correct / v.total : 0.5 };
+  for (const [techniqueId, records] of Object.entries(overallAcc)) {
+    const accuracy = records.reduce((sum, row) => sum + row.accuracy, 0) / records.length;
+    const total = Math.max(...records.map((row) => row.total));
+    overall[techniqueId] = { correct: accuracy * total, total, accuracy };
   }
   return { byAssetClass, overall };
 }
@@ -139,24 +250,30 @@ export async function loadTechniquePriors(env) {
 // alternative to blended, with the exact same MIN_RELIABILITY_SAMPLES +
 // significance bar applied there before it's ever preferred over blended.
 export async function loadRegimeReliability(env) {
-  const rows = await d1(env, 'SELECT symbol, technique_id, regime, correct, total FROM technique_regime_reliability WHERE total > 0');
-  // Pool across horizon_hours (two rows per symbol|technique|regime, one
-  // per HORIZONS_HOURS entry) exactly the way loadReliability's own
-  // `blended` pools across horizons — accumulate first, compute accuracy
-  // once totals are final, not per-row (a per-row overwrite would silently
-  // drop whichever horizon's row got processed first).
+  const rows = await d1(env, `
+    SELECT symbol, series_key AS technique_id, regime,
+           horizon_minutes / 60 AS horizon_hours,
+           SUM(correct) AS correct, COUNT(*) AS total
+    FROM forecast_outcomes
+    WHERE series_kind = 'technique' AND aggregated = 1 AND regime IS NOT NULL
+      AND model_version = ? AND label_version = ?
+    GROUP BY symbol, series_key, regime, horizon_minutes
+  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
+  // Average horizon accuracies and use only the deepest horizon as effective n.
+  // Summing 24h and 168h records treats two labels on related paths as two
+  // independent experiments and can push a regime across the significance bar.
   const acc = { trending: {}, choppy: {} };
   for (const r of rows) {
     if (!acc[r.regime]) continue; // defensive: regime is a free-text column, only these two values are ever written
     const key = `${r.symbol}|${r.technique_id}`;
-    if (!acc[r.regime][key]) acc[r.regime][key] = { correct: 0, total: 0 };
-    acc[r.regime][key].correct += r.correct;
-    acc[r.regime][key].total += r.total;
+    (acc[r.regime][key] ??= []).push(r);
   }
   const out = { trending: {}, choppy: {} };
   for (const regime of ['trending', 'choppy']) {
-    for (const [key, v] of Object.entries(acc[regime])) {
-      out[regime][key] = { correct: v.correct, accuracy: v.total ? v.correct / v.total : 0.5, total: v.total };
+    for (const [key, records] of Object.entries(acc[regime])) {
+      const accuracy = records.reduce((sum, r) => sum + r.correct / r.total, 0) / records.length;
+      const total = Math.max(...records.map((r) => r.total));
+      out[regime][key] = { correct: accuracy * total, accuracy, total };
     }
   }
   return out;
@@ -168,14 +285,28 @@ export async function loadRegimeReliability(env) {
 // lets live scoring give a SMALL bonus to proven reinforcing pairs rather than
 // treating every agreement as equally informative.
 export async function loadComboReliability(env) {
-  const rows = await d1(env, 'SELECT symbol, technique_a, technique_b, SUM(correct) AS correct, SUM(total) AS total FROM technique_combo_reliability WHERE total > 0 GROUP BY symbol, technique_a, technique_b');
+  const ledgerRows = await d1(env, `
+    SELECT symbol, series_key, horizon_minutes / 60 AS horizon_hours,
+           SUM(correct) AS correct, COUNT(*) AS total
+    FROM forecast_outcomes
+    WHERE series_kind = 'combo' AND aggregated = 1
+      AND model_version = ? AND label_version = ?
+    GROUP BY symbol, series_key, horizon_minutes
+  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
+  const rows = [];
+  for (const row of ledgerRows) {
+    let pair;
+    try { pair = JSON.parse(row.series_key); } catch { pair = null; }
+    if (!Array.isArray(pair) || pair.length !== 2) continue;
+    rows.push({ ...row, technique_a: pair[0], technique_b: pair[1] });
+  }
+  const grouped = {};
+  for (const row of rows) (grouped[`${row.symbol}|${row.technique_a}|${row.technique_b}`] ??= []).push(row);
   const out = {};
-  for (const r of rows) {
-    out[`${r.symbol}|${r.technique_a}|${r.technique_b}`] = {
-      correct: r.correct,
-      total: r.total,
-      accuracy: r.total ? r.correct / r.total : 0.5
-    };
+  for (const [key, records] of Object.entries(grouped)) {
+    const accuracy = records.reduce((sum, r) => sum + r.correct / r.total, 0) / records.length;
+    const total = Math.max(...records.map((r) => r.total));
+    out[key] = { correct: accuracy * total, total, accuracy };
   }
   return out;
 }
@@ -186,9 +317,30 @@ export async function loadComboReliability(env) {
 // by assetPredictionScore() in worker.js as one of the pooled inputs to
 // an asset's overall track-record score.
 export async function loadRangeReliability(env) {
-  const rows = await d1(env, 'SELECT symbol, SUM(hits) AS hits, SUM(total) AS total FROM range_reliability WHERE total > 0 GROUP BY symbol');
+  const rows = await d1(env, `
+    SELECT asset_class, symbol, horizon_minutes / 60 AS horizon_hours,
+           SUM(correct) AS hits, COUNT(*) AS total,
+           COUNT(DISTINCT substr(run_at, 1, 10)) AS effective_samples
+    FROM forecast_outcomes
+    WHERE series_kind = 'range' AND aggregated = 1
+      AND model_version = ? AND label_version = 'range-containment-v1'
+    GROUP BY asset_class, symbol, horizon_minutes
+  `, [OUTCOME_MODEL_VERSION]);
   const out = {};
-  for (const r of rows) out[r.symbol] = { hits: r.hits, total: r.total };
+  const grouped = {};
+  for (const r of rows) {
+    out[`${r.asset_class}|${r.symbol}|${r.horizon_hours}`] = { hits: r.hits, total: r.total, accuracy: r.hits / r.total, effectiveSamples: Math.min(r.total, r.effective_samples || r.total) };
+    (grouped[`${r.asset_class}|${r.symbol}`] ??= []).push(r);
+  }
+  for (const [key, records] of Object.entries(grouped)) {
+    const accuracy = records.reduce((sum, r) => sum + r.hits / r.total, 0) / records.length;
+    const total = Math.max(...records.map((r) => r.total));
+    const rec = { hits: accuracy * total, total, accuracy, effectiveSamples: Math.max(...records.map((r) => Math.min(r.total, r.effective_samples || r.total))) };
+    out[`${key}|all`] = rec;
+    // Backward-compatible lookup for the track-record helper. Runtime ticker
+    // collision quarantine ensures only one class can own this bare symbol.
+    out[key.slice(key.indexOf('|') + 1)] = rec;
+  }
   return out;
 }
 
@@ -197,9 +349,18 @@ export async function loadRangeReliability(env) {
 // actually land correct roughly 80-90% of the time? See evaluateMatured
 // for how this gets populated.
 export async function loadCalibration(env) {
-  const rows = await d1(env, 'SELECT bucket, correct, total FROM score_calibration WHERE total > 0');
+  const rows = await d1(env, `
+    SELECT MIN(9, MAX(0, CAST(score / 10 AS INTEGER))) AS bucket,
+           SUM(correct) AS correct, COUNT(*) AS total,
+           COUNT(DISTINCT substr(run_at, 1, 10)) AS effective_samples
+    FROM forecast_outcomes
+    WHERE series_kind = 'technique' AND series_key = 'composite'
+      AND aggregated = 1 AND score IS NOT NULL
+      AND model_version = ? AND label_version = ?
+    GROUP BY MIN(9, MAX(0, CAST(score / 10 AS INTEGER)))
+  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
   const out = {};
-  for (const r of rows) out[r.bucket] = { correct: r.correct, total: r.total, accuracy: r.total ? r.correct / r.total : 0 };
+  for (const r of rows) out[r.bucket] = { correct: r.correct, total: r.total, accuracy: r.total ? r.correct / r.total : 0, effectiveSamples: Math.min(r.total, r.effective_samples || r.total) };
   return out;
 }
 
@@ -209,15 +370,36 @@ export async function loadCalibration(env) {
 // curve; callers retain the pooled result as a fallback while a detail cell is
 // still thin.
 export async function loadDetailedCalibration(env) {
-  const rows = await d1(env, 'SELECT asset_class, dir, horizon_hours, bucket, correct, total FROM score_calibration_detail WHERE total > 0');
+  const rows = await d1(env, `
+    SELECT asset_class, dir, horizon_minutes / 60 AS horizon_hours,
+           MIN(9, MAX(0, CAST(score / 10 AS INTEGER))) AS bucket,
+           SUM(correct) AS correct, COUNT(*) AS total,
+           COUNT(DISTINCT substr(run_at, 1, 10)) AS effective_samples
+    FROM forecast_outcomes
+    WHERE series_kind = 'technique' AND series_key = 'composite'
+      AND aggregated = 1 AND score IS NOT NULL AND dir IN (-1, 1)
+      AND model_version = ? AND label_version = ?
+    GROUP BY asset_class, dir, horizon_minutes,
+             MIN(9, MAX(0, CAST(score / 10 AS INTEGER)))
+  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
   const out = {};
   for (const r of rows) {
     out[`${r.asset_class}|${r.dir}|${r.horizon_hours}|${r.bucket}`] = {
       correct: r.correct,
       total: r.total,
-      accuracy: r.total ? r.correct / r.total : 0
+      accuracy: r.total ? r.correct / r.total : 0,
+      effectiveSamples: Math.min(r.total, r.effective_samples || r.total)
     };
   }
+  const classPeriods = await d1(env, `
+    SELECT asset_class, COUNT(DISTINCT substr(run_at, 1, 10)) AS independent_periods
+    FROM forecast_outcomes
+    WHERE series_kind = 'technique' AND series_key = 'composite' AND aggregated = 1
+      AND model_version = ? AND label_version = ?
+    GROUP BY asset_class
+  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
+  out.__classMeta = {};
+  for (const row of classPeriods) out.__classMeta[row.asset_class] = { independentPeriods: row.independent_periods };
   return out;
 }
 
@@ -286,7 +468,14 @@ export async function logRun(env, runAt, log) {
 // Keyed by "symbol|horizon_hours" -> { meanPct, stdevPct, n }, computed
 // from running sum/sum-of-squares (Welford-lite, fine at this volume).
 export async function loadMoveStats(env) {
-  const rows = await d1(env, 'SELECT symbol, horizon_hours, n, sum_pct, sum_pct_sq FROM asset_move_stats WHERE n > 0');
+  const rows = await d1(env, `
+    SELECT symbol, horizon_minutes / 60 AS horizon_hours, COUNT(*) AS n,
+           SUM(return_pct) AS sum_pct, SUM(return_pct * return_pct) AS sum_pct_sq
+    FROM forecast_outcomes
+    WHERE series_kind = 'market' AND aggregated = 1 AND return_pct IS NOT NULL
+      AND model_version = ? AND label_version = ?
+    GROUP BY symbol, horizon_minutes
+  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
   const out = {};
   for (const r of rows) {
     const mean = r.sum_pct / r.n;
@@ -295,6 +484,7 @@ export async function loadMoveStats(env) {
   }
   return out;
 }
+
 
 // Chooses the first valid observation at or after a forecast's exact target
 // instant. An observation before the target would shorten the forecast window;
@@ -317,6 +507,36 @@ export function selectMaturityPrice(priceRows, targetAt, maxLagMinutes = MATURIT
   return match ? { price: match.price, run_at: match.run_at } : null;
 }
 
+// Objective path labels for later scalp/swing research. These do not predict
+// a top or bottom; they record the realized high/low and when each first
+// occurred inside the exact forecast window so a future model can test those
+// claims without reconstructing them from pruned operational logs.
+export function pathExcursionStats(priceRows, entryPrice, runAt, observedAt) {
+  const entry = Number(entryPrice);
+  const startMs = Date.parse(runAt);
+  const endMs = Date.parse(observedAt);
+  if (!Array.isArray(priceRows) || !(entry > 0) || !Number.isFinite(startMs)
+    || !Number.isFinite(endMs) || endMs < startMs) return null;
+  const valid = [{ run_at: new Date(startMs).toISOString(), price: entry, at: startMs }];
+  for (const row of priceRows) {
+    const at = Date.parse(row && (row.run_at || row.observed_at));
+    const price = Number(row && row.price);
+    if (!Number.isFinite(at) || !(price > 0) || at < startMs || at > endMs) continue;
+    valid.push({ run_at: row.run_at || row.observed_at, price, at });
+  }
+  let high = valid[0], low = valid[0];
+  for (const point of valid) {
+    if (point.price > high.price || (point.price === high.price && point.at < high.at)) high = point;
+    if (point.price < low.price || (point.price === low.price && point.at < low.at)) low = point;
+  }
+  return {
+    path_high_pct: ((high.price / entry) - 1) * 100,
+    path_low_pct: ((low.price / entry) - 1) * 100,
+    minutes_to_high: Math.max(0, (high.at - startMs) / 60000),
+    minutes_to_low: Math.max(0, (low.at - startMs) / 60000)
+  };
+}
+
 function maturityTarget(runAt, horizonHours) {
   const runMs = Date.parse(runAt);
   if (!Number.isFinite(runMs)) return null;
@@ -330,37 +550,291 @@ function maturityTarget(runAt, horizonHours) {
 async function loadForecastStartPrices(env, targets) {
   const out = {};
   for (const batch of chunk(targets, CHUNK)) {
-    const values = batch.map(() => '(?,?)').join(',');
-    const params = batch.flatMap((t) => [t.runAt, t.symbol]);
+    const values = batch.map(() => '(?,?,?)').join(',');
+    const params = batch.flatMap((t) => [t.runAt, t.assetClass, t.symbol]);
     const rows = await d1(env, `
-      WITH requested(origin_run_at, symbol) AS (VALUES ${values})
-      SELECT requested.origin_run_at, requested.symbol, p.price
+      WITH requested(origin_run_at, asset_class, symbol) AS (VALUES ${values})
+      SELECT requested.origin_run_at, requested.asset_class, requested.symbol, p.price
       FROM requested
-      JOIN asset_price_log p ON p.run_at = requested.origin_run_at AND p.symbol = requested.symbol
+      JOIN asset_price_log p ON p.run_at = requested.origin_run_at
+        AND p.asset_class = requested.asset_class AND p.symbol = requested.symbol
     `, params);
-    for (const r of rows) out[`${r.origin_run_at}|${r.symbol}`] = r.price;
+    for (const r of rows) out[`${r.origin_run_at}|${r.asset_class}|${r.symbol}`] = r.price;
   }
   return out;
 }
 
 async function loadMaturityPriceRows(env, targets) {
   const out = {};
-  // Four parameters per requested target keep this at 60 values per query
+  // Five parameters per requested target keep this at 75 values per query
   // under D1's 100-bound-parameter cap (CHUNK is 15).
   for (const batch of chunk(targets, CHUNK)) {
-    const values = batch.map(() => '(?,?,?,?)').join(',');
-    const params = batch.flatMap((t) => [t.runAt, t.symbol, t.targetAt, t.maxAt]);
+    const values = batch.map(() => '(?,?,?,?,?)').join(',');
+    const params = batch.flatMap((t) => [t.runAt, t.assetClass, t.symbol, t.targetAt, t.maxAt]);
     const rows = await d1(env, `
-      WITH requested(origin_run_at, symbol, target_at, max_at) AS (VALUES ${values})
-      SELECT requested.origin_run_at, requested.symbol, p.run_at, p.price
+      WITH requested(origin_run_at, asset_class, symbol, target_at, max_at) AS (VALUES ${values})
+      SELECT requested.origin_run_at, requested.asset_class, requested.symbol, p.run_at, p.price
       FROM requested
-      JOIN asset_price_log p ON p.symbol = requested.symbol
+      JOIN asset_price_log p ON p.asset_class = requested.asset_class AND p.symbol = requested.symbol
         AND p.run_at >= requested.target_at
         AND p.run_at <= requested.max_at
     `, params);
-    for (const r of rows) (out[`${r.origin_run_at}|${r.symbol}`] ??= []).push(r);
+    for (const r of rows) (out[`${r.origin_run_at}|${r.asset_class}|${r.symbol}`] ??= []).push(r);
   }
   return out;
+}
+
+async function loadForecastPathRows(env, targets) {
+  const out = {};
+  for (const batch of chunk(targets, CHUNK)) {
+    const values = batch.map(() => '(?,?,?,?,?)').join(',');
+    const params = batch.flatMap((t) => [t.runAt, t.assetClass, t.symbol, t.runAt, t.maxAt]);
+    const rows = await d1(env, `
+      WITH requested(origin_run_at, asset_class, symbol, start_at, max_at) AS (VALUES ${values})
+      SELECT requested.origin_run_at, requested.asset_class, requested.symbol, p.run_at, p.price
+      FROM requested
+      JOIN asset_price_log p ON p.asset_class = requested.asset_class AND p.symbol = requested.symbol
+        AND p.run_at >= requested.start_at AND p.run_at <= requested.max_at
+      ORDER BY p.run_at
+    `, params);
+    for (const row of rows) (out[`${row.origin_run_at}|${row.asset_class}|${row.symbol}`] ??= []).push(row);
+  }
+  return out;
+}
+
+async function loadAcceptedOutcomeTimes(env, horizonMinutes) {
+  const rows = await d1(env, `
+    SELECT asset_class, symbol, horizon_minutes, series_kind, series_key, MAX(run_at) AS last_run_at
+    FROM forecast_outcomes
+    WHERE horizon_minutes = ?
+    GROUP BY asset_class, symbol, horizon_minutes, series_kind, series_key
+  `, [horizonMinutes]);
+  const out = {};
+  for (const row of rows) out[outcomeSeriesIdentity(row)] = row.last_run_at;
+  return out;
+}
+
+export async function insertForecastOutcomes(env, rows) {
+  const allowedKinds = new Set(['technique', 'combo', 'market', 'range', 'intraday']);
+  for (const row of rows) {
+    if (!row || !Number.isFinite(Date.parse(row.run_at)) || !row.asset_class || !row.symbol
+      || !Number.isInteger(Number(row.horizon_minutes)) || Number(row.horizon_minutes) <= 0
+      || !allowedKinds.has(row.series_kind) || !row.series_key
+      || ![0, 1].includes(Number(row.correct)) || !Number.isFinite(Date.parse(row.evaluated_at))) {
+      throw new Error(`invalid forecast outcome: ${JSON.stringify(row)}`);
+    }
+    for (const field of ['entry_price', 'exit_price']) {
+      if (row[field] != null && (!Number.isFinite(Number(row[field])) || Number(row[field]) <= 0)) {
+        throw new Error(`invalid ${field} in forecast outcome`);
+      }
+    }
+    for (const field of ['path_high_pct', 'path_low_pct', 'minutes_to_high', 'minutes_to_low']) {
+      if (row[field] != null && !Number.isFinite(Number(row[field]))) throw new Error(`invalid ${field} in forecast outcome`);
+    }
+    if ((row.minutes_to_high != null && Number(row.minutes_to_high) < 0)
+      || (row.minutes_to_low != null && Number(row.minutes_to_low) < 0)) {
+      throw new Error('negative time-to-extreme in forecast outcome');
+    }
+    if (row.path_high_pct != null && row.path_low_pct != null
+      && Number(row.path_high_pct) < Number(row.path_low_pct)) {
+      throw new Error('forecast outcome path high is below path low');
+    }
+    if (row.target_at != null && !Number.isFinite(Date.parse(row.target_at))) throw new Error('invalid target_at in forecast outcome');
+    if (row.observed_at != null && !Number.isFinite(Date.parse(row.observed_at))) throw new Error('invalid observed_at in forecast outcome');
+    if (row.target_at && row.observed_at && Date.parse(row.observed_at) < Date.parse(row.target_at)) {
+      throw new Error('forecast outcome observation predates its target');
+    }
+  }
+  for (const batch of chunk(rows, OUTCOME_INSERT_CHUNK)) {
+    const placeholders = batch.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap((row) => [
+      row.run_at, row.asset_class, row.symbol, row.horizon_minutes,
+      row.series_kind, row.series_key, row.dir ?? null, row.actual_dir ?? null,
+      row.correct ? 1 : 0, row.score ?? null, row.regime ?? null,
+      row.return_pct ?? null, row.target_at ?? null, row.observed_at ?? null,
+      row.entry_price ?? null, row.exit_price ?? null,
+      row.path_high_pct ?? null, row.path_low_pct ?? null,
+      row.minutes_to_high ?? null, row.minutes_to_low ?? null,
+      row.model_version || (row.series_kind === 'intraday' ? 'intraday-v1' : OUTCOME_MODEL_VERSION),
+      row.label_version || (row.series_kind === 'range' ? 'range-containment-v1' : OUTCOME_LABEL_VERSION),
+      row.evaluated_at
+    ]);
+    await d1(env, `
+      INSERT INTO forecast_outcomes
+        (run_at, asset_class, symbol, horizon_minutes, series_kind, series_key,
+         dir, actual_dir, correct, score, regime, return_pct, target_at,
+         observed_at, entry_price, exit_price, path_high_pct, path_low_pct,
+         minutes_to_high, minutes_to_low, model_version, label_version, evaluated_at)
+      VALUES ${placeholders}
+      ON CONFLICT(run_at, asset_class, symbol, horizon_minutes, series_kind, series_key) DO NOTHING
+    `, params);
+  }
+}
+
+function outcomeAggregateStatements(row, nowIso) {
+  const statements = [];
+  const horizonHours = row.horizon_minutes / 60;
+  if (row.series_kind === 'technique') {
+    statements.push({
+      sql: `
+        INSERT INTO technique_reliability
+          (asset_class, symbol, technique_id, horizon_hours, correct, total, accuracy, votes_up, votes_down, updated_at)
+        VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+        ON CONFLICT (symbol, technique_id, horizon_hours) DO UPDATE SET
+          correct = technique_reliability.correct + excluded.correct,
+          total = technique_reliability.total + 1,
+          accuracy = CAST(technique_reliability.correct + excluded.correct AS REAL) / (technique_reliability.total + 1),
+          votes_up = technique_reliability.votes_up + excluded.votes_up,
+          votes_down = technique_reliability.votes_down + excluded.votes_down,
+          updated_at = excluded.updated_at
+      `,
+      params: [row.asset_class, row.symbol, row.series_key, horizonHours, row.correct, row.correct, row.dir === 1 ? 1 : 0, row.dir === -1 ? 1 : 0, nowIso]
+    });
+    if (row.regime) {
+      statements.push({
+        sql: `
+          INSERT INTO technique_regime_reliability
+            (symbol, technique_id, horizon_hours, regime, correct, total, accuracy, updated_at)
+          VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+          ON CONFLICT (symbol, technique_id, horizon_hours, regime) DO UPDATE SET
+            correct = technique_regime_reliability.correct + excluded.correct,
+            total = technique_regime_reliability.total + 1,
+            accuracy = CAST(technique_regime_reliability.correct + excluded.correct AS REAL) / (technique_regime_reliability.total + 1),
+            updated_at = excluded.updated_at
+        `,
+        params: [row.symbol, row.series_key, horizonHours, row.regime, row.correct, row.correct, nowIso]
+      });
+    }
+    if (row.series_key === 'composite' && row.score != null && (row.dir === 1 || row.dir === -1)) {
+      const bucket = scoreBucket(row.score);
+      statements.push({
+        sql: `
+          INSERT INTO score_calibration (bucket, correct, total, updated_at)
+          VALUES (?, ?, 1, ?)
+          ON CONFLICT (bucket) DO UPDATE SET
+            correct = score_calibration.correct + excluded.correct,
+            total = score_calibration.total + 1,
+            updated_at = excluded.updated_at
+        `,
+        params: [bucket, row.correct, nowIso]
+      });
+      statements.push({
+        sql: `
+          INSERT INTO score_calibration_detail
+            (asset_class, dir, horizon_hours, bucket, correct, total, updated_at)
+          VALUES (?, ?, ?, ?, ?, 1, ?)
+          ON CONFLICT (asset_class, dir, horizon_hours, bucket) DO UPDATE SET
+            correct = score_calibration_detail.correct + excluded.correct,
+            total = score_calibration_detail.total + 1,
+            updated_at = excluded.updated_at
+        `,
+        params: [row.asset_class, row.dir, horizonHours, bucket, row.correct, nowIso]
+      });
+    }
+  } else if (row.series_kind === 'combo') {
+    let pair;
+    try { pair = JSON.parse(row.series_key); } catch { pair = null; }
+    if (Array.isArray(pair) && pair.length === 2) {
+      statements.push({
+        sql: `
+          INSERT INTO technique_combo_reliability
+            (symbol, technique_a, technique_b, horizon_hours, correct, total, accuracy, updated_at)
+          VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+          ON CONFLICT (symbol, technique_a, technique_b, horizon_hours) DO UPDATE SET
+            correct = technique_combo_reliability.correct + excluded.correct,
+            total = technique_combo_reliability.total + 1,
+            accuracy = CAST(technique_combo_reliability.correct + excluded.correct AS REAL) / (technique_combo_reliability.total + 1),
+            updated_at = excluded.updated_at
+        `,
+        params: [row.symbol, pair[0], pair[1], horizonHours, row.correct, row.correct, nowIso]
+      });
+    }
+  } else if (row.series_kind === 'market') {
+    statements.push({
+      sql: `
+        INSERT INTO direction_baseline (asset_class, horizon_hours, n_up, n_flat, n_down, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (asset_class, horizon_hours) DO UPDATE SET
+          n_up = direction_baseline.n_up + excluded.n_up,
+          n_flat = direction_baseline.n_flat + excluded.n_flat,
+          n_down = direction_baseline.n_down + excluded.n_down,
+          updated_at = excluded.updated_at
+      `,
+      params: [row.asset_class, horizonHours, row.actual_dir === 1 ? 1 : 0, row.actual_dir === 0 ? 1 : 0, row.actual_dir === -1 ? 1 : 0, nowIso]
+    });
+    statements.push({
+      sql: `
+        INSERT INTO asset_move_stats (symbol, horizon_hours, n, sum_pct, sum_pct_sq, updated_at)
+        VALUES (?, ?, 1, ?, ?, ?)
+        ON CONFLICT (symbol, horizon_hours) DO UPDATE SET
+          n = asset_move_stats.n + 1,
+          sum_pct = asset_move_stats.sum_pct + excluded.sum_pct,
+          sum_pct_sq = asset_move_stats.sum_pct_sq + excluded.sum_pct_sq,
+          updated_at = excluded.updated_at
+      `,
+      params: [row.symbol, horizonHours, row.return_pct, row.return_pct * row.return_pct, nowIso]
+    });
+  } else if (row.series_kind === 'range') {
+    statements.push({
+      sql: `
+        INSERT INTO range_reliability (asset_class, symbol, horizon_hours, hits, total, accuracy, updated_at)
+        VALUES (?, ?, ?, ?, 1, ?, ?)
+        ON CONFLICT (symbol, horizon_hours) DO UPDATE SET
+          hits = range_reliability.hits + excluded.hits,
+          total = range_reliability.total + 1,
+          accuracy = CAST(range_reliability.hits + excluded.hits AS REAL) / (range_reliability.total + 1),
+          updated_at = excluded.updated_at
+      `,
+      params: [row.asset_class, row.symbol, horizonHours, row.correct, row.correct, nowIso]
+    });
+  } else if (row.series_kind === 'intraday') {
+    statements.push({
+      sql: `
+        INSERT INTO intraday_reliability (asset_class, symbol, horizon_minutes, correct, total, accuracy, updated_at)
+        VALUES (?, ?, ?, ?, 1, ?, ?)
+        ON CONFLICT (symbol, horizon_minutes) DO UPDATE SET
+          correct = intraday_reliability.correct + excluded.correct,
+          total = intraday_reliability.total + 1,
+          accuracy = CAST(intraday_reliability.correct + excluded.correct AS REAL) / (intraday_reliability.total + 1),
+          updated_at = excluded.updated_at
+      `,
+      params: [row.asset_class, row.symbol, row.horizon_minutes, row.correct, row.correct, nowIso]
+    });
+  }
+  // Claim + guarded increments + commit all run in one D1 batch transaction.
+  // Two workflows may select the same pending row concurrently; only the one
+  // whose 0 -> -1 claim succeeds is allowed to increment aggregates. A failed
+  // batch rolls the claim back, so there is no stranded in-progress state.
+  const guarded = statements.map((statement) => {
+    const values = statement.sql.match(/VALUES\s*\(([^)]*)\)/i);
+    if (!values) throw new Error(`aggregate statement has no simple VALUES clause for outcome ${row.id}`);
+    return {
+      sql: statement.sql.replace(values[0], `SELECT ${values[1]} FROM forecast_outcomes WHERE id = ? AND aggregated = -1`),
+      params: [...statement.params, row.id]
+    };
+  });
+  return [
+    { sql: 'UPDATE forecast_outcomes SET aggregated = -1 WHERE id = ? AND aggregated = 0', params: [row.id] },
+    ...guarded,
+    { sql: 'UPDATE forecast_outcomes SET aggregated = 1 WHERE id = ? AND aggregated = -1', params: [row.id] }
+  ];
+}
+
+// Recoverable aggregation: a job may die after a ledger insert and before this
+// function. The next run sees `aggregated = 0` and finishes it. Conversely, D1
+// batches the derived increments with the flag update transactionally, so a
+// retry can never increment the same outcome twice.
+export async function aggregatePendingForecastOutcomes(env, nowIso) {
+  const pending = await d1(env, `
+    SELECT id, run_at, asset_class, symbol, horizon_minutes, series_kind,
+           series_key, dir, actual_dir, correct, score, regime, return_pct
+    FROM forecast_outcomes WHERE aggregated = 0 ORDER BY id
+  `);
+  for (const batch of chunk(pending, OUTCOME_AGGREGATE_CHUNK)) {
+    const statements = batch.flatMap((row) => outcomeAggregateStatements(row, nowIso));
+    await d1Batch(env, statements);
+  }
+  return pending.length;
 }
 
 // Finds technique_votes rows old enough to have matured for each horizon
@@ -378,10 +852,15 @@ export async function evaluateMatured(env, nowIso) {
   const now = new Date(nowIso).getTime();
   let evaluatedCount = 0;
 
+  // Finish any ledger rows left behind by a process/network failure before
+  // considering fresh maturities. This is safe on every run and makes recovery
+  // independent of whether another raw vote is currently due.
+  await aggregatePendingForecastOutcomes(env, nowIso);
+
   for (const h of HORIZONS_HOURS) {
     const cutoff = new Date(now - h * 3600 * 1000).toISOString();
     const col = EVAL_COLUMN[h];
-    const due = await d1(env, `SELECT run_at, asset_class, symbol, technique_id, dir, score, regime FROM technique_votes WHERE run_at <= ? AND ${col} = 0`, [cutoff]);
+    const due = await d1(env, `SELECT run_at, asset_class, symbol, technique_id, dir, score, regime FROM technique_votes WHERE run_at <= ? AND ${col} = 0 ORDER BY run_at`, [cutoff]);
     // Range predictions logged at this same horizon (see RANGE_LOG_HORIZONS_DAYS
     // in worker.js) — each row matures once, at its own horizon_hours, so
     // there's no evaluated flag to filter on here, just the cutoff.
@@ -392,261 +871,164 @@ export async function evaluateMatured(env, nowIso) {
     // (run_at, symbol) shares the same entry and horizon-target price.
     const targetByKey = {};
     for (const r of [...due, ...dueRanges]) {
-      const key = `${r.run_at}|${r.symbol}`;
+      const key = `${r.run_at}|${r.asset_class}|${r.symbol}`;
       if (targetByKey[key]) continue;
       const target = maturityTarget(r.run_at, h);
-      if (target) targetByKey[key] = { runAt: r.run_at, symbol: r.symbol, ...target };
+      if (target) targetByKey[key] = { runAt: r.run_at, assetClass: r.asset_class, symbol: r.symbol, ...target };
     }
     const allTargets = Object.values(targetByKey);
-    const voteTargets = [...new Map(due.map((r) => {
-      const key = `${r.run_at}|${r.symbol}`;
-      return [key, targetByKey[key]];
-    }).filter(([, target]) => target)).values()];
-    const priceBefore = await loadForecastStartPrices(env, voteTargets);
+    const priceBefore = await loadForecastStartPrices(env, allTargets);
     const maturityRows = await loadMaturityPriceRows(env, allTargets);
+    const pathRows = await loadForecastPathRows(env, allTargets);
     const priceAtTarget = {};
     for (const target of allTargets) {
-      const key = `${target.runAt}|${target.symbol}`;
+      const key = `${target.runAt}|${target.assetClass}|${target.symbol}`;
       const match = selectMaturityPrice(maturityRows[key], target.targetAt);
-      if (match) priceAtTarget[key] = match.price;
+      if (match) priceAtTarget[key] = match;
     }
 
-    // Range containment only needs the "after" price (was it inside
-    // [low, high]), not "before" — unlike technique_votes' directional
-    // check, there's no direction to compare against.
-    const rangeDeltas = {}; // symbol -> { hits, total, asset_class }
-    const evaluatedRangesByRunAt = {};
-    for (const r of dueRanges) {
-      const after = priceAtTarget[`${r.run_at}|${r.symbol}`];
-      if (after == null) continue; // no valid target-time observation yet; leave pending for a later pass or hard-cap prune
-      if (!rangeDeltas[r.symbol]) rangeDeltas[r.symbol] = { hits: 0, total: 0, asset_class: r.asset_class };
-      rangeDeltas[r.symbol].total += 1;
-      if (after >= r.low && after <= r.high) rangeDeltas[r.symbol].hits += 1;
-      (evaluatedRangesByRunAt[r.run_at] ??= new Set()).add(r.symbol);
-    }
-    await forEachConcurrent(Object.entries(rangeDeltas), D1_WRITE_CONCURRENCY, async ([symbol, d]) => {
-      await d1(env, `
-        INSERT INTO range_reliability (asset_class, symbol, horizon_hours, hits, total, accuracy, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (symbol, horizon_hours) DO UPDATE SET
-          hits = range_reliability.hits + excluded.hits,
-          total = range_reliability.total + excluded.total,
-          accuracy = CAST(range_reliability.hits + excluded.hits AS REAL) / (range_reliability.total + excluded.total),
-          updated_at = excluded.updated_at
-      `, [d.asset_class, symbol, h, d.hits, d.total, d.total ? d.hits / d.total : 0, nowIso]);
-    });
-    const rangeDeletionJobs = Object.entries(evaluatedRangesByRunAt).flatMap(([runAt, symbols]) =>
-      chunk([...symbols], CHUNK).map((symbolsBatch) => ({ runAt, symbolsBatch }))
-    );
-    await forEachConcurrent(rangeDeletionJobs, D1_WRITE_CONCURRENCY, async ({ runAt, symbolsBatch }) => {
-      const placeholders = symbolsBatch.map(() => '?').join(',');
-      await d1(env, `DELETE FROM range_log WHERE horizon_hours = ? AND run_at = ? AND symbol IN (${placeholders})`, [h, runAt, ...symbolsBatch]);
-    });
-
-    const deltas = {}; // "symbol|technique_id" -> { correct, total, asset_class }
-    const moveDeltas = {}; // "symbol" -> { n, sumPct, sumPctSq } — one realized move per (symbol, run_at), deduped across techniques
-    // Decile of the composite call's own 0-100 score -> {correct, total} —
-    // pooled across both horizons here, matching loadReliability's blended
-    // technique records. The detailed companion below preserves the
-    // asset-class/direction/horizon split for alert calibration.
-    const calibDeltas = {};
-    const detailedCalibDeltas = {};
-    const baselineDeltas = {}; // asset_class -> { n_up, n_flat, n_down }, deduped per (run_at, symbol)
-    const seenMoves = new Set();
-    const evaluatedSymbolsByRunAt = {}; // only mark rows we could actually score
-    // Phase 5: which technique pairs agreed on direction this (run_at,
-    // symbol), grouped here for free off rows already in hand — the actual
-    // pairing/tally happens in one pass after this loop, once actualDir is
-    // known for every group. 'composite' is excluded (it's the aggregate
-    // call, not an individual technique) and only genuinely directional
-    // votes count (dir 1/-1) — a neutral flag like earningsrisk's has
-    // nothing to "agree" on a direction with.
-    const comboGroups = {}; // "run_at|symbol" -> { symbol, actualDir, votes: [{technique_id, dir}] }
-    // Phase 6: same due-rows pass, bucketed by the regime frozen on the row
-    // at cast time (see the `regime` column/regimeOf, worker.js) — null
-    // regime (not enough history to compute structure when the vote was
-    // cast, or a row written before this column existed) is simply skipped
-    // here, same as it already is everywhere else.
-    const regimeDeltas = {}; // "symbol|technique_id|regime" -> { symbol, technique_id, regime, correct, total }
+    const horizonMinutes = h * 60;
+    let acceptedState = await loadAcceptedOutcomeTimes(env, horizonMinutes);
+    const evaluableVotes = [];
+    const moveByEvent = {};
+    const evaluatedVotesByRunAndClass = {};
     for (const r of due) {
-      const before = priceBefore[`${r.run_at}|${r.symbol}`];
-      const after = priceAtTarget[`${r.run_at}|${r.symbol}`];
-      if (before == null || after == null || !before) continue; // no exact entry/target observation; leave pending, hard-cap prune handles it eventually
-      const pct = ((after / before) - 1) * 100;
-      const actualDir = pct > OUTCOME_DEADBAND_PCT ? 1 : pct < -OUTCOME_DEADBAND_PCT ? -1 : 0;
-      const key = `${r.symbol}|${r.technique_id}`;
-      if (!deltas[key]) deltas[key] = { correct: 0, total: 0, votes_up: 0, votes_down: 0, asset_class: r.asset_class };
-      deltas[key].total += 1;
-      if (r.dir === actualDir) deltas[key].correct += 1;
-      // Directional mix, so noSkillBaseline can judge this record against the
-      // null accuracy for the directions IT actually chose rather than a
-      // class-wide average (worker.js).
-      if (r.dir === 1) deltas[key].votes_up += 1;
-      else if (r.dir === -1) deltas[key].votes_down += 1;
-      (evaluatedSymbolsByRunAt[r.run_at] ??= new Set()).add(r.symbol);
-
-      if (r.technique_id === 'composite' && r.score != null) {
-        const bucket = scoreBucket(r.score);
-        if (!calibDeltas[bucket]) calibDeltas[bucket] = { correct: 0, total: 0 };
-        calibDeltas[bucket].total += 1;
-        if (r.dir === actualDir) calibDeltas[bucket].correct += 1;
-        const detailedKey = `${r.asset_class}|${r.dir}|${h}|${bucket}`;
-        if (!detailedCalibDeltas[detailedKey]) {
-          detailedCalibDeltas[detailedKey] = {
-            assetClass: r.asset_class, dir: r.dir, bucket, correct: 0, total: 0
-          };
-        }
-        detailedCalibDeltas[detailedKey].total += 1;
-        if (r.dir === actualDir) detailedCalibDeltas[detailedKey].correct += 1;
-      }
-
-      if (r.regime) {
-        const rk = `${r.symbol}|${r.technique_id}|${r.regime}`;
-        if (!regimeDeltas[rk]) regimeDeltas[rk] = { symbol: r.symbol, technique_id: r.technique_id, regime: r.regime, correct: 0, total: 0 };
-        regimeDeltas[rk].total += 1;
-        if (r.dir === actualDir) regimeDeltas[rk].correct += 1;
-      }
-
-      if (r.technique_id !== 'composite' && (r.dir === 1 || r.dir === -1)) {
-        const gk = `${r.run_at}|${r.symbol}`;
-        (comboGroups[gk] ??= { symbol: r.symbol, actualDir, votes: [] }).votes.push({ technique_id: r.technique_id, dir: r.dir });
-      }
-
-      const moveKey = `${r.run_at}|${r.symbol}`;
-      if (!seenMoves.has(moveKey)) {
-        seenMoves.add(moveKey);
-        if (!moveDeltas[r.symbol]) moveDeltas[r.symbol] = { n: 0, sumPct: 0, sumPctSq: 0 };
-        moveDeltas[r.symbol].n += 1;
-        moveDeltas[r.symbol].sumPct += pct;
-        moveDeltas[r.symbol].sumPctSq += pct * pct;
-        // Same dedup, same reason: one realized price move is ONE observation
-        // of "what the market did," however many techniques voted on it.
-        // Counting per-vote would inflate the baseline's own sample count and
-        // make a thin window look authoritative.
-        if (!baselineDeltas[r.asset_class]) baselineDeltas[r.asset_class] = { n_up: 0, n_flat: 0, n_down: 0 };
-        if (actualDir === 1) baselineDeltas[r.asset_class].n_up += 1;
-        else if (actualDir === -1) baselineDeltas[r.asset_class].n_down += 1;
-        else baselineDeltas[r.asset_class].n_flat += 1;
-      }
+      const eventKey = `${r.run_at}|${r.asset_class}|${r.symbol}`;
+      const before = priceBefore[eventKey];
+      const match = priceAtTarget[eventKey];
+      const after = match && match.price;
+      if (before == null || after == null || !before) continue;
+      const returnPct = ((after / before) - 1) * 100;
+      const target = targetByKey[eventKey];
+      const path = pathExcursionStats(pathRows[eventKey], before, r.run_at, match.run_at);
+      const actualDir = returnPct > OUTCOME_DEADBAND_PCT ? 1 : returnPct < -OUTCOME_DEADBAND_PCT ? -1 : 0;
+      const candidate = {
+        ...r, horizon_minutes: horizonMinutes, series_kind: 'technique',
+        series_key: r.technique_id, actual_dir: actualDir, return_pct: returnPct,
+        target_at: target.targetAt, observed_at: match.run_at,
+        entry_price: before, exit_price: after, ...(path || {})
+      };
+      evaluableVotes.push(candidate);
+      moveByEvent[eventKey] = {
+        run_at: r.run_at, asset_class: r.asset_class, symbol: r.symbol,
+        horizon_minutes: horizonMinutes, series_kind: 'market', series_key: 'market',
+        actual_dir: actualDir, return_pct: returnPct,
+        target_at: target.targetAt, observed_at: match.run_at,
+        entry_price: before, exit_price: after, ...(path || {})
+      };
+      const markKey = `${r.run_at}|${r.asset_class}`;
+      (evaluatedVotesByRunAndClass[markKey] ??= new Set()).add(r.symbol);
     }
 
-    // One pass over each group's votes, pairing techniques that voted the
-    // SAME direction (disagreeing pairs aren't a "combo" — there's no
-    // shared call to score). O(k^2) in the number of techniques that voted
-    // directionally that hour for that symbol (k is typically small — most
-    // techniques sit at 0/null most of the time, see evaluateTechniques'
-    // own "never fire alone" discipline throughout), not O(k^2) over the
-    // full technique roster.
-    const comboDeltas = {}; // "symbol|a|b" -> { symbol, a, b, correct, total }
-    for (const g of Object.values(comboGroups)) {
-      const votes = g.votes;
-      for (let i = 0; i < votes.length; i++) {
-        for (let j = i + 1; j < votes.length; j++) {
-          if (votes[i].dir !== votes[j].dir) continue;
-          const [a, b] = [votes[i].technique_id, votes[j].technique_id].sort();
-          const ck = `${g.symbol}|${a}|${b}`;
-          if (!comboDeltas[ck]) comboDeltas[ck] = { symbol: g.symbol, a, b, correct: 0, total: 0 };
-          comboDeltas[ck].total += 1;
-          if (votes[i].dir === g.actualDir) comboDeltas[ck].correct += 1;
+    const techniquePartition = selectNonOverlappingForecasts(evaluableVotes, horizonMinutes, acceptedState);
+    acceptedState = techniquePartition.lastAcceptedByKey;
+    const marketPartition = selectNonOverlappingForecasts(Object.values(moveByEvent), horizonMinutes, acceptedState);
+    acceptedState = marketPartition.lastAcceptedByKey;
+
+    // Pair only technique votes that independently earned admission to this
+    // horizon's ledger. Correlated same-run agreement is useful context, but it
+    // does not manufacture extra time-series observations.
+    const comboGroups = {};
+    for (const row of techniquePartition.accepted) {
+      if (row.technique_id === 'composite' || !(row.dir === 1 || row.dir === -1)) continue;
+      const key = `${row.run_at}|${row.asset_class}|${row.symbol}`;
+      (comboGroups[key] ??= { ...moveByEvent[key], votes: [] }).votes.push(row);
+    }
+    const comboCandidates = [];
+    for (const group of Object.values(comboGroups)) {
+      for (let i = 0; i < group.votes.length; i++) {
+        for (let j = i + 1; j < group.votes.length; j++) {
+          if (group.votes[i].dir !== group.votes[j].dir) continue;
+          const [a, b] = [group.votes[i].technique_id, group.votes[j].technique_id].sort();
+          comboCandidates.push({
+            run_at: group.run_at, asset_class: group.asset_class, symbol: group.symbol,
+            horizon_minutes: horizonMinutes, series_kind: 'combo', series_key: JSON.stringify([a, b]),
+            dir: group.votes[i].dir, actual_dir: group.actual_dir, return_pct: group.return_pct
+          });
         }
       }
     }
-    await forEachConcurrent(Object.values(comboDeltas), D1_WRITE_CONCURRENCY, async (d) => {
-      await d1(env, `
-        INSERT INTO technique_combo_reliability (symbol, technique_a, technique_b, horizon_hours, correct, total, accuracy, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (symbol, technique_a, technique_b, horizon_hours) DO UPDATE SET
-          correct = technique_combo_reliability.correct + excluded.correct,
-          total = technique_combo_reliability.total + excluded.total,
-          accuracy = CAST(technique_combo_reliability.correct + excluded.correct AS REAL) / (technique_combo_reliability.total + excluded.total),
-          updated_at = excluded.updated_at
-      `, [d.symbol, d.a, d.b, h, d.correct, d.total, d.total ? d.correct / d.total : 0, nowIso]);
-    });
+    const comboPartition = selectNonOverlappingForecasts(comboCandidates, horizonMinutes, acceptedState);
+    acceptedState = comboPartition.lastAcceptedByKey;
 
-    await forEachConcurrent(Object.values(regimeDeltas), D1_WRITE_CONCURRENCY, async (d) => {
-      await d1(env, `
-        INSERT INTO technique_regime_reliability (symbol, technique_id, horizon_hours, regime, correct, total, accuracy, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (symbol, technique_id, horizon_hours, regime) DO UPDATE SET
-          correct = technique_regime_reliability.correct + excluded.correct,
-          total = technique_regime_reliability.total + excluded.total,
-          accuracy = CAST(technique_regime_reliability.correct + excluded.correct AS REAL) / (technique_regime_reliability.total + excluded.total),
-          updated_at = excluded.updated_at
-      `, [d.symbol, d.technique_id, h, d.regime, d.correct, d.total, d.total ? d.correct / d.total : 0, nowIso]);
-    });
+    const evaluableRanges = [];
+    const evaluatedRangesByRunAndClass = {};
+    for (const r of dueRanges) {
+      const eventKey = `${r.run_at}|${r.asset_class}|${r.symbol}`;
+      const match = priceAtTarget[eventKey];
+      const after = match && match.price;
+      if (after == null) continue;
+      const target = targetByKey[eventKey];
+      const before = priceBefore[eventKey];
+      const path = pathExcursionStats(pathRows[eventKey], before, r.run_at, match.run_at);
+      evaluableRanges.push({
+        ...r, horizon_minutes: horizonMinutes, series_kind: 'range', series_key: 'range',
+        correct: after >= r.low && after <= r.high ? 1 : 0,
+        target_at: target.targetAt, observed_at: match.run_at,
+        entry_price: before ?? null, exit_price: after, ...(path || {})
+      });
+      const markKey = `${r.run_at}|${r.asset_class}`;
+      (evaluatedRangesByRunAndClass[markKey] ??= new Set()).add(r.symbol);
+    }
+    const rangePartition = selectNonOverlappingForecasts(evaluableRanges, horizonMinutes, acceptedState);
 
-    await forEachConcurrent(Object.entries(calibDeltas), D1_WRITE_CONCURRENCY, async ([bucket, d]) => {
-      await d1(env, `
-        INSERT INTO score_calibration (bucket, correct, total, updated_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT (bucket) DO UPDATE SET
-          correct = score_calibration.correct + excluded.correct,
-          total = score_calibration.total + excluded.total,
-          updated_at = excluded.updated_at
-      `, [Number(bucket), d.correct, d.total, nowIso]);
-    });
+    const outcomes = [
+      ...techniquePartition.accepted.map((r) => ({
+        run_at: r.run_at, asset_class: r.asset_class, symbol: r.symbol,
+        horizon_minutes: horizonMinutes, series_kind: 'technique', series_key: r.technique_id,
+        dir: r.dir, actual_dir: r.actual_dir, correct: r.dir === r.actual_dir ? 1 : 0,
+        score: r.score, regime: r.regime, return_pct: r.return_pct,
+        target_at: r.target_at, observed_at: r.observed_at,
+        entry_price: r.entry_price, exit_price: r.exit_price,
+        path_high_pct: r.path_high_pct, path_low_pct: r.path_low_pct,
+        minutes_to_high: r.minutes_to_high, minutes_to_low: r.minutes_to_low,
+        model_version: OUTCOME_MODEL_VERSION, label_version: OUTCOME_LABEL_VERSION,
+        evaluated_at: nowIso
+      })),
+      ...marketPartition.accepted.map((r) => ({ ...r, correct: 1, model_version: OUTCOME_MODEL_VERSION, label_version: OUTCOME_LABEL_VERSION, evaluated_at: nowIso })),
+      ...comboPartition.accepted.map((r) => ({ ...r, correct: r.dir === r.actual_dir ? 1 : 0, model_version: OUTCOME_MODEL_VERSION, label_version: OUTCOME_LABEL_VERSION, evaluated_at: nowIso })),
+      ...rangePartition.accepted.map((r) => ({
+        run_at: r.run_at, asset_class: r.asset_class, symbol: r.symbol,
+        horizon_minutes: horizonMinutes, series_kind: 'range', series_key: 'range',
+        correct: r.correct, target_at: r.target_at, observed_at: r.observed_at,
+        entry_price: r.entry_price, exit_price: r.exit_price,
+        path_high_pct: r.path_high_pct, path_low_pct: r.path_low_pct,
+        minutes_to_high: r.minutes_to_high, minutes_to_low: r.minutes_to_low,
+        model_version: OUTCOME_MODEL_VERSION, label_version: 'range-containment-v1',
+        evaluated_at: nowIso
+      }))
+    ];
 
-    await forEachConcurrent(Object.values(detailedCalibDeltas), D1_WRITE_CONCURRENCY, async (d) => {
-      await d1(env, `
-        INSERT INTO score_calibration_detail (asset_class, dir, horizon_hours, bucket, correct, total, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (asset_class, dir, horizon_hours, bucket) DO UPDATE SET
-          correct = score_calibration_detail.correct + excluded.correct,
-          total = score_calibration_detail.total + excluded.total,
-          updated_at = excluded.updated_at
-      `, [d.assetClass, d.dir, h, d.bucket, d.correct, d.total, nowIso]);
-    });
+    if (outcomes.length) await insertForecastOutcomes(env, outcomes);
+    evaluatedCount += techniquePartition.accepted.length;
 
-    await forEachConcurrent(Object.entries(deltas), D1_WRITE_CONCURRENCY, async ([key, d]) => {
-      const [symbol, techniqueId] = key.split('|');
-      await d1(env, `
-        INSERT INTO technique_reliability (asset_class, symbol, technique_id, horizon_hours, correct, total, accuracy, votes_up, votes_down, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (symbol, technique_id, horizon_hours) DO UPDATE SET
-          correct = technique_reliability.correct + excluded.correct,
-          total = technique_reliability.total + excluded.total,
-          accuracy = CAST(technique_reliability.correct + excluded.correct AS REAL) / (technique_reliability.total + excluded.total),
-          votes_up = technique_reliability.votes_up + excluded.votes_up,
-          votes_down = technique_reliability.votes_down + excluded.votes_down,
-          updated_at = excluded.updated_at
-      `, [d.asset_class, symbol, techniqueId, h, d.correct, d.total, d.total ? d.correct / d.total : 0, d.votes_up, d.votes_down, nowIso]);
-      evaluatedCount += d.total;
+    // Mark every forecast with a valid exact-target observation, including
+    // overlapping rows intentionally omitted from the independent ledger.
+    // Ledger inserts happen first, so a failure here only causes a harmless
+    // re-scan; the unique index prevents duplicate outcomes.
+    const evaluationMarkJobs = Object.entries(evaluatedVotesByRunAndClass).flatMap(([runAndClass, symSet]) => {
+      const splitAt = runAndClass.lastIndexOf('|');
+      const runAt = runAndClass.slice(0, splitAt);
+      const assetClass = runAndClass.slice(splitAt + 1);
+      return chunk([...symSet], CHUNK).map((symbolsBatch) => ({ runAt, assetClass, symbolsBatch }));
     });
-
-    // The no-skill baseline every weight and significance test is measured
-    // against. Accumulated forward from live outcomes rather than pinned to a
-    // constant, so it tracks regime changes on its own.
-    await forEachConcurrent(Object.entries(baselineDeltas), D1_WRITE_CONCURRENCY, async ([assetClass, d]) => {
-      await d1(env, `
-        INSERT INTO direction_baseline (asset_class, horizon_hours, n_up, n_flat, n_down, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT (asset_class, horizon_hours) DO UPDATE SET
-          n_up = direction_baseline.n_up + excluded.n_up,
-          n_flat = direction_baseline.n_flat + excluded.n_flat,
-          n_down = direction_baseline.n_down + excluded.n_down,
-          updated_at = excluded.updated_at
-      `, [assetClass, h, d.n_up, d.n_flat, d.n_down, nowIso]);
-    });
-
-    await forEachConcurrent(Object.entries(moveDeltas), D1_WRITE_CONCURRENCY, async ([symbol, d]) => {
-      await d1(env, `
-        INSERT INTO asset_move_stats (symbol, horizon_hours, n, sum_pct, sum_pct_sq, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT (symbol, horizon_hours) DO UPDATE SET
-          n = asset_move_stats.n + excluded.n,
-          sum_pct = asset_move_stats.sum_pct + excluded.sum_pct,
-          sum_pct_sq = asset_move_stats.sum_pct_sq + excluded.sum_pct_sq,
-          updated_at = excluded.updated_at
-      `, [symbol, h, d.n, d.sumPct, d.sumPctSq, nowIso]);
-    });
-
-    const evaluationMarkJobs = Object.entries(evaluatedSymbolsByRunAt).flatMap(([runAt, symSet]) =>
-      chunk([...symSet], CHUNK).map((symbolsBatch) => ({ runAt, symbolsBatch }))
-    );
-    await forEachConcurrent(evaluationMarkJobs, D1_WRITE_CONCURRENCY, async ({ runAt, symbolsBatch }) => {
+    await forEachConcurrent(evaluationMarkJobs, D1_WRITE_CONCURRENCY, async ({ runAt, assetClass, symbolsBatch }) => {
       const placeholders = symbolsBatch.map(() => '?').join(',');
-      await d1(env, `UPDATE technique_votes SET ${col} = 1 WHERE run_at = ? AND symbol IN (${placeholders})`, [runAt, ...symbolsBatch]);
+      await d1(env, `UPDATE technique_votes SET ${col} = 1 WHERE run_at = ? AND asset_class = ? AND symbol IN (${placeholders})`, [runAt, assetClass, ...symbolsBatch]);
     });
+
+    const rangeDeletionJobs = Object.entries(evaluatedRangesByRunAndClass).flatMap(([runAndClass, symSet]) => {
+      const splitAt = runAndClass.lastIndexOf('|');
+      const runAt = runAndClass.slice(0, splitAt);
+      const assetClass = runAndClass.slice(splitAt + 1);
+      return chunk([...symSet], CHUNK).map((symbolsBatch) => ({ runAt, assetClass, symbolsBatch }));
+    });
+    await forEachConcurrent(rangeDeletionJobs, D1_WRITE_CONCURRENCY, async ({ runAt, assetClass, symbolsBatch }) => {
+      const placeholders = symbolsBatch.map(() => '?').join(',');
+      await d1(env, `DELETE FROM range_log WHERE horizon_hours = ? AND run_at = ? AND asset_class = ? AND symbol IN (${placeholders})`, [h, runAt, assetClass, ...symbolsBatch]);
+    });
+
+    await aggregatePendingForecastOutcomes(env, nowIso);
   }
 
   const retentionCutoff = new Date(now - RETENTION_HOURS * 3600 * 1000).toISOString();
@@ -756,30 +1138,31 @@ export async function detectAndLogCallFlips(env, nowIso) {
 // "24h" flip result is actually a 24h result.
 export async function evaluateCallFlips(env, nowIso) {
   const cutoff = new Date(new Date(nowIso).getTime() - CALL_FLIP_EVAL_HORIZON_HOURS * 3600 * 1000).toISOString();
-  const due = await d1(env, 'SELECT id, symbol, new_dir, flip_run_at FROM call_flip_log WHERE outcome IS NULL AND flip_run_at <= ?', [cutoff]);
+  const due = await d1(env, 'SELECT id, asset_class, symbol, new_dir, flip_run_at FROM call_flip_log WHERE outcome IS NULL AND flip_run_at <= ?', [cutoff]);
   if (!due.length) return 0;
 
   const targetByKey = {};
   for (const r of due) {
-    const key = `${r.flip_run_at}|${r.symbol}`;
+    const key = `${r.flip_run_at}|${r.asset_class}|${r.symbol}`;
     if (targetByKey[key]) continue;
     const target = maturityTarget(r.flip_run_at, CALL_FLIP_EVAL_HORIZON_HOURS);
-    if (target) targetByKey[key] = { runAt: r.flip_run_at, symbol: r.symbol, ...target };
+    if (target) targetByKey[key] = { runAt: r.flip_run_at, assetClass: r.asset_class, symbol: r.symbol, ...target };
   }
   const targets = Object.values(targetByKey);
   const priceAtFlip = await loadForecastStartPrices(env, targets);
   const maturityRows = await loadMaturityPriceRows(env, targets);
   const priceAtTarget = {};
   for (const target of targets) {
-    const key = `${target.runAt}|${target.symbol}`;
+    const key = `${target.runAt}|${target.assetClass}|${target.symbol}`;
     const match = selectMaturityPrice(maturityRows[key], target.targetAt);
     if (match) priceAtTarget[key] = match.price;
   }
 
   let evaluated = 0;
   for (const r of due) {
-    const before = priceAtFlip[`${r.flip_run_at}|${r.symbol}`];
-    const after = priceAtTarget[`${r.flip_run_at}|${r.symbol}`];
+    const eventKey = `${r.flip_run_at}|${r.asset_class}|${r.symbol}`;
+    const before = priceAtFlip[eventKey];
+    const after = priceAtTarget[eventKey];
     if (before == null || after == null) continue; // no exact entry/target observation; leave unscored rather than mislabeling the flip
     const movePct = ((after / before) - 1) * 100;
     const actualDir = Math.abs(movePct) < OUTCOME_DEADBAND_PCT ? 0 : (movePct > 0 ? 1 : -1);
@@ -1276,6 +1659,75 @@ export async function loadRetrospective(env, limit = 12) {
     };
   } catch (e) {
     console.error('loadRetrospective failed (display-only, ignored):', e.message || e);
+    return null;
+  }
+}
+
+// Display-only view of the automatic quant-research lifecycle. Statistical
+// discovery status and trade eligibility are intentionally separate: a row
+// can be interesting but still be an explicit abstention after costs or
+// walk-forward testing. Nothing here feeds scoring.
+export async function loadQuantResearch(env, limit = 20) {
+  try {
+    const [countRows, rows] = await Promise.all([
+      d1(env, `
+        SELECT r.status, COALESCE(m.trade_decision, 'abstain') AS trade_decision, COUNT(*) AS n
+        FROM research_registry r
+        LEFT JOIN research_strategy_metrics m ON m.hypothesis = r.hypothesis
+        GROUP BY r.status, COALESCE(m.trade_decision, 'abstain')
+      `),
+      d1(env, `
+        SELECT r.hypothesis, r.family, r.asset_class, r.symbol, r.horizon_days,
+               r.status, r.discovered_at, r.discovery_n, r.discovery_effect,
+               r.discovery_z, r.tests_in_family, r.oos_n, r.oos_effect, r.oos_z,
+               m.strategy_direction, m.assumed_round_trip_cost_pct,
+               m.walk_forward_verdict, m.walk_forward_folds,
+               m.trade_decision, m.decision_reason, m.oos_trade_n,
+               m.oos_net_mean_pct, m.oos_net_lower_95_pct,
+               m.oos_win_rate_pct, m.oos_profit_factor,
+               m.oos_compound_return_pct, m.oos_max_drawdown_pct,
+               m.oos_worst_trade_pct, m.updated_at
+        FROM research_registry r
+        LEFT JOIN research_strategy_metrics m ON m.hypothesis = r.hypothesis
+        ORDER BY
+          CASE COALESCE(m.trade_decision, 'abstain')
+            WHEN 'confirmed' THEN 0 WHEN 'provisional' THEN 1 ELSE 2 END,
+          COALESCE(m.oos_net_lower_95_pct, -999999) DESC,
+          r.discovered_at DESC
+        LIMIT ?
+      `, [limit])
+    ]);
+    const lifecycle = {};
+    const decisions = {};
+    for (const row of countRows) {
+      lifecycle[row.status] = (lifecycle[row.status] || 0) + Number(row.n);
+      decisions[row.trade_decision] = (decisions[row.trade_decision] || 0) + Number(row.n);
+    }
+    return {
+      lifecycle, decisions,
+      promotionRule: 'family-corrected discovery -> purged walk-forward -> positive after-cost lower bound -> independent post-discovery confirmation',
+      rows: rows.map((row) => ({
+        hypothesis: row.hypothesis, family: row.family,
+        assetClass: row.asset_class, symbol: row.symbol,
+        horizonDays: Number(row.horizon_days), status: row.status,
+        discoveredAt: row.discovered_at, discoveryN: Number(row.discovery_n),
+        discoveryEffectPct: row.discovery_effect, discoveryZ: row.discovery_z,
+        testsInFamily: Number(row.tests_in_family), oosN: Number(row.oos_n || 0),
+        oosEffectPct: row.oos_effect, oosZ: row.oos_z,
+        side: row.strategy_direction || 'abstain',
+        assumedCostPct: row.assumed_round_trip_cost_pct,
+        walkForward: row.walk_forward_verdict || 'insufficient',
+        walkForwardFolds: Number(row.walk_forward_folds || 0),
+        decision: row.trade_decision || 'abstain', reason: row.decision_reason || 'not-yet-evaluated',
+        trades: Number(row.oos_trade_n || 0), netMeanPct: row.oos_net_mean_pct,
+        netLower95Pct: row.oos_net_lower_95_pct, winRatePct: row.oos_win_rate_pct,
+        profitFactor: row.oos_profit_factor, compoundReturnPct: row.oos_compound_return_pct,
+        maxDrawdownPct: row.oos_max_drawdown_pct, worstTradePct: row.oos_worst_trade_pct,
+        updatedAt: row.updated_at
+      }))
+    };
+  } catch (error) {
+    console.error('loadQuantResearch failed (display-only, ignored):', error.message || error);
     return null;
   }
 }

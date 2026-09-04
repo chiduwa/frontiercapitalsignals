@@ -11,7 +11,8 @@
 // job — casts signals and evaluates maturity every tick, since both are
 // cheap D1-only operations once ticks already exist).
 import { d1, chunk } from './d1-client.mjs';
-import { intradaySignal, nearestTick, INTRADAY_DEADBAND_PCT, INTRADAY_TICK_TOLERANCE_MIN, MIN_RELIABILITY_SAMPLES, isReliabilitySignificant } from '../worker.js';
+import { selectNonOverlappingForecasts, insertForecastOutcomes, aggregatePendingForecastOutcomes, pathExcursionStats } from './reliability.mjs';
+import { intradaySignal, INTRADAY_DEADBAND_PCT, INTRADAY_TICK_TOLERANCE_MIN, MIN_RELIABILITY_SAMPLES, isReliabilitySignificant } from '../worker.js';
 
 // No user-facing leverage/liquidation/position-size numbers ever leave
 // this module — see scripts/intraday-tick.mjs's assembled display object
@@ -173,6 +174,22 @@ export async function castIntradaySignals(env, ticksBySymbol, nowIso) {
 // plus a generous buffer for tolerance-window matching.
 const SIGNAL_LOG_RETENTION_HOURS = 6;
 
+// Exact-horizon labels are one-sided: a tick before the target would shorten a
+// 15-minute forecast into a 5- or 10-minute outcome. Select the first valid tick
+// at or after target, within the declared scheduler tolerance.
+export function firstTickAtOrAfter(ticks, targetMs, toleranceMs) {
+  if (!Array.isArray(ticks) || !Number.isFinite(targetMs) || !Number.isFinite(toleranceMs) || toleranceMs < 0) return null;
+  let best = null;
+  for (const tick of ticks) {
+    const at = Date.parse(tick && tick.tick_at);
+    const price = Number(tick && tick.price);
+    if (!Number.isFinite(at) || !Number.isFinite(price) || price <= 0) continue;
+    if (at < targetMs || at > targetMs + toleranceMs) continue;
+    if (!best || at < best.at) best = { ...tick, price, at };
+  }
+  return best;
+}
+
 // Mirrors evaluateMatured's (reliability.mjs) cutoff-based maturity
 // pattern, but matches each due row against the NEAREST tick to its own
 // specific target instant (tick_at + horizon_minutes) rather than a
@@ -200,39 +217,62 @@ export async function evaluateIntradayMatured(env, nowIso) {
     const ticksBySymbol = {};
     for (const t of tickRows) (ticksBySymbol[t.symbol] ??= []).push({ tick_at: t.tick_at, price: t.price });
 
-    const deltas = {}; // symbol -> { correct, total, assetClass }
+    const candidates = [];
     const evaluatedIds = [];
     for (const r of due) {
       const targetMs = new Date(r.tick_at).getTime() + horizonMinutes * 60 * 1000;
-      const match = nearestTick(ticksBySymbol[r.symbol] || [], targetMs, toleranceMs);
+      const match = firstTickAtOrAfter(ticksBySymbol[r.symbol] || [], targetMs, toleranceMs);
       if (!match) continue; // no tick landed near the target instant (yet, or a real pipeline gap) — leave pending, retention prune cleans it up eventually
 
       const pct = ((match.price / r.entry_price) - 1) * 100;
       const deadband = INTRADAY_DEADBAND_PCT[r.asset_class] ?? INTRADAY_DEADBAND_PCT.crypto;
       const actualDir = pct > deadband ? 1 : pct < -deadband ? -1 : 0;
-      if (!deltas[r.symbol]) deltas[r.symbol] = { correct: 0, total: 0, assetClass: r.asset_class };
-      deltas[r.symbol].total += 1;
-      if (r.dir === actualDir) deltas[r.symbol].correct += 1;
+      const path = pathExcursionStats(ticksBySymbol[r.symbol] || [], r.entry_price, r.tick_at, match.tick_at);
+      candidates.push({
+        run_at: r.tick_at,
+        asset_class: r.asset_class,
+        symbol: r.symbol,
+        horizon_minutes: horizonMinutes,
+        series_kind: 'intraday',
+        series_key: 'intraday-v1',
+        dir: r.dir,
+        actual_dir: actualDir,
+        correct: r.dir === actualDir ? 1 : 0,
+        return_pct: pct,
+        target_at: new Date(targetMs).toISOString(),
+        observed_at: match.tick_at,
+        entry_price: r.entry_price,
+        exit_price: match.price,
+        ...(path || {}),
+        model_version: 'intraday-v1',
+        label_version: `intraday-deadband-${deadband}pct-v1`,
+        evaluated_at: nowIso
+      });
       evaluatedIds.push(r.id);
     }
 
-    for (const [symbol, d] of Object.entries(deltas)) {
-      await d1(env, `
-        INSERT INTO intraday_reliability (asset_class, symbol, horizon_minutes, correct, total, accuracy, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (symbol, horizon_minutes) DO UPDATE SET
-          correct = intraday_reliability.correct + excluded.correct,
-          total = intraday_reliability.total + excluded.total,
-          accuracy = CAST(intraday_reliability.correct + excluded.correct AS REAL) / (intraday_reliability.total + excluded.total),
-          updated_at = excluded.updated_at
-      `, [d.assetClass, symbol, horizonMinutes, d.correct, d.total, d.total ? d.correct / d.total : 0, nowIso]);
-      evaluatedCount += d.total;
+    const priorRows = await d1(env, `
+      SELECT asset_class, symbol, horizon_minutes, series_kind, series_key, MAX(run_at) AS last_run_at
+      FROM forecast_outcomes
+      WHERE series_kind = 'intraday' AND horizon_minutes = ?
+      GROUP BY asset_class, symbol, horizon_minutes, series_kind, series_key
+    `, [horizonMinutes]);
+    const prior = {};
+    for (const row of priorRows) {
+      prior[`${row.asset_class}|${row.symbol}|${row.horizon_minutes}|${row.series_kind}|${row.series_key}`] = row.last_run_at;
     }
+    const partition = selectNonOverlappingForecasts(candidates, horizonMinutes, prior);
+    if (partition.accepted.length) await insertForecastOutcomes(env, partition.accepted);
+    evaluatedCount += partition.accepted.length;
 
+    // Every row with a valid target tick is complete, even when its forward
+    // window overlaps an accepted trial and is intentionally excluded from n.
+    // The append-only ledger is written first, so retries remain idempotent.
     for (const batch of chunk(evaluatedIds, 50)) {
       const idPlaceholders = batch.map(() => '?').join(',');
       await d1(env, `UPDATE intraday_signal_log SET evaluated = 1 WHERE id IN (${idPlaceholders})`, batch);
     }
+    await aggregatePendingForecastOutcomes(env, nowIso);
   }
 
   const retentionCutoff = new Date(now - SIGNAL_LOG_RETENTION_HOURS * 3600 * 1000).toISOString();
@@ -347,17 +387,10 @@ export async function pruneClosedPaperTrades(env, nowMs = Date.now(), retentionD
 // ------------------------- DISPLAY PAYLOAD ASSEMBLY --------------------------
 const HORIZON_LABELS = { 15: '15m', 30: '30m', 60: '1h' };
 
-// Assembles the exact JSON scripts/intraday-tick.mjs writes to
-// signals:intraday (served as-is by the Worker's /api/intraday route —
-// see worker.js). Deliberately excludes leverage, liquidation price, and
-// position size: this is an informational signal display, not
-// individualized trading advice (the paper-trading module above uses
-// those numbers internally for its own bookkeeping only). The adaptive
-// horizon (try 15min, fall back to 30, then 60) uses the exact same
-// MIN_RELIABILITY_SAMPLES + isReliabilitySignificant gate every other
-// confidence number in this codebase already uses — falls back to the
-// shortest horizon with 'methodology' basis and no confidence number
-// (never a fabricated one) when nothing has cleared the bar yet.
+// Research snapshot written by a manually dispatched tick job. The public
+// /api/intraday route is disabled because this model did not demonstrate a
+// usable edge. Keep measurements and aggregate track record, but never write a
+// directional call or methodology fallback horizon into the compatibility KV.
 export async function buildIntradayDisplayPayload(env, watchlist, ticksBySymbol, nowIso) {
   const symbols = watchlist.map((w) => w.symbol);
   if (!symbols.length) return { generated_at: nowIso, watchlist: [], trackRecord: {} };
@@ -383,23 +416,18 @@ export async function buildIntradayDisplayPayload(env, watchlist, ticksBySymbol,
     const ticks = entry ? entry.ticks : [];
     if (!ticks.length) continue; // never ticked yet (a symbol just added to the watchlist)
     const current = ticks.reduce((a, b) => (new Date(b.tick_at).getTime() > new Date(a.tick_at).getTime() ? b : a));
-    const sig = intradaySignal(ticks, nowIso, w.assetClass);
-
-    let horizonMinutes = null, basis = 'methodology', confidence = null;
+    let measured = null;
     for (const h of INTRADAY_HORIZONS_MIN) {
       const rec = relBySymbol[w.symbol] && relBySymbol[w.symbol][h];
       if (rec && rec.total >= MIN_RELIABILITY_SAMPLES && isReliabilitySignificant(rec.correct, rec.total)) {
-        horizonMinutes = h; basis = 'historical'; confidence = rec.accuracy;
+        measured = { horizonMinutes: h, horizonLabel: HORIZON_LABELS[h] || `${h}m`, accuracy: rec.accuracy, samples: rec.total };
         break;
       }
     }
-    if (horizonMinutes == null) horizonMinutes = INTRADAY_HORIZONS_MIN[0];
 
     displayList.push({
       symbol: w.symbol, assetClass: w.assetClass, price: current.price,
-      dir: sig.dir ?? 0, peaked: !!sig.peaked, bottomed: !!sig.bottomed,
-      horizonMinutes, horizonLabel: HORIZON_LABELS[horizonMinutes] || `${horizonMinutes}m`,
-      basis, confidence
+      status: 'research-only-not-published', measuredReliability: measured
     });
   }
 

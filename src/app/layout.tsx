@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     template: "%s | Frontier Capital Signals",
   },
   description:
-    "AI-powered investment intelligence for Ghana, Nigeria, Kenya, Malawi, and Uganda. Daily market insights, due diligence support, and on-ground intelligence for emerging market investors.",
+    "AI-powered investment intelligence for Ghana, Nigeria, Kenya, Malawi and Uganda, with daily market insights and due diligence for emerging-market investors.",
   keywords: [
     "Africa investment intelligence",
     "emerging market research",
@@ -33,11 +33,14 @@ export const metadata: Metadata = {
     "infrastructure investment Africa",
     "Africa PPP opportunities",
     "African private equity",
-    "emerging Africa markets 2025",
+    "emerging Africa markets",
     "invest in Africa",
     "Africa business intelligence",
   ],
-  alternates: { canonical: "https://frontiercapitalsignals.com" },
+  alternates: {
+    canonical: "https://frontiercapitalsignals.com",
+    types: { "text/plain": "https://frontiercapitalsignals.com/llms.txt" },
+  },
   authors: [{ name: "Frontier Capital Signals" }],
   creator: "Frontier Capital Signals",
   openGraph: {

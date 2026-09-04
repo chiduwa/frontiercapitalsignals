@@ -29,7 +29,7 @@
 // project, not a new one-off table for a single question.
 //
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID
-import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, replayIntradaySignal, chronologicalHalfSplit, isReliabilitySignificant, RELIABILITY_SIGNIFICANCE_Z } from '../worker.js';
+import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, replayIntradaySignal, chronologicalHalfSplit, isReliabilitySignificant, RELIABILITY_SIGNIFICANCE_Z, hasCrossClassTickerCollision } from '../worker.js';
 import { binanceUsExchangeInfo, binanceUsKlines } from './archive.mjs';
 import { selectIntradayWatchlist, INTRADAY_HORIZONS_MIN } from './intraday.mjs';
 import { d1, chunk } from './d1-client.mjs';
@@ -66,6 +66,7 @@ async function main() {
   const cryptoRaw = await getCryptoMarkets();
   const cryptoUniverse = cryptoRaw
     .filter((c) => !CRYPTO_BLOCKLIST.has((c.symbol || '').toLowerCase()))
+    .filter((c) => !hasCrossClassTickerCollision(c.symbol))
     .filter((c) => (c.market_cap || 0) >= CRYPTO_MIN_MCAP && (c.total_volume || 0) >= CRYPTO_MIN_VOLUME)
     .map((c) => ({ symbol: (c.symbol || '').toUpperCase(), id: c.id }));
   const fundingMap = await getFundingMap();

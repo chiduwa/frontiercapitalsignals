@@ -1,6 +1,9 @@
 name = "frontier-capital-signals"
 main = "src/worker.js"
-compatibility_date = "2024-11-01"
+compatibility_date = "2026-09-01"
+
+[observability]
+enabled = true
 
 # Bind the KV namespace that stores the hourly payload.
 # Create it once:  npx wrangler kv namespace create FCS_CACHE

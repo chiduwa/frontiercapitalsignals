@@ -36,6 +36,22 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Verify quant research guardrails
+        working-directory: signals-worker
+        run: |
+          node test-discovery.mjs
+          node test-market-context.mjs
+
+      # Discovery now persists queryable strategy/risk metrics. Apply its
+      # additive schema here rather than relying on the hourly refresh job to
+      # have happened first after a deploy.
+      - name: Apply D1 migrations
+        working-directory: signals-worker
+        run: npx --yes wrangler@4 d1 migrations apply frontier-capital-signals-reliability --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Run discovery and out-of-sample re-validation
         working-directory: signals-worker
         run: node scripts/discovery.mjs
@@ -44,3 +60,5 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          FCS_CRYPTO_ROUND_TRIP_COST_PCT: ${{ vars.FCS_CRYPTO_ROUND_TRIP_COST_PCT }}
+          FCS_STOCK_ROUND_TRIP_COST_PCT: ${{ vars.FCS_STOCK_ROUND_TRIP_COST_PCT }}

@@ -14,7 +14,7 @@
 // directly (see backfill-history.mjs/daily-refresh.mjs imports) since those
 // two are genuinely the same need either way: "what's in the universe" and
 // "what's each coin's live funding right now."
-import { d1, chunk } from './d1-client.mjs';
+import { d1, d1Batch, chunk } from './d1-client.mjs';
 import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, computeSpreadSeries, levelChangeBefore, detectOutperformanceRotation, detectPossibleLongTermBottom, isNonDirectionalAsset } from '../worker.js';
 
 const UA = 'Mozilla/5.0 (compatible; FrontierCapitalSignals/2.0)';
@@ -1134,7 +1134,7 @@ export async function yahooHourlyBars(ticker, days = 700) {
 // Pure/no I/O — reused identically by the one-time backfill (Yahoo hourly)
 // and the daily forward-tally (asset_price_log rows), so both build the
 // same statistic the same way.
-export function computeSwingTimeTallies(hourlyBars) {
+export function computeSwingTimeTallies(hourlyBars, minBarsPerDay = 12) {
   const byDay = new Map();
   for (const bar of hourlyBars) {
     const day = bar.ts.slice(0, 10);
@@ -1144,7 +1144,7 @@ export function computeSwingTimeTallies(hourlyBars) {
   const tallies = {};
   let totalDays = 0;
   for (const dayBars of byDay.values()) {
-    if (dayBars.length < 12) continue;
+    if (dayBars.length < minBarsPerDay) continue;
     let hi = dayBars[0], lo = dayBars[0];
     for (const b of dayBars) {
       if (b.close > hi.close) hi = b;
@@ -1159,6 +1159,34 @@ export function computeSwingTimeTallies(hourlyBars) {
     }
   }
   return { tallies, totalDays };
+}
+
+// Atomic, retry-safe historical bootstrap. The historical slice is a
+// replacement snapshot, not another set of live observations: re-running the
+// backfill must not add the same Yahoo window again (the former additive
+// upsert inflated equity sample counts roughly ten-fold). Daily forward
+// observations still use upsertSwingTimeStats below and remain additive.
+export async function replaceSwingTimeBootstrap(env, symbol, assetClass, tallies, totalDays, updatedAt) {
+  const statements = [{
+    sql: 'DELETE FROM swing_time_stats WHERE symbol = ? AND asset_class = ?',
+    params: [symbol, assetClass]
+  }];
+  for (const [slot, tally] of Object.entries(tallies)) {
+    if (tally.high) statements.push({
+      sql: `INSERT INTO swing_time_stats
+        (symbol, asset_class, slot, extreme_type, count, total_days, updated_at)
+        VALUES (?, ?, ?, 'high', ?, ?, ?)`,
+      params: [symbol, assetClass, slot, tally.high, totalDays, updatedAt]
+    });
+    if (tally.low) statements.push({
+      sql: `INSERT INTO swing_time_stats
+        (symbol, asset_class, slot, extreme_type, count, total_days, updated_at)
+        VALUES (?, ?, ?, 'low', ?, ?, ?)`,
+      params: [symbol, assetClass, slot, tally.low, totalDays, updatedAt]
+    });
+  }
+  await d1Batch(env, statements);
+  return statements.length - 1;
 }
 
 // Additive upsert: the same slot gets touched by both the one-time
@@ -1218,13 +1246,34 @@ export async function upsertTimeOfDayStats(env, symbol, assetClass, tallies, upd
   return written;
 }
 
+// Same replacement boundary for the historical forward-return bootstrap.
+// Delete + all inserts are one D1 transaction, so a timeout/retry cannot
+// leave half a profile committed or count the same history twice.
+export async function replaceTimeOfDayBootstrap(env, symbol, assetClass, tallies, updatedAt) {
+  const statements = [{
+    sql: 'DELETE FROM time_of_day_stats WHERE symbol = ? AND asset_class = ?',
+    params: [symbol, assetClass]
+  }];
+  for (const [key, tally] of Object.entries(tallies)) {
+    const [slot, horizon] = key.split('|');
+    statements.push({
+      sql: `INSERT INTO time_of_day_stats
+        (symbol, asset_class, slot, horizon_hours, n, sum_pct, sum_pct_sq, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      params: [symbol, assetClass, slot, Number(horizon), tally.n, tally.sumPct, tally.sumPctSq, updatedAt]
+    });
+  }
+  await d1Batch(env, statements);
+  return statements.length - 1;
+}
+
 // Existing coverage check so the (one-time-ish) backfill doesn't re-fetch
 // and re-tally a symbol that's already been bootstrapped — checks the
 // symbol's own max total_days across its rows (same value on every row
 // for a given symbol, see upsertSwingTimeStats's docs).
 export async function getSwingTimeCoverage(env) {
-  const rows = await d1(env, 'SELECT symbol, MAX(total_days) AS total_days FROM swing_time_stats GROUP BY symbol');
-  return Object.fromEntries(rows.map((r) => [r.symbol, r.total_days]));
+  const rows = await d1(env, 'SELECT asset_class, symbol, MAX(total_days) AS total_days FROM swing_time_stats GROUP BY asset_class, symbol');
+  return Object.fromEntries(rows.map((r) => [`${r.asset_class}|${r.symbol}`, r.total_days]));
 }
 
 // The time-of-day bootstrap needs its OWN coverage check, not swing-timing's.
@@ -1265,8 +1314,8 @@ export async function getOpenCoverage(env) {
 }
 
 export async function getTimeOfDayCoverage(env) {
-  const rows = await d1(env, 'SELECT symbol, MAX(n) AS n FROM time_of_day_stats WHERE horizon_hours = 1 GROUP BY symbol');
-  return Object.fromEntries(rows.map((r) => [r.symbol, r.n]));
+  const rows = await d1(env, 'SELECT asset_class, symbol, MAX(n) AS n FROM time_of_day_stats WHERE horizon_hours = 1 GROUP BY asset_class, symbol');
+  return Object.fromEntries(rows.map((r) => [`${r.asset_class}|${r.symbol}`, r.n]));
 }
 
 // ----------------------------- EVENT SEVERITY (HACKS) -----------------------

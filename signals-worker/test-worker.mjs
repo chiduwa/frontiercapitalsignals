@@ -12,12 +12,15 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { computeSwingTimeTallies, barsRowsToReturnsBySymbol, matchProtocolsToUniverse, findPivots, walkSrLevels, isYahooCryptoDataTrustworthy, fundingSnapshotToRows } from './scripts/archive.mjs';
-import { selectIntradayWatchlist, CRYPTO_WATCHLIST_SIZE } from './scripts/intraday.mjs';
+import { selectIntradayWatchlist, CRYPTO_WATCHLIST_SIZE, firstTickAtOrAfter } from './scripts/intraday.mjs';
 import { parseBinanceKlines } from './scripts/archive.mjs';
-import { selectMaturityPrice } from './scripts/reliability.mjs';
+import { insertForecastOutcomes, loadReliability, OUTCOME_LABEL_VERSION, OUTCOME_MODEL_VERSION, pathExcursionStats, selectMaturityPrice, selectNonOverlappingForecasts } from './scripts/reliability.mjs';
 import { forEachConcurrent } from './scripts/d1-client.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const reliabilitySource = readFileSync(join(__dirname, 'scripts', 'reliability.mjs'), 'utf8');
+const independentOutcomeMigration = readFileSync(join(__dirname, 'migrations', '0009_independent_retry_safe_outcomes.sql'), 'utf8');
+const outcomeProvenanceMigration = readFileSync(join(__dirname, 'migrations', '0013_outcome_provenance_and_versions.sql'), 'utf8');
 
 let failures = 0;
 const check = (name, cond, detail = '') => {
@@ -40,6 +43,113 @@ check('processes every independent batch exactly once', processedBatches.length 
 check('never exceeds the configured bulk-write concurrency', peakConcurrentBatches <= 2, `peak=${peakConcurrentBatches}`);
 await forEachConcurrent([], 4, async () => { throw new Error('empty queue must not invoke a worker'); });
 check('empty bulk-write queue resolves without invoking a worker', true);
+
+console.log('\n== independent outcome ledger: migration replay + transactional claim shape ==');
+const normalizedMigration = independentOutcomeMigration.replace(/\s+/g, ' ').trim();
+const normalizedReliabilitySource = reliabilitySource.replace(/\s+/g, ' ').trim();
+const aggregateDeletePositions = [
+  'DELETE FROM technique_reliability',
+  'DELETE FROM technique_regime_reliability',
+  'DELETE FROM technique_combo_reliability',
+  'DELETE FROM range_reliability',
+  'DELETE FROM asset_move_stats',
+  'DELETE FROM score_calibration',
+  'DELETE FROM score_calibration_detail',
+  'DELETE FROM direction_baseline',
+  'DELETE FROM intraday_reliability'
+].map((sql) => normalizedMigration.indexOf(sql));
+const ledgerReplayPosition = normalizedMigration.indexOf('UPDATE forecast_outcomes SET aggregated = 0');
+const rawReplayPosition = normalizedMigration.indexOf('UPDATE technique_votes SET evaluated_24 = 0, evaluated_168 = 0');
+check('migration 0009 retains the ledger but resets every committed row for aggregate reconstruction',
+  ledgerReplayPosition > Math.max(...aggregateDeletePositions) && ledgerReplayPosition < rawReplayPosition && aggregateDeletePositions.every((p) => p >= 0));
+check('the reconstruction consumer selects exactly the migration-reset pending state',
+  normalizedReliabilitySource.includes('FROM forecast_outcomes WHERE aggregated = 0 ORDER BY id'));
+check('aggregate transaction first claims 0 -> -1 and only the claimant can feed increment SELECTs',
+  normalizedReliabilitySource.includes('UPDATE forecast_outcomes SET aggregated = -1 WHERE id = ? AND aggregated = 0')
+    && normalizedReliabilitySource.includes('FROM forecast_outcomes WHERE id = ? AND aggregated = -1'));
+check('the same transaction commits only a successfully claimed row and is sent through D1 batch',
+  normalizedReliabilitySource.includes('UPDATE forecast_outcomes SET aggregated = 1 WHERE id = ? AND aggregated = -1')
+    && normalizedReliabilitySource.includes('await d1Batch(env, statements)'));
+check('outcome provenance migration records target, observation, prices, path extrema/timing, model, and label versions',
+  ['target_at', 'observed_at', 'entry_price', 'exit_price', 'path_high_pct', 'path_low_pct', 'minutes_to_high', 'minutes_to_low', 'model_version', 'label_version'].every((column) => outcomeProvenanceMigration.includes(column)));
+
+console.log('\n== versioned outcome ledger: exact evidence and auditable inserts ==');
+const priorFetchForLedger = globalThis.fetch;
+const ledgerBodies = [];
+globalThis.fetch = async (_url, options) => {
+  const body = JSON.parse(options.body);
+  ledgerBodies.push(body);
+  const sql = body.sql || '';
+  const results = sql.includes('GROUP BY asset_class, symbol, series_key, dir')
+    ? [{ asset_class: 'crypto', symbol: 'BTC', technique_id: 'composite', dir: 1, horizon_hours: 24, accuracy: 0.8, total: 30, effective_samples: 30 }]
+    : sql.includes('FROM forecast_outcomes')
+      ? [{ asset_class: 'crypto', symbol: 'BTC', technique_id: 'composite', horizon_hours: 24, correct: 24, total: 30, votes_up: 30, votes_down: 0 }]
+      : [];
+  return new Response(JSON.stringify({ success: true, result: [{ success: true, results }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+};
+const versionedReliability = await loadReliability({ CLOUDFLARE_ACCOUNT_ID: 'a', FCS_D1_DATABASE_ID: 'd', CLOUDFLARE_API_TOKEN: 't' });
+check('reliability loader exposes an exact class/asset/side/horizon cell', versionedReliability.byHorizon[24]['crypto|BTC|composite|1'].total === 30);
+check('every reliability ledger read is pinned to the active model and label versions', ledgerBodies.every((body) => body.params.includes(OUTCOME_MODEL_VERSION) && body.params.includes(OUTCOME_LABEL_VERSION)), JSON.stringify(ledgerBodies.map((body) => body.params)));
+
+ledgerBodies.length = 0;
+const auditOutcome = {
+  run_at: '2026-09-01T00:00:00.000Z', asset_class: 'crypto', symbol: 'BTC',
+  horizon_minutes: 1440, series_kind: 'technique', series_key: 'composite',
+  dir: 1, actual_dir: 1, correct: 1, score: 91, regime: 'trending', return_pct: 2.5,
+  target_at: '2026-09-02T00:00:00.000Z', observed_at: '2026-09-02T00:13:00.000Z',
+  entry_price: 100, exit_price: 102.5, model_version: OUTCOME_MODEL_VERSION,
+  label_version: OUTCOME_LABEL_VERSION, evaluated_at: '2026-09-02T00:14:00.000Z'
+};
+await insertForecastOutcomes({ CLOUDFLARE_ACCOUNT_ID: 'a', FCS_D1_DATABASE_ID: 'd', CLOUDFLARE_API_TOKEN: 't' }, [auditOutcome]);
+check('ledger insert carries all 23 audit/version values', ledgerBodies[0].params.length === 23, JSON.stringify(ledgerBodies[0]));
+check('ledger insert ignores only its declared unique conflict, not arbitrary constraint failures', !ledgerBodies[0].sql.includes('INSERT OR IGNORE') && ledgerBodies[0].sql.includes('ON CONFLICT(run_at, asset_class, symbol, horizon_minutes, series_kind, series_key) DO NOTHING'));
+let invalidOutcomeRejected = false;
+try {
+  await insertForecastOutcomes({ CLOUDFLARE_ACCOUNT_ID: 'a', FCS_D1_DATABASE_ID: 'd', CLOUDFLARE_API_TOKEN: 't' }, [{ ...auditOutcome, observed_at: '2026-09-01T23:59:00.000Z' }]);
+} catch { invalidOutcomeRejected = true; }
+check('an observation before its declared target is rejected before persistence', invalidOutcomeRejected);
+globalThis.fetch = priorFetchForLedger;
+
+const pathStart = Date.parse('2026-09-01T00:00:00.000Z');
+const realizedPath = pathExcursionStats([
+  { run_at: new Date(pathStart + 30 * 60000).toISOString(), price: 110 },
+  { run_at: new Date(pathStart + 120 * 60000).toISOString(), price: 90 },
+  { run_at: new Date(pathStart + 180 * 60000).toISOString(), price: 95 },
+  { run_at: new Date(pathStart + 240 * 60000).toISOString(), price: 999 }
+], 100, new Date(pathStart).toISOString(), new Date(pathStart + 180 * 60000).toISOString());
+check('path labels preserve the realized high/low and time-to-extreme inside the horizon', Math.abs(realizedPath.path_high_pct - 10) < 1e-9 && Math.abs(realizedPath.path_low_pct + 10) < 1e-9 && realizedPath.minutes_to_high === 30 && realizedPath.minutes_to_low === 120, JSON.stringify(realizedPath));
+check('path labels ignore observations after the scored horizon', realizedPath.path_high_pct < 100);
+
+console.log('\n== selectNonOverlappingForecasts: one independent trial per horizon and series ==');
+const independentBaseMs = Date.parse('2026-01-01T00:00:00.000Z');
+const outcomeAtHour = (hour, overrides = {}) => ({
+  run_at: new Date(independentBaseMs + hour * 3600 * 1000).toISOString(),
+  asset_class: 'crypto', symbol: 'BTC', horizon_minutes: 24 * 60,
+  series_kind: 'technique', series_key: 'rsi',
+  ...overrides
+});
+const hourlyCandidates = Array.from({ length: 49 }, (_, hour) => outcomeAtHour(hour)).reverse();
+const independent24h = selectNonOverlappingForecasts(hourlyCandidates, 24 * 60);
+check('49 hourly repeats become only three non-overlapping 24h trials',
+  independent24h.accepted.length === 3 && independent24h.skipped.length === 46,
+  JSON.stringify(independent24h.accepted.map((r) => r.run_at)));
+check('the exact horizon boundary is admissible and selection is chronological even for reversed input',
+  independent24h.accepted.map((r) => r.run_at).join('|') === [0, 24, 48].map((h) => outcomeAtHour(h).run_at).join('|'));
+const simultaneousIndependentSeries = selectNonOverlappingForecasts([
+  outcomeAtHour(0),
+  outcomeAtHour(0, { series_key: 'macd' }),
+  outcomeAtHour(0, { symbol: 'ETH' }),
+  outcomeAtHour(0, { asset_class: 'stock' })
+], 24 * 60);
+check('symbol, asset class, and series key form separate independence streams', simultaneousIndependentSeries.accepted.length === 4);
+const priorAcceptance = { 'crypto|BTC|1440|technique|rsi': outcomeAtHour(0).run_at };
+const afterRestart = selectNonOverlappingForecasts([
+  outcomeAtHour(1), outcomeAtHour(23), outcomeAtHour(24), outcomeAtHour(25)
+], 24 * 60, priorAcceptance);
+check('persisted ledger state survives a restart: only the next full-window boundary is accepted',
+  afterRestart.accepted.length === 1 && afterRestart.accepted[0].run_at === outcomeAtHour(24).run_at);
+check('selection never mutates the caller\'s persisted-state object',
+  Object.keys(priorAcceptance).length === 1 && priorAcceptance['crypto|BTC|1440|technique|rsi'] === outcomeAtHour(0).run_at);
 
 // ---- deterministic fake upstreams -----------------------------------------
 const spark = Array.from({ length: 168 }, (_, i) => 100 + i * 0.05 + Math.sin(i / 6));
@@ -195,10 +305,16 @@ global.fetch = stubbedFetch;
 const ctx = { waitUntil: (p) => { if (p && p.then) p.catch(() => {}); } };
 
 const src = readFileSync(join(__dirname, 'worker.js'), 'utf8');
+const deployedSrc = readFileSync(join(__dirname, 'src', 'worker.js'), 'utf8');
 const mod = await import('data:text/javascript,' + encodeURIComponent(src));
+
+console.log('\n== cross-class ticker collision quarantine ==');
+check('known DASH/DoorDash collision is detected', mod.hasCrossClassTickerCollision('dash') === true);
+check('ordinary crypto ticker is not falsely quarantined', mod.hasCrossClassTickerCollision('BTC') === false);
 const worker = mod.default;
 check('worker exports fetch + stale-cache recovery cron', typeof worker.fetch === 'function' && typeof worker.scheduled === 'function');
 check('buildPayload + CACHE_KEY exported for scripts/build-signals.mjs', typeof mod.buildPayload === 'function' && typeof mod.CACHE_KEY === 'string');
+check('source-of-truth and deployed Worker copies are byte-identical', src === deployedSrc);
 
 console.log('\n== stale-cache refresh dispatcher ==');
 const originalFetch = global.fetch;
@@ -337,8 +453,18 @@ check('GTM container + consent-mode snippet present in the page', pageText.inclu
 check('custom event pushes present (data-loaded, error, methodology-open)', pageText.includes('signals_data_loaded') && pageText.includes('signals_feed_error') && pageText.includes('signals_methodology_open'));
 check('clickable-row + sortable-header tracking present', pageText.includes('signals_asset_click') && pageText.includes('signals_sort_change') && pageText.includes('sym-link') && pageText.includes('sortable'));
 check('horizon chip markup + methodology copy present', pageText.includes('class="horizon') && pageText.includes('hz-hist') && pageText.includes('hz-meth') && pageText.includes('Leading vs. lagging'));
-check('track-record section + methodology copy present', pageText.includes('id="trackRecord"') && pageText.includes('95%+') && pageText.includes('Prediction-score track record'));
+check('track-record section + separated-metrics methodology copy present', pageText.includes('id="trackRecord"') && pageText.includes('Prediction track record') && pageText.includes('range containment'));
 check('live-price markup + polling code present', pageText.includes('live-price-cell') && pageText.includes('live-chg-cell') && pageText.includes("api/prices") && pageText.includes('updateLivePrices'));
+check('dashboard polls the fresh measured scalp route, never the deprecated intraday route', pageText.includes("api/scalp") && pageText.includes('loadScalp') && !pageText.includes("api/intraday") && !pageText.includes('loadIntraday'));
+const scalpRendererSource = pageText.slice(pageText.indexOf('function renderScalp(d)'), pageText.indexOf('function meter(score)'));
+check('scalp renderer consumes the measurement-only assets contract, not the old directional watchlist', scalpRendererSource.includes('d.assets.map') && !scalpRendererSource.includes('d.watchlist') && !scalpRendererSource.includes('a.dir'));
+check('scalp renderer never turns the unvalidated range entry candidate into a displayed trade call', !scalpRendererSource.includes('a.range.entry') && !scalpRendererSource.includes('r.entry'));
+const dayRangeRendererSource = pageText.slice(pageText.indexOf('var dr = d.dayRange'), pageText.indexOf("classWithheldBanner('stock'"));
+check('the duplicate day-range panel also withholds its unvalidated fade direction', !dayRangeRendererSource.includes('x.entry.side') && dayRangeRendererSource.includes('direction intentionally withheld until independently validated'));
+check('scalp feed fails closed on missing, stale, or errored live prices', pageText.includes('scalpPricesAreFresh') && pageText.includes('SCALP_MAX_PRICE_AGE_MS') && pageText.includes('renderScalpUnavailable') && pageText.includes('No live scalp context shown'));
+check('abstained rows have an explicit neutral/withheld branch instead of falling through to long', pageText.includes("r.dir===1)?'long'") && pageText.includes("r.dir===-1)?'short':'withheld'") && pageText.includes('— WITHHELD') && pageText.includes('timeframe withheld'));
+check('withheld rows explain both no-edge and insufficient-evidence cases', pageText.includes('Direction withheld: no demonstrated edge over baseline') && pageText.includes('Direction withheld: insufficient independent matured outcomes'));
+check('class-level withholding is surfaced for both crypto and equities, including cold-start evidence gaps', pageText.includes("classWithheldBanner('crypto',cs.crypto)") && pageText.includes("classWithheldBanner('stock',cs.stock)") && pageText.includes('There are not yet enough independent matured outcomes'));
 check('favorites board says just "FAVORITES", not a possessive "YOUR FAVORITES"', pageText.includes('>FAVORITES</b>') && !pageText.includes('YOUR FAVORITES'), pageText.includes('YOUR FAVORITES'));
 check('per-row direction arrow + consolidating-badge markup present', pageText.includes('dir-arrow') && pageText.includes('class="coil') && pageText.includes('Consolidating'));
 check('quality + rotation badge markup present', pageText.includes('class="quality') && pageText.includes('class="rotation') && pageText.includes('Rotating in'));
@@ -440,17 +566,15 @@ check('sparkline fallback has no calibrated lookback (no real daily history to b
 console.log('\n== engine: buildPayload() called directly, as build-signals.mjs will ==');
 const { payload: built, log } = await mod.buildPayload({ TREFIS_OVERRIDES: '{"AAPL": 999}' });
 check('crypto boards populated', built.crypto.breakout.length > 0 && built.crypto.universe >= 3);
-// 5, not 4: bitcoin/ethereum/solana/chainlink + stellar (a favorite,
-// deliberately fixtured below CRYPTO_MIN_MCAP/CRYPTO_MIN_VOLUME to prove
-// the bypass actually works) — tether (blocklisted) and some-microcap (an
-// ordinary non-favorite coin at the same size as stellar) are both
-// correctly excluded.
-check('stablecoin filtered, favorite bypasses the mcap/volume floor, an equally-small non-favorite does not', built.crypto.universe === 5, `universe=${built.crypto.universe}`);
-check('the favorite itself is present in favorites despite being far below the normal mcap/volume floor', built.crypto.favorites.some(f => f.symbol === 'XLM'), JSON.stringify(built.crypto.favorites.map(f => f.symbol)));
+// Five clear the liquidity/favorite universe rule, but only the three with a
+// trustworthy daily series may enter the daily signal model. Favorites bypass
+// the liquidity floor, never the input-quality gate.
+check('stablecoin and assets without trustworthy daily history are filtered before the daily model can call them', built.crypto.universe === 3, `universe=${built.crypto.universe}`);
+check('favorite status never bypasses the trustworthy-daily-history requirement', !built.crypto.favorites.some(f => f.symbol === 'XLM' || f.symbol === 'SOL'), JSON.stringify(built.crypto.favorites.map(f => f.symbol)));
 check('an equally-small NON-favorite is excluded from the universe entirely, not just from favorites', !built.crypto.breakout.concat(built.crypto.breakdown, built.crypto.favorites).some(r => r.symbol === 'MICRO'));
 check('only the 7 named favorites ever appear in the favorites section', built.crypto.favorites.every(f => ['BTC', 'ETH', 'SOL', 'XLM', 'XRP', 'HYPE', 'HBAR'].includes(f.symbol)), JSON.stringify(built.crypto.favorites.map(f => f.symbol)));
 check('stocks never carry a favorites section (FAVORITE_SYMBOLS is crypto-only)', Array.isArray(built.stocks.favorites) && built.stocks.favorites.length === 0);
-check('every favorites row is shaped exactly like a board row (reuses entry(), not a second implementation)', built.crypto.favorites.every(f => typeof f.score === 'number' && (f.dir === 1 || f.dir === -1) && typeof f.price === 'number'));
+check('every favorite is a board-shaped row and is explicitly withheld during cold start', built.crypto.favorites.every(f => typeof f.score === 'number' && f.dir === 0 && typeof f.price === 'number' && f.abstained && f.horizon === null && f.range === null));
 check('every crypto board row carries a consolidating field, null or a real direction, never anything else', built.crypto.breakout.concat(built.crypto.breakdown, built.crypto.favorites).every(r => r.consolidating === null || r.consolidating === 1 || r.consolidating === -1), JSON.stringify(built.crypto.breakout.map(r => r.consolidating)));
 check('every crypto board row carries a rotation field, null or a real streak object, never anything else', built.crypto.breakout.concat(built.crypto.breakdown, built.crypto.favorites).every(r => r.rotation === null || typeof r.rotation.peakRel === 'number'));
 check('every crypto board row carries recentFlip/flipStability fields, safely null with no callFlipData passed (never a crash)', built.crypto.breakout.concat(built.crypto.breakdown, built.crypto.favorites).every(r => r.recentFlip === null && r.flipStability === null));
@@ -473,23 +597,22 @@ check('open interest fed to crypto', built.crypto.breakout.concat(built.crypto.b
 check('DXY/Gold/Oil macro benchmarks reach payload.overview', built.overview.dxy && built.overview.gold && built.overview.oil, JSON.stringify(built.overview));
 check('UST2Y/UST10Y Treasury yield benchmarks reach payload.overview too', built.overview.ust2y && built.overview.ust10y, JSON.stringify(built.overview));
 check('health counts sane', built.health.stocks_ok === built.health.stocks_total && built.health.valuation_ok > 0);
-check('crypto_daily health reflects the daily-history fetch (3 of 5 succeed, solana and stellar have none stubbed)', built.health.crypto_daily_total === 5 && built.health.crypto_daily_ok === 3, `ok=${built.health.crypto_daily_ok} total=${built.health.crypto_daily_total}`);
+check('crypto_daily health reflects all five eligible fetch attempts even though only three may enter the daily model', built.health.crypto_daily_total === 5 && built.health.crypto_daily_ok === 3, `ok=${built.health.crypto_daily_ok} total=${built.health.crypto_daily_total}`);
 check('votesLog/priceLog/rangeLog/allSymbols not leaked into the public payload', built.crypto.votesLog === undefined && built.crypto.priceLog === undefined && built.crypto.rangeLog === undefined && built.crypto.allSymbols === undefined && built.stocks.votesLog === undefined && built.stocks.rangeLog === undefined && built.stocks.allSymbols === undefined);
 check('internal signal candidates are logged for alerting but not leaked into the public payload', Array.isArray(log.signals) && log.signals.every(s => (s.dir === 1 || s.dir === -1) && typeof s.score === 'number') && built.signals === undefined);
 check('log has directional votes for both asset classes', log.votes.some(v => v.asset_class === 'crypto') && log.votes.some(v => v.asset_class === 'stock'));
 check('log votes are directional only (no 0/null dir)', log.votes.every(v => v.dir === 1 || v.dir === -1));
 check('log has a price row per universe asset, both classes', log.prices.length === built.crypto.universe + built.stocks.universe);
-check('log has one composite vote per directionally-called asset, both classes', log.votes.some(v => v.technique_id === 'composite' && v.asset_class === 'crypto') && log.votes.some(v => v.technique_id === 'composite' && v.asset_class === 'stock'));
+check('cold-start heuristics remain research observations but cannot manufacture composite production votes', !log.votes.some(v => v.technique_id === 'composite'));
 check('composite votes carry their own 0-100 score, for the calibration curve', log.votes.filter(v => v.technique_id === 'composite').every(v => typeof v.score === 'number' && v.score >= 0 && v.score <= 100));
 check('real (non-composite) technique votes do not carry a score — only composite rows do', log.votes.filter(v => v.technique_id !== 'composite').every(v => v.score === undefined));
-check('log has range predictions at both the 1d (24h) and 7d (168h) horizons', log.ranges.some(r => r.horizon_hours === 24) && log.ranges.some(r => r.horizon_hours === 168));
-check('every logged range prediction is a real band (low < high)', log.ranges.length > 0 && log.ranges.every(r => r.low < r.high));
+check('no empirical signal horizon means no range forecast is logged', log.ranges.length === 0, JSON.stringify(log.ranges));
 check('highAccuracy present as an array even with no reliability data fed in (none qualify yet)', Array.isArray(built.highAccuracy) && built.highAccuracy.length === 0);
 check('crypto entries carry a CoinGecko id (for the dashboard\'s outbound link)', built.crypto.breakout.concat(built.crypto.breakdown).every(r => typeof r.id === 'string' && r.id.length > 0));
 check('stock entries have no id field (not applicable, uses symbol for the Yahoo link instead)', built.stocks.breakout.every(r => r.id === undefined));
-check('every ranked row carries a horizon estimate end-to-end through buildPayload', built.crypto.breakout.concat(built.crypto.breakdown, built.stocks.breakout, built.stocks.breakdown).every(r => r.horizon && typeof r.horizon.label === 'string' && (r.horizon.basis === 'methodology' || r.horizon.basis === 'historical')));
+check('every cold-start ranked row withholds direction, horizon, and range rather than presenting methodology as evidence', built.crypto.breakout.concat(built.crypto.breakdown, built.stocks.breakout, built.stocks.breakdown).every(r => r.dir === 0 && r.horizon === null && r.range === null && r.abstained));
 
-console.log('\n== engine: qualifying highAccuracy entries preserve asset class, price, and range ==');
+console.log('\n== engine: qualifying historical track records do not invent current trade metrics ==');
 const qualifyingReliability = {
   'BTC|composite': { correct: 25, total: 25, accuracy: 1 },
   'AAPL|composite': { correct: 25, total: 25, accuracy: 1 }
@@ -499,8 +622,8 @@ const btcEntry = builtQualifying.highAccuracy.find(r => r.symbol === 'BTC');
 const aaplEntry = builtQualifying.highAccuracy.find(r => r.symbol === 'AAPL');
 check('BTC clears the 95%+ bar given a synthetic 25/25 composite record', !!btcEntry, JSON.stringify(builtQualifying.highAccuracy));
 check('the qualifying entry carries a real current price, not just a bare score', btcEntry && typeof btcEntry.price === 'number' && btcEntry.price > 0);
-check('the qualifying entry carries its own predicted range (low < high) and a coin id to link out', btcEntry && btcEntry.range && btcEntry.range.low < btcEntry.range.high && typeof btcEntry.id === 'string');
-check('the qualifying entry carries a horizon label for that range\'s own period', btcEntry && btcEntry.horizon && typeof btcEntry.horizon.label === 'string');
+check('a historical track-record row retains its coin id but carries no current range field', btcEntry && !Object.hasOwn(btcEntry, 'range') && typeof btcEntry.id === 'string');
+check('a strong pooled track record alone carries no current timeframe field', btcEntry && !Object.hasOwn(btcEntry, 'horizon'));
 check('qualifying crypto and equity rows retain their asset class so the dashboard labels and links stay correct', btcEntry && btcEntry.asset_class === 'crypto' && aaplEntry && aaplEntry.asset_class === 'stock', JSON.stringify({ btc: btcEntry && btcEntry.asset_class, aapl: aaplEntry && aaplEntry.asset_class }));
 
 console.log('\n== reliability weighting: confluence() with a synthetic reliability map ==');
@@ -511,8 +634,8 @@ const nerfed = mod.confluence(btcMetrics, 'crypto', { [`${btcMetrics.symbol}|rsi
 const belowThreshold = mod.confluence(btcMetrics, 'crypto', { [`${btcMetrics.symbol}|rsi`]: { accuracy: 1.0, correct: 3, total: 3 } });
 check('reliability multiplier changes the score vs baseline (enough samples)', boosted.long !== baseline.long || boosted.short !== baseline.short || nerfed.long !== baseline.long || nerfed.short !== baseline.short);
 check('below MIN_RELIABILITY_SAMPLES, weighting stays at baseline (no overfit to small samples)', belowThreshold.long === baseline.long && belowThreshold.short === baseline.short);
-check('reliabilityMultiplier clamps to [0.5, 1.5]', mod.reliabilityMultiplier({ 'X|y': { accuracy: 5, correct: 50, total: 50 } }, 'X', 'y') === 1.5 && mod.reliabilityMultiplier({ 'X|y': { accuracy: -5, correct: 0, total: 50 } }, 'X', 'y') === 0.5);
-check('reliabilityMultiplier is neutral (1) with no reliability data', mod.reliabilityMultiplier(undefined, 'X', 'y') === 1 && mod.reliabilityMultiplier({}, 'X', 'y') === 1);
+check('reliabilityMultiplier caps a proven positive record at 1.5 and silences a non-positive record', mod.reliabilityMultiplier({ 'X|y': { accuracy: 5, correct: 50, total: 50 } }, 'X', 'y') === 1.5 && mod.reliabilityMultiplier({ 'X|y': { accuracy: -5, correct: 0, total: 50 } }, 'X', 'y') === 0);
+check('reliabilityMultiplier is zero with no reliability data: unknown candidates cannot vote', mod.reliabilityMultiplier(undefined, 'X', 'y') === 0 && mod.reliabilityMultiplier({}, 'X', 'y') === 0);
 
 console.log('\n== isReliabilitySignificant: guards against trusting noise at small sample sizes ==');
 check('14/20 (70%): NOT significant — this is exactly the kind of small-sample noise the guardrail targets', mod.isReliabilitySignificant(14, 20) === false);
@@ -527,7 +650,7 @@ check('zero samples: false, not a division-by-zero crash', mod.isReliabilitySign
 console.log('\n== reliabilityMultiplier: enough samples is not enough on its own, still needs significance ==');
 const notSignificantRec = { 'X|y': { accuracy: 0.7, correct: 14, total: 20 } }; // clears MIN_RELIABILITY_SAMPLES, fails isReliabilitySignificant
 const significantRec = { 'X|y': { accuracy: 0.8, correct: 16, total: 20 } };
-check('14/20 clears the sample-count floor but not significance: multiplier stays neutral (1), not boosted to 1.2', mod.reliabilityMultiplier(notSignificantRec, 'X', 'y') === 1, mod.reliabilityMultiplier(notSignificantRec, 'X', 'y'));
+check('14/20 clears the sample-count floor but not significance: candidate is silenced, not treated as a neutral vote', mod.reliabilityMultiplier(notSignificantRec, 'X', 'y') === 0, mod.reliabilityMultiplier(notSignificantRec, 'X', 'y'));
 check('16/20 clears both bars: multiplier actually reflects the measured accuracy', mod.reliabilityMultiplier(significantRec, 'X', 'y') === mod.clamp(0.5 + 0.8, 0.5, 1.5), mod.reliabilityMultiplier(significantRec, 'X', 'y'));
 const classPrior = { byAssetClass: { crypto: { y: { accuracy: 0.6, total: 100 } } }, overall: {} };
 check('asset-class prior shrinks a significant asset-specific record toward the broader technique baseline instead of fully trusting the raw rate', mod.reliabilityMultiplierForAssetClass(significantRec, 'X', 'y', undefined, undefined, 'crypto', classPrior) < mod.reliabilityMultiplier(significantRec, 'X', 'y'));
@@ -542,11 +665,11 @@ console.log('\n== reliabilityMultiplier: regime-specific track record preferred 
 const blendedOnly = { 'X|y': { accuracy: 0.6, correct: 12, total: 20 } }; // clears MIN_RELIABILITY_SAMPLES but not significance on its own
 const byRegimeStrong = { trending: { 'X|y': { accuracy: 0.85, correct: 17, total: 20 } }, choppy: {} };
 const byRegimeThin = { trending: { 'X|y': { accuracy: 0.9, correct: 9, total: 10 } }, choppy: {} }; // regime-specific but below MIN_RELIABILITY_SAMPLES
-check('no regime passed at all: behaves exactly like the pre-Phase-6 call (blended only)', mod.reliabilityMultiplier(blendedOnly, 'X', 'y') === 1);
-check('regime passed but no byRegime data: falls back to blended', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', undefined, 'trending') === 1);
+check('no regime passed: a blended record without significant positive edge remains silent', mod.reliabilityMultiplier(blendedOnly, 'X', 'y') === 0);
+check('regime passed but no byRegime data: an unproven blended fallback remains silent', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', undefined, 'trending') === 0);
 check('significant regime-specific record: overrides blended with the regime-specific accuracy', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', byRegimeStrong, 'trending') === mod.clamp(0.5 + 0.85, 0.5, 1.5));
-check('regime-specific sample too thin (below MIN_RELIABILITY_SAMPLES): falls back to blended rather than trusting it anyway', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', byRegimeThin, 'trending') === 1);
-check('asset currently choppy but only trending data exists for it: falls back to blended, not cross-regime data', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', byRegimeStrong, 'choppy') === 1);
+check('regime-specific sample too thin: neither it nor the unproven blended record can vote', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', byRegimeThin, 'trending') === 0);
+check('asset currently choppy but only trending data exists: cross-regime evidence is not borrowed', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', byRegimeStrong, 'choppy') === 0);
 
 console.log('\n== scoreBucket: decile bucketing for the calibration curve ==');
 check('0 -> bucket 0', mod.scoreBucket(0) === 0);
@@ -596,21 +719,29 @@ check('RSI troughed+turning WITH structure confirmation: fires bullish', rWithCo
 check('RSI merely low but still falling (not turned yet): does not fire, even with a confirmation present', rStillFalling.dir !== 1, `dir=${rStillFalling.dir}`);
 check('mirror case: RSI peaked+turning down WITH confirmation fires bearish', rTop.dir === -1, `dir=${rTop.dir}`);
 
-const rNoSentiment = findTech(mod.evaluateTechniques(bottomWithConfirm, 'crypto', undefined, { marketContext: {} }), 'reversal');
-const rExtremeFear = findTech(mod.evaluateTechniques(bottomWithConfirm, 'crypto', undefined, { marketContext: { fearGreed: 15 } }), 'reversal');
-const rExtremeGreedIrrelevantToBottom = findTech(mod.evaluateTechniques(bottomWithConfirm, 'crypto', undefined, { marketContext: { fearGreed: 90 } }), 'reversal');
+// Context may size an already-proven signal, but it cannot rescue an unknown
+// heuristic. Give reversal its own demonstrated record before testing the
+// contextual modifier itself.
+const reversalReliability = { 'TESTASSET|reversal': { accuracy: 1, correct: 25, total: 25 } };
+const rNoSentiment = findTech(mod.evaluateTechniques(bottomWithConfirm, 'crypto', reversalReliability, { marketContext: {} }), 'reversal');
+const rExtremeFear = findTech(mod.evaluateTechniques(bottomWithConfirm, 'crypto', reversalReliability, { marketContext: { fearGreed: 15 } }), 'reversal');
+const rExtremeGreedIrrelevantToBottom = findTech(mod.evaluateTechniques(bottomWithConfirm, 'crypto', reversalReliability, { marketContext: { fearGreed: 90 } }), 'reversal');
 check('crypto: extreme fear boosts weight on a bottom call', rExtremeFear.w > rNoSentiment.w, `boosted=${rExtremeFear.w} base=${rNoSentiment.w}`);
 check('crypto: extreme greed (misaligned) leaves weight at base for a bottom call', rExtremeGreedIrrelevantToBottom.w === rNoSentiment.w);
 
 const stockBottom = baseMetric({ rsi: 35, rsiPrev: 28, rsiRecentMin: 25, rsiRecentMax: 60, structure: 1 });
-const rStockNoVix = findTech(mod.evaluateTechniques(stockBottom, 'stock', undefined, { marketContext: {} }), 'reversal');
-const rStockHighVix = findTech(mod.evaluateTechniques(stockBottom, 'stock', undefined, { marketContext: { vixRangePos: 0.85 } }), 'reversal');
+const rStockNoVix = findTech(mod.evaluateTechniques(stockBottom, 'stock', reversalReliability, { marketContext: {} }), 'reversal');
+const rStockHighVix = findTech(mod.evaluateTechniques(stockBottom, 'stock', reversalReliability, { marketContext: { vixRangePos: 0.85 } }), 'reversal');
 check('stock: elevated VIX boosts weight on a bottom call', rStockHighVix.w > rStockNoVix.w, `boosted=${rStockHighVix.w} base=${rStockNoVix.w}`);
 
 console.log('\n== combo reinforcement: proven agreeing pairs get only a modest extra lift ==');
 const comboMetric = baseMetric({ symbol: 'PAIR', chgShort: 2, chg24h: 3, chg7d: 5, rsi: 50, rsiPrev: 45 });
-const comboBaseline = mod.evaluateTechniques(comboMetric, 'crypto');
-const comboBoosted = mod.evaluateTechniques(comboMetric, 'crypto', undefined, {
+const comboTechniqueReliability = {
+  'PAIR|momentum': { accuracy: 1, correct: 25, total: 25 },
+  'PAIR|rsi': { accuracy: 1, correct: 25, total: 25 }
+};
+const comboBaseline = mod.evaluateTechniques(comboMetric, 'crypto', comboTechniqueReliability);
+const comboBoosted = mod.evaluateTechniques(comboMetric, 'crypto', comboTechniqueReliability, {
   comboReliability: { 'PAIR|momentum|rsi': { correct: 18, total: 20, accuracy: 0.9 } }
 });
 check('a proven same-direction pair slightly boosts the participating techniques, not the whole model indiscriminately', findTech(comboBoosted, 'momentum').w > findTech(comboBaseline, 'momentum').w && findTech(comboBoosted, 'rsi').w > findTech(comboBaseline, 'rsi').w);
@@ -627,30 +758,31 @@ check('every technique evaluateTechniques() can emit has a complete TECHNIQUE_ME
 check('horizonLabel buckets: 1 day / few days / a week / weeks', mod.horizonLabel(1) === '~1 day' && mod.horizonLabel(2.5) === '1-3 days' && mod.horizonLabel(5) === '3-6 days' && mod.horizonLabel(8) === '~1 week' && mod.horizonLabel(15) === '1-3 weeks' && mod.horizonLabel(25) === '3+ weeks');
 
 const noHorizonData = mod.confluence(bottomWithConfirm, 'crypto');
-check('no reliability-by-horizon data: falls back to a methodology-based estimate', noHorizonData.longHorizon && noHorizonData.longHorizon.basis === 'methodology', JSON.stringify(noHorizonData.longHorizon));
+check('no reliability-by-horizon data: withholds timeframe instead of turning methodology metadata into a prediction', noHorizonData.longHorizon === null, JSON.stringify(noHorizonData.longHorizon));
 
 const symbol = bottomWithConfirm.symbol;
 const activeBullIds = mod.evaluateTechniques(bottomWithConfirm, 'crypto').filter(t => t.dir === 1).map(t => t.id);
+const provenActiveReliability = Object.fromEntries(activeBullIds.map(id => [`${symbol}|${id}`, { accuracy: 1, correct: 25, total: 25 }]));
 const strongAt24h = {
-  24: Object.fromEntries(activeBullIds.map(id => [`${symbol}|${id}`, { correct: 25, total: 25 }])),
+  24: Object.fromEntries(activeBullIds.map(id => [`crypto|${symbol}|${id}|1`, { correct: 25, total: 25 }])),
   168: {}
 };
-const historicalShort = mod.confluence(bottomWithConfirm, 'crypto', undefined, { reliabilityByHorizon: strongAt24h });
-check('this asset\'s own 24h accuracy is strong and 168h has no data: picks the historical 1-day window', historicalShort.longHorizon.basis === 'historical' && historicalShort.longHorizon.label === mod.horizonLabel(1), JSON.stringify(historicalShort.longHorizon));
+const historicalShort = mod.confluence(bottomWithConfirm, 'crypto', provenActiveReliability, { reliabilityByHorizon: strongAt24h });
+check('this asset\'s proven 24h techniques and no usable 168h data: picks the historical 1-day window', historicalShort.longHorizon && historicalShort.longHorizon.basis === 'historical' && historicalShort.longHorizon.label === mod.horizonLabel(1), JSON.stringify(historicalShort.longHorizon));
 
 const strongAt168h = {
   24: {},
-  168: Object.fromEntries(activeBullIds.map(id => [`${symbol}|${id}`, { correct: 25, total: 25 }]))
+  168: Object.fromEntries(activeBullIds.map(id => [`crypto|${symbol}|${id}|1`, { correct: 25, total: 25 }]))
 };
-const historicalLong = mod.confluence(bottomWithConfirm, 'crypto', undefined, { reliabilityByHorizon: strongAt168h });
-check('this asset\'s own 7d accuracy is strong and 24h has no data: picks the historical ~1-week window', historicalLong.longHorizon.basis === 'historical' && historicalLong.longHorizon.label === mod.horizonLabel(7), JSON.stringify(historicalLong.longHorizon));
+const historicalLong = mod.confluence(bottomWithConfirm, 'crypto', provenActiveReliability, { reliabilityByHorizon: strongAt168h });
+check('this asset\'s proven 7d techniques and no usable 24h data: picks the historical ~1-week window', historicalLong.longHorizon && historicalLong.longHorizon.basis === 'historical' && historicalLong.longHorizon.label === mod.horizonLabel(7), JSON.stringify(historicalLong.longHorizon));
 
 const belowSampleThreshold = {
-  24: Object.fromEntries(activeBullIds.map(id => [`${symbol}|${id}`, { correct: 4, total: 5 }])),
+  24: Object.fromEntries(activeBullIds.map(id => [`crypto|${symbol}|${id}|1`, { correct: 4, total: 5 }])),
   168: {}
 };
-const historicalTooFewSamples = mod.confluence(bottomWithConfirm, 'crypto', undefined, { reliabilityByHorizon: belowSampleThreshold });
-check('below MIN_RELIABILITY_SAMPLES at both horizons: still falls back to methodology, not overfit', historicalTooFewSamples.longHorizon.basis === 'methodology', JSON.stringify(historicalTooFewSamples.longHorizon));
+const historicalTooFewSamples = mod.confluence(bottomWithConfirm, 'crypto', provenActiveReliability, { reliabilityByHorizon: belowSampleThreshold });
+check('below MIN_RELIABILITY_SAMPLES at both horizons: withholds timeframe rather than overfitting or falling back', historicalTooFewSamples.longHorizon === null, JSON.stringify(historicalTooFewSamples.longHorizon));
 
 // Regression test for a real bug found live: several techniques voting on
 // the same asset in the same hour are correlated (marked right/wrong
@@ -661,11 +793,11 @@ check('below MIN_RELIABILITY_SAMPLES at both horizons: still falls back to metho
 // threshold individually, summing past it).
 check('at least 2 active techniques exist to make this regression test meaningful', activeBullIds.length >= 2, `activeBullIds=${JSON.stringify(activeBullIds)}`);
 const correlatedThinSamples = {
-  24: Object.fromEntries(activeBullIds.map(id => [`${symbol}|${id}`, { correct: 5, total: 13 }])), // 13 < 20 each, but sums past 20 with 2+ techniques
+  24: Object.fromEntries(activeBullIds.map(id => [`crypto|${symbol}|${id}|1`, { correct: 5, total: 13 }])), // 13 < 20 each, but sums past 20 with 2+ techniques
   168: {}
 };
-const notFooledByCorrelatedSamples = mod.confluence(bottomWithConfirm, 'crypto', undefined, { reliabilityByHorizon: correlatedThinSamples });
-check('several techniques each below threshold: does not sum to false confidence, stays methodology', notFooledByCorrelatedSamples.longHorizon.basis === 'methodology', JSON.stringify(notFooledByCorrelatedSamples.longHorizon));
+const notFooledByCorrelatedSamples = mod.confluence(bottomWithConfirm, 'crypto', provenActiveReliability, { reliabilityByHorizon: correlatedThinSamples });
+check('several techniques each below threshold: does not sum to false confidence and withholds the timeframe', notFooledByCorrelatedSamples.longHorizon === null, JSON.stringify(notFooledByCorrelatedSamples.longHorizon));
 
 check('horizonEstimate returns null when nothing voted that direction', mod.horizonEstimate([{ id: 'rsi', w: 1, dir: 1 }], -1, 'X', undefined) === null);
 
@@ -724,13 +856,13 @@ check('this specific, checked-in-advance fixture picks the shortest candidate (f
 console.log('\n== topIndicator: which specific indicator this asset leans on ==');
 check('no reliability data: null, not a guess', mod.topIndicator(undefined, 'BTC') === null);
 const multiTechReliability = {
-  'BTC|rsi': { accuracy: 0.55, total: 30 },
-  'BTC|divergence': { accuracy: 0.71, total: 25 },
-  'BTC|macd': { accuracy: 0.9, total: 5 } // high accuracy but below MIN_RELIABILITY_SAMPLES — must not win
+  'BTC|rsi': { accuracy: 17 / 30, correct: 17, total: 30 },
+  'BTC|divergence': { accuracy: 0.88, correct: 22, total: 25 },
+  'BTC|macd': { accuracy: 1, correct: 5, total: 5 } // perfect but below MIN_RELIABILITY_SAMPLES — must not win
 };
 const best = mod.topIndicator(multiTechReliability, 'BTC');
-check('picks the highest-accuracy technique among those with enough of their own samples', best && best.id === 'divergence', JSON.stringify(best));
-check('a technique above the threshold-accuracy but below sample threshold is correctly excluded', best.id !== 'macd');
+check('picks the strongest statistically proven technique rather than a merely above-average one', best && best.id === 'divergence', JSON.stringify(best));
+check('a perfect technique below the sample threshold is correctly excluded', best && best.id !== 'macd');
 
 console.log('\n== predictedRange: a band from real volatility, never a point figure ==');
 check('missing price/horizon/direction: returns null', mod.predictedRange(null, 3, 60, 1, undefined, 'X', 2) === null && mod.predictedRange(100, null, 60, 1, undefined, 'X', 2) === null && mod.predictedRange(100, 3, 60, 0, undefined, 'X', 2) === null);
@@ -1405,9 +1537,10 @@ console.log('\n== dwell + seasonal techniques: fire only with real signal, learn
 const dwellLowMetric = baseMetric({ rsi: 50, rsiPrev: 50, dwell: { dir: -1, days: 12 }, corr: 0.8 }); // dwelling low, but still correlated with the market
 const dwellLowDecoupled = baseMetric({ rsi: 50, rsiPrev: 50, dwell: { dir: -1, days: 12 }, corr: 0.1 }); // same dwell, decoupled
 const dwellTooShort = baseMetric({ rsi: 50, rsiPrev: 50, dwell: { dir: -1, days: 2 }, corr: 0.1 }); // below MIN_DWELL_DAYS
-const dTechCorrelated = findTech(mod.evaluateTechniques(dwellLowMetric, 'crypto'), 'dwell');
-const dTechDecoupled = findTech(mod.evaluateTechniques(dwellLowDecoupled, 'crypto'), 'dwell');
-const dTechTooShort = findTech(mod.evaluateTechniques(dwellTooShort, 'crypto'), 'dwell');
+const dwellReliability = { 'TESTASSET|dwell': { accuracy: 1, correct: 25, total: 25 } };
+const dTechCorrelated = findTech(mod.evaluateTechniques(dwellLowMetric, 'crypto', dwellReliability), 'dwell');
+const dTechDecoupled = findTech(mod.evaluateTechniques(dwellLowDecoupled, 'crypto', dwellReliability), 'dwell');
+const dTechTooShort = findTech(mod.evaluateTechniques(dwellTooShort, 'crypto', dwellReliability), 'dwell');
 check('dwelling near a low votes bullish (reversal read)', dTechCorrelated.dir === 1, `dir=${dTechCorrelated.dir}`);
 check('decoupling from the market raises the weight over the same dwell while still correlated', dTechDecoupled.w > dTechCorrelated.w, `decoupled=${dTechDecoupled.w} correlated=${dTechCorrelated.w}`);
 check('below MIN_DWELL_DAYS: does not fire a directional call', dTechTooShort.dir === 0, `dir=${dTechTooShort.dir}`);
@@ -1759,14 +1892,15 @@ console.log('\n== assetPredictionScore: DIRECTIONAL track record, measured again
 check('below MIN_RELIABILITY_SAMPLES directional outcomes: null, not a noisy guess', mod.assetPredictionScore('THIN', { 'THIN|composite': { correct: 5, total: 10 } }, {}) === null);
 check('exactly one under the threshold (19 total): still null', mod.assetPredictionScore('W', { 'W|composite': { correct: 10, total: 19 } }, {}) === null);
 const pooled = mod.assetPredictionScore('X', {
-  'X|composite': { correct: 9, total: 10 },
+  'X|composite': { correct: 16, total: 20 },
   'X|reversal': { correct: 4, total: 5 },
   'X|dwell': { correct: 3, total: 5 }
 }, { X: { hits: 8, total: 10 } });
 // Range containment is no longer averaged in with the directional records: a
 // band is BUILT to contain the price, so pooling it let containment carry the
-// headline. 16/20 directional = 80, with containment reported separately.
-check('pools the three DIRECTIONAL records only (16/20 = 80), never range containment', pooled && pooled.score === 80 && pooled.samples === 20, JSON.stringify(pooled));
+// headline. The independent composite is 16/20 = 80; reversal and dwell are
+// correlated inputs to it, so adding their 7/10 again would be double-counting.
+check('uses the independent composite record only (16/20 = 80), never correlated component votes or range containment', pooled && pooled.score === 80 && pooled.samples === 20, JSON.stringify(pooled));
 check('reports range containment separately rather than blending it into the score', pooled && pooled.range && pooled.range.containment === 80 && pooled.range.samples === 10, JSON.stringify(pooled && pooled.range));
 const rangeOnly = mod.assetPredictionScore('Y', {}, { Y: { hits: 19, total: 20 } });
 check('a symbol with ONLY range containment has no directional track record: null, not a 95 that reads as prediction accuracy', rangeOnly === null, JSON.stringify(rangeOnly));
@@ -1798,7 +1932,7 @@ check('a thin lucky streak has a weaker lower bound than a deep one at the same 
 console.log('\n== reliabilityWeight: reduces exactly to the old formula at a 0.5 baseline ==');
 check('accuracy 0.5 at the old baseline is still a neutral 1.0 weight', mod.reliabilityWeight(0.5, 50) === 1);
 check('small-record half-scale response is unchanged (0.8 -> 1.3)', Math.abs(mod.reliabilityWeight(0.8, 50) - 1.3) < 1e-9);
-check('deep-record response is unchanged (0.8, n=100 -> 1.5 clamped)', Math.abs(mod.reliabilityWeight(0.8, 100) - 1.5) < 1e-9);
+check('deep records retain the same bounded response instead of receiving an abrupt n=100 boost', Math.abs(mod.reliabilityWeight(0.8, 100) - 1.3) < 1e-9);
 check('at a measured 0.384 baseline, 0.384 accuracy is the new neutral point', Math.abs(mod.reliabilityWeight(0.384, 50, 0.384) - 1) < 1e-9);
 check('a 44% technique is rewarded above neutral where it used to be penalised', mod.reliabilityWeight(0.44, 50, 0.384) > 1 && mod.reliabilityWeight(0.44, 50) < 1);
 
@@ -1813,7 +1947,7 @@ check('at baseline stays neutral', Math.abs(mod.reliabilityWeight(0.36, 300, 0.3
 check('above baseline is still rewarded', mod.reliabilityWeight(0.50, 300, 0.36) > 1);
 // Silencing is data-driven and reverses itself if the record recovers.
 check('a recovered record is no longer silenced', mod.reliabilityWeight(0.45, 346, 0.36) > 0);
-check('behaviour at the old 0.5 baseline is unchanged for healthy records', Math.abs(mod.reliabilityWeight(0.8, 100) - 1.5) < 1e-9 && mod.reliabilityWeight(0.5, 50) === 1);
+check('healthy records stay bounded and neutral-at-baseline under the old 0.5 baseline', Math.abs(mod.reliabilityWeight(0.8, 100) - 1.3) < 1e-9 && mod.reliabilityWeight(0.5, 50) === 1);
 
 console.log('\n== discovery: family-corrected significance bar ==');
 const disc = await import('./scripts/discovery.mjs');
@@ -1922,7 +2056,7 @@ check('even a CONFIRMED finding is demoted when contradicted', disc.nextStatus('
 
 console.log('\n== live triggers: only confirmed setups, only when actually live ==');
 const confirmedRun = {
-  hypothesis: 'run-reversal|crypto|2|down', family: 'run-reversal', status: 'confirmed',
+  hypothesis: 'run-reversal|crypto|2|down', family: 'run-reversal', status: 'confirmed', trade_decision: 'confirmed',
   asset_class: 'crypto', symbol: null, discovery_effect: 4.2, discovery_z: 3.1, discovery_n: 14,
   discovered_at: '2026-01-01T00:00:00Z', oos_n: 30
 };
@@ -1947,7 +2081,7 @@ check('a PROVISIONAL finding never fires a live trigger', disc.evaluateLiveTrigg
 check('a DECAYED finding never fires either', disc.evaluateLiveTriggers([{ ...confirmedRun, status: 'decayed' }], liveBooks, '2026-04-02T06:00:00Z').length === 0);
 
 const confirmedDow = {
-  hypothesis: 'day-of-week|AAPL|4', family: 'day-of-week', status: 'confirmed',
+  hypothesis: 'day-of-week|AAPL|4', family: 'day-of-week', status: 'confirmed', trade_decision: 'confirmed',
   asset_class: 'stock', symbol: 'AAPL', discovery_effect: -0.31, discovery_z: 3.9, discovery_n: 400,
   discovered_at: '2026-01-01T00:00:00Z', oos_n: 40
 };
@@ -2062,23 +2196,21 @@ check('and neither one absorbs the other price as a session extreme', collide.by
 console.log('\n== dayRangeSignal: has it moved enough today to fade? ==');
 const stats = { BTC: { medianPct: 4, p80Pct: 6, samples: 90 } };
 const quiet = mod.dayRangeSignal('BTC', 100.5, { open: 100, high: 101, low: 99.8 }, stats, {});
-check('a normal-sized move is not an entry', quiet.entry === null && quiet.state !== 'extended-up');
+check('a normal-sized move has no reversal watch', quiet.watch === null && quiet.state !== 'extended-up');
 check('median range is reported in price terms at the current price, for sizing', Math.abs(quiet.medianAbs - 100.5 * 0.04) < 1e-9);
 // +7% with a 6% p80 bar, sitting at the top of the day's range.
 const stretched = mod.dayRangeSignal('BTC', 107, { open: 100, high: 107, low: 99 }, stats, { rsi: 78, volRatio: 2.1 });
 check('a move past p80 while pinned near the day high reads as extended-up', stretched.state === 'extended-up');
-check('and yields a candidate SHORT', stretched.entry && stretched.entry.side === 'short', JSON.stringify(stretched.entry));
-check('carrying its confirmations, not just a bare call', stretched.entry.reasons.length >= 2);
-check('never marked proven — it has no scored track record', stretched.entry.proven === false);
+check('and reports confirmations without inventing a SHORT', stretched.watch && stretched.watch.reasons.length >= 2 && !Object.hasOwn(stretched.watch, 'side'), JSON.stringify(stretched.watch));
 check('reports the move as a multiple of a normal day', Math.abs(stretched.moveInMedians - 1.75) < 1e-9);
 // Same stretch, but the price has already come back off the high.
 const faded = mod.dayRangeSignal('BTC', 103, { open: 100, high: 107, low: 99 }, stats, { rsi: 78, volRatio: 2.1 });
-check('extended but no longer near the extreme: no entry (the fade already happened)', faded.entry === null);
+check('extended but no longer near the extreme: no reversal watch (the fade already happened)', faded.watch === null);
 const down = mod.dayRangeSignal('BTC', 93, { open: 100, high: 101, low: 93 }, stats, { rsi: 22, volRatio: 1.8 });
-check('the symmetric down case yields a candidate LONG', down.state === 'extended-down' && down.entry.side === 'long', JSON.stringify(down.entry));
+check('the symmetric down case reports evidence but no invented LONG', down.state === 'extended-down' && down.watch && down.watch.reasons.length >= 1 && !Object.hasOwn(down.watch, 'side'), JSON.stringify(down.watch));
 // Confirmation discipline: stretched alone is not enough.
 const noConfirm = mod.dayRangeSignal('BTC', 107, { open: 100, high: 107, low: 99 }, stats, { rsi: 55, volRatio: 0.9 });
-check('stretched with nothing confirming it does NOT fire — same never-fire-alone rule as every other technique', noConfirm.state === 'extended-up' && noConfirm.entry === null);
+check('stretched with nothing confirming produces no watch', noConfirm.state === 'extended-up' && noConfirm.watch === null);
 check('an asset with no measured range abstains entirely', mod.dayRangeSignal('ZZZ', 100, { open: 100, high: 101, low: 99 }, stats, {}) === null);
 check('too few samples abstains', mod.dayRangeSignal('X', 100, { open: 100, high: 101, low: 99 }, { X: { medianPct: 4, p80Pct: 6, samples: 5 } }, {}) === null);
 // Second line of defence. With a zero median, `bar` used to fall back to 0 and
@@ -2092,10 +2224,10 @@ check('a peg-tight median abstains', mod.dayRangeSignal('GHO', 100.5, { open: 10
 // and neither is something to mean-revert into.
 const dislocated = mod.dayRangeSignal('DASH', 41.68, { open: 236.74, high: 236.74, low: 41.68 }, { DASH: { medianPct: 4.12, p80Pct: 5.31, samples: 90 } }, { volRatio: 1.9 });
 check('a move far beyond any plausible session is marked dislocated', dislocated.state === 'dislocated', JSON.stringify({ state: dislocated.state, moveInMedians: dislocated.moveInMedians }));
-check('and offers NO entry — you do not fade a dislocation', dislocated.entry === null);
+check('and offers NO directional watch — you do not fade a dislocation', dislocated.watch === null);
 check('while still reporting the numbers so the anomaly is visible, not hidden', Math.abs(dislocated.moveInMedians) > 8);
 const bigButReal = mod.dayRangeSignal('BTC', 93, { open: 100, high: 101, low: 93 }, { BTC: { medianPct: 4, p80Pct: 6, samples: 90 } }, { rsi: 22 });
-check('a large-but-plausible move still trades normally', bigButReal.state === 'extended-down' && bigButReal.entry.side === 'long');
+check('a large-but-plausible move still reports its non-directional confirmation watch', bigButReal.state === 'extended-down' && bigButReal.watch && !Object.hasOwn(bigButReal.watch, 'side'));
 check('no session data yet abstains', mod.dayRangeSignal('BTC', 100, null, stats, {}) === null);
 
 console.log('\n== dayTradingUniverse / indexBoardRows ==');
@@ -2130,11 +2262,13 @@ check('produces a day-trading view', view && view.assets.length === 1, JSON.stri
 const a = view.assets[0];
 check('carries the live price, not the build price', a.price === 107);
 check('carries the range-exhaustion read', a.range && a.range.state === 'extended-up');
-check('and a candidate entry with its confirmations', a.range.entry && a.range.entry.side === 'short' && a.range.entry.reasons.length >= 2);
+check('and confirmations without a side or entry instruction', a.range.confirmations.length >= 2 && !Object.hasOwn(a.range, 'entry') && !Object.hasOwn(a.range, 'side'));
 check('carries the proven hour window', a.hours && a.hours.buy && a.hours.buy.label === 'NYSE close (16:00 ET)');
 // The point of the rewrite: no invented direction call.
 check('states its basis rather than implying a forecast', /no unvalidated direction call/.test(view.basis));
 check('reports how fresh the prices actually are', view.prices_generated_at === '2026-08-31T00:04:00Z');
+check('measurement-only scalp asset has no direction, confidence, target, peak, or bottom field',
+  !Object.hasOwn(a, 'dir') && !Object.hasOwn(a, 'confidence') && !Object.hasOwn(a, 'target') && !Object.hasOwn(a, 'peaked') && !Object.hasOwn(a, 'bottomed'), JSON.stringify(a));
 // An asset with nothing measured must not appear at all.
 const bare = mod.buildScalpView({ ...scalpPayload, dailyRange: null, todEdge: null }, scalpLive, scalpSession, '2026-08-31T00:05:00Z');
 check('an asset with no measured range and no imminent window is omitted entirely', bare === null, JSON.stringify(bare));
@@ -2146,7 +2280,7 @@ const twoAssets = mod.buildScalpView(
   { crypto: { BTC: { price: 107 }, ETH: { price: 100.5 } }, stocks: {}, generated_at: '2026-08-31T00:04:00Z' },
   { date: '2026-08-31', bySymbol: { 'crypto|BTC': { open: 100, high: 107, low: 99 }, 'crypto|ETH': { open: 100, high: 101, low: 100 } } },
   '2026-08-31T00:05:00Z');
-check('an asset with a live entry candidate sorts above a quiet one', twoAssets.assets[0].symbol === 'BTC', JSON.stringify(twoAssets.assets.map(x=>x.symbol)));
+check('an asset with observed confirmations sorts above a quiet one', twoAssets.assets[0].symbol === 'BTC', JSON.stringify(twoAssets.assets.map(x=>x.symbol)));
 
 console.log('\n== mergeLivePrices: fresh price layer over a slow model layer ==');
 const basePayload = {
@@ -2189,17 +2323,22 @@ const stockVerdict = mod.assetClassSkill(stockCal, skillBaselines, 'stock');
 check('stocks are measured as NOT clearing their baseline', stockVerdict && stockVerdict.edge < 0 && !stockVerdict.proven, JSON.stringify(stockVerdict));
 check('too little evidence to judge a class: null, not a verdict', mod.assetClassSkill({ 'crypto|1|24|8': { correct: 5, total: 10 } }, skillBaselines, 'crypto') === null);
 
-const boards = { breakout: [{ symbol: 'A', dir: 1, score: 80, price: 10 }], breakdown: [{ symbol: 'B', dir: -1, score: 75 }], universe: 2 };
+const boards = {
+  breakout: [{ symbol: 'A', dir: 1, score: 80, price: 10, horizon: { days: 1, basis: 'historical' }, range: { low: 9, high: 12, basis: 'historical' } }],
+  breakdown: [{ symbol: 'B', dir: -1, score: 75, horizon: { days: 7, basis: 'historical' }, range: { low: 7, high: 11, basis: 'historical' } }],
+  universe: 2
+};
 const kept = mod.abstainBoards(boards, cryptoVerdict);
 check('a class with proven skill publishes its directional calls untouched', kept === boards && kept.breakout[0].dir === 1);
 const abstained = mod.abstainBoards(boards, stockVerdict);
 check('a class that failed its baseline has the direction stripped', abstained.breakout[0].dir === 0 && abstained.breakdown[0].dir === 0);
 check('abstaining explains itself rather than silently blanking', abstained.breakout[0].abstained && abstained.breakout[0].abstained.reason === 'no-demonstrated-edge');
 check('abstaining keeps every descriptive field intact', abstained.breakout[0].score === 80 && abstained.breakout[0].price === 10);
+check('abstaining removes the unvalidated trade clock and range', abstained.breakout[0].horizon === null && abstained.breakout[0].range === null);
 check('abstaining preserves non-array sections', abstained.universe === 2);
-// The cold-start case: no verdict yet must NOT mean "suppress everything", or a
-// fresh database would render an entirely blank dashboard.
-check('no measured verdict yet: publishes as before rather than blanking the board', mod.abstainBoards(boards, null) === boards);
+const coldStartAbstained = mod.abstainBoards(boards, null);
+check('no measured class verdict yet: preserves the row but withholds its trade call', coldStartAbstained.breakout[0].dir === 0 && coldStartAbstained.breakout[0].horizon === null && coldStartAbstained.breakout[0].range === null);
+check('cold-start withholding is explicit about insufficient evidence', coldStartAbstained.breakout[0].abstained && coldStartAbstained.breakout[0].abstained.reason === 'insufficient-evidence');
 
 console.log('\n== currentSignalConfidence: conservative, horizon-matched current-call confidence ==');
 check('no empirical support at all: returns null rather than inventing confidence from a raw score alone', mod.currentSignalConfidence({ symbol: 'X', asset_class: 'crypto', dir: 1, score: 90, agree: 7, total: 10, horizon: { days: 1, basis: 'methodology' }, range: { basis: 'methodology' } }, {}, null) === null);
@@ -2209,7 +2348,9 @@ const confBlended = mod.currentSignalConfidence(
     pooled: { 8: { correct: 72, total: 100, accuracy: 0.72 } },
     detailed: { 'crypto|1|24|8': { correct: 29, total: 30, accuracy: 29 / 30 } }
   },
-  { correct: 45, total: 50 }
+  { correct: 45, total: 50, effectiveSamples: 50 },
+  undefined,
+  { hits: 70, total: 100, effectiveSamples: 100 }
 );
 check('prefers the matching asset-class/direction/horizon calibration once it has enough samples', confBlended && confBlended.calibration && confBlended.calibration.source === 'asset-class-direction-horizon', JSON.stringify(confBlended));
 check('uses a conservative lower estimate rather than the raw blended hit rate', confBlended && confBlended.estimatedWinRate < confBlended.rawEstimatedWinRate && confBlended.estimatedWinRate >= 0.68, JSON.stringify(confBlended));
@@ -2220,7 +2361,9 @@ const confWeakAgreement = mod.currentSignalConfidence(
     pooled: { 8: { correct: 72, total: 100, accuracy: 0.72 } },
     detailed: { 'crypto|1|24|8': { correct: 29, total: 30, accuracy: 29 / 30 } }
   },
-  { correct: 45, total: 50 }
+  { correct: 45, total: 50, effectiveSamples: 50 },
+  undefined,
+  { hits: 70, total: 100, effectiveSamples: 100 }
 );
 check('weak current agreement blocks an alert even with decent history', confWeakAgreement && confWeakAgreement.actionable === false, JSON.stringify(confWeakAgreement));
 const confCalibrationOnly = mod.currentSignalConfidence(
@@ -2228,7 +2371,7 @@ const confCalibrationOnly = mod.currentSignalConfidence(
   { 9: { correct: 110, total: 120, accuracy: 110 / 120 } },
   null
 );
-check('very strong bucket calibration alone can still qualify a top-end score', confCalibrationOnly && confCalibrationOnly.actionable === true, JSON.stringify(confCalibrationOnly));
+check('bucket calibration alone cannot qualify a call without asset evidence and historical horizon/range', confCalibrationOnly && confCalibrationOnly.actionable === false, JSON.stringify(confCalibrationOnly));
 const confThinAssetRecord = mod.currentSignalConfidence(
   { symbol: 'X', asset_class: 'crypto', dir: 1, score: 84, agree: 7, total: 10, horizon: { days: 1, basis: 'historical' }, range: { basis: 'historical' } },
   {},
@@ -2236,6 +2379,52 @@ const confThinAssetRecord = mod.currentSignalConfidence(
 );
 check('a raw 80% record with only 20 outcomes does not clear the conservative alert bar', confThinAssetRecord && confThinAssetRecord.actionable === false && confThinAssetRecord.estimatedWinRate < 0.68, JSON.stringify(confThinAssetRecord));
 check('lowerConfidenceBound is below the raw rate for finite evidence, not a fabricated certainty', mod.lowerConfidenceBound(45, 50) < 0.9 && mod.lowerConfidenceBound(45, 50) > 0.68, mod.lowerConfidenceBound(45, 50));
+
+console.log('\n== gateBoardsBySignalConfidence: exact current setup must earn publication ==');
+const setupRow = {
+  symbol: 'BTC', name: 'Bitcoin', dir: 1, score: 94, price: 100,
+  conf: { agree: 8, total: 10 },
+  horizon: { days: 1, label: '~1 day', basis: 'historical' },
+  range: { low: 95, high: 112, basis: 'historical' }
+};
+const setupBoards = { breakout: [setupRow], breakdown: [], universe: 1 };
+const setupReliability = { 24: { 'crypto|BTC|composite|1': { correct: 90, total: 100, effectiveSamples: 100 } }, 168: {} };
+const setupRangeReliability = { 'crypto|BTC|24': { hits: 70, total: 100, effectiveSamples: 100 } };
+const matchingCalibration = {
+  pooled: {},
+  detailed: { 'crypto|1|24|9': { correct: 90, total: 100, effectiveSamples: 100 } }
+};
+const setupPublished = mod.gateBoardsBySignalConfidence(setupBoards, 'crypto', setupReliability, matchingCalibration, undefined, setupRangeReliability);
+check('matching direction, horizon, score bucket, calibration, and asset record preserve the call', setupPublished.breakout[0].dir === 1 && setupPublished.breakout[0].confidence && setupPublished.breakout[0].confidence.conservative_edge > 0, JSON.stringify(setupPublished.breakout[0]));
+const pooledSetupCalibration = {
+  pooled: { 9: { correct: 95, total: 100, effectiveSamples: 100 } },
+  detailed: {}
+};
+const pooledSetupWithheld = mod.gateBoardsBySignalConfidence(setupBoards, 'crypto', setupReliability, pooledSetupCalibration, undefined, setupRangeReliability);
+check('a strong pooled score bucket cannot replace matching class, direction, and horizon calibration', pooledSetupWithheld.breakout[0].dir === 0 && pooledSetupWithheld.breakout[0].horizon === null && pooledSetupWithheld.breakout[0].range === null, JSON.stringify(pooledSetupWithheld.breakout[0]));
+const mismatchedCalibration = {
+  pooled: {},
+  detailed: { 'crypto|-1|24|9': { correct: 90, total: 100, effectiveSamples: 100 } }
+};
+const setupWithheld = mod.gateBoardsBySignalConfidence(setupBoards, 'crypto', setupReliability, mismatchedCalibration, undefined, setupRangeReliability);
+check('evidence from the wrong direction cannot launder this setup into a call', setupWithheld.breakout[0].dir === 0 && setupWithheld.breakout[0].horizon === null && setupWithheld.breakout[0].range === null, JSON.stringify(setupWithheld.breakout[0]));
+check('per-setup withholding carries an explicit reason', setupWithheld.breakout[0].abstained && setupWithheld.breakout[0].abstained.reason === 'unproven-current-setup');
+const wrongSideReliability = { 24: { 'crypto|BTC|composite|-1': { correct: 95, total: 100, effectiveSamples: 100 } }, 168: {} };
+const wrongSideWithheld = mod.gateBoardsBySignalConfidence(setupBoards, 'crypto', wrongSideReliability, matchingCalibration, undefined, setupRangeReliability);
+check('the asset\'s opposite-side record cannot authorize this direction', wrongSideWithheld.breakout[0].dir === 0);
+const overwideRange = { 'crypto|BTC|24': { hits: 98, total: 100, effectiveSamples: 100 } };
+const uncalibratedRangeWithheld = mod.gateBoardsBySignalConfidence(setupBoards, 'crypto', setupReliability, matchingCalibration, undefined, overwideRange);
+check('a near-always-hit band is rejected as uncalibrated/too broad rather than advertised as precise', uncalibratedRangeWithheld.breakout[0].dir === 0);
+check('range calibration reports both coverage and the declared nominal target', mod.rangeCalibrationEvidence(setupRangeReliability['crypto|BTC|24']).qualified === true && mod.rangeCalibrationEvidence(setupRangeReliability['crypto|BTC|24']).nominalCoverage === 0.68);
+
+const sanitizedOldPayload = mod.sanitizePayloadForPublication({
+  classSkill: { crypto: { proven: true } },
+  crypto: { breakout: [{ ...setupRow, confidence: { calibration_source: 'pooled', asset_effective_samples: 999, calibration_effective_samples: 999 } }] },
+  stocks: {}, highAccuracy: [{ symbol: 'BTC', dir: 1, horizon: { days: 1 }, range: { low: 1, high: 2 } }],
+  dayRange: { 'crypto|BTC': { entry: { side: 'short', target: 90 }, side: 'short', target: 90 } }
+});
+check('publication sanitizer strips stale cached calls that lack exact evidence', sanitizedOldPayload.crypto.breakout[0].dir === 0 && sanitizedOldPayload.crypto.breakout[0].horizon === null && sanitizedOldPayload.crypto.breakout[0].range === null);
+check('publication sanitizer strips trade fields from track-record and measurement-only panels', !Object.hasOwn(sanitizedOldPayload.highAccuracy[0], 'dir') && !Object.hasOwn(sanitizedOldPayload.dayRange['crypto|BTC'], 'entry') && !Object.hasOwn(sanitizedOldPayload.dayRange['crypto|BTC'], 'side'));
 
 console.log('\n== api: KV populated by the "Action" (mirrors what build-signals.mjs writes) ==');
 const warmEnv = { FCS_CACHE: new MockKV() };
@@ -2252,10 +2441,28 @@ const stale = await worker.fetch(new Request('https://x.com/signals/api/signals'
 check('serves stale cache, marked "stale"', stale.headers.get('x-fcs-cache') === 'stale', stale.headers.get('x-fcs-cache'));
 check('stale response body still has real data', (await stale.json()).crypto.breakout.length > 0);
 
-console.log('\n== api: /api/intraday — day-trading signal, separate KV key, no leverage/liquidation/sizing fields ==');
+console.log('\n== api: /api/scalp — current measurement-only contract ==');
+const scalpApiEnv = { FCS_CACHE: new MockKV() };
+await scalpApiEnv.FCS_CACHE.put(mod.CACHE_KEY, JSON.stringify(scalpPayload));
+await scalpApiEnv.FCS_CACHE.put(mod.LIVE_PRICE_CACHE_KEY, JSON.stringify({ ...scalpLive, generated_at: new Date().toISOString() }));
+await scalpApiEnv.FCS_CACHE.put('signals:session-extremes', JSON.stringify(scalpSession));
+const scalpApi = await worker.fetch(new Request('https://x.com/signals/api/scalp'), scalpApiEnv, ctx);
+const scalpApiBody = await scalpApi.json();
+check('scalp endpoint is never browser/CDN cached', scalpApi.headers.get('cache-control') === 'no-store', scalpApi.headers.get('cache-control'));
+check('scalp endpoint serves assets plus both freshness timestamps', scalpApiBody.assets && scalpApiBody.assets.length === 1 && scalpApiBody.generated_at && scalpApiBody.prices_generated_at, JSON.stringify(scalpApiBody));
+check('scalp endpoint exposes measurements without a directional call',
+  scalpApiBody.assets.every((x) => !Object.hasOwn(x, 'dir') && !Object.hasOwn(x, 'confidence') && !Object.hasOwn(x, 'target') && !Object.hasOwn(x, 'peaked') && !Object.hasOwn(x, 'bottomed')),
+  JSON.stringify(scalpApiBody.assets));
+const scalpApiJson = JSON.stringify(scalpApiBody);
+check('scalp endpoint has no nested side, entry, or target escape hatch', !scalpApiJson.includes('"side":') && !scalpApiJson.includes('"entry":') && !scalpApiJson.includes('"target":'), scalpApiJson);
+const scalpApiEmpty = await worker.fetch(new Request('https://x.com/signals/api/scalp'), { FCS_CACHE: new MockKV() }, ctx);
+check('scalp endpoint with no model cache fails closed with an error body', scalpApiEmpty.status === 200 && typeof (await scalpApiEmpty.json()).error === 'string');
+
+console.log('\n== api: /api/intraday — deprecated route fails closed even with stale directional KV ==');
 const intradayEmptyEnv = { FCS_CACHE: new MockKV() };
 const intradayEmpty = await worker.fetch(new Request('https://x.com/signals/api/intraday'), intradayEmptyEnv, ctx);
-check('no tick yet: still 200 with an error body, not a crash', intradayEmpty.status === 200 && typeof (await intradayEmpty.json()).error === 'string');
+const intradayEmptyBody = await intradayEmpty.json();
+check('deprecated route stays 200 but explicitly publishes no call', intradayEmpty.status === 200 && intradayEmptyBody.deprecated === true && intradayEmptyBody.direction === null && intradayEmptyBody.horizon === null && intradayEmptyBody.target === null);
 
 const intradayPayload = {
   generated_at: new Date().toISOString(),
@@ -2267,9 +2474,8 @@ const intradayPayload = {
 const intradayWarmEnv = { FCS_CACHE: new MockKV() };
 await intradayWarmEnv.FCS_CACHE.put(mod.INTRADAY_CACHE_KEY, JSON.stringify(intradayPayload));
 const intradayWarm = await worker.fetch(new Request('https://x.com/signals/api/intraday'), intradayWarmEnv, ctx);
-check('warm marked hit', intradayWarm.headers.get('x-fcs-cache') === 'hit', intradayWarm.headers.get('x-fcs-cache'));
 const intradayBody = await intradayWarm.json();
-check('returns the stored watchlist', intradayBody.watchlist.length === 1 && intradayBody.watchlist[0].symbol === 'BTC');
+check('old directional KV is ignored rather than republished', intradayWarm.headers.get('x-fcs-cache') === 'disabled' && !Object.hasOwn(intradayBody, 'watchlist') && intradayBody.direction === null);
 const intradayBodyStr = JSON.stringify(intradayBody).toLowerCase();
 check('no leverage field anywhere in the served payload', !intradayBodyStr.includes('leverage'));
 check('no liquidation field anywhere in the served payload', !intradayBodyStr.includes('liquidat'));
@@ -2278,7 +2484,7 @@ check('no position-size/margin field anywhere in the served payload', !intradayB
 const intradayStaleEnv = { FCS_CACHE: new MockKV() };
 await intradayStaleEnv.FCS_CACHE.put(mod.INTRADAY_CACHE_KEY, JSON.stringify({ ...intradayPayload, generated_at: new Date(Date.now() - 60 * 60 * 1000).toISOString() }));
 const intradayStale = await worker.fetch(new Request('https://x.com/signals/api/intraday'), intradayStaleEnv, ctx);
-check('stale (past the 45min intraday freshness window) marked stale', intradayStale.headers.get('x-fcs-cache') === 'stale', intradayStale.headers.get('x-fcs-cache'));
+check('stale directional cache is also disabled and never served', intradayStale.headers.get('x-fcs-cache') === 'disabled' && (await intradayStale.json()).direction === null);
 
 console.log('\n== api: live prices (between-build ticks, real fetch, symbols only from KV) ==');
 const pricesEmptyEnv = { FCS_CACHE: new MockKV() };
@@ -2295,7 +2501,7 @@ const displayedCryptoSymbols = new Set(built.crypto.breakout.concat(built.crypto
 const displayedStockSymbols = new Set(built.stocks.breakout.concat(built.stocks.breakdown).map(r => r.symbol));
 check('crypto live prices keyed by ticker symbol, not CoinGecko id', [...displayedCryptoSymbols].some(sym => pricesBody.crypto[sym] && typeof pricesBody.crypto[sym].price === 'number'));
 const solRow = built.crypto.breakout.concat(built.crypto.breakdown).find(r => r.symbol === 'SOL');
-check('a coin with no live quote (solana, not in the CoinGecko fixture) falls back to the hourly build\'s own price rather than a gap', !!solRow && pricesBody.crypto.SOL && pricesBody.crypto.SOL.price === solRow.price);
+check('an asset rejected for missing trustworthy daily history is not reintroduced by the live-price layer', !solRow && !pricesBody.crypto.SOL);
 check('stock live prices keyed by symbol with numeric price + chg24h', [...displayedStockSymbols].every(sym => pricesBody.stocks[sym] && typeof pricesBody.stocks[sym].price === 'number' && typeof pricesBody.stocks[sym].chg24h === 'number'));
 
 console.log('\n== api: live prices split across two providers (Binance.US + CoinGecko), see binanceUsTradablePairs ==');
@@ -2459,6 +2665,27 @@ check('finds the nearest tick within tolerance, not just the first candidate', m
 check('a target with nothing within tolerance returns null, not a distant fallback', mod.nearestTick(irregularTicks, T0 - 90 * 60000, 10 * 60000) === null);
 check('empty tick array: null, not a crash', mod.nearestTick([], T0, 10 * 60000) === null);
 check('exact match wins over a slightly-off one', mod.nearestTick(irregularTicks, T0 - 3 * 60000, 10 * 60000).price === 108);
+
+console.log('\n== firstTickAtOrAfter: intraday maturity never shortens the labeled horizon ==');
+const oneSidedTarget = T0;
+const oneSidedTicks = [
+  { tick_at: new Date(oneSidedTarget + 7 * 60000).toISOString(), price: 107 },
+  { tick_at: new Date(oneSidedTarget - 1 * 60000).toISOString(), price: 999 }, // closer, but before target
+  { tick_at: new Date(oneSidedTarget + 2 * 60000).toISOString(), price: 102 }
+];
+const firstPostTarget = firstTickAtOrAfter(oneSidedTicks, oneSidedTarget, 10 * 60000);
+check('chooses the first tick at/after target even when a pre-target tick is closer',
+  firstPostTarget && firstPostTarget.price === 102 && firstPostTarget.tick_at === new Date(oneSidedTarget + 2 * 60000).toISOString(),
+  JSON.stringify(firstPostTarget));
+check('a pre-target tick by itself cannot score a matured horizon',
+  firstTickAtOrAfter([{ tick_at: new Date(oneSidedTarget - 1).toISOString(), price: 100 }], oneSidedTarget, 10 * 60000) === null);
+check('a post-target tick beyond tolerance is withheld rather than relabeled',
+  firstTickAtOrAfter([{ tick_at: new Date(oneSidedTarget + 10 * 60000 + 1).toISOString(), price: 100 }], oneSidedTarget, 10 * 60000) === null);
+check('invalid and non-positive prices cannot become maturity observations',
+  firstTickAtOrAfter([
+    { tick_at: new Date(oneSidedTarget).toISOString(), price: 0 },
+    { tick_at: new Date(oneSidedTarget + 1000).toISOString(), price: 'bad' }
+  ], oneSidedTarget, 10 * 60000) === null);
 
 console.log('\n== intradaySignal: 2-of-2 momentum confluence off price-only ticks, deadband + day-extreme aware ==');
 const mkTicks = (pricesAgoMin) => pricesAgoMin.map(([minAgo, price]) => ({ tick_at: new Date(T0 - minAgo * 60000).toISOString(), price }));
@@ -2862,6 +3089,7 @@ check('a down-call is correct when price falls', mod.scoreSurgeCast(-1, 100, 92)
 check('a down-call is wrong when price rises', mod.scoreSurgeCast(-1, 100, 108).outcome === 'wrong');
 check('a flat market credits neither side', mod.scoreSurgeCast(-1, 100, 100.4).outcome === 'flat');
 check('an up-call is correct when price rises', mod.scoreSurgeCast(1, 100, 108).outcome === 'correct');
+
 
 console.log(failures === 0 ? '\nWORKER INTEGRATION OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

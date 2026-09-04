@@ -100,7 +100,7 @@ export default function OGImage() {
               alignItems: "center",
               gap: 10,
               marginBottom: 32,
-              width: "fit-content",
+              width: "auto",
               background: WHITE_08,
               border: `1px solid ${WHITE_15}`,
               borderRadius: 100,

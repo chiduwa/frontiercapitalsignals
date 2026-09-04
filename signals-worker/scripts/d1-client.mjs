@@ -47,6 +47,41 @@ export async function d1(env, sql, params = []) {
   return (body.result && body.result[0] && body.result[0].results) || [];
 }
 
+// Runs several statements as one D1 batch transaction. This is intentionally
+// separate from forEachConcurrent below: concurrency is useful for independent
+// bulk writes, while a learning outcome and the aggregates derived from it must
+// either all commit or all roll back. The REST API's `batch` form has the same
+// transactional semantics as D1Database.batch: statements execute in order and
+// a failure rolls the batch back. See Cloudflare's Query D1 Database API.
+export async function d1Batch(env, statements) {
+  if (!Array.isArray(statements) || !statements.length) return [];
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), D1_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(d1Url(env), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        batch: statements.map((statement) => ({
+          sql: statement.sql,
+          params: statement.params || []
+        }))
+      }),
+      signal: ctrl.signal
+    });
+  } finally {
+    clearTimeout(t);
+  }
+  const body = await res.json().catch(() => null);
+  const results = body && Array.isArray(body.result) ? body.result : [];
+  const failed = results.find((result) => result && result.success === false);
+  if (!res.ok || !body || body.success !== true || failed) {
+    throw new Error(`D1 batch failed: HTTP ${res.status} ${JSON.stringify((body && body.errors) || failed)}`);
+  }
+  return results.map((result) => (result && result.results) || []);
+}
+
 // D1's REST API accepts independent statements concurrently, but opening one
 // request for every write batch can rate-limit the shared API and recreate the
 // same backlog. This bounded queue is used for bulk, order-independent writes.
