@@ -12,7 +12,7 @@
 // Optional env: TREFIS_OVERRIDES
 // Optional (enables reliability weighting when set): FCS_D1_DATABASE_ID
 import { buildPayload, sanitizePayloadForPublication, CACHE_KEY, coingeckoSimplePrice, yahooQuote, getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, hasCrossClassTickerCollision } from '../worker.js';
-import { loadReliability, loadTechniquePriors, loadComboReliability, loadMoveStats, loadRangeReliability, loadCalibration, loadDetailedCalibration, loadDirectionBaselines, loadDailyRangeStats, loadTimeOfDayEdge, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, loadSwingTimeStats, loadRecentEvents, loadIvHistory, loadRegimeReliability, loadSrLevels, loadSrBreakStats, loadQualityData, loadRotationStatus, loadCallFlipData, loadLongTermBottomStatus, loadRetrospective, loadQuantResearch, logRun, evaluateMatured, evaluateTimeOfDay, snapshotAssetScores, detectAndLogCallFlips, evaluateCallFlips } from './reliability.mjs';
+import { loadReliability, loadTechniquePriors, loadComboReliability, loadMoveStats, loadRangeReliability, loadCalibration, loadDetailedCalibration, loadDirectionBaselines, loadDailyRangeStats, loadTimeOfDayEdge, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, loadSwingTimeStats, loadRecentEvents, loadIvHistory, loadRegimeReliability, loadSrLevels, loadSrBreakStats, loadQualityData, loadRotationStatus, loadCallFlipData, loadLongTermBottomStatus, loadRetrospective, loadQuantResearch, loadExcursionEvidence, EXCURSION_MIN_SAMPLES, logRun, evaluateMatured, evaluateTimeOfDay, snapshotAssetScores, detectAndLogCallFlips, evaluateCallFlips } from './reliability.mjs';
 import { checkAndNotifyReversals, checkAndNotifySuddenMoves, checkAndNotifyConsolidations, checkAndNotifyConfidentMoves } from './notify.mjs';
 import { upsertMarketSentiment, loadRecentBars, loadTvlSeries, loadMarketReturn, loadYieldSpreadChange } from './archive.mjs';
 import { selectIntradayWatchlist } from './intraday.mjs';
@@ -213,6 +213,26 @@ if (FCS_D1_DATABASE_ID) {
     console.log(`retrospective: ${retro.recent.length} recent episode(s), ${retro.patterns.length} cause pattern(s)`);
   } else {
     console.log('retrospective: no rows yet (the daily job has not run, or found nothing to explain)');
+  }
+}
+
+// Measured path shape of matured calls: when the favorable extreme actually
+// arrived inside the declared horizon, and how much of it was still there at
+// maturity. Display-only for the same reason the retrospective is — it is a
+// backward-looking track record of independent, matured forecasts, and
+// nothing in the engine scores against it. Empty until enough non-overlapping
+// outcomes carry path columns, which is the correct cold-start state.
+if (FCS_D1_DATABASE_ID) {
+  try {
+    const excursions = await loadExcursionEvidence(env);
+    if (excursions.length) {
+      payload.holdingEvidence = { minSamples: EXCURSION_MIN_SAMPLES, rows: excursions.slice(0, 24) };
+      console.log(`holding evidence: ${excursions.length} asset/side/horizon record(s) over the sample floor`);
+    } else {
+      console.log('holding evidence: no asset/side/horizon has enough independent matured paths yet');
+    }
+  } catch (error) {
+    console.error('holding-evidence load failed (ignored):', error.message || error);
   }
 }
 

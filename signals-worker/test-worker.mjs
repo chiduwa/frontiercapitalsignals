@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { computeSwingTimeTallies, barsRowsToReturnsBySymbol, matchProtocolsToUniverse, findPivots, walkSrLevels, isYahooCryptoDataTrustworthy, fundingSnapshotToRows } from './scripts/archive.mjs';
 import { selectIntradayWatchlist, CRYPTO_WATCHLIST_SIZE, firstTickAtOrAfter } from './scripts/intraday.mjs';
 import { parseBinanceKlines } from './scripts/archive.mjs';
-import { insertForecastOutcomes, loadReliability, OUTCOME_LABEL_VERSION, OUTCOME_MODEL_VERSION, pathExcursionStats, selectMaturityPrice, selectNonOverlappingForecasts } from './scripts/reliability.mjs';
+import { EXCURSION_MIN_SAMPLES, insertForecastOutcomes, loadReliability, OUTCOME_LABEL_VERSION, OUTCOME_MODEL_VERSION, pathExcursionStats, selectMaturityPrice, selectNonOverlappingForecasts, summarizeExcursionEvidence } from './scripts/reliability.mjs';
 import { forEachConcurrent } from './scripts/d1-client.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -3090,6 +3090,68 @@ check('a down-call is wrong when price rises', mod.scoreSurgeCast(-1, 100, 108).
 check('a flat market credits neither side', mod.scoreSurgeCast(-1, 100, 100.4).outcome === 'flat');
 check('an up-call is correct when price rises', mod.scoreSurgeCast(1, 100, 108).outcome === 'correct');
 
+
+console.log('\n== excursion evidence: side-aware entry/exit measurement ==');
+// One long row: best price +6% at 6h of a 24h window, worst -2%, closed +1%.
+const longExcursion = {
+  asset_class: 'crypto', symbol: 'SOL', dir: 1, horizon_hours: 24, n: 40,
+  sum_mfe: 6 * 40, sum_mae: -2 * 40, sum_minutes_to_peak: 360 * 40,
+  sum_signed_return: 1 * 40, n_favorable_first: 10
+};
+const [longSummary] = summarizeExcursionEvidence([longExcursion]);
+check('the best available price and its timing are reported as measured', longSummary
+  && Math.abs(longSummary.mfePct - 6) < 1e-9 && Math.abs(longSummary.hoursToPeak - 6) < 1e-9, JSON.stringify(longSummary));
+check('the peak is placed at its real share of the declared horizon', longSummary && Math.abs(longSummary.peakShare - 0.25) < 1e-9);
+// The whole point: holding to maturity gave back 5 of the 6 points offered.
+check('give-back is the best price minus what maturity actually returned', longSummary && Math.abs(longSummary.giveBackPct - 5) < 1e-9);
+check('the worst excursion against the call is preserved with its sign', longSummary && Math.abs(longSummary.maePct + 2) < 1e-9);
+check('adverse-first is the complement of favorable-first', longSummary && Math.abs(longSummary.adverseFirstRate - 0.75) < 1e-9);
+check('the adverse-first rate carries a conservative lower bound below it', longSummary
+  && longSummary.adverseFirstLower > 0 && longSummary.adverseFirstLower < longSummary.adverseFirstRate,
+  JSON.stringify(longSummary && longSummary.adverseFirstLower));
+
+// A short's favorable extreme is the path LOW. The SQL flips the sign, so a
+// short that fell 6% must read exactly like the long that rose 6% — getting
+// this backwards would report every profitable short as a maximum loss.
+const [shortSummary] = summarizeExcursionEvidence([{ ...longExcursion, symbol: 'DOGE', dir: -1 }]);
+check('a short is summarized on the same scale as a long', shortSummary
+  && Math.abs(shortSummary.mfePct - 6) < 1e-9 && Math.abs(shortSummary.maePct + 2) < 1e-9);
+
+// Sample floor: thin records do not exist rather than being shown thin.
+check('a record below the sample floor is withheld entirely',
+  summarizeExcursionEvidence([{ ...longExcursion, n: EXCURSION_MIN_SAMPLES - 1 }]).length === 0);
+check('the floor is exactly the declared minimum, not one above it',
+  summarizeExcursionEvidence([{ ...longExcursion, n: EXCURSION_MIN_SAMPLES }]).length === 1);
+
+// Give-back is a difference between two points on the SAME measured path, so
+// it can never be negative; a maturity price above the window's own high would
+// mean the path was mis-measured, not that holding beat the peak.
+const impossible = summarizeExcursionEvidence([{ ...longExcursion, sum_signed_return: 9 * 40 }]);
+check('a maturity return above the measured peak cannot produce negative give-back',
+  impossible.length === 1 && impossible[0].giveBackPct === 0);
+
+// Ordering is the actionable part: the worst exit timing sorts first.
+const ordered = summarizeExcursionEvidence([
+  { ...longExcursion, symbol: 'A', sum_signed_return: 5 * 40 },
+  { ...longExcursion, symbol: 'B', sum_signed_return: 0 },
+  { ...longExcursion, symbol: 'C', sum_signed_return: 3 * 40 }
+]);
+check('assets held longest past their own peak are listed first',
+  ordered.map((r) => r.symbol).join('') === 'BCA', ordered.map((r) => r.symbol).join(''));
+
+check('a non-directional record is never summarized',
+  summarizeExcursionEvidence([{ ...longExcursion, dir: 0 }]).length === 0);
+check('a zero-length horizon is rejected rather than dividing by it',
+  summarizeExcursionEvidence([{ ...longExcursion, horizon_hours: 0 }]).length === 0);
+
+// The loader's own degenerate-path exclusion is in SQL, so assert the query
+// actually carries it: without this clause every window whose only known
+// point was its own entry would read as "no give-back, no heat".
+check('the loader excludes windows carrying no path information at all',
+  /path_high_pct > 0 OR path_low_pct < 0/.test(reliabilitySource));
+check('the loader only aggregates independent, version-matched composite outcomes',
+  /series_key = 'composite'/.test(reliabilitySource) && /aggregated = 1/.test(reliabilitySource)
+  && /model_version = \? AND label_version = \?/.test(reliabilitySource));
 
 console.log(failures === 0 ? '\nWORKER INTEGRATION OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

@@ -5526,11 +5526,26 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .rt-tag-out-of-universe{color:var(--amber);border-color:rgba(255,178,36,.4)}
   .rt-tag-wrong-side{color:var(--down);border-color:rgba(255,122,133,.4)}
   .rt-tell{color:var(--muted);cursor:help}
+  .px-row{display:grid;grid-template-columns:minmax(150px,1.7fr) minmax(60px,2fr) 58px 78px 78px 130px;gap:12px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11.5px}
+  .px-row:last-child{border-bottom:none}
+  .px-a{color:var(--muted)}
+  .px-a b{color:var(--paper);font-weight:600}
+  .px-side.up{color:var(--up)}
+  .px-side.down{color:var(--down)}
+  .px-bar{background:var(--ink-2);height:6px;position:relative;overflow:hidden;cursor:help;font-size:0}
+  .px-mark{position:absolute;top:0;bottom:0;width:2px;background:var(--amber);transform:translateX(-1px)}
+  .px-peak,.px-best,.px-give,.px-heat{text-align:right;color:var(--paper);cursor:help}
+  .px-best{color:var(--up)}
+  .px-give{color:var(--amber)}
+  .px-heat{color:var(--down)}
+  .rt-hdr .px-bar{background:none;height:auto;font-size:9.5px;text-align:left;overflow:visible}
   .rt-lead-inline{color:var(--dim)}
   .rt-avail-inline{color:var(--amber);cursor:help}
   @media(max-width:860px){
     .rt-row{grid-template-columns:1fr 76px 84px;gap:8px}
     .rt-row .rt-bar,.rt-row .rt-lead{display:none}
+    .px-row{grid-template-columns:1fr 52px 70px 70px;gap:8px}
+    .px-row .px-bar,.px-row .px-best{display:none}
   }
   .coil.coil-up{color:var(--up)}
   .coil.coil-down{color:var(--down)}
@@ -6211,6 +6226,43 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           +pRows
         +'</div>'
         +(eRows?'<div class="rt-eps"><div class="rt-eps-h">Most recent episodes</div>'+eRows+'</div>':'')
+      +'</section>';
+    }
+    // Path shape of matured calls — added 2026-09-04. The boards above answer
+    // "which way"; this answers the two questions that actually decide the
+    // trade: how much better an entry the signal price usually left on the
+    // table, and how long after the call the best exit historically arrived.
+    // Backward-looking and measurement-only: every row is a track record of
+    // independent, matured, non-overlapping forecasts for that exact asset,
+    // side and horizon, and nothing here is a statement about today's setup.
+    if(d.holdingEvidence && d.holdingEvidence.rows && d.holdingEvidence.rows.length){
+      var hx = d.holdingEvidence;
+      var hRows = hx.rows.map(function(r){
+        var sideLabel = r.dir===1?'LONG':'SHORT';
+        var hLabel = r.horizonHours>=168?'7d':(Math.round(r.horizonHours)+'h');
+        var peakPct = (r.peakShare*100);
+        var adverseFirst = r.adverseFirstRate*100;
+        var lowerPct = r.adverseFirstLower!=null ? r.adverseFirstLower*100 : null;
+        return '<div class="px-row">'
+          +'<span class="px-a"><b>'+esc(r.symbol)+'</b> <span class="px-side '+(r.dir===1?'up':'down')+'">'+sideLabel+'</span> '
+            +'<span class="dim">'+hLabel+' · n='+r.n+'</span></span>'
+          +'<span class="px-bar" title="Where inside the declared horizon the best available price landed, on average."><span class="px-mark" style="left:'+peakPct.toFixed(1)+'%"></span></span>'
+          +'<span class="px-peak" title="Average time from the call to its best available price.">'+r.hoursToPeak.toFixed(1)+'h</span>'
+          +'<span class="px-best" title="Average best unrealized move in the called direction during the window.">'+(r.mfePct>=0?'+':'')+r.mfePct.toFixed(1)+'%</span>'
+          +'<span class="px-give" title="Average difference between that best price and the price at the declared horizon. This is what holding to maturity cost.">-'+r.giveBackPct.toFixed(1)+'%</span>'
+          +'<span class="px-heat" title="Average worst move against the call, and how often that worst move arrived BEFORE the best one. A high share means the signal price was usually not the best entry available.">'
+            +r.maePct.toFixed(1)+'% <span class="dim">'+Math.round(adverseFirst)+'% first'
+            +(lowerPct!=null?' ≥'+Math.round(lowerPct)+'%':'')+'</span></span>'
+        +'</div>';
+      }).join('');
+      b+='<section class="rt-wrap" aria-label="Entry and exit timing">'
+        +'<div class="rt-head"><span class="rt-eyebrow">LEARNING · <b>ENTRY &amp; EXIT TIMING</b></span>'
+        +'<h2 class="rt-title">Where the move actually was</h2>'
+        +'<p class="rt-sub">A direction call is only half a trade. For every matured, non-overlapping forecast the engine records the best and worst prices reached inside the declared window and when each first occurred, so entry and exit can be judged on measurement instead of assumption. Sorted by how much the declared horizon gave back against its own best price — the largest numbers are the assets this engine is holding too long. Needs '+hx.minSamples+' independent matured paths before an asset, side and horizon appears at all; a thin record is shown as nothing, not as a hint.</p></div>'
+        +'<div class="rt-table">'
+          +'<div class="px-row rt-hdr"><span class="px-a">Asset / side</span><span class="px-bar">Best price landed here in the window</span><span class="px-peak">Peak at</span><span class="px-best">Best offered</span><span class="px-give">Gave back</span><span class="px-heat">Worst against / arrived first</span></div>'
+          +hRows
+        +'</div>'
       +'</section>';
     }
     b+=classWithheldBanner('crypto',cs.crypto);

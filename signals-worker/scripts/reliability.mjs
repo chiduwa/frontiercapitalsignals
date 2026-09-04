@@ -4,7 +4,7 @@
 // Talks to Cloudflare's D1 HTTP API directly via d1-client.mjs, shared with
 // the archive/backfill scripts so there's one D1 client, not a hand-copied
 // duplicate that could drift.
-import { MIN_RELIABILITY_SAMPLES, slotsForTimestamp, assetPredictionScore, scoreBucket, TOD_HORIZONS_HOURS, detectCallFlips } from '../worker.js';
+import { MIN_RELIABILITY_SAMPLES, slotsForTimestamp, assetPredictionScore, scoreBucket, TOD_HORIZONS_HOURS, detectCallFlips, lowerConfidenceBound } from '../worker.js';
 import { d1, d1Batch, chunk, forEachConcurrent } from './d1-client.mjs';
 import { computeSwingTimeTallies, upsertSwingTimeStats } from './archive.mjs';
 
@@ -485,6 +485,102 @@ export async function loadMoveStats(env) {
   return out;
 }
 
+
+// Path-shape evidence: WHEN inside a matured forecast the favorable extreme
+// actually arrived, and how much of it was still there at the declared
+// horizon. Directional accuracy answers "did it go the called way"; it says
+// nothing about entry or exit, which is the whole point of this project.
+// Both numbers come from columns the ledger already stores (migration 0013),
+// so this costs no extra fetch and no extra write — it is the aggregation
+// step the audit listed as the next model version's path-dependent labels.
+//
+// Deliberately backward-looking and measurement-only. It is a per-asset
+// track record of matured, non-overlapping forecasts, NOT a claim about the
+// current setup, and it never feeds a score, a weight, or a publication
+// gate. Same discipline as everything else here: below the sample floor a
+// row simply does not exist rather than being shown thin.
+export const EXCURSION_MIN_SAMPLES = 30;
+
+// Turns grouped ledger rows into the published summary. Kept pure so the
+// side-awareness (a short's favorable extreme is the path LOW) and the
+// degenerate-path exclusion are covered by the regression suite rather than
+// only being exercised against live D1.
+export function summarizeExcursionEvidence(rows, minSamples = EXCURSION_MIN_SAMPLES) {
+  const out = [];
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const n = Number(r && r.n);
+    const horizonHours = Number(r && r.horizon_hours);
+    if (!Number.isFinite(n) || n < minSamples || !(horizonHours > 0)) continue;
+    const dir = Number(r.dir);
+    if (dir !== 1 && dir !== -1) continue;
+    const mfePct = Number(r.sum_mfe) / n;
+    const maePct = Number(r.sum_mae) / n;
+    const heldPct = Number(r.sum_signed_return) / n;
+    const hoursToPeak = Number(r.sum_minutes_to_peak) / n / 60;
+    if (![mfePct, maePct, heldPct, hoursToPeak].every(Number.isFinite)) continue;
+    const adverseFirst = n - Number(r.n_favorable_first);
+    // The favorable extreme cannot be worse than the price at maturity: the
+    // maturity observation is itself a point on the measured path. So
+    // give-back is a non-negative quantity by construction, and a large one
+    // means the declared horizon is systematically selling after the top.
+    const giveBackPct = Math.max(0, mfePct - heldPct);
+    out.push({
+      assetClass: r.asset_class,
+      symbol: r.symbol,
+      dir,
+      horizonHours,
+      n,
+      // Best price the call ever offered, and when.
+      mfePct,
+      hoursToPeak,
+      peakShare: Math.min(1, Math.max(0, hoursToPeak / horizonHours)),
+      // What holding to the declared horizon actually returned, signed so a
+      // short that fell is positive, and what that cost against the peak.
+      heldPct,
+      giveBackPct,
+      // Worst excursion against the call. This is the honest answer to "could
+      // I have bought lower": a persistently negative mean, with the adverse
+      // extreme usually arriving first, says the signal price was not the
+      // best available entry.
+      maePct,
+      adverseFirstRate: adverseFirst / n,
+      // Conservative floor on that rate, so a thin or lucky-looking split is
+      // not presented as a reliable "wait for a better fill" instruction.
+      adverseFirstLower: lowerConfidenceBound(adverseFirst, n)
+    });
+  }
+  // Largest measured give-back first: those are the assets whose declared
+  // horizon is demonstrably exiting too late.
+  return out.sort((a, b) => b.giveBackPct - a.giveBackPct);
+}
+
+export async function loadExcursionEvidence(env, minSamples = EXCURSION_MIN_SAMPLES) {
+  const rows = await d1(env, `
+    SELECT asset_class, symbol, dir, horizon_minutes / 60 AS horizon_hours,
+           COUNT(*) AS n,
+           SUM(CASE WHEN dir = 1 THEN path_high_pct ELSE -path_low_pct END) AS sum_mfe,
+           SUM(CASE WHEN dir = 1 THEN path_low_pct ELSE -path_high_pct END) AS sum_mae,
+           SUM(CASE WHEN dir = 1 THEN minutes_to_high ELSE minutes_to_low END) AS sum_minutes_to_peak,
+           SUM(CASE WHEN dir = 1 THEN return_pct ELSE -return_pct END) AS sum_signed_return,
+           SUM(CASE WHEN (CASE WHEN dir = 1 THEN minutes_to_high ELSE minutes_to_low END)
+                       < (CASE WHEN dir = 1 THEN minutes_to_low ELSE minutes_to_high END)
+                    THEN 1 ELSE 0 END) AS n_favorable_first
+    FROM forecast_outcomes
+    WHERE series_kind = 'technique' AND series_key = 'composite'
+      AND aggregated = 1 AND dir IN (-1, 1)
+      AND model_version = ? AND label_version = ?
+      AND return_pct IS NOT NULL
+      AND path_high_pct IS NOT NULL AND path_low_pct IS NOT NULL
+      AND minutes_to_high IS NOT NULL AND minutes_to_low IS NOT NULL
+      -- A window whose only known point is its own entry carries no path
+      -- information at all; counting it would drag every mean toward zero
+      -- and manufacture a "no give-back, no heat" reading out of missing
+      -- data. Same failure mode as the zero-median daily range (0004).
+      AND (path_high_pct > 0 OR path_low_pct < 0)
+    GROUP BY asset_class, symbol, dir, horizon_minutes
+  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
+  return summarizeExcursionEvidence(rows, minSamples);
+}
 
 // Chooses the first valid observation at or after a forecast's exact target
 // instant. An observation before the target would shorten the forecast window;

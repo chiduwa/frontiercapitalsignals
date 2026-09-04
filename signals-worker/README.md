@@ -309,6 +309,43 @@ The default round-trip deductions are explicit assumptions—0.30% for crypto an
 
 This is not yet a portfolio backtester: the archive is built from the currently observed universe and is therefore not guaranteed survivorship-bias-free, while simultaneous signals, capacity, and cross-position correlation are not netted into a portfolio equity curve. Maximum drawdown is measured on the event-close curve, not intratrade adverse excursion. Per-pattern rankings are useful research triage, not a claim that the top row was historically investable at arbitrary size.
 
+## Entry and exit timing, measured (added 2026-09-04)
+
+A direction call is half a trade. `forecast_outcomes` already stores, for every
+matured non-overlapping forecast, the best and worst price reached inside the
+declared window and when each first occurred (migration `0013`), so the
+remaining question — where in the window the tradeable move actually was — is
+an aggregation, not new data collection. `loadExcursionEvidence`
+(`scripts/reliability.mjs`) groups that ledger by asset class, symbol, side and
+horizon and reports four things per record:
+
+- **best offered** — mean favorable excursion, sign-flipped for shorts so a
+  short that fell reads like a long that rose;
+- **peak at** — mean time from the call to that best price, and its share of
+  the declared horizon;
+- **gave back** — best offered minus what holding to the declared horizon
+  actually returned. Both are points on the same measured path, so this is
+  non-negative by construction, and a large value is direct evidence that the
+  horizon exits systematically after the top;
+- **worst against / arrived first** — mean adverse excursion and how often it
+  preceded the favorable one, with a one-sided Wilson lower bound. A high share
+  says the signal price was usually not the best entry available, which is the
+  measurable form of "wait for a better fill" rather than an opinion about it.
+
+Windows whose only known price is their own entry are excluded in SQL
+(`path_high_pct > 0 OR path_low_pct < 0`): counting them would drag every mean
+toward zero and manufacture a "no give-back, no heat" reading out of missing
+observations, the same failure the zero-median daily range guard exists for
+(migration `0004`). A record needs `EXCURSION_MIN_SAMPLES` (30) independent
+matured paths before it appears at all.
+
+This is measurement-only and display-only, attached to the payload after
+`buildPayload` alongside the retrospective. It feeds no score, no technique
+weight and no publication gate, and it makes no claim about the current setup —
+it is that asset and side's own history of where the move was. Promoting any of
+it into an entry rule requires the same discovery lifecycle as every other
+hypothesis here (see the quant research section above).
+
 ## Editing later
 
 Change the watchlist, universe size, and filters in the config constants near the top of `worker.js`; tune technique weights in `evaluateTechniques`; adjust the embedded dashboard in the `PAGE_HTML` template near the bottom. After any edit, copy the file to `src/worker.js` too (`cp worker.js src/worker.js`) and run `node test-worker.mjs` before redeploying.
