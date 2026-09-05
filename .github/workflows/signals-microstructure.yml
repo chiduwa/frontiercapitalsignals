@@ -1,0 +1,70 @@
+name: Signals Microstructure
+
+# Continuous cross-venue and perp-vs-spot lead-lag measurement at 1-second
+# resolution (signals-worker/scripts/microstructure.mjs). Each run collects ONE
+# five-minute window, stores its per-cell summary, and then re-tests every cell
+# that has accumulated enough independent windows.
+#
+# Why a dropped firing costs nothing here. GitHub's scheduler is unreliable on
+# this repo — measured at ~142 minutes average gap against an intended 60, with
+# whole clusters dropped under load, which is why the live price layer was moved
+# to Cloudflare's cron. That failure mode is fatal for anything users read and
+# harmless for this: every run is a self-contained observation of a market that
+# is not going anywhere, so an irregular schedule costs sample count, never
+# correctness. What it must NOT do is run twice over the same seconds, which
+# would double-count one window's evidence as two independent trials — the
+# script rejects an overlapping window at write time rather than trusting the
+# schedule.
+#
+# Every 15 minutes is deliberately more often than needed. The pooled test wants
+# many independent five-minute windows across many hours of the day, and asking
+# for four an hour tends to deliver roughly one given the drop rate above.
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: signals-microstructure
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    # One window is ~21 outbound calls (7 symbols x 3 series) plus the pooled
+    # re-test against D1. Nothing here is long-running; the timeout is there to
+    # stop a hung venue holding a runner.
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      # The guardrails are the deliverable here, not the arithmetic. This module
+      # searches hundreds of cells for a small effect in noisy data, which is
+      # precisely the setup that manufactures convincing false positives, so a
+      # run that cannot prove its refusals still work should not record evidence.
+      - name: Verify microstructure guardrails
+        working-directory: signals-worker
+        run: node test-microstructure.mjs
+
+      - name: Apply D1 migrations
+        working-directory: signals-worker
+        run: npx --yes wrangler@4 d1 migrations apply frontier-capital-signals-reliability --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Collect one window and re-test every accumulated cell
+        working-directory: signals-worker
+        run: node scripts/microstructure.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          FCS_FUTURES_ROUND_TRIP_COST_PCT: ${{ vars.FCS_FUTURES_ROUND_TRIP_COST_PCT }}
