@@ -113,6 +113,36 @@ export async function setLeverage(symbol, leverage) {
   return signedRequest('POST', '/fapi/v1/leverage', { symbol, leverage: Math.round(leverage) });
 }
 
+// Realized P&L, commission and funding for one symbol since a given time,
+// straight from Binance's own income ledger. Deliberately not inferred from
+// entry/exit prices: fees and funding are real costs, and an edge that only
+// exists gross of them is not an edge.
+export async function getIncomeSince(symbol, startMs) {
+  const rows = await signedRequest('GET', '/fapi/v1/income', {
+    symbol, startTime: Math.max(0, Math.floor(startMs)), limit: 1000
+  });
+  const totals = { realizedPnl: 0, commission: 0, fundingFee: 0, rows: 0 };
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const v = Number(r.income);
+    if (!Number.isFinite(v)) continue;
+    totals.rows++;
+    if (r.incomeType === 'REALIZED_PNL') totals.realizedPnl += v;
+    else if (r.incomeType === 'COMMISSION') totals.commission += v;
+    else if (r.incomeType === 'FUNDING_FEE') totals.fundingFee += v;
+  }
+  totals.netPnl = totals.realizedPnl + totals.commission + totals.fundingFee;
+  return totals;
+}
+
+// Fills for one symbol since a time — used to recover the average exit price
+// of a position the bot did not close itself (a stop, a target, or the
+// operator closing by hand).
+export async function getUserTradesSince(symbol, startMs) {
+  return signedRequest('GET', '/fapi/v1/userTrades', {
+    symbol, startTime: Math.max(0, Math.floor(startMs)), limit: 1000
+  });
+}
+
 export async function getMarkPrice(symbol) {
   const r = await publicRequest('/fapi/v1/premiumIndex', { symbol });
   return { price: Number(r.markPrice), fundingRate: Number(r.lastFundingRate) };

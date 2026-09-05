@@ -56,6 +56,28 @@ export async function recordSkip(skip) {
   `, [skip.skippedAt, skip.symbol, skip.reason, skip.price ?? null, skip.quoteDeferred ?? null]);
 }
 
+// Mark-to-market snapshot. Cost basis alone answers "what did I pay"; this
+// supplies the other half of return on asset, and costs nothing extra because
+// the cycle already fetched every one of these prices. Bucketed to the hour so
+// a 4-hourly cadence keeps this small while still giving a usable curve.
+export async function logValuation(nowIso, rows) {
+  if (!rows.length) return;
+  const d = new Date(nowIso);
+  d.setUTCMinutes(0, 0, 0);
+  const bucket = d.toISOString();
+  for (const r of rows) {
+    await d1(env, `
+      INSERT INTO spot_bot_valuation (bucket, symbol, observed_at, quantity, price, market_value, cost_basis, unrealized_pct)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(bucket, symbol) DO UPDATE SET
+        observed_at = excluded.observed_at, quantity = excluded.quantity,
+        price = excluded.price, market_value = excluded.market_value,
+        cost_basis = excluded.cost_basis, unrealized_pct = excluded.unrealized_pct
+    `, [bucket, r.symbol, nowIso, r.quantity, r.price, r.marketValue,
+        r.costBasis ?? null, r.unrealizedPct ?? null]);
+  }
+}
+
 // Average cost basis per asset, from this bot's own fills. Reported for
 // visibility only — nothing consumes it, because there is no sell path.
 export async function costBasis() {

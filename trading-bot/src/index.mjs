@@ -16,17 +16,19 @@
 // stop or target underneath.
 import { config } from './config.mjs';
 import { log } from './logger.mjs';
-import { loadState, saveState, recordEquity } from './state.mjs';
+import { loadState, saveState, recordEquity, recordTrade, logEquity, recordRiskAlert, tradeSummary } from './state.mjs';
 import {
   getAccount, getOpenAlgoOrders, setLeverage, getMarkPrice,
   placeMarketOrder, placeProtectiveOrder, cancelAllOpenOrders,
-  roundQuantity, roundPrice, getExchangeInfo, getPositionRiskMap
+  roundQuantity, roundPrice, getExchangeInfo, getPositionRiskMap,
+  getIncomeSince, getUserTradesSince
 } from './binance.mjs';
 import { fetchSignals, fetchScalp, buildCandidates, getFearGreed } from './signals.mjs';
 import { decideEntries } from './strategy.mjs';
 import {
   stopLossPrice, stopLossPriceForResearch, takeProfitPrice, timeExitAfterMs
 } from './risk.mjs';
+import { positionOrigin, assessRisk, emergencyStopPrice } from './positions.mjs';
 import {
   loadOpenShadowTrades, recordEntry, resolveShadowTrade, markResolved,
   updateExtremes, shadowSummary
@@ -224,7 +226,14 @@ async function executeOpen(decision, state, nowIso) {
     state.openOrders[symbol] = {
       side, entryPrice: markPrice, marginUsed: marginToUse, leverage,
       range: candidate.range, targetPrice: target, stopPrice: stop,
-      timeExitAfterMs: timeExit, source: candidate.source, openedAt: nowIso
+      timeExitAfterMs: timeExit, source: candidate.source, openedAt: nowIso,
+      // Frozen at open: judging an outcome against evidence gathered later
+      // would be hindsight, not measurement.
+      edge: decision.edge ?? null, horizonHours: candidate.horizonHours ?? null,
+      holdingMfePct: candidate.holding?.mfePct ?? null,
+      holdingMaePct: candidate.holding?.maePct ?? null,
+      holdingHoursToPeak: candidate.holding?.hoursToPeak ?? null,
+      extremeBoost: !!extremeBoost, equityAtOpen: balance
     };
     if (config.shadowLedger) {
       await recordEntry({
@@ -259,6 +268,98 @@ async function recordShadow(decision, nowIso) {
   }
 }
 
+// Watch, do not touch. Records and alerts on a foreign position only when the
+// numbers say a large loss is close — and at 'extreme', optionally places a
+// stop between the mark and the liquidation price, because closing short of a
+// liquidation loses materially less than the liquidation itself.
+async function watchForeignPosition(position, risk, equity, nowIso) {
+  const symbol = position.symbol;
+  const side = Number(position.positionAmt) > 0 ? 'BUY' : 'SELL';
+  const r = (risk && risk[symbol]) || {};
+  const assessment = assessRisk({
+    symbol, side, markPrice: r.markPrice, liquidationPrice: r.liquidationPrice,
+    unrealizedPnl: Number(position.unrealizedProfit), equity
+  });
+
+  if (assessment.severity === 'none') {
+    log('foreign_position_ok', { symbol, side, note: 'operator-managed; bot places no orders on it', ...assessment.metrics });
+    return;
+  }
+
+  let actionTaken = 'alert only';
+  if (assessment.severity === 'extreme' && config.emergencyStopForeign) {
+    const raw = emergencyStopPrice(r.markPrice, r.liquidationPrice, side);
+    if (raw == null) {
+      actionTaken = 'no stop possible (mark/liquidation unusable)';
+    } else {
+      const price = await roundPrice(symbol, raw).catch(() => null);
+      const closingSide = side === 'BUY' ? 'SELL' : 'BUY';
+      const existing = await getOpenAlgoOrders(symbol).catch(() => []);
+      const hasStop = existing.some((o) => o.orderType === 'STOP_MARKET' || o.type === 'STOP_MARKET');
+      if (hasStop) {
+        actionTaken = 'position already has a stop; left alone';
+      } else if (!Number.isFinite(price) || !(price > 0)) {
+        actionTaken = 'computed stop price unusable; NOT placed';
+      } else if (config.dryRun) {
+        actionTaken = `dry run — would place emergency stop at ${price}`;
+      } else {
+        await placeProtectiveOrder(symbol, closingSide, 'STOP_MARKET', price)
+          .then(() => { actionTaken = `emergency stop placed at ${price}`; })
+          .catch((e) => { actionTaken = `emergency stop FAILED: ${e.message}`; });
+      }
+    }
+  }
+
+  log(assessment.severity === 'extreme' ? 'foreign_position_extreme_risk' : 'foreign_position_warning', {
+    symbol, side, reason: assessment.reason, actionTaken, ...assessment.metrics
+  });
+  await recordRiskAlert({
+    raisedAt: nowIso, symbol, severity: assessment.severity, reason: assessment.reason,
+    ...assessment.metrics, actionTaken
+  }).catch((e) => log('error_recording_risk_alert', { symbol, error: e.message }));
+}
+
+// What the trade actually earned, from Binance's own income ledger rather than
+// inferred from prices — fees and funding are real costs, and an edge that
+// only survives gross of them is not an edge.
+async function captureOutcome(symbol, record, equityNow, nowIso) {
+  const openedMs = Date.parse(record?.openedAt);
+  const since = Number.isFinite(openedMs) ? openedMs - 60000 : Date.now() - 7 * 86400000;
+  const [income, fills] = await Promise.all([
+    getIncomeSince(symbol, since).catch(() => null),
+    getUserTradesSince(symbol, since).catch(() => [])
+  ]);
+
+  // Average exit price from the closing fills, weighted by quantity.
+  const closing = (Array.isArray(fills) ? fills : []).filter((f) =>
+    (record?.side === 'BUY' ? f.side === 'SELL' : f.side === 'BUY'));
+  const qty = closing.reduce((t, f) => t + Math.abs(Number(f.qty) || 0), 0);
+  const exitPrice = qty > 0
+    ? closing.reduce((t, f) => t + Number(f.price) * Math.abs(Number(f.qty) || 0), 0) / qty
+    : null;
+
+  const marginUsed = Number(record?.marginUsed);
+  const netPnl = income ? income.netPnl : null;
+  const holdingMinutes = Number.isFinite(openedMs) ? (Date.parse(nowIso) - openedMs) / 60000 : null;
+
+  await recordTrade({
+    symbol, side: record?.side || 'BUY', origin: 'bot', source: record?.source ?? null,
+    openedAt: record?.openedAt ?? null, closedAt: nowIso,
+    entryPrice: record?.entryPrice ?? null, exitPrice, quantity: qty || null,
+    leverage: record?.leverage ?? null, marginUsed: Number.isFinite(marginUsed) ? marginUsed : null,
+    realizedPnl: income?.realizedPnl ?? null, commission: income?.commission ?? null,
+    fundingFee: income?.fundingFee ?? null, netPnl,
+    returnOnMarginPct: (Number.isFinite(netPnl) && marginUsed > 0) ? (netPnl / marginUsed) * 100 : null,
+    holdingMinutes, exitReason: record?.exitReason ?? 'exchange-or-manual',
+    edge: record?.edge ?? null, horizonHours: record?.horizonHours ?? null,
+    holdingMfePct: record?.holdingMfePct ?? null, holdingMaePct: record?.holdingMaePct ?? null,
+    holdingHoursToPeak: record?.holdingHoursToPeak ?? null,
+    extremeBoost: record?.extremeBoost, equityAtOpen: record?.equityAtOpen ?? null,
+    equityAtClose: equityNow
+  });
+  log('trade_recorded', { symbol, netPnl, exitPrice, holdingMinutes: holdingMinutes && Math.round(holdingMinutes) });
+}
+
 async function runCycle() {
   const nowIso = new Date().toISOString();
   const nowMs = Date.now();
@@ -281,10 +382,19 @@ async function runCycle() {
     log('error_loading_position_risk', { error: e.message, note: 'protective orders cannot be anchored without it' });
     return {};
   });
+  // Positions the operator opened are NOT managed: no stop, no take-profit, no
+  // time exit. An unrequested protective order can close somebody else's trade
+  // against their intent, which is its own kind of loss. They are watched, and
+  // spoken about only when a reading suggests a large loss is imminent.
+  const ownPositions = [];
   for (const p of openPositionsRaw) {
+    if (positionOrigin(p.symbol, state) === 'bot') { ownPositions.push(p); continue; }
+    await watchForeignPosition(p, risk, equity, nowIso);
+  }
+  for (const p of ownPositions) {
     try { await ensureProtection(p, state, risk); } catch (e) { log('error_ensuring_protection', { symbol: p.symbol, error: e.message }); }
   }
-  await applyTimeExits(openPositionsRaw, state, nowMs);
+  await applyTimeExits(ownPositions, state, nowMs);
 
   // Reconcile: any symbol this bot thought it had open but Binance no longer
   // shows (closed via stop/take-profit, time exit, or manually) starts its
@@ -292,9 +402,12 @@ async function runCycle() {
   const openSymbolsNow = new Set(openPositionsRaw.map((p) => p.symbol));
   for (const symbol of Object.keys(state.openOrders)) {
     if (!openSymbolsNow.has(symbol)) {
+      const record = state.openOrders[symbol];
       state.lastClosedAt[symbol] = nowIso;
       delete state.openOrders[symbol];
       log('detected_position_closed', { symbol });
+      await captureOutcome(symbol, record, equity, nowIso).catch((e) =>
+        log('error_recording_outcome', { symbol, error: e.message }));
     }
   }
 
@@ -363,6 +476,16 @@ async function runCycle() {
         wins: row.wins, avgReturnPct: row.avg_return_pct == null ? null : Number(Number(row.avg_return_pct).toFixed(3))
       });
     }
+  }
+
+  const unrealized = openPositionsRaw.reduce((t, p) => t + (Number(p.unrealizedProfit) || 0), 0);
+  await logEquity(nowIso, equity, openPositionsRaw.length, unrealized)
+    .catch((e) => log('error_logging_equity', { error: e.message }));
+  for (const row of await tradeSummary().catch(() => [])) {
+    log('realised_record', {
+      origin: row.origin, trades: row.n, wins: row.wins, netPnl: row.net_pnl,
+      avgReturnOnMarginPct: row.avg_return_on_margin_pct, avgHoldMinutes: row.avg_hold_minutes
+    });
   }
 
   await saveState(state);

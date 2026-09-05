@@ -122,6 +122,30 @@ export const config = {
   dailyLossLimitPct: num(process.env.DAILY_LOSS_LIMIT_PCT, 0.10), // pause new entries for the rest of the day if realized+unrealized loss since day-start exceeds this
   maxFundingRateAbs: num(process.env.MAX_FUNDING_RATE_ABS, 0.001), // skip entry if funding is this unfavorable or worse against the intended direction (0.001 = 0.1% per 8h)
 
+  // --- Positions the operator opened by hand -------------------------------
+  // The bot does not manage them: no stop, no take-profit, no time exit. It
+  // watches them each cycle and speaks up only when a reading suggests a large
+  // loss is imminent. Thresholds are percentages, negative ones being losses.
+  //
+  // Distance from the mark to the liquidation price. A liquidation forfeits
+  // the entire margin committed, not merely the adverse move, which is what
+  // makes proximity to it the sharpest available definition of "a lot of
+  // money at stake".
+  liquidationWarnPct: num(process.env.LIQUIDATION_WARN_PCT, 25),
+  liquidationExtremePct: num(process.env.LIQUIDATION_EXTREME_PCT, 12),
+  // Unrealized loss as a share of account equity. Catches a large position
+  // bleeding badly while still nowhere near liquidation.
+  unrealizedLossWarnPct: num(process.env.UNREALIZED_LOSS_WARN_PCT, -20),
+  unrealizedLossExtremePct: num(process.env.UNREALIZED_LOSS_EXTREME_PCT, -35),
+  // Whether to place an emergency stop on a foreign position at 'extreme'.
+  // On by default: closing short of liquidation loses less than a liquidation
+  // does. Set false to make the bot alert and never touch the position.
+  emergencyStopForeign: bool(process.env.EMERGENCY_STOP_FOREIGN, true),
+  // How far from the mark toward liquidation to place it. 0.5 is halfway --
+  // clear of the current price so it does not fill instantly, clear of the
+  // liquidation price so it actually gets the chance to.
+  emergencyStopFraction: num(process.env.EMERGENCY_STOP_FRACTION, 0.5),
+
   // Shadow ledger: while the engine withholds every call (the v7 cold
   // start), record what the bot WOULD have opened and resolve those against
   // real subsequent prices, so it accumulates its own track record instead

@@ -17,6 +17,7 @@ const {
 } = await import('./src/risk.mjs');
 const { evaluateCandidate, decideEntries } = await import('./src/strategy.mjs');
 const { resolveShadowTrade } = await import('./src/paper.mjs');
+const { positionOrigin, distanceToLiquidationPct, assessRisk, emergencyStopPrice } = await import('./src/positions.mjs');
 const { buildCandidates, toBinanceSymbol, dedupeBySymbol } = await import('./src/signals.mjs');
 
 let failures = 0;
@@ -424,6 +425,54 @@ check('buildCandidates emits one row per symbol even when a symbol is on two boa
   }, null);
   return both.filter((c) => c.signalSymbol === 'SOL').length === 1;
 })());
+
+console.log('\n== positions.mjs: the operator\'s trades are not the bot\'s to manage ==');
+check('a position the bot recorded opening is its own',
+  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: { side: 'BUY' } } }) === 'bot');
+check('a position the bot has no record of is the operator\'s',
+  positionOrigin('TRXUSDT', { openOrders: {} }) === 'manual');
+// If state were lost, the bot's own positions read as foreign and stop being
+// managed. That is the safe direction to fail: it withholds action rather than
+// placing an order on a trade nobody asked it to touch.
+check('lost state fails toward withholding, not toward acting',
+  positionOrigin('SOLUSDT', {}) === 'manual');
+
+check('liquidation distance for a long is measured downward',
+  Math.abs(distanceToLiquidationPct(100, 80, 'BUY') - 20) < 1e-9);
+check('liquidation distance for a short is measured upward',
+  Math.abs(distanceToLiquidationPct(100, 120, 'SELL') - 20) < 1e-9);
+check('a missing liquidation price yields null, not a false sense of safety',
+  distanceToLiquidationPct(100, 0, 'BUY') === null);
+
+const calm = { symbol: 'TRXUSDT', side: 'BUY', markPrice: 100, liquidationPrice: 50, unrealizedPnl: -1, equity: 100 };
+check('a healthy foreign position is left entirely alone', assessRisk(calm).severity === 'none');
+check('approaching liquidation raises a warning',
+  assessRisk({ ...calm, liquidationPrice: 80 }).severity === 'warning');
+check('close to liquidation is extreme',
+  assessRisk({ ...calm, liquidationPrice: 92 }).severity === 'extreme');
+// The second, independent reading: bleeding badly while nowhere near
+// liquidation. Both must be able to fire on their own.
+check('a large unrealized loss is extreme even far from liquidation', (() => {
+  const r = assessRisk({ ...calm, unrealizedPnl: -40, equity: 100 });
+  return r.severity === 'extreme' && r.metrics.distanceToLiquidationPct === 50;
+})());
+check('a moderate unrealized loss is a warning', assessRisk({ ...calm, unrealizedPnl: -22 }).severity === 'warning');
+check('the assessment always carries the numbers behind it',
+  assessRisk({ ...calm, liquidationPrice: 92 }).reason.includes('liquidation'));
+check('an unknown equity does not manufacture a loss reading',
+  assessRisk({ ...calm, equity: 0 }).metrics.unrealizedVsEquityPct === null);
+
+// An emergency stop must sit strictly between the mark and liquidation: at or
+// through the mark it fills instantly, past liquidation it never fills.
+const es = emergencyStopPrice(100, 80, 'BUY');
+check('an emergency stop for a long sits between mark and liquidation', es > 80 && es < 100, String(es));
+check('halfway is the default placement', Math.abs(es - 90) < 1e-9);
+const esShort = emergencyStopPrice(100, 120, 'SELL');
+check('an emergency stop for a short sits between mark and liquidation', esShort > 100 && esShort < 120, String(esShort));
+check('an unusable liquidation price produces no stop rather than a bad one',
+  emergencyStopPrice(100, 0, 'BUY') === null);
+check('a liquidation price on the wrong side of the mark produces no stop',
+  emergencyStopPrice(100, 120, 'BUY') === null);
 
 console.log(failures === 0 ? '\nTRADING BOT OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

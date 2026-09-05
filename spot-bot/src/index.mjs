@@ -14,7 +14,7 @@
 import { config } from './config.mjs';
 import { getExchangeInfo, getFreeBalance, getPrice, getWeeklyKlines, marketBuyQuote, roundQuantity, marketBuyQuantity } from './binance-spot.mjs';
 import { selectAssets, weeklyProfile, evaluateTrigger, tranchePool, trancheDue, periodsElapsed, allocate } from './strategy.mjs';
-import { loadState, saveState, recordFill, recordSkip, costBasis } from './state.mjs';
+import { loadState, saveState, recordFill, recordSkip, costBasis, logValuation } from './state.mjs';
 
 const log = (event, data = {}) => console.log(JSON.stringify({ t: new Date().toISOString(), event, ...data }));
 
@@ -184,12 +184,38 @@ async function runCycle() {
 
   if (spentTotal > 0) await saveState({ lastTrancheAt: nowIso, dryPowder: 0 }, nowIso);
 
+  // Mark to market. Prices for the selected set were already fetched above, so
+  // the only extra work is for a holding no longer in the current selection —
+  // which still needs valuing, or a position would vanish from the record the
+  // moment the screen stopped picking it.
+  const priced = new Map(triggered.map((a) => [a.symbol, a.price]));
+  const valuations = [];
   for (const row of await costBasis().catch(() => [])) {
+    const avgCost = row.qty > 0 ? row.spent / row.qty : null;
+    let price = priced.get(row.symbol) ?? null;
+    if (price == null) price = await getPrice(row.symbol).catch(() => null);
+    const marketValue = price != null ? price * row.qty : null;
+    const unrealizedPct = (avgCost && price) ? ((price / avgCost) - 1) * 100 : null;
+    if (price != null) {
+      valuations.push({ symbol: row.symbol, quantity: row.qty, price, marketValue, costBasis: row.spent, unrealizedPct });
+    }
     log('holding', {
       symbol: row.symbol, sleeve: row.sleeve, fills: row.fills,
       spent: Number(Number(row.spent).toFixed(2)),
-      avgCost: row.qty > 0 ? Number((row.spent / row.qty).toFixed(8)) : null,
+      avgCost: avgCost != null ? Number(avgCost.toFixed(8)) : null,
+      price, marketValue: marketValue != null ? Number(marketValue.toFixed(2)) : null,
+      unrealizedPct: unrealizedPct != null ? Number(unrealizedPct.toFixed(2)) : null,
       since: row.first_fill
+    });
+  }
+  await logValuation(nowIso, valuations).catch((e) => log('error_logging_valuation', { error: e.message }));
+  if (valuations.length) {
+    const mv = valuations.reduce((t, v) => t + v.marketValue, 0);
+    const cb = valuations.reduce((t, v) => t + (v.costBasis || 0), 0);
+    log('portfolio', {
+      positions: valuations.length, costBasis: Number(cb.toFixed(2)),
+      marketValue: Number(mv.toFixed(2)),
+      returnOnAssetPct: cb > 0 ? Number((((mv / cb) - 1) * 100).toFixed(2)) : null
     });
   }
 }
