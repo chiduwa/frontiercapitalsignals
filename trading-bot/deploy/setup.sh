@@ -12,6 +12,7 @@ set -euo pipefail
 REPO_URL="https://github.com/chiduwa/frontiercapitalsignals.git"
 INSTALL_DIR="/opt/fcs"
 ENV_FILE="/etc/fcs-trading-bot.env"
+SPOT_ENV_FILE="/etc/fcs-spot-bot.env"
 RUN_USER="fcsbot"
 NODE_MAJOR="24"
 
@@ -89,8 +90,10 @@ echo "    $(git -C "$INSTALL_DIR" log --oneline -1)"
 # there is no npm install step and no lockfile to trust on this box.
 log "Running the guardrail tests"
 sudo -u "$RUN_USER" env HOME=/tmp node "$INSTALL_DIR/trading-bot/test.mjs" >/dev/null \
-  || die "guardrail tests failed on this checkout — refusing to install a bot that fails its own tests"
-echo "    passed"
+  || die "futures guardrail tests failed on this checkout — refusing to install a bot that fails its own tests"
+sudo -u "$RUN_USER" env HOME=/tmp node "$INSTALL_DIR/spot-bot/test.mjs" >/dev/null \
+  || die "spot guardrail tests failed on this checkout — refusing to install a bot that fails its own tests"
+echo "    passed (both suites)"
 
 # ---------------------------------------------------------------------------
 # Secrets. Created empty; you fill them in. 0600, owned by the service user.
@@ -120,9 +123,40 @@ fi
 chown root:"$RUN_USER" "$ENV_FILE"
 chmod 640 "$ENV_FILE"
 
+# Separate file, separate key. A leak or a bug in the leveraged futures path
+# must not be able to reach spot holdings, and vice versa.
+if [[ -f "$SPOT_ENV_FILE" ]]; then
+  log "Keeping the existing $SPOT_ENV_FILE"
+else
+  log "Writing an empty $SPOT_ENV_FILE for you to fill in"
+  cat > "$SPOT_ENV_FILE" <<'SPOTEOF'
+# Binance SPOT key: Spot Trading + Reading enabled, Withdrawals OFF,
+# restricted to this instance's reserved public IP. A DIFFERENT key from the
+# futures one -- that separation is the point.
+BINANCE_SPOT_API_KEY=
+BINANCE_SPOT_API_SECRET=
+
+# Leave true until you have reviewed several cycles.
+SPOT_DRY_RUN=true
+
+CLOUDFLARE_API_TOKEN=
+CLOUDFLARE_ACCOUNT_ID=7fe4bcf36c49af53696a3264a20e3cf6
+FCS_D1_DATABASE_ID=b07a4faa-8330-4b13-bf94-99fc662d4d6e
+
+# Optional overrides -- see spot-bot/src/config.mjs for the full list.
+# SPOT_TRANCHE_PCT=0.05
+# SPOT_TRANCHE_PERIOD_DAYS=7
+# SPOT_DROP_SIGMAS=1.0
+SPOTEOF
+fi
+chown root:"$RUN_USER" "$SPOT_ENV_FILE"
+chmod 640 "$SPOT_ENV_FILE"
+
 log "Installing the systemd units"
 install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-trading-bot.service" /etc/systemd/system/
 install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-trading-bot.timer" /etc/systemd/system/
+install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-spot-bot.service" /etc/systemd/system/
+install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-spot-bot.timer" /etc/systemd/system/
 install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-trading-bot-update.service" /etc/systemd/system/
 install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-trading-bot-update.timer" /etc/systemd/system/
 install -m 755 "$INSTALL_DIR/trading-bot/deploy/update.sh" /usr/local/bin/fcs-bot-update
@@ -133,11 +167,15 @@ cat <<EOF
 ------------------------------------------------------------------------
 Installed. NOT started — the env file is still empty.
 
-  1. Put the credentials in:      sudo nano $ENV_FILE
+  1. Put the credentials in:      sudo nano $ENV_FILE          (futures)
+                                  sudo nano $SPOT_ENV_FILE     (spot)
   2. Allowlist this IP on the Binance key:   $EGRESS_IP
   3. Run one cycle by hand:       sudo systemctl start fcs-trading-bot
   4. Read what it did:            journalctl -u fcs-trading-bot -n 100 --no-pager
-  5. Once that looks right:       sudo systemctl enable --now fcs-trading-bot.timer
+  5. Same for spot:               sudo systemctl start fcs-spot-bot
+                                  journalctl -u fcs-spot-bot -n 60 --no-pager
+  6. Once both look right:        sudo systemctl enable --now fcs-trading-bot.timer
+                                  sudo systemctl enable --now fcs-spot-bot.timer
                                   sudo systemctl enable --now fcs-trading-bot-update.timer
 
 Expect zero opens: the signals engine withholds every call during its

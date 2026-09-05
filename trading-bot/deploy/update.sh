@@ -28,7 +28,8 @@ log "updating ${PREVIOUS:0:7} -> ${TARGET:0:7}"
 git reset --quiet --hard "$TARGET"
 chown -R "$RUN_USER:$RUN_USER" "$INSTALL_DIR"
 
-if sudo -u "$RUN_USER" env HOME=/tmp node "$INSTALL_DIR/trading-bot/test.mjs" >/tmp/fcs-bot-test.log 2>&1; then
+if sudo -u "$RUN_USER" env HOME=/tmp node "$INSTALL_DIR/trading-bot/test.mjs" >/tmp/fcs-bot-test.log 2>&1 \
+   && sudo -u "$RUN_USER" env HOME=/tmp node "$INSTALL_DIR/spot-bot/test.mjs" >>/tmp/fcs-bot-test.log 2>&1; then
   log "guardrail tests passed on ${TARGET:0:7} — now live"
   exit 0
 fi

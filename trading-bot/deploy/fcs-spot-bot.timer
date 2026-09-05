@@ -1,0 +1,21 @@
+[Unit]
+Description=Check the spot accumulation triggers every 4 hours
+Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/spot-bot/README.md
+
+[Timer]
+# Every four hours, NOT weekly. The tranche cadence itself is weekly and is
+# decided inside the bot from elapsed days — this is how often it gets to
+# *look* for a qualifying dip within that week. Checking six times a day
+# rather than once gives a far better chance of catching an intra-week low,
+# which is the entire point of making the buy conditional.
+#
+# Firing often is safe because the pool is derived from elapsed time, not
+# accumulated per firing: repeated checks inside one period cannot inflate it.
+OnCalendar=*-*-* 00,04,08,12,16,20:11:00
+AccuracySec=1m
+# Catch up after downtime: a missed window is a missed chance at a dip.
+Persistent=true
+Unit=fcs-spot-bot.service
+
+[Install]
+WantedBy=timers.target

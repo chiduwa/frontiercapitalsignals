@@ -1,0 +1,9 @@
+{
+  "name": "fcs-spot-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Conditional dollar-cost accumulation on Binance spot, driven by FrontierCapitalSignals' published descriptive measures",
+  "main": "src/index.mjs",
+  "scripts": { "start": "node src/index.mjs", "test": "node test.mjs" }
+}

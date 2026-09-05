@@ -1,0 +1,32 @@
+[Unit]
+Description=FrontierCapitalSignals spot accumulation bot — one cycle
+Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/spot-bot/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=fcsbot
+Group=fcsbot
+WorkingDirectory=/opt/fcs/spot-bot
+EnvironmentFile=/etc/fcs-spot-bot.env
+ExecStart=/usr/bin/node src/index.mjs
+TimeoutStartSec=300
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fcs-spot-bot
