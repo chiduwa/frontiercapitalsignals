@@ -79,8 +79,11 @@ id -u "$RUN_USER" >/dev/null 2>&1 || useradd --system --no-create-home --shell /
 # root (and again as root from the update timer). Without this, every later
 # git operation fails with "detected dubious ownership" and the self-update
 # silently never applies. Guarded so re-running does not stack duplicates.
-git config --global --get-all safe.directory 2>/dev/null | grep -qx "$INSTALL_DIR" \
-  || git config --global --add safe.directory "$INSTALL_DIR"
+# --system (i.e. /etc/gitconfig), not --global: this runs as root here and
+# again as root from the update timer, and a per-user config would depend on
+# whichever HOME sudo/systemd happened to set. System scope is read regardless.
+git config --system --get-all safe.directory 2>/dev/null | grep -qx "$INSTALL_DIR" \
+  || git config --system --add safe.directory "$INSTALL_DIR"
 
 log "Fetching the repository"
 if [[ -d "$INSTALL_DIR/.git" ]]; then

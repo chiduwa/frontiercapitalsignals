@@ -16,8 +16,11 @@ log() { printf '%s fcs-bot-update: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; 
 # Self-heal on a box provisioned before this was added to setup.sh: the
 # checkout belongs to the service user while this runs as root, and git
 # refuses to operate across that boundary without an explicit exception.
-git config --global --get-all safe.directory 2>/dev/null | grep -qx "$INSTALL_DIR" \
-  || git config --global --add safe.directory "$INSTALL_DIR"
+# --system (i.e. /etc/gitconfig), not --global: this runs as root here and
+# again as root from the update timer, and a per-user config would depend on
+# whichever HOME sudo/systemd happened to set. System scope is read regardless.
+git config --system --get-all safe.directory 2>/dev/null | grep -qx "$INSTALL_DIR" \
+  || git config --system --add safe.directory "$INSTALL_DIR"
 
 cd "$INSTALL_DIR"
 PREVIOUS="$(git rev-parse HEAD)"
