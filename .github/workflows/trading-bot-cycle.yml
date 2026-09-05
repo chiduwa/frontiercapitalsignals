@@ -13,9 +13,16 @@ name: Trading Bot Cycle
 # can lag by several minutes during high platform load — don't assume
 # exactly-every-5-minutes precision.
 on:
+  # Manual only. Execution moved to a single Oracle Cloud instance
+  # (trading-bot/deploy/) for two reasons that had the same cause: this
+  # schedule never fired once, and GitHub-hosted runners egress from ~7,251
+  # rotating CIDR blocks, so the Binance API key could never be IP-restricted.
+  #
+  # The schedule is deliberately gone rather than left in place: two
+  # schedulers deciding against the same account is how you get racing
+  # cycles and duplicated exposure. Dispatch stays as an escape hatch for
+  # running one cycle by hand.
   workflow_dispatch:
-  schedule:
-    - cron: '*/5 * * * *'
 
 jobs:
   cycle:

@@ -2,9 +2,16 @@
 
 Autonomous Binance USDS-M Futures bot, driven by the live signals at
 [frontiercapitalsignals.com/signals](https://frontiercapitalsignals.com/signals).
-Runs as a one-shot script fired every 5 minutes by GitHub Actions
-(`.github/workflows/trading-bot-cycle.yml`), not a persistent daemon —
-there's no VM. This is a **separate process, targeting the Lead Trader
+Runs as a one-shot script fired every 5 minutes by a systemd timer on a
+single Oracle Cloud instance — see [`deploy/`](deploy/) for the runbook. It
+is not a persistent daemon: each firing runs one cycle and exits, with all
+state in D1.
+
+It ran on GitHub Actions until 2026-09-05. That moved for two reasons with
+one cause: the `*/5` schedule **never fired once**, and GitHub-hosted runners
+egress from ~7,251 rotating CIDR blocks, so the Binance API key could never
+be IP-restricted — which the security section below had flagged as this
+design's weakest point. One instance you own fixes both. This is a **separate process, targeting the Lead Trader
 futures account**, and does not touch or depend on the existing
 personal-account "Ben 10" bot in any way. All state that needs to
 survive between runs (equity curve, per-symbol cooldowns, this bot's own
@@ -148,8 +155,9 @@ backtest of one.
 - `node test.mjs` covers the contract binding, sizing, exit geometry, patience
   and ledger resolution with no network or Binance key. The engine's numeric
   bars are pinned there, so a drift that would leave the bot laxer than the
-  system it follows fails the suite. The cycle workflow runs it before every
-  live cycle.
+  system it follows fails the suite. `deploy/setup.sh` refuses to install a
+  checkout that fails them, and the hourly update rolls back rather than arm
+  an untested bot.
 
 ## Security — non-negotiable
 
@@ -158,13 +166,17 @@ Generate a **trade-only** API key on Binance: enable **Futures** +
 permission for anything it does, and a compromised trade-only key can't
 drain the account.
 
-**No IP restriction is possible.** GitHub-hosted runners use a large,
-changing pool of IPs (GitHub publishes ranges, but they rotate and
-aren't practical to allowlist on Binance's side) — unlike the original
-VM design, this key cannot be locked to a fixed IP. The trade-only /
-no-withdrawal scope is doing the real security work here; treat the key
-as the sole thing standing between a leaked secret and unauthorized
-trades, and rotate it if this repo (or its GitHub secrets) is ever
+**Restrict the key to the instance's reserved public IP.** This is now
+possible and you should do it: the bot runs from one address you control.
+Reserve the IP first — an ephemeral Oracle public IP changes on stop/start
+and would silently break the allowlist. `deploy/setup.sh` prints the egress
+address it actually sees, so you allowlist the measured value rather than an
+assumed one.
+
+The secret lives only in `/etc/fcs-trading-bot.env` on that instance (mode
+640, root:fcsbot), not in GitHub secrets and not in this repo. Keep the
+trade-only / no-withdrawal scope as well: IP restriction and scope are
+independent controls, and rotate the key if the instance or this repo is ever
 suspected compromised.
 
 Store the real key as GitHub repo secrets (`BINANCE_API_KEY`,

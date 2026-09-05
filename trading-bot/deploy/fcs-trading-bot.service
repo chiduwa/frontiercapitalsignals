@@ -1,0 +1,41 @@
+[Unit]
+Description=FrontierCapitalSignals trading bot — one decision cycle
+Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/trading-bot/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=fcsbot
+Group=fcsbot
+WorkingDirectory=/opt/fcs/trading-bot
+EnvironmentFile=/etc/fcs-trading-bot.env
+ExecStart=/usr/bin/node src/index.mjs
+
+# One cycle is ~10-30s of network-bound work. If it hangs, kill it: the next
+# firing is only five minutes away, and every open position's stop and
+# take-profit live on the exchange, so a killed cycle leaves nothing
+# unprotected.
+TimeoutStartSec=180
+
+# The bot keeps all state in D1 and writes nothing to disk, so it needs no
+# write access anywhere on this filesystem.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+# The JSON decision log goes to journald — this is the audit trail.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fcs-trading-bot

@@ -1,0 +1,13 @@
+[Unit]
+Description=Pull trading bot updates hourly
+
+[Timer]
+# Hourly, offset off the top of the hour so an update never lands in the same
+# second as a decision cycle.
+OnCalendar=*:37
+AccuracySec=1m
+Persistent=true
+Unit=fcs-trading-bot-update.service
+
+[Install]
+WantedBy=timers.target

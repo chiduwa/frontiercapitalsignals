@@ -1,0 +1,12 @@
+[Unit]
+Description=Update the FrontierCapitalSignals trading bot, gated on its own tests
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/fcs-bot-update
+TimeoutStartSec=300
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fcs-bot-update

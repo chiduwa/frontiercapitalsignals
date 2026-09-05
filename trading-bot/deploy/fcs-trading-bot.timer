@@ -1,0 +1,20 @@
+[Unit]
+Description=Fire the FrontierCapitalSignals trading bot every 5 minutes
+Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/trading-bot/README.md
+
+[Timer]
+# Every five minutes, on the wall clock. This is the cadence the bot's own
+# design assumes: the patience gate re-checks price here, the time exit is
+# enforced here, and the shadow ledger samples its running extremes here.
+# GitHub Actions could not deliver it (measured: zero firings of the same
+# request), which is why execution moved to this host.
+OnCalendar=*:0/5
+AccuracySec=15s
+# Do NOT catch up on missed firings. A backlog of cycles fired back-to-back
+# after downtime would each read the same stale signals payload and re-decide
+# on it; the next scheduled cycle is the correct behaviour instead.
+Persistent=false
+Unit=fcs-trading-bot.service
+
+[Install]
+WantedBy=timers.target
