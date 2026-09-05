@@ -53,6 +53,20 @@ ssh -i ~/.ssh/oracle_fcs_bot ubuntu@<RESERVED_IP>     # 'opc@' on Oracle Linux
 curl -fsSL https://raw.githubusercontent.com/chiduwa/frontiercapitalsignals/main/trading-bot/deploy/setup.sh | sudo bash
 ```
 
+**Re-running it after pushing a change to the script itself?** Use the local
+copy, not the URL:
+
+```bash
+sudo git -C /opt/fcs fetch origin main && sudo git -C /opt/fcs reset --hard origin/main
+sudo bash /opt/fcs/trading-bot/deploy/setup.sh
+```
+
+`raw.githubusercontent.com` serves a CDN-cached copy for several minutes and
+**ignores a `?cache-buster` query string**, so a fresh `curl` can silently run
+the previous version of the script. That cost real debugging time here: a fix
+appeared not to work when the code under test simply was not the code that
+ran. The one-liner above is for the first provision only.
+
 It checks Binance reachability, prints the egress IP to allowlist, installs
 Node 24, clones the repo, **runs the guardrail tests and refuses to install if
 they fail**, creates an unprivileged `fcsbot` user, and installs the timers —
