@@ -24,23 +24,35 @@ resources stay free. Worth doing before you rely on this.
 
 ## Creating the instance
 
-Compute → Instances → **Create instance**.
+**What is actually deployed** (af-casablanca-1, provisioned 2026-09-05):
 
-| Setting | Value | Why |
-|---|---|---|
-| Shape | **VM.Standard.E2.1.Micro** (AMD, 1 OCPU / 1 GB) | Always Free and almost always available. The ARM `A1.Flex` shape is the one that returns *"Out of host capacity"* — if that's what's been failing, this is why. 1 GB is ample: the bot has no dependencies and holds no state in memory. |
-| Image | Ubuntu 22.04/24.04 **or** Oracle Linux 9 | `setup.sh` handles both (apt and dnf). |
-| Subnet | **Public subnet**, assign a public IPv4 | Outbound traffic from a public-subnet instance is 1:1 NAT'd through its own public IP, which is the address Binance will see. |
-| SSH key | paste `~/.ssh/oracle_fcs_bot.pub` | Generated on your Mac for this purpose. |
+| Setting | Value |
+|---|---|
+| Name / shape | `fcs-trading-bot` · `VM.Standard.A1.Flex` · 1 OCPU / 6 GB |
+| Image | `Canonical-Ubuntu-22.04-aarch64` (arm64) |
+| Reserved IP | `84.8.217.132` |
+| Boot volume | 45 GB usable, 6% used |
 
-Then, before you touch the Binance key:
+Shape note, corrected from an earlier draft of this file: **af-casablanca-1
+offers ARM only.** `VM.Standard.E2.1.Micro` (the AMD micro shape usually
+recommended because it dodges the capacity lottery) does not exist in this
+region, so `A1.Flex` is the only Always-Free option here — which means the
+lottery is unavoidable. This instance took ~2 hours of retrying at 1 OCPU /
+6 GB, the smallest ask available, before a host freed up. Oracle also
+rate-limits the launch API itself (`Too many requests for the user`)
+independently of capacity, so a retry loop needs a real backoff or it makes
+its own odds worse.
 
-**Reserve the public IP.** Networking → *Reserved public IPs* → reserve one and
-attach it to the instance's VNIC, or convert the ephemeral IP to reserved on
-the instance's VNIC page. An **ephemeral IP changes whenever the instance is
-stopped and started**, which would silently break the Binance allowlist and
-leave every API call rejected. This is the single most important step on this
-page.
+Both bots run on this one instance, with separate keys — see the note on that
+in [`../README.md`](../README.md). A second instance would double the capacity
+wait and consume the whole 2-OCPU quota for no benefit.
+
+**Reserve the public IP.** OCI cannot convert an ephemeral IP to reserved in
+place: you must release the ephemeral one and create a `RESERVED` public IP
+against the same private IP object. Do it *before* creating the Binance key —
+an ephemeral IP changes whenever the instance is stopped and started, which
+would break the allowlist silently, with every API call rejected and no
+obvious cause.
 
 No firewall work is needed: the default security list already permits inbound
 SSH and all outbound traffic, and the bot only needs outbound.
@@ -70,14 +82,17 @@ ran. The one-liner above is for the first provision only.
 It checks Binance reachability, prints the egress IP to allowlist, installs
 Node 24, clones the repo, **runs the guardrail tests and refuses to install if
 they fail**, creates an unprivileged `fcsbot` user, and installs the timers —
-stopped, with an empty env file.
+stopped, with two empty env files (futures and spot).
 
 Then:
 
 ```bash
-sudo nano /etc/fcs-trading-bot.env      # paste the Binance key + Cloudflare token
+sudo nano /etc/fcs-trading-bot.env      # futures key + Cloudflare token
+sudo nano /etc/fcs-spot-bot.env         # spot key (a DIFFERENT Binance key)
 sudo systemctl start fcs-trading-bot    # one cycle, by hand
 journalctl -u fcs-trading-bot -n 100 --no-pager
+sudo systemctl start fcs-spot-bot
+journalctl -u fcs-spot-bot -n 60 --no-pager
 ```
 
 Confirm in that log: `equity` is a real number **for the account you intend**
@@ -90,7 +105,8 @@ and the bot records shadow entries instead.
 Once that looks right:
 
 ```bash
-sudo systemctl enable --now fcs-trading-bot.timer
+sudo systemctl enable --now fcs-trading-bot.timer      # every 5 min
+sudo systemctl enable --now fcs-spot-bot.timer         # every 4 h
 sudo systemctl enable --now fcs-trading-bot-update.timer
 ```
 
