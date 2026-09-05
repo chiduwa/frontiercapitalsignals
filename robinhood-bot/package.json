@@ -1,0 +1,8 @@
+{
+  "name": "fcs-robinhood-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bottom-then-reversal rule for leveraged US ETFs, shadow-first",
+  "scripts": { "test": "node test.mjs" }
+}
