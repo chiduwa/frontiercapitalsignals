@@ -74,6 +74,12 @@ INSERT OR REPLACE INTO robinhood_watchlist_state
  off_low_pct, needed_pct, sigma_pct, closed_up, qualifies, verdict)
 VALUES (...)
 ```
+**Insert one row at a time, not a multi-row batch.** D1 caps a statement at
+about 100 bound parameters, so a ten-row insert of this twelve-column table
+(120 parameters) is rejected with `too many SQL variables`. The first test run
+lost several turns rediscovering this; ten single-row inserts are quick and
+always work. The same cap is documented in `signals-worker/scripts/reliability.mjs`.
+
 `observed_on` is the date of the last bar (YYYY-MM-DD), not today's date —
 they differ on holidays and after-hours runs. `structure` comes from
 `classify(symbol)`. `verdict` is the module's own `reason` string.
