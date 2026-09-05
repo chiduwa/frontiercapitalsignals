@@ -39,7 +39,22 @@ chown -R "$RUN_USER:$RUN_USER" "$INSTALL_DIR"
 
 if sudo -u "$RUN_USER" env HOME=/tmp node "$INSTALL_DIR/trading-bot/test.mjs" >/tmp/fcs-bot-test.log 2>&1 \
    && sudo -u "$RUN_USER" env HOME=/tmp node "$INSTALL_DIR/spot-bot/test.mjs" >>/tmp/fcs-bot-test.log 2>&1; then
-  log "guardrail tests passed on ${TARGET:0:7} — now live"
+  log "guardrail tests passed on ${TARGET:0:7}"
+  # Reinstall the units and helper scripts. Without this the updater ships new
+  # CODE but never new UNITS, so a commit that adds a timer or a script lands
+  # in the checkout and silently does nothing — which is exactly how the
+  # go-live gate ended up with an armed timer and no service to trigger.
+  # Idempotent: install(1) overwrites, and daemon-reload is a no-op if nothing
+  # changed. Deliberately does NOT restart or enable anything, so it can never
+  # arm a timer the operator had disabled.
+  for unit in "$INSTALL_DIR"/trading-bot/deploy/fcs-*.service "$INSTALL_DIR"/trading-bot/deploy/fcs-*.timer; do
+    [ -f "$unit" ] || continue
+    install -m 644 "$unit" /etc/systemd/system/
+  done
+  install -m 755 "$INSTALL_DIR/trading-bot/deploy/update.sh" /usr/local/bin/fcs-bot-update
+  install -m 755 "$INSTALL_DIR/trading-bot/deploy/golive.sh" /usr/local/bin/fcs-golive
+  systemctl daemon-reload
+  log "units and helper scripts reinstalled; ${TARGET:0:7} now live"
   exit 0
 fi
 
