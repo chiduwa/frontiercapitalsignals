@@ -7,7 +7,7 @@ process.env.CLOUDFLARE_ACCOUNT_ID = 'test';
 process.env.FCS_D1_DATABASE_ID = 'test';
 
 const { config } = await import('./src/config.mjs');
-const { selectAssets, weeklyProfile, evaluateTrigger, tranchePool, trancheDue, periodsElapsed } = await import('./src/strategy.mjs');
+const { selectAssets, weeklyProfile, evaluateTrigger, tranchePool, trancheDue, periodsElapsed, allocate } = await import('./src/strategy.mjs');
 
 let failures = 0;
 const check = (name, cond, detail) => {
@@ -183,6 +183,44 @@ check('selection never reads dir, score or confidence', (() => {
   const b = picks.map((p) => p.signalSymbol).sort().join(',');
   return a === b;
 })(), 'withheld rows must select identically to authorized ones');
+
+console.log('\n== allocate: a real order beats nine rejected ones ==');
+const min5 = () => 5;
+const mk = (sym, sleeve) => ({ symbol: sym, sleeve });
+const nine = [
+  mk('BTCUSDT','core'), mk('ETHUSDT','core'), mk('HBARUSDT','core'),
+  mk('UNIUSDT','core'), mk('GRAMUSDT','core'), mk('ZECUSDT','core'),
+  mk('ATOMUSDT','satellite'), mk('RENDERUSDT','satellite'), mk('NEXOUSDT','satellite')
+];
+// The live case: $13.17 across 9 assets is $1.46 each against a $5 floor.
+// Splitting evenly would have every order rejected as dust.
+const small = allocate(nine, 13.17, min5);
+check('a small pool concentrates instead of producing dust', small.length === 2, JSON.stringify(small.map(a=>[a.symbol,a.quote.toFixed(2)])));
+check('every funded share clears the minimum', small.every((a) => a.quote >= 5));
+check('the whole pool is committed, nothing stranded',
+  Math.abs(small.reduce((t,a)=>t+a.quote,0) - 13.17) < 1e-9);
+check('concentration follows rank, core sleeve first',
+  small.every((a) => a.sleeve === 'core'));
+// As the balance grows, k rises on its own and it spreads back out.
+check('a large pool funds every triggered asset', allocate(nine, 500, min5).length === 9);
+check('a large pool splits evenly',
+  Math.abs(allocate(nine, 450, min5)[0].quote - 50) < 1e-9);
+check('a pool below even one minimum funds nothing rather than sending dust',
+  allocate(nine, 3, min5).length === 0);
+check('exactly one minimum funds exactly one asset', (() => {
+  const r = allocate(nine, 5, min5);
+  return r.length === 1 && r[0].quote === 5;
+})());
+// Pairs have different floors; each must clear its OWN.
+check('a pair with a higher floor is not funded below it', (() => {
+  const perPair = (s) => (s === 'BTCUSDT' ? 100 : 5);
+  const r = allocate([mk('BTCUSDT','core'), mk('ETHUSDT','core')], 20, perPair);
+  return r.length === 1 && r[0].symbol === 'ETHUSDT' && r[0].quote === 20;
+})(), 'BTC needs 100, so fund ETH alone with the full pool');
+check('satellites are funded once the pool is big enough for the core too',
+  allocate(nine, 90, min5).some((a) => a.sleeve === 'satellite'));
+check('no triggers means no allocation', allocate([], 100, min5).length === 0);
+check('a zero pool allocates nothing', allocate(nine, 0, min5).length === 0);
 
 console.log(failures === 0 ? '\nSPOT BOT OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

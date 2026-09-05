@@ -201,6 +201,44 @@ export function tranchePool(quoteBalance, periodsElapsed, opts = {}) {
   return { base, carryTranches, pool: Math.min(base * (1 + carryTranches), spendable) };
 }
 
+// Splits the pool across the assets that actually triggered.
+//
+// The naive split — pool x weight for every selected asset — is unusable at a
+// small balance, and that is not a corner case: at $263 free, a 5% tranche is
+// $13.17, which across 9 assets is $1.46 each against a Binance spot
+// MIN_NOTIONAL of about $5. Every order would be rejected as dust, so the bot
+// could never buy anything at all. Even at the 3x carry cap it is $4.39 each,
+// still under the floor.
+//
+// So: fund as many of the triggered assets as the pool can actually cover at
+// or above their own minimums, in rank order (core sleeve first), splitting
+// the pool evenly among those funded. A small pool concentrates into one or
+// two real buys instead of nine rejected ones; as the balance grows, k rises
+// on its own and the allocation spreads back out across the full set. The
+// sleeve intent survives because ranking decides who gets funded first.
+//
+// `minNotionalFor(symbol)` supplies each pair's own floor.
+export function allocate(triggered, pool, minNotionalFor) {
+  if (!Array.isArray(triggered) || !triggered.length || !(pool > 0)) return [];
+  // Rank order: core before satellite, and within a sleeve the order selection
+  // already produced (near-a-low, then quality, then market cap).
+  const ordered = [...triggered].sort((a, b) =>
+    (a.sleeve === b.sleeve ? 0 : a.sleeve === 'core' ? -1 : 1));
+
+  for (let k = ordered.length; k >= 1; k--) {
+    const share = pool / k;
+    // Take the k highest-ranked assets that can each clear their OWN minimum
+    // at this share -- skipping any whose floor is simply too high. Taking a
+    // strict top-k instead would let one expensive-minimum pair at the top of
+    // the ranking starve every affordable asset below it, funding nothing.
+    const affordable = ordered.filter((a) => share >= minNotionalFor(a.symbol));
+    if (affordable.length >= k) {
+      return affordable.slice(0, k).map((a) => ({ ...a, quote: share }));
+    }
+  }
+  return []; // the pool cannot fund even the single cheapest minimum
+}
+
 // Whole tranche periods elapsed since the last actual buy. 0 means not yet
 // due; 1 means due; >1 means periods were skipped for want of a trigger.
 export function periodsElapsed(lastTrancheAt, nowMs, opts = {}) {

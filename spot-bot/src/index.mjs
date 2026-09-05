@@ -13,7 +13,7 @@
 // would be invented rather than measured.
 import { config } from './config.mjs';
 import { getExchangeInfo, getFreeBalance, getPrice, getWeeklyKlines, marketBuyQuote, roundQuantity, marketBuyQuantity } from './binance-spot.mjs';
-import { selectAssets, weeklyProfile, evaluateTrigger, tranchePool, trancheDue, periodsElapsed } from './strategy.mjs';
+import { selectAssets, weeklyProfile, evaluateTrigger, tranchePool, trancheDue, periodsElapsed, allocate } from './strategy.mjs';
 import { loadState, saveState, recordFill, recordSkip, costBasis } from './state.mjs';
 
 const log = (event, data = {}) => console.log(JSON.stringify({ t: new Date().toISOString(), event, ...data }));
@@ -105,11 +105,13 @@ async function runCycle() {
     return;
   }
 
+  // Pass 1: measure every selected asset and record who triggered. No money is
+  // committed here, so the allocation in pass 2 can see the full picture.
+  const triggered = [];
   let spentTotal = 0;
   let deferredTotal = 0;
 
   for (const asset of selected) {
-    const share = pool * asset.weight;
     try {
       const [price, klines] = await Promise.all([
         getPrice(asset.symbol),
@@ -117,26 +119,56 @@ async function runCycle() {
       ]);
       const profile = weeklyProfile(klines);
       const trigger = evaluateTrigger(price, profile);
-
       if (!trigger.buy) {
-        log('skip', { symbol: asset.symbol, sleeve: asset.sleeve, price, deferred: Number(share.toFixed(2)), reason: trigger.reason });
-        await recordSkip({ skippedAt: nowIso, symbol: asset.symbol, reason: trigger.reason, price, quoteDeferred: share });
-        deferredTotal += share;
+        log('skip', { symbol: asset.symbol, sleeve: asset.sleeve, price, reason: trigger.reason });
+        await recordSkip({ skippedAt: nowIso, symbol: asset.symbol, reason: trigger.reason, price, quoteDeferred: pool * asset.weight });
         continue;
       }
+      triggered.push({ ...asset, price, profile, trigger });
+    } catch (e) {
+      log('error_asset', { symbol: asset.symbol, error: e.message });
+    }
+  }
 
-      const result = await buyOne(asset, share, price, profile, trigger, nowIso, tradable);
+  if (!triggered.length) {
+    log('no_triggers', { checked: selected.length, reason: 'no asset met its own measured bar this cycle' });
+  }
+
+  // Pass 2: fund as many of them as the pool can actually cover at or above
+  // each pair's minimum order size, rather than handing every asset a share
+  // too small for the exchange to accept.
+  const minNotionalFor = (symbol) =>
+    Math.max(config.minOrderQuote, tradable[symbol]?.minNotional || 0);
+  const funded = allocate(triggered, pool, minNotionalFor);
+
+  if (triggered.length && !funded.length) {
+    log('pool_too_small', {
+      pool: Number(pool.toFixed(2)), triggered: triggered.map((a) => a.symbol),
+      cheapestMinimum: Math.min(...triggered.map((a) => minNotionalFor(a.symbol))),
+      reason: 'the whole tranche cannot cover even one minimum order; deferring so it can accumulate'
+    });
+  } else if (funded.length < triggered.length) {
+    log('allocation_concentrated', {
+      funded: funded.map((a) => a.symbol), perAsset: Number((pool / funded.length).toFixed(2)),
+      notFunded: triggered.slice(funded.length).map((a) => a.symbol),
+      reason: 'pool split across as many triggered assets as clear their minimum order size, in rank order'
+    });
+  }
+
+  for (const asset of funded) {
+    try {
+      const result = await buyOne(asset, asset.quote, asset.price, asset.profile, asset.trigger, nowIso, tradable);
       spentTotal += result.spent;
       deferredTotal += result.deferred;
       if (result.deferred > 0) {
         log('skip', { symbol: asset.symbol, reason: result.reason, deferred: Number(result.deferred.toFixed(2)) });
-        await recordSkip({ skippedAt: nowIso, symbol: asset.symbol, reason: result.reason, price, quoteDeferred: result.deferred });
+        await recordSkip({ skippedAt: nowIso, symbol: asset.symbol, reason: result.reason, price: asset.price, quoteDeferred: result.deferred });
       }
     } catch (e) {
       log('error_asset', { symbol: asset.symbol, error: e.message });
-      deferredTotal += share;
     }
   }
+  deferredTotal += Math.max(0, pool - spentTotal - deferredTotal);
 
   // The marker only advances when something was actually bought. If the whole
   // cycle was declined, the tranche stays due and the next firing (hours, not
