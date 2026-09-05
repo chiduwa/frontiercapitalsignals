@@ -2246,6 +2246,46 @@ check('board rows are indexed per asset class, so a shared ticker cannot cross w
 const collideIdx = mod.indexBoardRows({ crypto: { breakout: [{ symbol: 'DASH', rsi: 20 }] }, stocks: { breakout: [{ symbol: 'DASH', rsi: 80 }] } });
 check('DASH resolves to two distinct rows, not first-writer-wins', collideIdx['crypto|DASH'].rsi === 20 && collideIdx['stock|DASH'].rsi === 80);
 
+console.log('\n== isRetryableHistoryFailure: which daily-history failures can change on a second ask ==');
+check('a 429 is the rate-limit case the favorites rescue exists for', mod.isRetryableHistoryFailure({ _error: 'HTTP 429 https://api.coingecko.com/x' }) === true);
+check('a 5xx is a server condition of the moment', mod.isRetryableHistoryFailure({ _error: 'HTTP 503 https://api.coingecko.com/x' }) === true);
+check('a 404 is a fact about the coin and is never retried', mod.isRetryableHistoryFailure({ _error: 'HTTP 404 https://api.coingecko.com/x' }) === false);
+check('a genuinely thin series will read the same next time, so it is not retried either', mod.isRetryableHistoryFailure({ _error: 'thin daily history for some-new-coin' }) === false);
+check('a transport failure carrying no HTTP status is retryable', mod.isRetryableHistoryFailure({ _error: 'fetch failed' }) === true);
+check('a successful result is not a failure to retry', mod.isRetryableHistoryFailure({ closes: [1, 2, 3] }) === false);
+
+console.log('\n== binanceGlobalDailyHistory: the independent daily-bar supplier behind the favorites rescue ==');
+const klineDays = (n, close, endMs) => Array.from({ length: n }, (_, i) => [
+  endMs - (n - 1 - i) * 86400000, String(close), String(close * 1.02), String(close * 0.98), String(close), '1000', 0, '1000', 10, '0', '0', '0'
+]);
+const NOW_MS = Date.parse('2026-09-05T12:00:00Z');
+const withKlines = (rows) => { global.fetch = (url) => String(url).includes('/klines')
+  ? Promise.resolve({ ok: true, status: 200, json: async () => rows, text: async () => JSON.stringify(rows), headers: { get: () => null } })
+  : stubbedFetch(url); };
+
+withKlines(klineDays(365, 100, NOW_MS));
+const bnHist = await mod.binanceGlobalDailyHistory('SOL', 103.4, 365, NOW_MS);
+check('a good series returns getCryptoDailyHistory\'s exact { closes, volumes, bars } shape', Array.isArray(bnHist.closes) && bnHist.closes.length === 365 && bnHist.volumes.length === 365 && bnHist.bars.length === 365);
+check('bars carry the real high/low CoinGecko\'s free market_chart cannot supply', bnHist.bars[0].high > bnHist.bars[0].close && bnHist.bars[0].low < bnHist.bars[0].close);
+check('bars are dated oldest-first, newest last', bnHist.bars[0].date < bnHist.bars[bnHist.bars.length - 1].date);
+
+const rejects = async (label, rows, refPrice, cond) => {
+  withKlines(rows);
+  let msg = null;
+  try { await mod.binanceGlobalDailyHistory('SOL', refPrice, 365, NOW_MS); } catch (e) { msg = String(e.message); }
+  check(label, msg !== null && (!cond || cond(msg)), msg === null ? 'resolved instead of throwing' : msg);
+};
+// The HYPE/SUI/UNI defect, ported: a base ticker is not a unique asset id, so a
+// venue's same-named series can belong to a different token. Same two tests
+// archive.mjs' isYahooCryptoDataTrustworthy applies, enforced before the series
+// is allowed anywhere near the model.
+await rejects('a series two orders of magnitude off the known spot price is rejected as a different asset', klineDays(365, 0.5, NOW_MS), 103.4, (m) => /different asset/.test(m));
+await rejects('a stale series is rejected rather than modelled as current', klineDays(365, 100, NOW_MS - 30 * 86400000), 103.4, (m) => /stale/.test(m));
+await rejects('a short series is rejected on the same 60-bar floor CoinGecko\'s path uses', klineDays(40, 100, NOW_MS), 103.4, (m) => /thin daily history/.test(m));
+await rejects('no reference price means no way to verify the asset, so nothing is returned', klineDays(365, 100, NOW_MS), null, (m) => /reference price/.test(m));
+await rejects('a symbol the venue does not list (the real HYPE case) simply fails, it does not invent bars', [], 103.4);
+global.fetch = stubbedFetch;
+
 console.log('\n== buildScalpView: only what has actually been measured ==');
 const scalpPayload = {
   generated_at: '2026-08-31T00:00:00Z',
@@ -2516,6 +2556,29 @@ check('second call within the TTL is a cache hit', pricesResp2.headers.get('x-fc
 const pricesBody2 = await pricesResp2.json();
 check('cache hit serves the identical previously-fetched body (same generated_at)', pricesBody2.generated_at === pricesBody.generated_at);
 check('response never leaks a raw CoinGecko id key', Object.keys(pricesBody.crypto).every(k => displayedCryptoSymbols.has(k)));
+
+console.log('\n== api: live prices cover every DISPLAYED crypto section, not just the two ranked boards ==');
+// A pinned favorite usually is NOT in a top 10 — that is the whole reason the
+// section exists — and before this it got no tick at all: an hour-old build
+// price on screen, and no contribution to the session extremes attachDayRange
+// divides by dailyRange, so its day-range read never formed.
+const pinnedEnv = { FCS_CACHE: new MockKV() };
+const pinnedPayload = {
+  ...built,
+  crypto: {
+    ...built.crypto,
+    breakout: built.crypto.breakout.filter(r => r.symbol !== 'BTC'),
+    breakdown: built.crypto.breakdown.filter(r => r.symbol !== 'BTC'),
+    favorites: built.crypto.favorites.filter(r => r.symbol === 'BTC'),
+    longTermPotential: built.crypto.breakout.filter(r => r.symbol === 'LINK')
+  }
+};
+const pinnedLive = await mod.buildLivePrices(pinnedEnv, pinnedPayload);
+check('a favorite on neither ranked board still gets a live tick', pinnedLive.crypto.BTC && typeof pinnedLive.crypto.BTC.price === 'number', JSON.stringify(Object.keys(pinnedLive.crypto)));
+check('the long-term-potential section is covered too, on the same "it is on screen" reasoning', pinnedLive.crypto.LINK && typeof pinnedLive.crypto.LINK.price === 'number', JSON.stringify(Object.keys(pinnedLive.crypto)));
+check('and it feeds the session extremes the day-range read is built from', mod.updateSessionExtremes(null, pinnedLive, '2026-08-30T00:05:00Z').bySymbol['crypto|BTC'] != null);
+check('still no symbol the payload does not display anywhere', Object.keys(pinnedLive.crypto).every(s => ['BTC', 'ETH', 'LINK'].includes(s)), JSON.stringify(Object.keys(pinnedLive.crypto)));
+check('an asset rejected for untrustworthy daily history is still not reintroduced by the wider section sweep', !pinnedLive.crypto.SOL && !pinnedLive.crypto.XLM);
 
 console.log('\n== techniqueBreakdown: every technique\'s own accuracy for one asset, not just the best ==');
 const breakdownReliability = {

@@ -119,11 +119,21 @@ const CRYPTO_HISTORY_DELAY_MS = 3000;
 // Always evaluated and always shown in their own pinned dashboard section
 // (see rankBoards' favorites below), regardless of current rank or
 // whether they'd otherwise crack the top-10 breakout/breakdown boards —
-// the user wants these specific 4 visible every run, not just when they
-// happen to place. Also bypasses the CRYPTO_MIN_MCAP/CRYPTO_MIN_VOLUME
+// the user wants these specific symbols visible every run, not just when
+// they happen to place. Also bypasses the CRYPTO_MIN_MCAP/CRYPTO_MIN_VOLUME
 // floor below (still subject to CRYPTO_BLOCKLIST and simply needing to be
 // in CoinGecko's fetched top-CRYPTO_UNIVERSE page at all), so "always"
 // actually means always, not "usually, since they're currently large-cap."
+//
+// This list is also the day-trading universe (dayTradingUniverse) and the
+// scope of the published dailyRange table, so a symbol dropping out of it
+// silently removes the asset from three separate reads at once. What it is
+// NOT is a licence to publish: a favorite faces the same trustworthy-daily-
+// history gate, the same class-skill gate and the same per-cell evidence
+// requirement as anything else, and shows as withheld when it has not
+// earned a call. Pinned means always measured and always visible, never
+// always called. See buildPayload's rescue pass for the fetch-side half of
+// keeping that promise.
 export const FAVORITE_SYMBOLS = new Set(['BTC', 'ETH', 'SOL', 'XLM', 'XRP', 'HYPE', 'HBAR']);
 
 export const CRYPTO_BLOCKLIST = new Set([
@@ -3988,6 +3998,75 @@ export async function binanceGlobalKlines(baseSymbol, interval = '1h', limit = 2
   })).filter((b) => Number.isFinite(b.close) && b.close > 0);
 }
 
+// A second, independent supplier of the same daily series getCryptoDailyHistory
+// returns, in the identical { closes, volumes, bars } shape so callers never
+// branch on which venue answered.
+//
+// Why a second supplier at all: CoinGecko's free tier rate-limits per IP, and
+// this engine runs on GitHub Actions' shared runner ranges. The 2026-09-05
+// 20:00Z build landed 32 of 70 per-coin histories — 38 coins 429'd — and since
+// the queue order was just CoinGecko's market-cap page, WHICH 38 was close to a
+// coin toss. That is how SOL, XLM, XRP and HYPE fell out of FAVORITE_SYMBOLS'
+// pinned board that build: nothing about the model rejected them, their data
+// fetch simply lost a lottery. Retrying the same rate-limited host harder does
+// not fix a per-IP budget; asking a different host does. Binance's public data
+// mirror (see BINANCE_GLOBAL_BASE) is unauthenticated, not geo-blocked here,
+// and its 1d closes were verified against CoinGecko's same-day values for the
+// whole favorites set on 2026-09-05 — BTC 79748 vs 79763, XRP 1.4173 vs 1.4175,
+// SOL 103.43 vs 103.44, XLM 0.1844 vs 0.1845, HBAR 0.08086 vs 0.0808. Inside
+// 0.03% on every one, i.e. the same asset, not a lookalike.
+//
+// `refPrice` is the caller's already-known spot price and is REQUIRED, because
+// a base ticker is not a globally unique asset id: this is the exact shape of
+// the HYPE/SUI/UNI defect archive.mjs' isYahooCryptoDataTrustworthy was written
+// for, where a venue's same-named series belonged to a different token
+// entirely. Rather than import that (worker.js is what every script imports
+// FROM, never the reverse), the same two tests are applied here — the newest
+// bar must be recent, and within an order of magnitude of the price we already
+// hold — so a collision is rejected instead of quietly entering the model.
+export const BINANCE_DAILY_MAX_STALE_DAYS = 3;
+export async function binanceGlobalDailyHistory(baseSymbol, refPrice, days = CRYPTO_HISTORY_DAYS, nowMs = Date.now()) {
+  const rows = await binanceGlobalKlines(baseSymbol, '1d', days);
+  const bars = rows.map((b) => ({
+    date: b.openTime.slice(0, 10),
+    close: b.close,
+    // Binance carries real high/low, which CoinGecko's free market_chart does
+    // not (see migrations/0004_asset_daily_range.sql — close-only bars are
+    // exactly why HYPE has no measured daily range). Kept rather than dropped
+    // to match the CoinGecko shape: it is real data, and nothing downstream is
+    // harmed by a bar knowing more than the minimum.
+    high: b.high,
+    low: b.low
+  })).filter((b) => Number.isFinite(b.close) && b.close > 0);
+  if (bars.length < 60) throw new Error(`thin daily history for ${baseSymbol} (binance)`);
+  const last = bars[bars.length - 1];
+  if (refPrice == null || !(refPrice > 0)) throw new Error(`no reference price to verify ${baseSymbol} against (binance)`);
+  const staleDays = (nowMs - new Date(last.date + 'T00:00:00Z').getTime()) / 86400000;
+  if (!(staleDays <= BINANCE_DAILY_MAX_STALE_DAYS)) throw new Error(`stale binance series for ${baseSymbol} (${Math.round(staleDays)}d)`);
+  const ratio = last.close / refPrice;
+  if (!(ratio >= 0.1 && ratio <= 10)) throw new Error(`binance ${baseSymbol} series is a different asset (last ${last.close} vs reference ${refPrice})`);
+  const volumes = rows.map((b) => b.volume).filter((v) => Number.isFinite(v));
+  return {
+    closes: bars.map((b) => b.close),
+    volumes: volumes.length === bars.length ? volumes : null,
+    bars
+  };
+}
+
+// A failed daily-history fetch worth asking about again. Same distinction
+// getCryptoDailyHistory's own backoff already draws, lifted out so the
+// favorites rescue pass in buildPayload can apply it too: rate limiting and
+// server/transport faults are conditions of the moment, while a 404 or a series
+// that is genuinely too short is a fact about the coin and will read the same
+// on the next call.
+export function isRetryableHistoryFailure(result) {
+  if (!result || !result._error) return false;
+  const msg = String(result._error);
+  if (/^HTTP 429/.test(msg) || /^HTTP 5\d\d/.test(msg)) return true;
+  if (/^HTTP \d/.test(msg)) return false;
+  return !/^thin daily history/.test(msg); // no HTTP status at all: timeout/network
+}
+
 // Which base symbols have a live, actively-trading USDT pair on Binance.US
 // right now. Computed once per hourly build (see buildPayload), not per
 // live-price request — the result rides in the KV payload so /api/prices
@@ -4797,14 +4876,54 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
       if (!hasCrossClassTickerCollision(c.symbol)) directional.push(c);
     }
     cryptoStableValue = stableValueRows;
+    const isFavorite = (c) => FAVORITE_SYMBOLS.has((c.symbol || '').toUpperCase());
     const qualifying = directional
-      .filter(c => FAVORITE_SYMBOLS.has((c.symbol || '').toUpperCase())
+      .filter(c => isFavorite(c)
         || ((c.market_cap || 0) >= CRYPTO_MIN_MCAP && (c.total_volume || 0) >= CRYPTO_MIN_VOLUME));
+    // Favorites first, before anything else spends the per-IP rate-limit
+    // budget. "Always tracked" has to mean always, and until now the pinned
+    // assets queued in whatever order CoinGecko's market-cap page returned and
+    // took their chances with everything else — see binanceGlobalDailyHistory's
+    // docs for the build where that silently cost the board SOL/XLM/XRP/HYPE.
+    // Costs nothing: same call count, same pacing, different order. Array#sort
+    // is stable, so market-cap order still holds among the rest.
+    qualifying.sort((a, b) => (isFavorite(b) ? 1 : 0) - (isFavorite(a) ? 1 : 0));
 
     // Paced, not pooled at full concurrency: ~100 per-coin calls against
     // CoinGecko's free tier, one call per qualifying coin (no batched
     // multi-coin history endpoint exists on that tier).
     const histories = await poolPaced(qualifying, CRYPTO_HISTORY_BATCH, CRYPTO_HISTORY_DELAY_MS, (c) => getCryptoDailyHistory(c.id));
+
+    // Rescue pass, favorites only and bounded at FAVORITE_SYMBOLS.size extra
+    // calls. Ordering above improves the odds; it cannot guarantee them, and a
+    // pinned asset vanishing from its own board is the one failure this section
+    // exists to prevent. So a favorite that still has no series gets asked of a
+    // DIFFERENT venue (Binance's public data mirror — an independent host with
+    // its own budget, which is why this beats retrying CoinGecko harder), and
+    // only if that venue does not list it — HYPE has no USDT pair there — does
+    // it fall back to one more CoinGecko attempt, paced like the main queue and
+    // limited to failures that can actually change (isRetryableHistoryFailure).
+    //
+    // This raises the odds of having daily bars; it does NOT relax what counts
+    // as daily bars. Whatever comes back still faces the same inputInterval
+    // gate below as every other coin, and the Binance path additionally proves
+    // the series belongs to this asset before returning it. A favorite with no
+    // trustworthy series still sits the build out.
+    for (let i = 0; i < qualifying.length; i++) {
+      const coin = qualifying[i];
+      if (!isFavorite(coin) || !histories[i] || !histories[i]._error) continue;
+      const sym = (coin.symbol || '').toUpperCase();
+      try {
+        histories[i] = await binanceGlobalDailyHistory(sym, coin.current_price);
+        continue;
+      } catch (e) {
+        console.warn(`favorite ${sym}: binance daily history unavailable (${(e && e.message) || e})`);
+      }
+      if (!isRetryableHistoryFailure(histories[i])) continue;
+      await new Promise((r) => setTimeout(r, CRYPTO_HISTORY_DELAY_MS));
+      histories[i] = await getCryptoDailyHistory(coin.id)
+        .catch((err) => ({ _error: String((err && err.message) || err), _item: coin }));
+    }
     cryptoDailyTotal = histories.length;
     cryptoDailyOk = histories.filter(h => h && !h._error).length;
 
@@ -6640,7 +6759,29 @@ function json(obj, extraHeaders) {
 // (technique weights, calibration, reliability) waits on the heavy build.
 export async function buildLivePrices(env, cached) {
   if (!cached) return null;
-  const cryptoRows = [...((cached.crypto && cached.crypto.breakout) || []), ...((cached.crypto && cached.crypto.breakdown) || [])];
+  const cryptoSection = (cached && cached.crypto) || {};
+  // Every crypto section the dashboard actually renders, not just the two
+  // ranked boards. A pinned favorite is displayed whether or not it cracks a
+  // top 10, and the quiet ones usually do not — so BTC could sit on the
+  // favorites board showing an hour-old build price while every ranked row
+  // beside it ticked. Worse than cosmetic: updateSessionExtremes accumulates
+  // today's high/low from exactly this body, so a symbol absent here never
+  // builds the session extremes attachDayRange needs, and its day-range read
+  // never forms at all — which is why dayRange covered 3 symbols out of a
+  // 7-favorite day-trading universe.
+  //
+  // Free in subrequest terms, which is the constraint this route is written
+  // against: both crypto providers take the whole symbol list in ONE batched
+  // call (coingeckoSimplePrice, binanceUsTicker24hr), so this adds rows, not
+  // fetches. Equities deliberately stay on the two boards — yahooQuote is one
+  // call per symbol, and the route's 50-subrequest headroom is reasoned
+  // against that 20-symbol ceiling.
+  const cryptoRows = [
+    ...(cryptoSection.breakout || []),
+    ...(cryptoSection.breakdown || []),
+    ...(cryptoSection.favorites || []),
+    ...(cryptoSection.longTermPotential || [])
+  ];
   const stockRows = [...((cached.stocks && cached.stocks.breakout) || []), ...((cached.stocks && cached.stocks.breakdown) || [])];
   const cryptoIdToSymbol = new Map(cryptoRows.filter(r => r.id).map(r => [r.id, r.symbol]));
   const stockSymbols = [...new Set(stockRows.map(r => r.symbol))];
