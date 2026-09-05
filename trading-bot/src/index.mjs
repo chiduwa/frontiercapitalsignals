@@ -20,7 +20,7 @@ import { loadState, saveState, recordEquity } from './state.mjs';
 import {
   getAccount, getOpenAlgoOrders, setLeverage, getMarkPrice,
   placeMarketOrder, placeProtectiveOrder, cancelAllOpenOrders,
-  roundQuantity, roundPrice, getExchangeInfo
+  roundQuantity, roundPrice, getExchangeInfo, getPositionRiskMap
 } from './binance.mjs';
 import { fetchSignals, fetchScalp, buildCandidates, getFearGreed } from './signals.mjs';
 import { decideEntries } from './strategy.mjs';
@@ -44,7 +44,7 @@ function exitGeometry(candidate, decision, entryPrice) {
   return { stop, target, timeExit };
 }
 
-async function ensureProtection(position, state) {
+async function ensureProtection(position, state, risk) {
   const symbol = position.symbol;
   const existing = await getOpenAlgoOrders(symbol);
   const hasStop = existing.some((o) => o.orderType === 'STOP_MARKET' || o.type === 'STOP_MARKET');
@@ -53,9 +53,33 @@ async function ensureProtection(position, state) {
 
   const side = Number(position.positionAmt) > 0 ? 'BUY' : 'SELL';
   const closingSide = side === 'BUY' ? 'SELL' : 'BUY';
-  const entryPrice = Number(position.entryPrice);
-  const leverage = Number(position.leverage) || config.minLeverage;
+  const r = (risk && risk[symbol]) || {};
+  // entryPrice/leverage come from positionRisk, not from the account payload —
+  // the account's position entries do not contain them (see getPositionRiskMap).
+  let entryPrice = Number.isFinite(r.entryPrice) && r.entryPrice > 0 ? r.entryPrice : NaN;
+  let anchor = 'entry';
+  if (!Number.isFinite(entryPrice)) {
+    // A stop anchored to the mark is not equivalent to one anchored to entry,
+    // but an unprotected leveraged position is strictly worse than a slightly
+    // mis-anchored stop. Take the mark and say so.
+    entryPrice = Number.isFinite(r.markPrice) && r.markPrice > 0 ? r.markPrice : NaN;
+    anchor = 'mark';
+  }
+  const leverage = Number.isFinite(r.leverage) && r.leverage > 0 ? r.leverage : config.minLeverage;
   const recorded = state.openOrders[symbol];
+
+  if (!Number.isFinite(entryPrice)) {
+    // Fail loudly rather than sending a NaN trigger price that the exchange
+    // will reject, leaving the position silently unprotected.
+    log('error_no_price_reference_for_protection', {
+      symbol, reason: 'neither entryPrice nor markPrice available from positionRisk — cannot compute a protective trigger',
+      action: 'NO PROTECTIVE ORDER PLACED — investigate immediately'
+    });
+    return;
+  }
+  if (anchor === 'mark') {
+    log('warning_stop_anchored_to_mark', { symbol, reason: 'entryPrice unavailable from positionRisk; stop sized from the current mark instead' });
+  }
 
   if (!hasStop) {
     // A recorded stop is preferred: for a research-sourced position it was
@@ -63,6 +87,10 @@ async function ensureProtection(position, state) {
     // fallback knows nothing about.
     const raw = recorded?.stopPrice ?? stopLossPrice(entryPrice, side, leverage);
     const price = await roundPrice(symbol, raw);
+    if (!Number.isFinite(price) || !(price > 0)) {
+      log('error_bad_stop_price', { symbol, raw, computed: price, action: 'NO STOP PLACED — investigate immediately' });
+      return;
+    }
     if (config.dryRun) {
       log('dry_run_would_place_stop', { symbol, side: closingSide, triggerPrice: price });
     } else {
@@ -78,6 +106,10 @@ async function ensureProtection(position, state) {
       return;
     }
     const price = await roundPrice(symbol, raw);
+    if (!Number.isFinite(price) || !(price > 0)) {
+      log('error_bad_take_profit_price', { symbol, raw, computed: price, action: 'no take-profit placed; stop-loss still applies' });
+      return;
+    }
     if (config.dryRun) {
       log('dry_run_would_place_take_profit', { symbol, side: closingSide, triggerPrice: price });
     } else {
@@ -245,8 +277,12 @@ async function runCycle() {
   // Protect every currently-open position first, before considering new
   // entries — an unprotected leveraged position is the single biggest risk in
   // this whole system.
+  const risk = await getPositionRiskMap().catch((e) => {
+    log('error_loading_position_risk', { error: e.message, note: 'protective orders cannot be anchored without it' });
+    return {};
+  });
   for (const p of openPositionsRaw) {
-    try { await ensureProtection(p, state); } catch (e) { log('error_ensuring_protection', { symbol: p.symbol, error: e.message }); }
+    try { await ensureProtection(p, state, risk); } catch (e) { log('error_ensuring_protection', { symbol: p.symbol, error: e.message }); }
   }
   await applyTimeExits(openPositionsRaw, state, nowMs);
 

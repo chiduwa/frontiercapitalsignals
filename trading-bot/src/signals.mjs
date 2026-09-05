@@ -114,7 +114,35 @@ export function buildCandidates(signals, scalp) {
     });
   }
 
-  return candidates;
+  // One candidate per symbol. A symbol can sit on more than one board — seen
+  // live 2026-09-05, where UNI, ZEC and ASTER each produced two identical
+  // candidates and were evaluated twice. Harmless while everything is
+  // withheld, but once calls are authorized a duplicate would be sized and
+  // counted against exposure twice.
+  //
+  // Where two rows for the same symbol disagree on the published direction,
+  // NEITHER trades: a screen that says both long and short about one asset at
+  // one moment is not evidence for a side, it is a contradiction.
+  return dedupeBySymbol(candidates);
+}
+
+export function dedupeBySymbol(candidates) {
+  const bySymbol = new Map();
+  for (const c of candidates) {
+    const key = `${c.source}|${c.symbol}`;
+    const existing = bySymbol.get(key);
+    if (!existing) { bySymbol.set(key, c); continue; }
+    if (existing.authorized && c.authorized && existing.side !== c.side) {
+      bySymbol.set(key, {
+        ...existing, authorized: false,
+        unauthorizedReason: `contradictory published directions for this symbol (${existing.side} and ${c.side}) — abstaining on both`
+      });
+      continue;
+    }
+    // Otherwise keep whichever row the engine actually authorized.
+    if (!existing.authorized && c.authorized) bySymbol.set(key, c);
+  }
+  return [...bySymbol.values()];
 }
 
 export function getFearGreed(signals) {

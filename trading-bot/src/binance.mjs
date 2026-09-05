@@ -85,6 +85,30 @@ export async function getPositionRisk(symbol) {
   return signedRequest('GET', '/fapi/v3/positionRisk', symbol ? { symbol } : {});
 }
 
+// Entry price and leverage per symbol.
+//
+// These are NOT in /fapi/v3/account's `positions` entries — confirmed live
+// 2026-09-05, whose keys are only symbol, positionSide, positionAmt,
+// unrealizedProfit, isolatedMargin, notional, isolatedWallet, initialMargin,
+// maintMargin, updateTime. Reading entryPrice from there yields NaN, which
+// propagated into a stop-loss trigger price of NaN and would have left a live
+// leveraged position unprotected. positionRisk is the endpoint that carries
+// them.
+export async function getPositionRiskMap() {
+  const rows = await getPositionRisk();
+  const out = {};
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || !r.symbol) continue;
+    out[r.symbol] = {
+      entryPrice: Number(r.entryPrice),
+      leverage: Number(r.leverage),
+      markPrice: Number(r.markPrice),
+      liquidationPrice: Number(r.liquidationPrice)
+    };
+  }
+  return out;
+}
+
 export async function setLeverage(symbol, leverage) {
   return signedRequest('POST', '/fapi/v1/leverage', { symbol, leverage: Math.round(leverage) });
 }

@@ -17,7 +17,7 @@ const {
 } = await import('./src/risk.mjs');
 const { evaluateCandidate, decideEntries } = await import('./src/strategy.mjs');
 const { resolveShadowTrade } = await import('./src/paper.mjs');
-const { buildCandidates, toBinanceSymbol } = await import('./src/signals.mjs');
+const { buildCandidates, toBinanceSymbol, dedupeBySymbol } = await import('./src/signals.mjs');
 
 let failures = 0;
 function check(name, condition, detail) {
@@ -394,6 +394,35 @@ check('a withheld row is still surfaced, carrying the engine\'s reason', (() => 
     crypto: { breakout: [{ ...authorizedRow(), abstained: { reason: 'insufficient-evidence', measured: null } }], breakdown: [] }
   }, null);
   return cold[0].authorized === false && cold[0].unauthorizedReason.includes('insufficient-evidence');
+})());
+
+console.log('\n== signals.mjs: one candidate per symbol ==');
+const dupA = { source: 'confluence-v7', symbol: 'UNIUSDT', side: 'BUY', authorized: false, unauthorizedReason: 'x' };
+check('an identical duplicate collapses to one', dedupeBySymbol([dupA, { ...dupA }]).length === 1);
+check('an authorized row wins over a withheld one for the same symbol', (() => {
+  const auth = { ...dupA, authorized: true, unauthorizedReason: null };
+  const r = dedupeBySymbol([dupA, auth]);
+  return r.length === 1 && r[0].authorized === true;
+})());
+// A screen saying both long and short about one asset is a contradiction, not
+// evidence for a side.
+check('contradictory authorized directions abstain on both', (() => {
+  const long = { ...dupA, authorized: true, side: 'BUY', unauthorizedReason: null };
+  const short = { ...dupA, authorized: true, side: 'SELL', unauthorizedReason: null };
+  const r = dedupeBySymbol([long, short]);
+  return r.length === 1 && r[0].authorized === false && r[0].unauthorizedReason.includes('contradictory');
+})());
+check('the two sources are kept separate, not merged', (() => {
+  const research = { ...dupA, source: 'research-confirmed' };
+  return dedupeBySymbol([dupA, research]).length === 2;
+})());
+check('buildCandidates emits one row per symbol even when a symbol is on two boards', (() => {
+  const row = authorizedRow();
+  const both = buildCandidates({
+    classSkill: provenClass, holdingEvidence: evidence,
+    crypto: { breakout: [row], breakdown: [{ ...row }] }
+  }, null);
+  return both.filter((c) => c.signalSymbol === 'SOL').length === 1;
 })());
 
 console.log(failures === 0 ? '\nTRADING BOT OK\n' : `\n${failures} CHECK(S) FAILED\n`);
