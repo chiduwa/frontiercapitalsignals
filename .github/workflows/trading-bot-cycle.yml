@@ -30,6 +30,24 @@ jobs:
         with:
           node-version: "24"
 
+      # The bot binds to the engine's published contract; the guardrail tests
+      # pin that binding (including the engine's own numeric bars). A drift
+      # that would leave the bot laxer than the system it follows fails here
+      # rather than in a live cycle.
+      - name: Verify contract and risk guardrails
+        working-directory: trading-bot
+        run: node test.mjs
+
+      # The shadow ledger's table and the open-order exit-geometry columns are
+      # additive schema this bot owns. Re-running is safe: Wrangler records
+      # applied migrations.
+      - name: Apply D1 migrations
+        working-directory: signals-worker
+        run: npx --yes wrangler@4 d1 migrations apply frontier-capital-signals-reliability --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Run one trading bot cycle
         working-directory: trading-bot
         run: node src/index.mjs

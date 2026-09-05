@@ -730,8 +730,68 @@ CREATE TABLE IF NOT EXISTS trading_bot_open_orders (
   leverage INTEGER NOT NULL,
   range_low REAL,
   range_high REAL,
+  -- Exit geometry, resolved once at entry and persisted. Under confluence-v7
+  -- the take-profit is no longer derivable from the range alone (it may come
+  -- from measured path evidence instead), and the time exit has no other
+  -- representation, so a later cycle could not otherwise reconstruct either.
+  target_price REAL,
+  stop_price REAL,
+  time_exit_after_ms REAL,
+  source TEXT,
   opened_at TEXT NOT NULL
 );
+
+-- The bot's own track record, kept strictly separate from the engine's.
+-- Under v7 the engine withholds every direction until independent evidence
+-- rebuilds, so a correctly-gated bot places nothing for days or weeks. Every
+-- candidate that clears each gate the BOT owns, and fails only because the
+-- engine has not authorized a call, is recorded here with the exact entry,
+-- stop and target it would have used, and resolved by later cycles against
+-- real subsequent prices. Nothing in this table places an order or feeds a
+-- sizing decision. See trading-bot/src/paper.mjs and migration 0015.
+CREATE TABLE IF NOT EXISTS trading_bot_shadow_trades (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  opened_at TEXT NOT NULL,
+  -- shadow = engine had not authorized; dry = authorized but DRY_RUN;
+  -- live = authorized and executed. Never pooled across modes.
+  mode TEXT NOT NULL CHECK (mode IN ('shadow', 'dry', 'live')),
+  source TEXT NOT NULL CHECK (source IN ('confluence-v7', 'research-confirmed')),
+  symbol TEXT NOT NULL,
+  signal_symbol TEXT NOT NULL,
+  side TEXT NOT NULL CHECK (side IN ('BUY', 'SELL')),
+  entry_price REAL NOT NULL CHECK (entry_price > 0),
+  stop_price REAL CHECK (stop_price IS NULL OR stop_price > 0),
+  target_price REAL CHECK (target_price IS NULL OR target_price > 0),
+  position_pct REAL NOT NULL,
+  leverage REAL NOT NULL,
+  extreme_boost INTEGER NOT NULL DEFAULT 0 CHECK (extreme_boost IN (0, 1)),
+  withheld_reason TEXT,
+  horizon_hours REAL,
+  time_exit_after_ms REAL,
+  edge REAL,
+  holding_n INTEGER,
+  holding_mfe_pct REAL,
+  holding_mae_pct REAL,
+  holding_hours_to_peak REAL,
+  -- Extremes seen since entry, carried forward each cycle: a stop breached
+  -- and then recovered between two cycles is a closed trade, and scoring on
+  -- the latest price alone would silently drop exactly the losers.
+  running_high REAL,
+  running_low REAL,
+  resolved_at TEXT,
+  exit_price REAL CHECK (exit_price IS NULL OR exit_price > 0),
+  exit_reason TEXT CHECK (exit_reason IS NULL OR exit_reason IN ('target', 'stop', 'time', 'horizon')),
+  -- Signed, leveraged, GROSS of fees and funding: a cost assumption belongs
+  -- in the analysis that reads this, not baked into the stored observation.
+  return_pct REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_trading_bot_shadow_open
+  ON trading_bot_shadow_trades(resolved_at, opened_at) WHERE resolved_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_trading_bot_shadow_symbol
+  ON trading_bot_shadow_trades(symbol, opened_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_trading_bot_shadow_one_open
+  ON trading_bot_shadow_trades(symbol, mode) WHERE resolved_at IS NULL;
 
 -- ------------------------- SUPPORT/RESISTANCE (srbreak) ---------------------
 -- Added 2026-08-20 after a post-mortem on the 08-19 crypto pump: BTC's

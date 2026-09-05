@@ -14,7 +14,7 @@ const env = { CLOUDFLARE_API_TOKEN: config.cloudflareApiToken, CLOUDFLARE_ACCOUN
 export async function loadState() {
   const [equityRow] = await d1(env, 'SELECT peak_equity, day_start_equity, day_start_date FROM trading_bot_equity_state WHERE id = 1');
   const lastClosedRows = await d1(env, 'SELECT symbol, closed_at FROM trading_bot_last_closed');
-  const openOrderRows = await d1(env, 'SELECT symbol, side, entry_price, margin_used, leverage, range_low, range_high, opened_at FROM trading_bot_open_orders');
+  const openOrderRows = await d1(env, 'SELECT symbol, side, entry_price, margin_used, leverage, range_low, range_high, target_price, stop_price, time_exit_after_ms, source, opened_at FROM trading_bot_open_orders');
 
   return {
     peakEquity: equityRow?.peak_equity ?? null,
@@ -24,6 +24,10 @@ export async function loadState() {
     openOrders: Object.fromEntries(openOrderRows.map((r) => [r.symbol, {
       side: r.side, entryPrice: r.entry_price, marginUsed: r.margin_used, leverage: r.leverage,
       range: r.range_low != null ? { low: r.range_low, high: r.range_high } : null,
+      targetPrice: r.target_price ?? null,
+      stopPrice: r.stop_price ?? null,
+      timeExitAfterMs: r.time_exit_after_ms ?? null,
+      source: r.source ?? null,
       openedAt: r.opened_at
     }]))
   };
@@ -45,9 +49,9 @@ export async function saveState(state) {
   const stillOpenSymbols = Object.keys(state.openOrders);
   for (const [symbol, o] of Object.entries(state.openOrders)) {
     await d1(env, `
-      INSERT INTO trading_bot_open_orders (symbol, side, entry_price, margin_used, leverage, range_low, range_high, opened_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(symbol) DO UPDATE SET side = excluded.side, entry_price = excluded.entry_price, margin_used = excluded.margin_used, leverage = excluded.leverage, range_low = excluded.range_low, range_high = excluded.range_high, opened_at = excluded.opened_at
-    `, [symbol, o.side, o.entryPrice, o.marginUsed, o.leverage, o.range?.low ?? null, o.range?.high ?? null, o.openedAt]);
+      INSERT INTO trading_bot_open_orders (symbol, side, entry_price, margin_used, leverage, range_low, range_high, target_price, stop_price, time_exit_after_ms, source, opened_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(symbol) DO UPDATE SET side = excluded.side, entry_price = excluded.entry_price, margin_used = excluded.margin_used, leverage = excluded.leverage, range_low = excluded.range_low, range_high = excluded.range_high, target_price = excluded.target_price, stop_price = excluded.stop_price, time_exit_after_ms = excluded.time_exit_after_ms, source = excluded.source, opened_at = excluded.opened_at
+    `, [symbol, o.side, o.entryPrice, o.marginUsed, o.leverage, o.range?.low ?? null, o.range?.high ?? null, o.targetPrice ?? null, o.stopPrice ?? null, o.timeExitAfterMs ?? null, o.source ?? null, o.openedAt]);
   }
   // Positions this cycle detected as closed (see index.mjs) were already
   // deleted from state.openOrders in-memory before this is called —

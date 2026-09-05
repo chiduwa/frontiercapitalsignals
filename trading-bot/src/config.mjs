@@ -56,13 +56,38 @@ export const config = {
   minLeverage: num(process.env.MIN_LEVERAGE, 3),
   maxLeverage: num(process.env.MAX_LEVERAGE, 20),
 
-  // Confidence gating: conf.agree/conf.total (technique agreement) and
-  // topIndicator.accuracy (that asset's single best-performing technique's
-  // own live track record) both have to clear this before the bot
-  // considers a candidate at all — this IS the "patience" instruction:
-  // don't trade every signal, only ones with real conviction behind them.
-  minConfidenceRatio: num(process.env.MIN_CONFIDENCE_RATIO, 0.55),
-  minTopIndicatorAccuracy: num(process.env.MIN_TOP_INDICATOR_ACCURACY, 0.55),
+  // Sizing input. The old confidence gate (technique agreement x that
+  // asset's best technique accuracy) is gone: agreement across correlated
+  // techniques is precisely the "independent evidence" fallacy the engine's
+  // v7 audit removed, and topIndicator is no longer published for a
+  // withheld row. Authorization is now the engine's job (contract.mjs); what
+  // is left for this bot is HOW BIG, and that scales on the conservative
+  // edge over the class's own no-skill baseline. The engine's own bar is
+  // 0.18; this is the edge at which the bot commits full size.
+  edgeFullSize: num(process.env.EDGE_FULL_SIZE, 0.35),
+
+  // A separate, much lower ceiling for positions sourced from confirmed
+  // research strategies. Their evidence is an event study rather than a
+  // calibrated per-asset forecast record — real, but a different kind — so
+  // they may never consume the whole exposure budget.
+  maxResearchExposurePct: num(process.env.MAX_RESEARCH_EXPOSURE_PCT, 0.15),
+  // Multiple of a confirmed strategy's own measured worst trade to place its
+  // stop beyond. A stop tighter than the drawdown the rule is KNOWN to
+  // produce would cut exactly the trades its expectancy depends on.
+  researchStopWidening: num(process.env.RESEARCH_STOP_WIDENING, 1.5),
+
+  // Exit geometry from measured path shape (payload.holdingEvidence).
+  // Fraction of the measured mean favorable excursion to target. Excursion
+  // distributions are right-skewed, so their mean sits above their median —
+  // a target at the full mean would be reached less than half the time.
+  takeProfitMfeFraction: num(process.env.TAKE_PROFIT_MFE_FRACTION, 0.7),
+  // Multiple of the measured mean time-to-peak after which a still-open
+  // position is closed: past that point the evidence says the favorable
+  // excursion is usually already behind us and the trade is giving back.
+  timeExitPeakMultiple: num(process.env.TIME_EXIT_PEAK_MULTIPLE, 1.0),
+  // Lower bound on "the worst price arrived before the best" above which the
+  // bot waits for that drawdown instead of filling at the signal price.
+  patienceAdverseFirstBound: num(process.env.PATIENCE_ADVERSE_FIRST_BOUND, 0.5),
 
   // Range-position entry gate. rangePos is already computed by the live
   // engine (0 = at the predicted range's low end, 1 = at the high end).
@@ -75,12 +100,16 @@ export const config = {
   // user's own spec: "goes harder, holds the buy a bit longer with a bit
   // of a higher leverage whenever fear and greed is around or below 15
   // and there seems to be a reversal... vice versa (sell when fear and
-  // greed is above 85, peaked and its reversing)." "Reversal" is read as
-  // the intraday signal's own bottomed/peaked flags (proximity to a real
-  // 24h extreme), not its `dir` field — see signals.mjs for why dir is
-  // deliberately NOT used as a trade trigger.
+  // greed is above 85, peaked and its reversing)."
   fearGreedExtremeLow: num(process.env.FEAR_GREED_EXTREME_LOW, 15),
   fearGreedExtremeHigh: num(process.env.FEAR_GREED_EXTREME_HIGH, 85),
+  // "Reversal" is now proximity to a real session extreme, read from the
+  // measurement-only scalp surface (posInDayRange). The former source, the
+  // intraday model's bottomed/peaked flags, was retired for showing no
+  // usable edge and its endpoint is a deprecation stub — this condition had
+  // been silently unreachable until now.
+  reversalDayRangeLow: num(process.env.REVERSAL_DAY_RANGE_LOW, 0.15),
+  reversalDayRangeHigh: num(process.env.REVERSAL_DAY_RANGE_HIGH, 0.85),
   extremeAggressionBoost: num(process.env.EXTREME_AGGRESSION_BOOST, 1.25), // multiplier on size/leverage when the extreme+reversal condition fires, still hard-capped at max/max
   extremeHoldMultiplier: num(process.env.EXTREME_HOLD_MULTIPLIER, 1.5), // "holds the buy a bit longer" — multiplies the normal target-hold/cooldown window
 
@@ -91,5 +120,12 @@ export const config = {
   cooldownMinutes: num(process.env.COOLDOWN_MINUTES, 60), // minimum gap after closing a symbol before re-entering it — avoids fee/slippage churn
   circuitBreakerDrawdownPct: num(process.env.CIRCUIT_BREAKER_DRAWDOWN_PCT, 0.15), // pause NEW entries (existing positions still managed) if equity drawdown from peak exceeds this
   dailyLossLimitPct: num(process.env.DAILY_LOSS_LIMIT_PCT, 0.10), // pause new entries for the rest of the day if realized+unrealized loss since day-start exceeds this
-  maxFundingRateAbs: num(process.env.MAX_FUNDING_RATE_ABS, 0.001) // skip entry if funding is this unfavorable or worse against the intended direction (0.001 = 0.1% per 8h)
+  maxFundingRateAbs: num(process.env.MAX_FUNDING_RATE_ABS, 0.001), // skip entry if funding is this unfavorable or worse against the intended direction (0.001 = 0.1% per 8h)
+
+  // Shadow ledger: while the engine withholds every call (the v7 cold
+  // start), record what the bot WOULD have opened and resolve those against
+  // real subsequent prices, so it accumulates its own track record instead
+  // of idling. Never places an order — see paper.mjs.
+  shadowLedger: bool(process.env.SHADOW_LEDGER, true),
+  shadowMaxOpen: num(process.env.SHADOW_MAX_OPEN, 40) // cap concurrent unresolved shadow entries so the resolver's per-cycle price reads stay bounded
 };

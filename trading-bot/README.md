@@ -16,63 +16,140 @@ from Binance every cycle, never trusted from D1.
 **This connects to a real account with real leverage. Read this whole
 file before setting `DRY_RUN=false`.**
 
-## What it does, mapped to what was asked for
+## Bound to the engine's publication gate (confluence-v7)
 
-- **Fully autonomous.** Fired every 5 minutes by a GitHub Actions cron
-  schedule, no manual intervention required. (GitHub's documented cron
-  minimum is 5 minutes; actual firing can lag a few minutes under
-  platform load — this cadence doesn't need to be exact to be safe,
-  since protection lives on the exchange, not in this process — see
-  below.)
-- **5-20% of the portfolio per trade, 3-20x leverage, scaled to
-  confidence.** Confidence = the *lower* of the live confluence engine's
-  technique-agreement ratio and that asset's own best-performing
-  technique's live accuracy (`combinedConfidence`, `src/risk.mjs`) — both
-  have to be genuinely good, not just one.
-- **Max 20% per position, max 50% total exposure.** Hard ceilings,
-  enforced regardless of confidence (`src/risk.mjs`).
-- **Buys near the low end of the predicted range, sells near the high
-  end.** Uses `rangePos` exactly as the live dashboard computes it (0 =
-  low end, 1 = high end) — no reimplementation, one source of truth
-  (`src/signals.mjs`).
-- **"Be patient... enter at the right time, not just executing trades."**
-  A candidate has to clear a confidence floor AND actually be sitting in
-  the low/high entry zone before the bot acts — most cycles, most
-  candidates get skipped, logged with the specific reason. Run right now
-  against live data (2026-08-17), **every current candidate is skipped
-  for insufficient confidence** — that's the patience rule working, not a
-  bug.
-- **Fear & Greed extreme + reversal aggression.** F&G <=15 with a detected
-  bottom (or >=85 with a detected top) *substitutes* for the normal range
-  gate and boosts size/leverage by `EXTREME_AGGRESSION_BOOST` (still
-  capped at the hard ceilings) — exact thresholds from your own spec.
-  "Reversal" here means the intraday signal's `bottomed`/`peaked` flags
-  (proximity to a real 24h extreme), not its `dir` field — see the note
-  in `src/signals.mjs` on why.
-- **"Include other instructions to make it more profitable."** Added on
-  top of your spec, all in `src/risk.mjs` / `src/strategy.mjs`:
-  - Real exchange-side stop-loss AND take-profit on every position
-    (protection survives a run failing outright, or a cycle being
-    skipped entirely — it isn't enforced by this process staying alive,
-    which matters even more here than on a VM since this process never
-    stays alive between cycles by design).
-  - Take-profit target = the opposite end of the same predicted range the
-    entry was gated on.
-  - Stop-loss sized so max loss per trade is a consistent fraction of the
-    margin committed, regardless of that trade's leverage.
-  - Funding-rate check — skips entries where you'd be paying away edge
-    every 8h before the trade has a chance to work.
-  - Cooldown after closing a symbol, so it doesn't immediately re-enter
-    and churn fees/slippage.
-  - Circuit breaker: pauses *new* entries (existing positions stay
-    protected) if equity drawdown from peak hits 15%.
-  - Daily loss limit: pauses new entries for the rest of the day past
-    10% loss since day-start.
-  - Every decision is logged, including every skip and why — printed as
-    structured JSON to stdout, which is that job run's log in the
-    Actions tab. No local log file: there's no disk that survives
-    between runs, so the job log IS the audit trail (same pattern as
-    every other scheduled script in this repo).
+This bot does not have its own opinion about direction. It reads the same
+public JSON the dashboard renders from, and it may open a position only when
+the engine has **published an authorized call**. Concretely, in `contract.mjs`:
+
+- the asset class must have demonstrated skill over its **own** measured
+  no-skill baseline (`classSkill[class].proven`);
+- the row must carry a published `dir` of +1 or -1 — **which board a row was
+  screened onto is not a trade call**, and is never read as one;
+- `horizon` and `range` must both be `basis: 'historical'`, i.e. produced by a
+  matching-horizon record rather than a methodology assumption;
+- `confidence.calibration_source` must be the exact
+  `asset-class-direction-horizon` cell (pooled calibration is diagnostic only
+  and may never authorize a position), with the engine's independent-sample
+  minimums met on the asset record, the calibration cell and the range;
+- `confidence.conservative_edge` — a Wilson lower bound on accuracy minus the
+  class baseline — must clear the engine's own 0.18 bar.
+
+If any one of those is missing, there is no trade. The engine already nulls
+`dir`/`horizon`/`range`/`confidence` together when it withholds, so this file
+**verifies that invariant** rather than re-deriving statistics: no
+reconstructing a direction from `score`, `rangePos`, or a driver list.
+
+What changed, and why it mattered: before v7 this bot read board membership as
+direction and `conf.agree / conf.total` as confidence. Technique agreement
+across correlated techniques is precisely the "independent evidence" fallacy
+the engine's own audit removed
+(`signals-worker/QUANT_SIGNAL_DIAGNOSIS.md`) — and `topIndicator` is no longer
+published for a withheld row, so the old confidence floor was silently
+resolving to zero and skipping everything for the wrong reason. The Fear &
+Greed reversal boost was also reading `bottomed`/`peaked` from `/api/intraday`,
+a pipeline retired for showing no usable edge whose endpoint now returns a
+deprecation stub with no watchlist — so that whole branch was unreachable. It
+now uses `posInDayRange` from the measurement-only `/api/scalp` surface, which
+is the same underlying idea (proximity to a real session extreme) and a number
+the engine still stands behind.
+
+### Second authorized source: confirmed research
+
+A strategy from the engine's discovery lane may also open a position, but only
+in the `confirmed` lifecycle state — family-corrected discovery, then purged
+walk-forward folds, then a **positive after-cost 95% lower bound replicated on
+data that did not exist when the pattern was found**. `provisional` may not
+trade. Because that evidence is an event study rather than per-asset
+calibration, these positions always take the floor size and floor leverage,
+sit under their own much lower exposure ceiling
+(`MAX_RESEARCH_EXPOSURE_PCT`), and never outrank a calibrated directional call
+for the same margin. Their stop is sized off the strategy's **own measured
+worst trade** rather than a generic fraction — a stop tighter than the
+drawdown the rule is known to produce would cut exactly the trades its
+expectancy depends on — and is still bounded by the normal per-trade cap.
+
+## Entry and exit, measured rather than assumed
+
+The engine records, for every matured non-overlapping forecast, the best and
+worst price reached inside the declared window and when each first occurred
+(`payload.holdingEvidence`, 30 independent paths minimum). The bot uses all
+three numbers, and falls back to the previous behaviour per asset until that
+asset clears the floor:
+
+- **Take-profit** targets a fraction of the measured mean favorable excursion
+  rather than the far edge of the volatility band. The fraction
+  (`TAKE_PROFIT_MFE_FRACTION`, 0.7) is there because excursion distributions
+  are right-skewed: their mean sits above their median, so a target at the
+  full mean would be reached less than half the time. Where both a band edge
+  and a measured target exist, the **nearer** one wins — banking a measured,
+  achievable move is what the engine's own "gave back" column exists to
+  argue for.
+- **Time exit.** Past the measured mean time-to-peak, the evidence says the
+  favorable excursion for this asset/side/horizon is usually already behind us
+  and the position is giving back. The bot closes at market. This is the one
+  exit that cannot live on the exchange (Binance has no "close after N hours"
+  order), so it is enforced in-process and is strictly additive: a missed
+  cycle delays it, it never removes the stop or target underneath. It never
+  extends past the declared horizon.
+- **Entry patience.** `adverseFirstLower` is the lower bound on how often the
+  window's worst price arrived *before* its best. When that clears 50%, the
+  evidence says this setup goes against you first, so filling at the signal
+  price is measurably the wrong fill — the bot waits for price to reach the
+  session's low band (or high, for a short) instead. It runs again in five
+  minutes; a resting limit order would need an order lifecycle a one-shot
+  process cannot supervise.
+
+## The shadow ledger, and why the bot may place nothing for weeks
+
+Migration 0009 reset the engine's derived evidence on purpose, so as of
+2026-09-04 **every** direction is withheld and `classSkill.crypto` is null.
+A correctly-gated bot therefore opens nothing until that evidence rebuilds —
+which is the right answer, not a bug, and the thresholds must not be lowered
+to change it.
+
+Rather than idle through that window, every candidate that clears each gate
+the bot itself owns and fails **only** on the engine's authorization is
+recorded in `trading_bot_shadow_trades` with the exact entry, stop, target and
+clock it would have used. Later cycles resolve those against real subsequent
+prices. So when the engine does open up, the bot arrives with a record of its
+own selection quality instead of a blank one.
+
+Three provenances are kept strictly separate and never pooled: `shadow`
+(engine had not authorized), `dry` (authorized, `DRY_RUN` on), and `live`.
+Resolution judges against the extremes seen since entry, not the latest mark,
+because a stop breached and then recovered between two cycles is a closed
+trade and scoring on the current price alone would silently drop exactly the
+losers. When both levels have been seen it resolves as the **stop** — which
+came first is unknowable from sampled extremes, so it takes the unflattering
+reading.
+
+**Stated limit:** those extremes are sampled at the cycle cadence (~5
+minutes), so a spike through a level and back inside one gap is invisible.
+A real position does not have that problem — its stop and target live on the
+exchange and trigger on any tick. The ledger is therefore biased slightly
+optimistic against a live position and must not be read as a like-for-like
+backtest of one.
+
+## Risk controls (unchanged in intent)
+
+- 5–20% of the portfolio per trade, 3–20x leverage, now scaled on the
+  conservative edge over baseline rather than a raw win rate — a flat win-rate
+  threshold demands wildly different edges in different classes, purely as an
+  artifact of where each baseline sits.
+- Max 20% per position, max 50% total exposure, enforced regardless of edge.
+- Real exchange-side stop-loss AND take-profit on every position, so
+  protection survives a failed or skipped cycle.
+- Funding-rate check, per-symbol cooldown, 15% drawdown circuit breaker, 10%
+  daily loss limit. A shadow entry consumes no exposure and can never crowd
+  out a real one.
+- Every decision is logged as structured JSON to the job log, including every
+  skip and the engine's own reason for withholding.
+- `node test.mjs` covers the contract binding, sizing, exit geometry, patience
+  and ledger resolution with no network or Binance key. The engine's numeric
+  bars are pinned there, so a drift that would leave the bot laxer than the
+  system it follows fails the suite. The cycle workflow runs it before every
+  live cycle.
 
 ## Security — non-negotiable
 
@@ -141,6 +218,14 @@ rejects them outright. This bot uses the correct current endpoints
 (`POST /fapi/v1/algoOrder`, `GET /fapi/v1/openAlgoOrders`) — getting this
 wrong would have meant stop-losses silently failing to place.
 
+Fixed 2026-09-05, and worth calling out because it had never been reached:
+the engine speaks in bare asset symbols (`UNI`) while this account trades
+USDT pairs (`UNIUSDT`), and nothing mapped between them. Any candidate that
+ever cleared the gates would have thrown `no exchange info for UNI` inside
+order sizing. It was invisible only because no candidate has ever cleared
+them. There is now a mapping plus a tradability check that drops any asset
+with no Binance USDS-M futures market before it can reach execution.
+
 **Not yet verified live** (couldn't be, without live credentials): the
 exact field names in `getAccount()`'s response (`totalMarginBalance`,
 `positions[].notional`, etc.) are Binance's long-stable standard field
@@ -149,6 +234,11 @@ sessions — if a field is ever `undefined` where a number is expected, the
 logs will show it plainly rather than silently computing garbage, but
 this is exactly the kind of thing to check via the job logs before
 flipping to live, not to assume works.
+
+Also unverified live: the order-placement path itself has never executed,
+in dry-run or otherwise, because no candidate has ever been authorized.
+The first authorized call the engine publishes will be the first time
+`executeOpen` runs end to end. Watch that cycle's job log specifically.
 
 ## Not financial advice
 

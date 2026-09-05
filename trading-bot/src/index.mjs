@@ -1,26 +1,48 @@
-// Runs ONE cycle and exits: fetch real account state + live signals ->
-// decide -> execute (or log-only, if DRY_RUN) -> protect every open
-// position with a real exchange-side stop/take-profit -> persist state
-// to D1 -> exit. Fired on a cron schedule by
-// .github/workflows/trading-bot-cycle.yml's cron schedule — this process
-// does NOT loop or sleep itself, since a GitHub Actions runner is
-// stateless/ephemeral between invocations (see state.mjs).
+// Runs ONE cycle and exits: resolve the shadow ledger -> fetch real account
+// state + live signals -> decide -> execute (or record only) -> protect every
+// open position with a real exchange-side stop/take-profit -> apply measured
+// time exits -> persist state to D1 -> exit. Fired on a cron schedule by
+// .github/workflows/trading-bot-cycle.yml — this process does NOT loop or
+// sleep itself, since a GitHub Actions runner is stateless/ephemeral between
+// invocations (see state.mjs).
 //
-// Protective orders are placed on the EXCHANGE (via the Algo Order API,
-// see binance.mjs), not simulated in this process — so a position stays
-// protected even between runs, or if a run fails outright. That's the
-// single most important safety property of this design for an
-// unattended leveraged system.
+// Protective orders are placed on the EXCHANGE (via the Algo Order API, see
+// binance.mjs), not simulated in this process — so a position stays protected
+// even between runs, or if a run fails outright. That's the single most
+// important safety property of this design for an unattended leveraged
+// system. The time exit is the one exit that cannot live on the exchange
+// (Binance has no "close after N hours" order), so it is enforced here, and
+// is deliberately additive: a missed cycle delays it, it never removes the
+// stop or target underneath.
 import { config } from './config.mjs';
 import { log } from './logger.mjs';
 import { loadState, saveState, recordEquity } from './state.mjs';
 import {
   getAccount, getOpenAlgoOrders, setLeverage, getMarkPrice,
-  placeMarketOrder, placeProtectiveOrder, roundQuantity, roundPrice
+  placeMarketOrder, placeProtectiveOrder, cancelAllOpenOrders,
+  roundQuantity, roundPrice, getExchangeInfo
 } from './binance.mjs';
-import { fetchSignals, fetchIntraday, buildCandidates, getFearGreed } from './signals.mjs';
+import { fetchSignals, fetchScalp, buildCandidates, getFearGreed } from './signals.mjs';
 import { decideEntries } from './strategy.mjs';
-import { stopLossPrice, takeProfitPrice } from './risk.mjs';
+import {
+  stopLossPrice, stopLossPriceForResearch, takeProfitPrice, timeExitAfterMs
+} from './risk.mjs';
+import {
+  loadOpenShadowTrades, recordEntry, resolveShadowTrade, markResolved,
+  updateExtremes, shadowSummary
+} from './paper.mjs';
+
+// Exit geometry for one candidate, computed once at decision time and then
+// persisted, so a later cycle that did not open the position can still
+// reproduce exactly the same stop, target and clock.
+function exitGeometry(candidate, decision, entryPrice) {
+  const stop = candidate.source === 'research-confirmed'
+    ? stopLossPriceForResearch(entryPrice, decision.side, decision.leverage, candidate.worstTradePct)
+    : stopLossPrice(entryPrice, decision.side, decision.leverage);
+  const target = takeProfitPrice(decision.side, entryPrice, candidate.range, candidate.holding);
+  const timeExit = timeExitAfterMs(candidate.holding, candidate.horizonHours, decision.extremeBoost);
+  return { stop, target, timeExit };
+}
 
 async function ensureProtection(position, state) {
   const symbol = position.symbol;
@@ -36,7 +58,10 @@ async function ensureProtection(position, state) {
   const recorded = state.openOrders[symbol];
 
   if (!hasStop) {
-    const raw = stopLossPrice(entryPrice, side, leverage);
+    // A recorded stop is preferred: for a research-sourced position it was
+    // sized off that strategy's own measured worst trade, which this generic
+    // fallback knows nothing about.
+    const raw = recorded?.stopPrice ?? stopLossPrice(entryPrice, side, leverage);
     const price = await roundPrice(symbol, raw);
     if (config.dryRun) {
       log('dry_run_would_place_stop', { symbol, side: closingSide, triggerPrice: price });
@@ -46,10 +71,10 @@ async function ensureProtection(position, state) {
     }
   }
   if (!hasTp) {
-    const range = recorded?.range;
-    const raw = range ? takeProfitPrice(side, range) : null;
+    const raw = recorded?.targetPrice
+      ?? (recorded?.range ? takeProfitPrice(side, entryPrice, recorded.range, null) : null);
     if (raw == null) {
-      log('warning_no_take_profit_target', { symbol, reason: 'no recorded predicted range for this position (likely opened before this bot, or state was lost) — stop-loss only' });
+      log('warning_no_take_profit_target', { symbol, reason: 'no recorded exit geometry for this position (likely opened before this bot, or state was lost) — stop-loss only' });
       return;
     }
     const price = await roundPrice(symbol, raw);
@@ -58,6 +83,77 @@ async function ensureProtection(position, state) {
     } else {
       const order = await placeProtectiveOrder(symbol, closingSide, 'TAKE_PROFIT_MARKET', price);
       log('placed_take_profit', { symbol, triggerPrice: price, algoId: order.algoId });
+    }
+  }
+}
+
+// The measured time exit. The engine records when, inside the declared
+// window, the favorable extreme historically arrived; past that point the
+// evidence says the move is usually already behind us and the position is
+// giving back what it offered. Closing here is the "sell as high as possible"
+// half of the mandate expressed as a measurement rather than a hope.
+async function applyTimeExits(openPositionsRaw, state, nowMs) {
+  for (const position of openPositionsRaw) {
+    const symbol = position.symbol;
+    const recorded = state.openOrders[symbol];
+    if (!recorded || !Number.isFinite(Number(recorded.timeExitAfterMs))) continue;
+    const openedMs = Date.parse(recorded.openedAt);
+    if (!Number.isFinite(openedMs) || nowMs - openedMs < Number(recorded.timeExitAfterMs)) continue;
+
+    const amount = Number(position.positionAmt);
+    const closingSide = amount > 0 ? 'SELL' : 'BUY';
+    const quantity = await roundQuantity(symbol, Math.abs(amount));
+    const heldHours = ((nowMs - openedMs) / 3600000).toFixed(1);
+    if (!(quantity > 0)) {
+      log('time_exit_skipped_zero_quantity', { symbol, heldHours });
+      continue;
+    }
+    log('time_exit_due', { symbol, heldHours, afterMs: recorded.timeExitAfterMs, reason: 'past the measured mean time-to-peak for this asset/side/horizon' });
+    if (config.dryRun) {
+      log('dry_run_would_close_on_time', { symbol, side: closingSide, quantity });
+      continue;
+    }
+    try {
+      await placeMarketOrder(symbol, closingSide, quantity);
+      // The stop and target are now orphaned — leaving them live would arm a
+      // protective order against a position that no longer exists.
+      await cancelAllOpenOrders(symbol);
+      log('closed_on_time_exit', { symbol, side: closingSide, quantity });
+    } catch (e) {
+      log('error_time_exit', { symbol, error: e.message });
+    }
+  }
+}
+
+// Resolve the bot's own ledger against real subsequent prices. Runs before
+// anything else so the cycle log leads with how the existing record is doing.
+async function resolveShadowLedger(nowIso, nowMs) {
+  if (!config.shadowLedger) return;
+  let open;
+  try {
+    open = await loadOpenShadowTrades();
+  } catch (e) {
+    log('error_loading_shadow_ledger', { error: e.message });
+    return;
+  }
+  for (const row of open) {
+    try {
+      const { price } = await getMarkPrice(row.symbol);
+      const resolution = resolveShadowTrade(row, Number(price), nowMs);
+      if (!resolution) {
+        // Still open: carry this observation into the row's running extremes
+        // so the next cycle judges against everything seen since entry.
+        await updateExtremes(row.id, Number(price));
+        continue;
+      }
+      await markResolved(row.id, resolution, nowIso);
+      log('shadow_trade_resolved', {
+        id: row.id, mode: row.mode, source: row.source, symbol: row.symbol,
+        side: row.side, reason: resolution.reason,
+        returnPct: Number(resolution.returnPct.toFixed(3))
+      });
+    } catch (e) {
+      log('error_resolving_shadow_trade', { id: row.id, symbol: row.symbol, error: e.message });
     }
   }
 }
@@ -77,7 +173,13 @@ async function executeOpen(decision, state, nowIso) {
       return;
     }
 
-    log('decision_open', { symbol, side, positionPct, leverage, extremeBoost, marginToUse, quantity, markPrice, confidence: decision.confidence, range: candidate.range });
+    const { stop, target, timeExit } = exitGeometry(candidate, decision, markPrice);
+    log('decision_open', {
+      symbol, side, source: candidate.source, positionPct, leverage, extremeBoost,
+      marginToUse, quantity, markPrice, edge: decision.edge,
+      stop, target, timeExitAfterMs: timeExit,
+      targetBasis: candidate.holding ? 'measured favorable excursion' : 'predicted range edge'
+    });
 
     if (config.dryRun) {
       log('dry_run_would_open', { symbol, side, quantity, leverage });
@@ -87,15 +189,50 @@ async function executeOpen(decision, state, nowIso) {
       log('opened_position', { symbol, side, quantity, orderId: order.orderId });
     }
 
-    state.openOrders[symbol] = { side, entryPrice: markPrice, marginUsed: marginToUse, leverage, range: candidate.range, openedAt: nowIso };
+    state.openOrders[symbol] = {
+      side, entryPrice: markPrice, marginUsed: marginToUse, leverage,
+      range: candidate.range, targetPrice: target, stopPrice: stop,
+      timeExitAfterMs: timeExit, source: candidate.source, openedAt: nowIso
+    };
+    if (config.shadowLedger) {
+      await recordEntry({
+        mode: config.dryRun ? 'dry' : 'live', candidate, decision,
+        entryPrice: markPrice, stopPrice: stop, targetPrice: target, openedAt: nowIso
+      }).catch((e) => log('error_recording_ledger_entry', { symbol, error: e.message }));
+    }
   } catch (e) {
     log('error_opening_position', { symbol, error: e.message });
   }
 }
 
+// A shadow entry: every gate the bot owns passed, and only the engine's
+// authorization is missing. Priced and recorded exactly as a real entry would
+// have been, so the resulting record is comparable — but no order is ever
+// sent, and no exposure is consumed.
+async function recordShadow(decision, nowIso) {
+  const { symbol, candidate } = decision;
+  try {
+    const { price: markPrice } = await getMarkPrice(symbol);
+    const { stop, target } = exitGeometry(candidate, decision, Number(markPrice));
+    await recordEntry({
+      mode: 'shadow', candidate, decision,
+      entryPrice: Number(markPrice), stopPrice: stop, targetPrice: target, openedAt: nowIso
+    });
+    log('shadow_entry_recorded', {
+      symbol, side: decision.side, source: candidate.source,
+      markPrice, stop, target, withheldReason: decision.reason
+    });
+  } catch (e) {
+    log('error_recording_shadow_entry', { symbol, error: e.message });
+  }
+}
+
 async function runCycle() {
   const nowIso = new Date().toISOString();
+  const nowMs = Date.now();
   const state = await loadState();
+
+  await resolveShadowLedger(nowIso, nowMs);
 
   const account = await getAccount();
   const equity = Number(account.totalMarginBalance);
@@ -106,14 +243,15 @@ async function runCycle() {
   log('cycle_start', { equity, openPositionCount: openPositionsRaw.length, dryRun: config.dryRun });
 
   // Protect every currently-open position first, before considering new
-  // entries — an unprotected leveraged position is the single biggest
-  // risk in this whole system.
+  // entries — an unprotected leveraged position is the single biggest risk in
+  // this whole system.
   for (const p of openPositionsRaw) {
     try { await ensureProtection(p, state); } catch (e) { log('error_ensuring_protection', { symbol: p.symbol, error: e.message }); }
   }
+  await applyTimeExits(openPositionsRaw, state, nowMs);
 
-  // Reconcile: any symbol this bot thought it had open but Binance no
-  // longer shows (closed via stop/take-profit, or manually) starts its
+  // Reconcile: any symbol this bot thought it had open but Binance no longer
+  // shows (closed via stop/take-profit, time exit, or manually) starts its
   // cooldown timer now.
   const openSymbolsNow = new Set(openPositionsRaw.map((p) => p.symbol));
   for (const symbol of Object.keys(state.openOrders)) {
@@ -124,19 +262,71 @@ async function runCycle() {
     }
   }
 
-  const [signals, intraday] = await Promise.all([fetchSignals(), fetchIntraday()]);
-  const candidates = buildCandidates(signals, intraday);
-  const fearGreed = getFearGreed(signals);
+  const [signals, scalp] = await Promise.all([
+    fetchSignals(),
+    fetchScalp().catch((e) => { log('warning_scalp_unavailable', { error: e.message }); return null; })
+  ]);
+  log('signals_contract', {
+    model: signals.model,
+    cryptoClassProven: signals.classSkill?.crypto?.proven ?? null,
+    holdingEvidenceAssets: signals.holdingEvidence?.rows?.length ?? 0,
+    confirmedResearch: (signals.quantResearch?.rows || []).filter((r) => r.decision === 'confirmed').length
+  });
 
-  const openPositions = openPositionsRaw.map((p) => ({ notional: Math.abs(Number(p.notional)), leverage: Number(p.leverage) || 1 }));
+  const allCandidates = buildCandidates(signals, scalp);
+
+  // The engine speaks in bare asset symbols; this account trades USDT pairs.
+  // A candidate whose pair does not exist on Binance USDS-M futures is
+  // dropped here rather than failing later inside order sizing.
+  let tradable = {};
+  try {
+    tradable = await getExchangeInfo();
+  } catch (e) {
+    log('error_loading_exchange_info', { error: e.message });
+  }
+  const candidates = allCandidates.filter((c) => {
+    if (tradable[c.symbol]) return true;
+    log('decision_skip', { symbol: c.symbol, reason: 'no Binance USDS-M futures market for this asset' });
+    return false;
+  });
+
+  const fearGreed = getFearGreed(signals);
+  const openPositions = openPositionsRaw.map((p) => ({
+    notional: Math.abs(Number(p.notional)),
+    leverage: Number(p.leverage) || 1,
+    source: state.openOrders[p.symbol]?.source || 'confluence-v7'
+  }));
   const { decisions, paused } = decideEntries(candidates, {
-    fearGreed, openSymbols: openSymbolsNow, openPositions, balance, equity, state, nowMs: Date.now()
+    fearGreed, openSymbols: openSymbolsNow, openPositions, balance, equity, state, nowMs
   });
 
   if (paused) log('entries_paused', { reason: paused });
+
+  const shadowSymbols = new Set(
+    (await loadOpenShadowTrades().catch(() => [])).filter((r) => r.mode === 'shadow').map((r) => r.symbol)
+  );
   for (const d of decisions) {
-    if (d.action === 'SKIP') log('decision_skip', { symbol: d.symbol, reason: d.reason });
-    else await executeOpen(d, state, nowIso);
+    if (d.action === 'SKIP') { log('decision_skip', { symbol: d.symbol, reason: d.reason }); continue; }
+    if (d.action === 'SHADOW') {
+      if (!config.shadowLedger || shadowSymbols.has(d.symbol)) {
+        log('decision_withheld', { symbol: d.symbol, reason: d.reason });
+        continue;
+      }
+      await recordShadow(d, nowIso);
+      shadowSymbols.add(d.symbol);
+      continue;
+    }
+    await executeOpen(d, state, nowIso);
+  }
+
+  if (config.shadowLedger) {
+    const summary = await shadowSummary().catch((e) => { log('error_shadow_summary', { error: e.message }); return []; });
+    for (const row of summary) {
+      log('track_record', {
+        mode: row.mode, source: row.source, entries: row.n, stillOpen: row.open_n,
+        wins: row.wins, avgReturnPct: row.avg_return_pct == null ? null : Number(Number(row.avg_return_pct).toFixed(3))
+      });
+    }
   }
 
   await saveState(state);
