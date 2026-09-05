@@ -13,6 +13,12 @@ RUN_USER="fcsbot"
 
 log() { printf '%s fcs-bot-update: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
+# Self-heal on a box provisioned before this was added to setup.sh: the
+# checkout belongs to the service user while this runs as root, and git
+# refuses to operate across that boundary without an explicit exception.
+git config --global --get-all safe.directory 2>/dev/null | grep -qx "$INSTALL_DIR" \
+  || git config --global --add safe.directory "$INSTALL_DIR"
+
 cd "$INSTALL_DIR"
 PREVIOUS="$(git rev-parse HEAD)"
 

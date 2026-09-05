@@ -75,6 +75,13 @@ echo "    node $(node --version)"
 log "Creating the service user"
 id -u "$RUN_USER" >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin "$RUN_USER"
 
+# The checkout is owned by the unprivileged service user, but git runs here as
+# root (and again as root from the update timer). Without this, every later
+# git operation fails with "detected dubious ownership" and the self-update
+# silently never applies. Guarded so re-running does not stack duplicates.
+git config --global --get-all safe.directory 2>/dev/null | grep -qx "$INSTALL_DIR" \
+  || git config --global --add safe.directory "$INSTALL_DIR"
+
 log "Fetching the repository"
 if [[ -d "$INSTALL_DIR/.git" ]]; then
   git -C "$INSTALL_DIR" fetch --quiet origin main
