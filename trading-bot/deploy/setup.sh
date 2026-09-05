@@ -170,6 +170,8 @@ install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-spot-bot.timer" /etc/systemd
 install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-trading-bot-update.service" /etc/systemd/system/
 install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-trading-bot-update.timer" /etc/systemd/system/
 install -m 755 "$INSTALL_DIR/trading-bot/deploy/update.sh" /usr/local/bin/fcs-bot-update
+install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-golive.service" /etc/systemd/system/
+install -m 755 "$INSTALL_DIR/trading-bot/deploy/golive.sh" /usr/local/bin/fcs-golive
 systemctl daemon-reload
 
 cat <<EOF

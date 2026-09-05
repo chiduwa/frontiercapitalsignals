@@ -1,0 +1,13 @@
+[Unit]
+Description=Gated transition of both bots from dry run to live
+Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/trading-bot/deploy/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/fcs-golive
+TimeoutStartSec=300
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fcs-golive
