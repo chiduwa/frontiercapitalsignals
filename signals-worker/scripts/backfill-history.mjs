@@ -6,9 +6,10 @@
 // .github/workflows/signals-backfill.yml until it reports fully caught up.
 //
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID
-// Optional env: BACKFILL_ROW_BUDGET (default 15000 — free-D1-tier-safe;
+// Optional env: BACKFILL_ROW_BUDGET (default 150000 — sized for this
+//   account's Workers Paid D1 allowance, see the constant's own docs;
 //   raise once Workers Paid is confirmed active, see the plan),
-//   BINANCE_ROW_BUDGET (default 15000, same reasoning)
+//   BINANCE_ROW_BUDGET (default 120000, same reasoning)
 import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, BENCHMARK_SYMBOLS, computeTimeOfDayTallies, hasCrossClassTickerCollision } from '../worker.js';
 import {
   yahooFullHistory, coingeckoDailyBars, getExistingCoverage,
@@ -41,7 +42,7 @@ const OPEN_BACKFILL_MAX_BARS = Number(process.env.OPEN_BACKFILL_MAX_BARS || 1500
 // spreads over several runs rather than blowing a shared cap and starving the
 // crypto leg — the exact starvation failure BINANCE_PER_SYMBOL_ROW_CAP was
 // added to fix.
-const EQUITY_HOURLY_ROW_BUDGET = Number(process.env.EQUITY_HOURLY_ROW_BUDGET || 20000);
+const EQUITY_HOURLY_ROW_BUDGET = Number(process.env.EQUITY_HOURLY_ROW_BUDGET || 120000);
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
   if (!v) { console.error(`Missing required env var: ${name}`); process.exit(1); }
 }
@@ -54,13 +55,32 @@ const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID };
 // universe is market-cap-ordered) — sharing one budget meant funding/OI
 // silently never got a turn at all, run after run. Each leg now always
 // gets to make some progress every invocation.
-const PRICE_ROW_BUDGET = Number(process.env.BACKFILL_ROW_BUDGET || 15000);
-const FUNDING_ROW_BUDGET = Number(process.env.BACKFILL_FUNDING_ROW_BUDGET || 4000);
+// Budgets raised 2026-09-06, alongside the universe widening. Two facts the
+// old 15000 predates, both since confirmed directly against the account:
+//
+//   1. This account is on Workers PAID, not free. D1's included allowance is
+//      therefore 50M rows written/month and 5GB stored, not the free tier's
+//      100k/day and 500MB. Current usage is ~35k rows/day and 211MB — roughly
+//      2% and 4% of what is already paid for. The comments these budgets were
+//      written under ("free-tier-safe ... raise once Workers Paid is confirmed
+//      active") were describing a condition that is now met.
+//   2. The row quota was never the binding constraint anyway; D1 REST
+//      round-trip latency was. See D1_STATEMENTS_PER_BATCH in archive.mjs —
+//      batching lifted the write path from ~27 to ~680 rows/sec, which is what
+//      makes a budget this size finish inside signals-daily.yml's window at
+//      all rather than simply time out mid-run.
+//
+// Sized so a full backfill of the widened universe (~1.8M equity daily bars,
+// ~1.4M equity hourly) lands in about a week of nightly runs instead of about
+// four months, while the four legs together stay near ~10M rows/month — a
+// fifth of the included allowance, so this still costs nothing.
+const PRICE_ROW_BUDGET = Number(process.env.BACKFILL_ROW_BUDGET || 150000);
+const FUNDING_ROW_BUDGET = Number(process.env.BACKFILL_FUNDING_ROW_BUDGET || 20000);
 // Own budget, not shared with the price leg above — same reasoning: a
 // symbol's own full-depth pull shouldn't be able to starve every other
 // symbol's turn. Binance.US's own history floor (~2019-09-23, confirmed
 // live — see binanceUsKlines' docs, archive.mjs).
-const BINANCE_ROW_BUDGET = Number(process.env.BINANCE_ROW_BUDGET || 15000);
+const BINANCE_ROW_BUDGET = Number(process.env.BINANCE_ROW_BUDGET || 120000);
 // Caps how much of the shared budget any ONE symbol can consume in a
 // single run — confirmed live this was a real problem, not a theoretical
 // one: the watchlist is sorted by open interest descending, and BTC's own
@@ -68,7 +88,7 @@ const BINANCE_ROW_BUDGET = Number(process.env.BINANCE_ROW_BUDGET || 15000);
 // 15,000-row run on its own, leaving every other symbol untouched. At
 // ~3,000/symbol, one run makes real progress on ~5 symbols instead of
 // fully draining the budget on the single largest one.
-const BINANCE_PER_SYMBOL_ROW_CAP = Number(process.env.BINANCE_PER_SYMBOL_ROW_CAP || 3000);
+const BINANCE_PER_SYMBOL_ROW_CAP = Number(process.env.BINANCE_PER_SYMBOL_ROW_CAP || 20000);
 const BINANCE_US_FLOOR_MS = new Date('2019-09-23T00:00:00Z').getTime();
 let rowsWrittenThisRun = 0;
 let priceRowsWritten = 0;

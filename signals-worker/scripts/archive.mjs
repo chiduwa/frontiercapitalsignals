@@ -182,23 +182,45 @@ export async function getExistingCoverage(env, symbols) {
 // rows-attempted count (D1's REST API doesn't cleanly surface per-statement
 // affected-row counts through the shared d1() client) — good enough for a
 // soft write-budget guard, which is this number's only job.
+// How many multi-row INSERT statements ride in one D1 REST call. The 9- and
+// 10-row chunks below are fixed by D1's 100-bound-param ceiling and cannot
+// grow; the number of ROUND TRIPS can, and that is what actually bounded the
+// backfill. Measured against this database: a single statement costs ~330ms,
+// and so does a batch of 100 — latency is per request, not per statement, so
+// one call at a time was spending ~97% of the archive job's wall clock waiting
+// on HTTP rather than on D1. 25 x 9 = 225 rows per call turns ~27 rows/sec
+// into ~680.
+//
+// This is what makes the widened universe archivable at all: 229 added
+// equities carry ~1.8M historical bars between them, which is ~4 months of
+// nightly runs at the old throughput and about a week at this one.
+//
+// 25, not 100: a batch is one transaction, so a failure rolls the whole thing
+// back and the work is redone. Past ~25 the latency saving has already been
+// banked (see the measurements above) and a larger batch only raises the cost
+// of a retry.
+const D1_STATEMENTS_PER_BATCH = 25;
+
 export async function upsertDailyBars(env, rows) {
   let attempted = 0;
-  for (const batch of chunk(rows, 9)) {
-    const placeholders = batch.map(() => '(?,?,?,?,?,?,?,?,?)').join(',');
-    const params = batch.flatMap((b) => [b.symbol, b.assetClass, b.date, b.open ?? null, b.close, b.high ?? null, b.low ?? null, b.volume ?? null, b.source]);
+  const statements = chunk(rows, 9).map((batch) => ({
     // Was INSERT OR IGNORE, which silently skipped existing rows — so the
     // newly-added `open` column would have stayed NULL forever on the ~694k
     // bars already archived. COALESCE fills only what is missing: an existing
     // open is never overwritten, so a re-run cannot rewrite history, and price
     // fields keep their original values either way.
-    await d1(env, `
+    sql: `
       INSERT INTO asset_daily_bars (symbol, asset_class, date, open, close, high, low, volume, source)
-      VALUES ${placeholders}
+      VALUES ${batch.map(() => '(?,?,?,?,?,?,?,?,?)').join(',')}
       ON CONFLICT (symbol, date) DO UPDATE SET
         open = COALESCE(asset_daily_bars.open, excluded.open)
-    `, params);
-    attempted += batch.length;
+    `,
+    params: batch.flatMap((b) => [b.symbol, b.assetClass, b.date, b.open ?? null, b.close, b.high ?? null, b.low ?? null, b.volume ?? null, b.source]),
+    rows: batch.length
+  }));
+  for (const group of chunk(statements, D1_STATEMENTS_PER_BATCH)) {
+    await d1Batch(env, group);
+    for (const s of group) attempted += s.rows;
   }
   return attempted;
 }
@@ -1517,11 +1539,18 @@ export async function getExistingHourlyCoverage(env, symbols) {
 // confirmed 100-bound-param ceiling.
 export async function upsertHourlyBars(env, rows) {
   let attempted = 0;
-  for (const batch of chunk(rows, 10)) {
-    const placeholders = batch.map(() => '(?,?,?,?,?,?,?,?)').join(',');
-    const params = batch.flatMap((b) => [b.symbol, b.assetClass, b.bar_at, b.close, b.high ?? null, b.low ?? null, b.volume ?? null, b.source]);
-    await d1(env, `INSERT OR IGNORE INTO asset_hourly_bars (symbol, asset_class, bar_at, close, high, low, volume, source) VALUES ${placeholders}`, params);
-    attempted += batch.length;
+  // Batched for the same reason upsertDailyBars is — see
+  // D1_STATEMENTS_PER_BATCH. This is the heavier of the two paths: hourly bars
+  // are ~7x daily for equities and ~24x for crypto, and the equity leg of the
+  // archive has ~1.4M of them still to write across the widened watchlist.
+  const statements = chunk(rows, 10).map((batch) => ({
+    sql: `INSERT OR IGNORE INTO asset_hourly_bars (symbol, asset_class, bar_at, close, high, low, volume, source) VALUES ${batch.map(() => '(?,?,?,?,?,?,?,?)').join(',')}`,
+    params: batch.flatMap((b) => [b.symbol, b.assetClass, b.bar_at, b.close, b.high ?? null, b.low ?? null, b.volume ?? null, b.source]),
+    rows: batch.length
+  }));
+  for (const group of chunk(statements, D1_STATEMENTS_PER_BATCH)) {
+    await d1Batch(env, group);
+    for (const s of group) attempted += s.rows;
   }
   return attempted;
 }

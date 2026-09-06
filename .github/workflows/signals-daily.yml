@@ -37,7 +37,15 @@ jobs:
     # every individual outbound call already has its own bound via
     # fetchWithTimeout/FETCH_TIMEOUT_MS, so this ceiling is about total
     # aggregate time, not an unbounded-hang risk.
-    timeout-minutes: 55
+    #
+    # 120 as of 2026-09-06: the tracked universe went from ~150 symbols to
+    # ~450 and the archive row budgets went up ~8x with it, so the same
+    # silent-cancellation failure this comment already documents would
+    # otherwise be re-introduced by exactly the change that grew the work.
+    # Costs nothing to raise — this repo is public, so Actions minutes are
+    # free — and the daily cadence leaves no risk of a long run colliding
+    # with the next one under this job's concurrency group.
+    timeout-minutes: 120
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -54,12 +62,14 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
-          # Free-tier-safe defaults (see backfill-history.mjs) — raise once
-          # Workers Paid is confirmed active on the account.
-          BACKFILL_ROW_BUDGET: ${{ vars.BACKFILL_ROW_BUDGET || '15000' }}
-          BACKFILL_FUNDING_ROW_BUDGET: ${{ vars.BACKFILL_FUNDING_ROW_BUDGET || '4000' }}
-          BINANCE_ROW_BUDGET: ${{ vars.BINANCE_ROW_BUDGET || '15000' }}
-          BINANCE_PER_SYMBOL_ROW_CAP: ${{ vars.BINANCE_PER_SYMBOL_ROW_CAP || '3000' }}
+          # Sized for this account's confirmed Workers Paid D1 allowance, not
+          # the free tier the original values assumed — see the budget
+          # constants' own docs in backfill-history.mjs. Repo variables still
+          # override, so a single run can be throttled without a code change.
+          BACKFILL_ROW_BUDGET: ${{ vars.BACKFILL_ROW_BUDGET || '150000' }}
+          BACKFILL_FUNDING_ROW_BUDGET: ${{ vars.BACKFILL_FUNDING_ROW_BUDGET || '20000' }}
+          BINANCE_ROW_BUDGET: ${{ vars.BINANCE_ROW_BUDGET || '120000' }}
+          BINANCE_PER_SYMBOL_ROW_CAP: ${{ vars.BINANCE_PER_SYMBOL_ROW_CAP || '20000' }}
 
       - name: Refresh per-asset sentiment
         working-directory: signals-worker

@@ -18,24 +18,24 @@ on:
       row_budget:
         description: "Max price-bar rows to write this run"
         required: false
-        default: "15000"
+        default: "150000"
       funding_row_budget:
         description: "Max funding/OI rows to write this run"
         required: false
-        default: "4000"
+        default: "20000"
       binance_row_budget:
         description: "Max Binance.US hourly-bar rows to write this run"
         required: false
-        default: "15000"
+        default: "120000"
       binance_per_symbol_row_cap:
         description: "Max Binance.US hourly-bar rows any one symbol can consume this run"
         required: false
-        default: "3000"
+        default: "20000"
 
 jobs:
   backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

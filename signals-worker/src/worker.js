@@ -85,11 +85,26 @@ const SESSION_EXTREMES_TTL_SECONDS = 3 * 24 * 3600;
 const REFRESH_DISPATCH_STATUS_KEY = 'signals:refresh-dispatch-status';
 const REFRESH_DISPATCH_STATUS_SECONDS = 24 * 60 * 60;
 const GITHUB_REFRESH_DISPATCH_URL = 'https://api.github.com/repos/chiduwa/frontiercapitalsignals/actions/workflows/signals-refresh.yml/dispatches';
-// Top 100 by market cap, not 200: a smaller, higher-liquidity universe reads
-// cleaner technically, and the saved request budget instead goes toward a
-// real per-coin daily-history fetch (see getCryptoDailyHistory) rather than
-// relying only on the 7-day hourly sparkline for every technique.
-export const CRYPTO_UNIVERSE = 100;
+// 250, raised from 100 on 2026-09-06. The old value's stated reason was that
+// a smaller page "saved request budget" for the per-coin daily-history fetch —
+// which was never true of THIS call: /coins/markets returns up to 250 rows in
+// a single request either way, confirmed live (per_page=250 -> HTTP 200, 250
+// rows, sparklines intact, 1.06s). The page size was never the thing competing
+// with the history budget; the history fetch's own supplier was, and that is
+// fixed separately in fetchCryptoDailyHistories below.
+//
+// What the wider page actually buys, measured against the live top 250 on the
+// day of the change: the mcap/volume floors below admit 168 coins rather than
+// 71. Those floors are unchanged — the extra 97 are assets that already
+// cleared the user's own liquidity bar and were excluded only by an arbitrary
+// rank cutoff. The thinnest admitted at rank ~250 is ~$117M cap / ~$18M daily
+// volume, still an order of magnitude above the $30M/$2M floor.
+//
+// Widening the screened set does NOT widen what gets published: every added
+// asset starts with no evidence in its own (asset, side, horizon, score,
+// range) cells and is therefore WITHHELD until it earns a call, exactly like
+// any other cold asset. See the publication gates below.
+export const CRYPTO_UNIVERSE = 250;
 export const CRYPTO_MIN_MCAP = 30_000_000;
 export const CRYPTO_MIN_VOLUME = 2_000_000;
 // 365, not 210: a real 52-week window for dwellAtExtreme(), matching
@@ -342,16 +357,89 @@ export function dailyMovementStats(bars) {
   };
 }
 
+// The equity universe. Widened 61 -> 290 on 2026-09-06.
+//
+// Unlike crypto, nothing was ever rationing this list: Yahoo answered a live
+// 193-symbol 10-year chart sweep in 3.3s at POOL_CONCURRENCY and a 156-symbol
+// quoteSummary sweep in 1.8s, both with zero rate-limit responses, against a
+// build that already had ~35 minutes of unused headroom in its 45-minute
+// budget. The old 61 was a hand-picked starting set, not a ceiling anyone had
+// measured.
+//
+// Every added ticker was verified live before landing here, against the same
+// two endpoints the build itself uses: >= 300 daily bars in a 10-year request,
+// and >= $20M/day in dollar volume (price x regularMarketVolume). That is what
+// removed MMC/ZI/CFLT (no longer quoted under those tickers) and PARA (post-
+// merger stub, ~$0.4M/day). Names that had already been acquired or taken
+// private — JNPR, SQ, DFS, X, CYBR, EA — were caught the same way and are
+// deliberately absent.
+//
+// THREE TICKERS ARE DELIBERATELY EXCLUDED despite passing both tests: STX
+// (Seagate), S (SentinelOne) and U (Unity). CROSS_CLASS_TICKER_COLLISIONS
+// below is derived from this list, so adding an equity ticker silently EVICTS
+// the same-named crypto from the crypto universe. Stacks ($496M) and Sonic
+// ($119M) both qualify as crypto today and are worth more to this engine than
+// the equities that would displace them. Anything added here in future must be
+// checked against the live crypto universe the same way.
+//
+// ORDER MATTERS AT THE FRONT: intraday.mjs' selectIntradayWatchlist takes
+// slice(0, EQUITY_MEGACAP_COUNT) of this array as the day-trading equity set,
+// so the first eight entries must stay the mega-caps.
+//
+// As with the crypto widening, this changes what is SCREENED, not what is
+// PUBLISHED — every added name starts with no evidence in its own cells and is
+// withheld until it earns a call.
 export const STOCK_WATCHLIST = [
+  // Mega-caps. selectIntradayWatchlist depends on these eight staying first.
   'AAPL','MSFT','NVDA','GOOGL','AMZN','META','TSLA','AVGO',
+  // Banks, brokers, card networks, exchanges, insurers
   'JPM','GS','MS','BAC','WFC','C','V','MA',
+  'BLK','SCHW','AXP','COF','PNC','USB','TFC','STT',
+  'SPGI','MCO','ICE','CME','NDAQ',
+  'AIG','MET','PRU','TRV','ALL','PGR','CB','AON',
+  // Energy: majors, refiners, services, E&P, midstream
   'XOM','CVX','COP','MPC','VLO','PBF','DINO',
+  'SLB','HAL','BKR','OXY','DVN','FANG','EOG','PSX','KMI','WMB','OKE','LNG',
+  // Utilities and clean energy
+  'FSLR','ENPH','RUN','NEE','DUK','SO','AEP','D','EXC','SRE',
+  // Industrials, defense, transport, capital goods
   'GE','BA','CAT','DE','LMT','RTX',
-  'NFLX','DIS','TSM','ASML','AMD','MU','INTC','QCOM',
-  'ORCL','IBM','CRM','NOW','PLTR',
-  'CRWD','PANW','ZS','DDOG','SNOW','NET',
-  'DELL','SMCI','UNH','LLY','JNJ','ISRG',
-  'COIN','HOOD','MSTR','DASH','UBER','LCID','SNAP'
+  'HON','MMM','EMR','ETN','PH','ITW','CSX','UNP','NSC','FDX','UPS','WM','URI','PWR',
+  'GEV','VRT','ROK','DOV','CMI','PCAR',
+  // Semis and semicap
+  'TSM','ASML','AMD','MU','INTC','QCOM',
+  'TXN','AMAT','LRCX','KLAC','ADI','NXPI','ON','MRVL','ARM','TER','MCHP','SWKS','QRVO',
+  // Hardware, networking, storage
+  'DELL','SMCI','WDC','ANET','CSCO','GLW','HPQ','HPE','CIEN',
+  // Software, internet, media, gaming
+  'NFLX','DIS','ORCL','IBM','CRM','NOW','PLTR','ADBE','SAP','INTU','ADSK','WDAY','TEAM','HUBS','GTLB',
+  'MDB','OKTA','TWLO','DOCU','ZM','TTD','APP','TTWO','RBLX','PINS','SPOT','ROKU','WBD','CMCSA',
+  // Security
+  'CRWD','PANW','ZS','DDOG','SNOW','NET','FTNT','TENB','RPD','QLYS','ESTC',
+  // Healthcare: pharma, biotech, devices, payers, distribution
+  'UNH','LLY','JNJ','ISRG',
+  'PFE','MRK','ABBV','AMGN','GILD','BMY','VRTX','REGN','MRNA','BIIB','ZTS',
+  'TMO','DHR','ABT','MDT','SYK','BSX','CI','CVS','HUM','ELV','MCK','HCA',
+  'CRSP','NTLA','TEM',
+  // Consumer: staples, discretionary, retail, restaurants, travel
+  'COST','WMT','TGT','HD','LOW','NKE','SBUX','MCD','CMG','YUM',
+  'KO','PEP','PG','CL','KMB','MDLZ','GIS','KHC','EL','LULU','ROST','TJX','ORLY','AZO',
+  'ABNB','BKNG','MAR','HLT','RCL','CCL','NCLH','DAL','UAL','AAL','LUV',
+  // Autos and mobility
+  'F','GM','RIVN','LCID','NIO','LI','XPEV','HMC','TM','APTV','BWA',
+  // Telecom
+  'T','VZ','TMUS',
+  // Materials, metals, mining, chemicals
+  'LIN','APD','SHW','FCX','NEM','NUE','STLD','CLF','AA','DOW','DD','ALB','MP',
+  // REITs
+  'AMT','PLD','EQIX','SPG','O','CCI','PSA','DLR','WELL',
+  // Fintech, crypto-adjacent, high-beta growth
+  'COIN','HOOD','MSTR','DASH','UBER','SNAP',
+  'SHOP','PYPL','SOFI','AFRM','UPST','TOST','NU','RDDT',
+  // International / ADRs
+  'BABA','JD','PDD','SE','MELI','GRAB',
+  // Emerging tech: quantum, nuclear, eVTOL, space
+  'IONQ','RGTI','OKLO','SMR','JOBY','ACHR','ASTS','RKLB','LUNR'
 ];
 
 // Operational/archive tables created before asset_class was part of every key
@@ -4067,6 +4155,151 @@ export function isRetryableHistoryFailure(result) {
   return !/^thin daily history/.test(msg); // no HTTP status at all: timeout/network
 }
 
+// A THIRD independent supplier of the same daily series, in the same shape as
+// getCryptoDailyHistory and binanceGlobalDailyHistory. Yahoo quotes most
+// listed coins as `<TICKER>-USD`, and scripts/backfill-history.mjs has been
+// using exactly this source (with exactly these guards, its
+// isYahooCryptoDataTrustworthy) to build the permanent archive since it was
+// written — this is that same already-proven path, made available to the
+// hourly build instead of only the daily archive job.
+//
+// Why a third one: Binance global lists 108 of the 168 qualifying coins in the
+// widened universe. Measured live on the remaining 60, Yahoo answers for 30 of
+// them in 0.8s — assets like XMR, CRO, KAS, FLR and BSV that are simply not on
+// Binance and would otherwise have to queue behind CoinGecko's rate limiter.
+//
+// `refPrice` is REQUIRED for the same reason binanceGlobalDailyHistory
+// requires it, and the same two tests are applied: a ticker is not a globally
+// unique asset id. That is not theoretical here — the same live sweep had
+// Yahoo return a series ~10,600x off spot for AERO and ~16x off for REAL, both
+// correctly rejected by the ratio test below rather than entering the model as
+// that coin's price history.
+export async function yahooCryptoDailyHistory(baseSymbol, refPrice, days = CRYPTO_HISTORY_DAYS, nowMs = Date.now()) {
+  const sym = String(baseSymbol || '').toUpperCase();
+  // Yahoo takes a named range, not a day count. Ask for the smallest range
+  // that covers `days` so a 365-day request doesn't drag 10 years of bars.
+  const range = days <= 365 ? '2y' : days <= 730 ? '5y' : '10y';
+  const r = await yahooDaily(`${sym}-USD`, range);
+  const bars = [];
+  for (let i = 0; i < r.closes.length; i++) {
+    bars.push({ date: r.dates[i], close: r.closes[i], high: r.highs[i], low: r.lows[i] });
+  }
+  const trimmed = bars.slice(-days);
+  if (trimmed.length < 60) throw new Error(`thin daily history for ${sym} (yahoo)`);
+  const last = trimmed[trimmed.length - 1];
+  if (refPrice == null || !(refPrice > 0)) throw new Error(`no reference price to verify ${sym} against (yahoo)`);
+  const staleDays = (nowMs - new Date(last.date + 'T00:00:00Z').getTime()) / 86400000;
+  if (!(staleDays <= BINANCE_DAILY_MAX_STALE_DAYS)) throw new Error(`stale yahoo series for ${sym} (${Math.round(staleDays)}d)`);
+  const ratio = last.close / refPrice;
+  if (!(ratio >= 0.1 && ratio <= 10)) throw new Error(`yahoo ${sym} series is a different asset (last ${last.close} vs reference ${refPrice})`);
+  const volumes = r.volumes.slice(-trimmed.length);
+  return {
+    closes: trimmed.map((b) => b.close),
+    volumes: volumes.length === trimmed.length ? volumes : null,
+    bars
+  };
+}
+
+// How many coins the pooled (non-CoinGecko) tiers fetch at once. Binance's
+// public data mirror and Yahoo's chart endpoint both answered a full
+// 168-coin sweep at this concurrency without a single rate-limit response
+// (Binance: 108 series in 7.9s, peak used-weight 80 of the 6000/min ceiling;
+// Yahoo: 30 series in 0.8s). Deliberately NOT the CoinGecko treatment — the
+// whole point of these tiers is that they are not the rate-limited host.
+const CRYPTO_HISTORY_POOL = 6;
+
+// Where a coin's daily bars actually came from, in the order they are tried.
+// Order is by cost to the one supplier that rations us, not by preference:
+// tiers 1 and 2 are effectively free and answer in seconds, so everything they
+// can serve is served there, and CoinGecko's paced queue is left to handle only
+// what genuinely has no other source.
+//
+// The prior design ran every qualifying coin through CoinGecko's paced queue
+// and nothing else. That is what capped the live boards at 36 of 71 qualifying
+// coins (health.crypto_daily_ok=36 / crypto_daily_total=70 on the 2026-09-06
+// 05:00Z build): roughly half the queue 429'd, and WHICH half was close to a
+// coin toss — the same lottery binanceGlobalDailyHistory's own docs describe
+// costing the favorites board SOL/XLM/XRP/HYPE. Asking a rate-limited host
+// harder never fixed that. Asking three hosts does.
+//
+// Measured on the live top-250 the day this shipped: 108 of 168 from Binance
+// (7.9s), 30 more from Yahoo (0.8s), leaving 30 for CoinGecko's 3s-per-coin
+// queue (~90s) — where a ~50% success rate now costs ~15 coins instead of ~35.
+// Net ~150 of 168 with trustworthy daily bars, against 36 before, in LESS
+// wall-clock time than the old single-supplier loop took on its own.
+//
+// Every tier returns the identical { closes, volumes, bars } shape and every
+// tier's result faces the identical inputInterval='1d' gate downstream, so
+// this changes which assets HAVE a trustworthy series, never what counts as
+// one. The two ticker-keyed tiers additionally prove the series belongs to
+// this asset (recent enough, and within an order of magnitude of the spot
+// price CoinGecko already gave us) before returning it.
+export async function fetchCryptoDailyHistories(qualifying, binanceGlobalPairs, opts = {}) {
+  const nowMs = opts.nowMs || Date.now();
+  const pooled = opts.pool || pool;
+  const paced = opts.poolPaced || poolPaced;
+  const binancePairs = binanceGlobalPairs instanceof Set ? binanceGlobalPairs : new Set();
+  const out = new Array(qualifying.length).fill(null);
+  const sources = new Array(qualifying.length).fill(null);
+  const sym = (c) => String((c && c.symbol) || '').toUpperCase();
+
+  // Tier 1 — Binance global, for the coins it actually lists. Real OHLC, so
+  // these assets also gain a measured daily range/high/low that CoinGecko's
+  // close-only free endpoint could never give them (see
+  // migrations/0004_asset_daily_range.sql).
+  const t1 = [];
+  for (let i = 0; i < qualifying.length; i++) if (binancePairs.has(sym(qualifying[i]))) t1.push(i);
+  if (t1.length) {
+    const res = await pooled(t1, CRYPTO_HISTORY_POOL, async (i) => {
+      const c = qualifying[i];
+      try { return await binanceGlobalDailyHistory(sym(c), c.current_price, CRYPTO_HISTORY_DAYS, nowMs); }
+      catch (e) { return { _error: String((e && e.message) || e), _item: c }; }
+    });
+    for (let k = 0; k < t1.length; k++) {
+      out[t1[k]] = res[k];
+      if (res[k] && !res[k]._error) sources[t1[k]] = 'binance';
+    }
+  }
+
+  // Tier 2 — Yahoo <TICKER>-USD, for everything tier 1 could not serve.
+  const t2 = [];
+  for (let i = 0; i < qualifying.length; i++) if (!out[i] || out[i]._error) t2.push(i);
+  if (t2.length) {
+    const res = await pooled(t2, CRYPTO_HISTORY_POOL, async (i) => {
+      const c = qualifying[i];
+      try { return await yahooCryptoDailyHistory(sym(c), c.current_price, CRYPTO_HISTORY_DAYS, nowMs); }
+      catch (e) { return { _error: String((e && e.message) || e), _item: c }; }
+    });
+    for (let k = 0; k < t2.length; k++) {
+      if (res[k] && !res[k]._error) { out[t2[k]] = res[k]; sources[t2[k]] = 'yahoo'; }
+    }
+  }
+
+  // Tier 3 — CoinGecko's paced per-coin queue, now carrying only the
+  // remainder. Fetched by coin id rather than ticker, so this tier is the
+  // ambiguity-free backstop as well as the last resort: an asset no venue
+  // lists under a clean ticker (HYPE is the standing example) still has a
+  // path to a series, and it no longer has to win a lottery against 100+
+  // other coins to get one.
+  const t3 = [];
+  for (let i = 0; i < qualifying.length; i++) if (!out[i] || out[i]._error) t3.push(i);
+  if (t3.length) {
+    const res = await paced(t3, CRYPTO_HISTORY_BATCH, CRYPTO_HISTORY_DELAY_MS, (i) => getCryptoDailyHistory(qualifying[i].id));
+    for (let k = 0; k < t3.length; k++) {
+      const r = res[k];
+      if (r && !r._error) { out[t3[k]] = r; sources[t3[k]] = 'coingecko'; }
+      // Keep whichever error is most informative for the log: a tier-3 result
+      // exists for every unfilled slot, so prefer it over tier 1's.
+      else if (r) out[t3[k]] = r;
+    }
+  }
+
+  for (let i = 0; i < out.length; i++) {
+    if (!out[i]) out[i] = { _error: 'no daily-history supplier answered', _item: qualifying[i] };
+  }
+  return { histories: out, sources };
+}
+
 // Which base symbols have a live, actively-trading USDT pair on Binance.US
 // right now. Computed once per hourly build (see buildPayload), not per
 // live-price request — the result rides in the KV payload so /api/prices
@@ -4767,7 +5000,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
 
-  const [cryptoR, globalR, fngR, trendR, fundR, stocksR, overviewR, valR, benchR, binR] = await Promise.allSettled([
+  const [cryptoR, globalR, fngR, trendR, fundR, stocksR, overviewR, valR, benchR, binR, binGlobalR] = await Promise.allSettled([
     getCryptoMarkets(),
     getGlobal(),
     getFearGreed(),
@@ -4784,12 +5017,23 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     // ticker, relabeled to the stable `symbol` name before use since the
     // two differ (e.g. yahoo 'DX-Y.NYB' -> symbol 'DXY').
     pool(BENCHMARK_SYMBOLS, 3, (b) => yahooDaily(b.yahoo, '6mo').then((r) => ({ ...r, symbol: b.symbol }))),
-    binanceUsTradablePairs()
+    binanceUsTradablePairs(),
+    // One extra request per build, and the thing that lets tier 1 of
+    // fetchCryptoDailyHistories know which coins it can even ask for. Distinct
+    // from binanceUsTradablePairs above: that one is the US venue and drives
+    // the live-price split, this one is the global data mirror and drives
+    // daily history. The two listings differ substantially, so neither
+    // substitutes for the other.
+    binanceGlobalTradablePairs()
   ]);
 
   const trending = trendR.status === 'fulfilled' ? trendR.value : new Set();
   const funding = fundR.status === 'fulfilled' ? fundR.value : {};
   const binanceUsSymbols = binR.status === 'fulfilled' ? [...binR.value] : [];
+  // Never throws in the caller's face: a failed discovery call just means tier
+  // 1 is empty this build and every coin falls through to Yahoo/CoinGecko,
+  // i.e. degraded but not broken — same contract binanceUsSymbols has.
+  const binanceGlobalPairs = binGlobalR.status === 'fulfilled' ? binGlobalR.value : new Set();
 
   // Market-wide context, computed once and handed to every asset's
   // scoring (see the "reversal" technique): Fear & Greed for crypto, and
@@ -4825,6 +5069,11 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   let cryptoStableValue = [];
   let btc = null, eth = null;
   let cryptoDailyOk = 0, cryptoDailyTotal = 0;
+  // Per-supplier provenance for the health block. A tier silently going dark
+  // (Binance geo-blocking the runner, Yahoo changing its crypto ticker shape)
+  // otherwise shows up only as an unexplained coverage drop; this names which
+  // one stopped answering.
+  const cryptoDailyBySource = {};
   if (cryptoR.status === 'fulfilled' && Array.isArray(cryptoR.value)) {
     const raw = cryptoR.value;
     for (const c of raw) {
@@ -4889,43 +5138,56 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     // is stable, so market-cap order still holds among the rest.
     qualifying.sort((a, b) => (isFavorite(b) ? 1 : 0) - (isFavorite(a) ? 1 : 0));
 
-    // Paced, not pooled at full concurrency: ~100 per-coin calls against
-    // CoinGecko's free tier, one call per qualifying coin (no batched
-    // multi-coin history endpoint exists on that tier).
-    const histories = await poolPaced(qualifying, CRYPTO_HISTORY_BATCH, CRYPTO_HISTORY_DELAY_MS, (c) => getCryptoDailyHistory(c.id));
+    // Three suppliers tried in cost order, not one rate-limited host asked
+    // repeatedly — see fetchCryptoDailyHistories for the measurements behind
+    // the ordering and for why this both widens coverage and shortens the
+    // build. `sources` is per-coin provenance, surfaced in health below so a
+    // supplier quietly going dark is visible in the diagnostics rather than
+    // only as a coverage drop.
+    const { histories, sources: historySources } = await fetchCryptoDailyHistories(qualifying, binanceGlobalPairs);
 
     // Rescue pass, favorites only and bounded at FAVORITE_SYMBOLS.size extra
-    // calls. Ordering above improves the odds; it cannot guarantee them, and a
-    // pinned asset vanishing from its own board is the one failure this section
-    // exists to prevent. So a favorite that still has no series gets asked of a
-    // DIFFERENT venue (Binance's public data mirror — an independent host with
-    // its own budget, which is why this beats retrying CoinGecko harder), and
-    // only if that venue does not list it — HYPE has no USDT pair there — does
-    // it fall back to one more CoinGecko attempt, paced like the main queue and
-    // limited to failures that can actually change (isRetryableHistoryFailure).
+    // calls. The tiered fetch above improves the odds; it cannot guarantee
+    // them, and a pinned asset vanishing from its own board is the one failure
+    // this section exists to prevent.
+    //
+    // Narrower than it used to be, on purpose: this pass predates
+    // fetchCryptoDailyHistories and its whole job was to ask a DIFFERENT venue
+    // than the single CoinGecko queue. Every venue it knows about is now tried
+    // for every coin, so the only rescues left worth attempting are the two the
+    // tiers genuinely cannot repeat — Binance for a favorite that the pair
+    // discovery call did not list (a failed or stale exchangeInfo, not the coin
+    // actually being absent), and one more paced CoinGecko attempt for a
+    // failure that can still change (isRetryableHistoryFailure). HYPE remains
+    // the standing example of a favorite no ticker-keyed venue serves.
     //
     // This raises the odds of having daily bars; it does NOT relax what counts
     // as daily bars. Whatever comes back still faces the same inputInterval
-    // gate below as every other coin, and the Binance path additionally proves
-    // the series belongs to this asset before returning it. A favorite with no
+    // gate below as every other coin, and both ticker-keyed paths prove the
+    // series belongs to this asset before returning it. A favorite with no
     // trustworthy series still sits the build out.
     for (let i = 0; i < qualifying.length; i++) {
       const coin = qualifying[i];
       if (!isFavorite(coin) || !histories[i] || !histories[i]._error) continue;
       const sym = (coin.symbol || '').toUpperCase();
-      try {
-        histories[i] = await binanceGlobalDailyHistory(sym, coin.current_price);
-        continue;
-      } catch (e) {
-        console.warn(`favorite ${sym}: binance daily history unavailable (${(e && e.message) || e})`);
+      if (!binanceGlobalPairs.has(sym)) {
+        try {
+          histories[i] = await binanceGlobalDailyHistory(sym, coin.current_price);
+          historySources[i] = 'binance';
+          continue;
+        } catch (e) {
+          console.warn(`favorite ${sym}: binance daily history unavailable (${(e && e.message) || e})`);
+        }
       }
       if (!isRetryableHistoryFailure(histories[i])) continue;
       await new Promise((r) => setTimeout(r, CRYPTO_HISTORY_DELAY_MS));
       histories[i] = await getCryptoDailyHistory(coin.id)
         .catch((err) => ({ _error: String((err && err.message) || err), _item: coin }));
+      if (histories[i] && !histories[i]._error) historySources[i] = 'coingecko';
     }
     cryptoDailyTotal = histories.length;
     cryptoDailyOk = histories.filter(h => h && !h._error).length;
+    for (const s of historySources) if (s) cryptoDailyBySource[s] = (cryptoDailyBySource[s] || 0) + 1;
 
     const btcIdx = qualifying.findIndex(c => c.id === 'bitcoin');
     const btcCloses = btcIdx >= 0 && histories[btcIdx] && !histories[btcIdx]._error ? histories[btcIdx].closes : null;
@@ -5045,11 +5307,14 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
       trending: trendR.status === 'fulfilled',
       funding: fundR.status === 'fulfilled',
       binance_us: binR.status === 'fulfilled' && binanceUsSymbols.length > 0,
+      binance_global: binGlobalR.status === 'fulfilled' && binanceGlobalPairs.size > 0,
       valuation_ok: valR.status === 'fulfilled' ? valR.value.ok : 0,
       stocks_ok: STOCK_WATCHLIST.length - stockFailures.length,
       stocks_total: STOCK_WATCHLIST.length,
       crypto_daily_ok: cryptoDailyOk,
       crypto_daily_total: cryptoDailyTotal,
+      // Which supplier answered for how many coins — see cryptoDailyBySource.
+      crypto_daily_by_source: cryptoDailyBySource,
       trefis_overrides: Object.keys(overrides).length
     },
     overview: {

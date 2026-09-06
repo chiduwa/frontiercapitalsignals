@@ -2286,6 +2286,94 @@ await rejects('no reference price means no way to verify the asset, so nothing i
 await rejects('a symbol the venue does not list (the real HYPE case) simply fails, it does not invent bars', [], 103.4);
 global.fetch = stubbedFetch;
 
+console.log('\n== yahooCryptoDailyHistory: the third supplier, with the same guards as the second ==');
+// Yahoo's chart shape, not Binance's kline array — same series, different
+// envelope, so the guards have to be re-proven on this path rather than
+// assumed from binanceGlobalDailyHistory's passing them.
+const yChart = (n, close, endMs) => ({ chart: { result: [{
+  timestamp: Array.from({ length: n }, (_, i) => Math.floor((endMs - (n - 1 - i) * 86400000) / 1000)),
+  meta: { regularMarketPrice: close },
+  indicators: { quote: [{ close: Array.from({ length: n }, () => close), volume: Array.from({ length: n }, () => 1e6), high: Array.from({ length: n }, () => close * 1.02), low: Array.from({ length: n }, () => close * 0.98) }] }
+}] } });
+const withChart = (body) => { global.fetch = (url) => String(url).includes('finance/chart/')
+  ? Promise.resolve({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body), headers: { get: () => null } })
+  : stubbedFetch(url); };
+
+withChart(yChart(400, 100, NOW_MS));
+const yHist = await mod.yahooCryptoDailyHistory('XMR', 103.4, 365, NOW_MS);
+check('a good series returns the same { closes, volumes, bars } shape every other supplier returns', Array.isArray(yHist.closes) && yHist.closes.length === 365 && yHist.volumes.length === 365);
+check('the series is trimmed to the requested day count, not handed back at whatever length Yahoo\'s named range happened to give', yHist.closes.length === 365);
+check('bars carry real high/low, same as the Binance path', yHist.bars[0].high > yHist.bars[0].close && yHist.bars[0].low < yHist.bars[0].close);
+
+const yRejects = async (label, body, refPrice, cond) => {
+  withChart(body);
+  let msg = null;
+  try { await mod.yahooCryptoDailyHistory('XMR', refPrice, 365, NOW_MS); } catch (e) { msg = String(e.message); }
+  check(label, msg !== null && (!cond || cond(msg)), msg === null ? 'resolved instead of throwing' : msg);
+};
+// Not hypothetical: on the live sweep that justified adding this tier, Yahoo
+// returned a series ~10,600x off spot for AERO and ~16x off for REAL, and
+// stale-by-450-days series for LIT/PI/UB. All four classes are caught here.
+await yRejects('a series orders of magnitude off the known spot price is rejected as a different asset (the live AERO/REAL case)', yChart(400, 0.00005, NOW_MS), 0.545, (m) => /different asset/.test(m));
+await yRejects('a stale series is rejected rather than modelled as current (the live LIT/PI/UB case)', yChart(400, 100, NOW_MS - 450 * 86400000), 103.4, (m) => /stale/.test(m));
+await yRejects('a short series is rejected on the same 60-bar floor every other supplier uses', yChart(40, 100, NOW_MS), 103.4, (m) => /thin daily history/.test(m));
+await yRejects('no reference price means no way to verify the asset, so nothing is returned', yChart(400, 100, NOW_MS), null, (m) => /reference price/.test(m));
+global.fetch = stubbedFetch;
+
+console.log('\n== fetchCryptoDailyHistories: three suppliers, tried in cost order ==');
+// The whole point of the tiering is WHICH host gets asked, so these assert on
+// the call ledger, not just on the returned series.
+const tierCoins = [
+  { symbol: 'BTC', id: 'bitcoin', current_price: 100 },   // on Binance
+  { symbol: 'XMR', id: 'monero', current_price: 100 },    // not on Binance, on Yahoo
+  { symbol: 'HYPE', id: 'hyperliquid', current_price: 100 } // on neither -> CoinGecko
+];
+let asked = [];
+global.fetch = (url) => {
+  const u = String(url);
+  asked.push(u);
+  if (u.includes('/klines')) {
+    // Only BTC is listed; anything else reaching here would be a tier-1 bug.
+    return u.includes('BTCUSDT')
+      ? Promise.resolve({ ok: true, status: 200, json: async () => klineDays(365, 100, NOW_MS), headers: { get: () => null } })
+      : Promise.resolve({ ok: false, status: 400, json: async () => ({}), text: async () => '', headers: { get: () => null } });
+  }
+  if (u.includes('finance/chart/')) {
+    return u.includes('XMR-USD')
+      ? Promise.resolve({ ok: true, status: 200, json: async () => yChart(400, 100, NOW_MS), headers: { get: () => null } })
+      : Promise.resolve({ ok: false, status: 404, json: async () => ({}), text: async () => '', headers: { get: () => null } });
+  }
+  if (u.includes('/market_chart')) {
+    return Promise.resolve({ ok: true, status: 200, json: async () => ({
+      prices: cryptoDailyClose.map((c, i) => [1600000000000 + i * 86400000, c]),
+      total_volumes: cryptoDailyVol.map((v, i) => [1600000000000 + i * 86400000, v])
+    }), headers: { get: () => null } });
+  }
+  return stubbedFetch(url);
+};
+// poolPaced is stubbed to run without its real 3s-per-coin sleep; the pacing
+// itself is CRYPTO_HISTORY_DELAY_MS's contract, not this function's.
+const tiered = await mod.fetchCryptoDailyHistories(tierCoins, new Set(['BTC']), {
+  nowMs: NOW_MS,
+  poolPaced: (items, _b, _d, fn) => mod.pool(items, 1, fn)
+});
+check('every coin ends up with a series, from whichever supplier could serve it', tiered.histories.every(h => h && !h._error && h.closes.length >= 60), JSON.stringify(tiered.sources));
+check('provenance is recorded per coin, in cost order: Binance, then Yahoo, then CoinGecko', JSON.stringify(tiered.sources) === JSON.stringify(['binance', 'yahoo', 'coingecko']), JSON.stringify(tiered.sources));
+check('a coin Binance lists is never asked of Yahoo or CoinGecko — the cheap tier is not a first guess, it is the answer', !asked.some(u => u.includes('BTC-USD')) && !asked.some(u => u.includes('/coins/bitcoin/')), asked.filter(u => u.includes('bitcoin') || u.includes('BTC-USD')).join(' '));
+check('a coin Binance does not list is never asked of Binance at all (the pair listing is consulted first, not discovered by failure)', !asked.some(u => u.includes('XMRUSDT')) && !asked.some(u => u.includes('HYPEUSDT')), asked.filter(u => u.includes('/klines')).join(' '));
+check('CoinGecko\'s rationed per-coin queue is asked for exactly the remainder — one coin here, not three', asked.filter(u => u.includes('/market_chart')).length === 1, asked.filter(u => u.includes('/market_chart')).join(' '));
+
+// A supplier going dark must degrade coverage, never the shape of the result.
+asked = [];
+const allFail = await mod.fetchCryptoDailyHistories(tierCoins, new Set(), {
+  nowMs: NOW_MS,
+  pool: (items, _n, fn) => mod.pool(items, 1, () => Promise.resolve({ _error: 'supplier down' })),
+  poolPaced: (items) => Promise.resolve(items.map(() => ({ _error: 'supplier down' })))
+});
+check('when every supplier fails, each slot still holds a well-formed error object rather than a hole the caller must guard', allFail.histories.length === 3 && allFail.histories.every(h => h && typeof h._error === 'string'), JSON.stringify(allFail.histories));
+check('no provenance is claimed for a coin that got no series', allFail.sources.every(s => s === null), JSON.stringify(allFail.sources));
+global.fetch = stubbedFetch;
+
 console.log('\n== buildScalpView: only what has actually been measured ==');
 const scalpPayload = {
   generated_at: '2026-08-31T00:00:00Z',
