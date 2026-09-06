@@ -983,6 +983,184 @@ export function scoreBucket(score) {
   return Math.min(9, Math.max(0, Math.floor(score / 10)));
 }
 
+// ---------------------- CROSS-SECTIONAL EXPECTED-RETURN LANE ----------------
+//
+// Everything above this line scores one asset against absolute thresholds:
+// "RSI >= 70 is bearish", "chg7d >= 45% is bearish". That is the model this
+// project started with and it is the model whose live ledger, over 9,524
+// independent outcomes from 2026-08-28 onward, ran *below* its own no-skill
+// baseline in both asset classes, with its short calls carrying a HIGHER
+// mean forward return than its long calls (crypto 7d: -1 calls +4.68%,
+// +1 calls +4.47%; stocks 24h: -1 calls +0.64%, +1 calls -0.38%).
+//
+// This lane does the thing the published literature actually finds an edge
+// in, and which was re-measured on this project's own archive before being
+// written (see docs/CROSS_SECTIONAL_EVIDENCE.md for the queries and results):
+//
+//   1. Rank every asset in the class against its PEERS, not against a
+//      constant. "RSI 72" means opposite things in a bull and a bear tape;
+//      "RSI in this week's top decile of its peer group" does not.
+//   2. Never hard-code which direction a feature implies. Estimate the sign
+//      and the size from a rolling window of that feature's own realized
+//      forward returns, and let it flip when the market flips.
+//   3. Predict an expected forward RETURN, not a direction. Measured on
+//      216,693 crypto rows since 2018, the top cross-sectional momentum
+//      quintile returned +2.11%/week against a +1.26% universe mean while
+//      its *hit rate* was 46%, statistically indistinguishable from every
+//      other quintile. Direction accuracy cannot see this edge. That is not
+//      a flaw in the estimate; it is the wrong measurement instrument.
+//
+// Rank transform, univariate-then-combine estimation, and equal weighting of
+// the surviving forecasts follow Fieberg, Liedtke, Poddig, Walker & Zaremba,
+// "A Trend Factor for the Cross-Section of Cryptocurrency Returns" (JFQA
+// 2025), which reports the design surviving 30-60bp round-trip costs and
+// holding up in the 100 largest coins. Their headline magnitudes are not
+// reproduced here and are not claimed: their sample is 2015-2022 including
+// micro-caps and a short leg. What replicated on our archive is the shape —
+// top-quintile over universe, positive in 8 of 9 calendar years.
+//
+// This lane publishes nothing on its own. It is logged and scored by the
+// same fail-closed evidence gate as everything else (see xsBoardIsPublishable).
+
+// Percentile rank of each value within its own cross-section, mapped to
+// [-0.5, +0.5]. Nulls stay null and do not consume a rank slot, so an asset
+// missing one feature is not silently treated as its worst-ranked peer.
+//
+// Ranking (rather than z-scoring) is deliberate: crypto feature distributions
+// have unbounded tails, and one 400%-in-a-week coin would otherwise dominate
+// the entire cross-section's scale. Ties share the midpoint of the span they
+// occupy, so a class where a feature is constant contributes exactly 0 rather
+// than an arbitrary ordering of noise.
+export function crossSectionalRanks(values) {
+  const idx = [];
+  for (let i = 0; i < values.length; i++) {
+    if (Number.isFinite(values[i])) idx.push(i);
+  }
+  const out = new Array(values.length).fill(null);
+  if (idx.length < 2) return out;
+  idx.sort((a, b) => values[a] - values[b]);
+  const n = idx.length;
+  let i = 0;
+  while (i < n) {
+    let j = i;
+    while (j + 1 < n && values[idx[j + 1]] === values[idx[i]]) j++;
+    // Midpoint of the tied block, so ties are genuinely tied.
+    const mid = (i + j) / 2;
+    const r = n === 1 ? 0 : mid / (n - 1) - 0.5;
+    for (let k = i; k <= j; k++) out[idx[k]] = r;
+    i = j + 1;
+  }
+  return out;
+}
+
+// The features this lane ranks on. Every one is read off the metrics object
+// that evaluateTechniques already receives — this lane adds no upstream call,
+// no new supplier, and no new API budget. It is arithmetic over data the
+// hourly build has already paid for.
+//
+// Signs are deliberately absent. A feature is a measurement here, never a
+// direction; xsFitCoefficients decides what it means and can change its mind.
+export const XS_FEATURES = [
+  { id: 'mom_24h',     get: (m) => m.chg24h },
+  { id: 'mom_7d',      get: (m) => m.chg7d },
+  { id: 'mom_30d',     get: (m) => m.chg30d },
+  // Momentum divided by the asset's own realized vol. Ranks a steady 20%
+  // grind above a 20% spike, which is the risk-adjusted-momentum form the
+  // crypto trend literature consistently prefers to raw returns.
+  { id: 'mom_7d_rvol', get: (m) => (m.chg7d != null && m.volPct > 0 ? m.chg7d / m.volPct : null) },
+  { id: 'rsi',         get: (m) => m.rsi },
+  { id: 'range_pos',   get: (m) => m.rangePos },
+  { id: 'stretch',     get: (m) => m.stretch },
+  { id: 'slope',       get: (m) => m.slope },
+  { id: 'vol_ratio',   get: (m) => m.volRatio },
+  { id: 'rvol',        get: (m) => m.volPct },
+  { id: 'macd_hist',   get: (m) => (m.macdHist != null && m.price > 0 ? (m.macdHist / m.price) * 100 : null) },
+  { id: 'bb_pct_b',    get: (m) => (m.bb ? m.bb.pctB : null) },
+  { id: 'stoch_k',     get: (m) => (m.stoch ? m.stoch.k : null) },
+  { id: 'obv_slope',   get: (m) => m.obv },
+  { id: 'dist_sma50',  get: (m) => (m.sma50 > 0 && m.price > 0 ? (m.price / m.sma50 - 1) * 100 : null) },
+  { id: 'dist_sma200', get: (m) => (m.sma200 > 0 && m.price > 0 ? (m.price / m.sma200 - 1) * 100 : null) },
+  { id: 'funding_pct', get: (m) => m.fundingPercentile },
+  { id: 'oi_pct',      get: (m) => m.oiPercentile },
+  // Size and turnover. The crypto factor-zoo literature keeps finding that
+  // liquidity proxies dominate whatever else is in the model, so they are
+  // measured here rather than assumed away.
+  { id: 'log_mcap',    get: (m) => (m.mcap > 0 ? Math.log(m.mcap) : null) },
+  { id: 'turnover',    get: (m) => (m.mcap > 0 && m.volume > 0 ? m.volume / m.mcap : null) }
+];
+
+// A cross-section needs enough members for a percentile to carry information.
+// Below this the whole lane abstains rather than ranking noise.
+export const XS_MIN_UNIVERSE = 25;
+// An asset must have at least this fraction of the SELECTED features present
+// to receive a forecast; otherwise its score would be an average over a
+// different, easier feature set than its peers'.
+export const XS_MIN_FEATURE_COVERAGE = 0.6;
+// Horizons the lane casts and logs each build. Kept identical to the fitter's
+// XS_HORIZONS_DAYS: a forecast logged at a horizon nothing was fitted for
+// would sit in the ledger forever, never scored and never explained.
+export const XS_LOG_HORIZONS_DAYS = [7, 1];
+
+// Builds the ranked panel for one asset class in one build.
+// Returns [{ symbol, ranks: { featureId: rank } }], ranks in [-0.5, 0.5].
+export function buildXsPanel(metrics) {
+  if (!Array.isArray(metrics) || metrics.length < XS_MIN_UNIVERSE) return null;
+  const ranksByFeature = {};
+  for (const f of XS_FEATURES) {
+    ranksByFeature[f.id] = crossSectionalRanks(metrics.map((m) => {
+      const v = f.get(m);
+      return Number.isFinite(v) ? v : null;
+    }));
+  }
+  return metrics.map((m, i) => {
+    const ranks = {};
+    for (const f of XS_FEATURES) {
+      const r = ranksByFeature[f.id][i];
+      if (r != null) ranks[f.id] = r;
+    }
+    return { symbol: m.symbol, ranks };
+  });
+}
+
+// Combines one asset's ranked features into an expected forward return, using
+// coefficients fitted by scripts/cross-sectional.mjs.
+//
+// `coefficients` is { featureId: { alpha, beta, selected } } for this asset
+// class and horizon. Only `selected` features contribute, and the surviving
+// univariate forecasts are averaged with EQUAL weight rather than combined by
+// their fitted magnitudes. That is not laziness: forecast-combination results
+// (Rapach-Strauss-Zhou; Diebold-Shin; and the CTREND paper's own design) find
+// the equal-weighted average of selected univariate forecasts beats the
+// magnitude-weighted multivariate fit out of sample, because averaging shrinks
+// every slope by 1/J and refuses to bet on the estimation error in any one of
+// them. Selection carries the information; weighting mostly carries the noise.
+//
+// Returns null — never 0, never a guess — when the asset cannot be forecast.
+export function xsForecast(ranks, coefficients) {
+  if (!ranks || !coefficients) return null;
+  const selected = Object.keys(coefficients).filter((k) => coefficients[k] && coefficients[k].selected);
+  if (!selected.length) return null;
+  let sum = 0, used = 0;
+  for (const id of selected) {
+    const r = ranks[id];
+    if (!Number.isFinite(r)) continue;
+    const c = coefficients[id];
+    if (!Number.isFinite(c.alpha) || !Number.isFinite(c.beta)) continue;
+    sum += c.alpha + c.beta * r;
+    used++;
+  }
+  if (!used || used / selected.length < XS_MIN_FEATURE_COVERAGE) return null;
+  return { expectedReturnPct: sum / used, featuresUsed: used, featuresSelected: selected.length };
+}
+
+// Turns the class's forecasts into within-class percentiles, which is what a
+// board actually needs: "this is in the top 5% of everything we can see right
+// now" travels across regimes in a way that "+2.4% expected" does not.
+export function xsPercentiles(forecasts) {
+  const ranks = crossSectionalRanks(forecasts.map((f) => (f ? f.expectedReturnPct : null)));
+  return ranks.map((r) => (r == null ? null : Math.round((r + 0.5) * 100)));
+}
+
 // Classifies each technique as leading (anticipates a move before it's
 // confirmed) or lagging/confirming (describes a move already underway),
 // plus a typical resolution horizon in days — the fallback estimate below
@@ -3777,10 +3955,36 @@ export function confluence(m, kind, reliability, ctx = {}) {
   let long = 100 * (bullW - 0.5 * bearW) / totalW;
   let short = 100 * (bearW - 0.5 * bullW) / totalW;
 
-  // Two documented kickers for setup extremity.
-  const huge = kind === 'crypto' ? 45 : 22;
-  if ((m.chg30d ?? 0) < -15 && (m.chg7d ?? 0) > 0 && (m.rsi ?? 50) < 55) long += 8;
-  if ((m.chg7d ?? 0) >= huge) short += 10;
+  // Both former "setup extremity" kickers were removed 2026-09-06 after being
+  // measured against this project's own daily archive. They were never
+  // evidence-derived — they encoded the textbook contrarian reading of an
+  // extended move — and both were inverted against 8+ years of realized
+  // forward returns:
+  //
+  //   short += 10 when chg7d >= 45 (crypto)
+  //     crypto, 2018+, vol > $1M, n=4,572 : +9.97% mean forward 7d return
+  //     vs a +1.21% base rate. Restricted to 20 majors that existed in 2018
+  //     and still exist (no survivorship selection at all), n=635: +5.87%
+  //     vs a +0.98% base rate. The stock form of the same rule (huge=22),
+  //     n=1,825 since 2010: +2.32% vs a +0.64% base rate.
+  //     The single most bullish screenable condition in the archive was
+  //     adding ten points to the SHORT score.
+  //
+  //   long += 8 when chg30d < -15 and chg7d > 0 and rsi < 55
+  //     crypto, n=16,189: -1.08% mean forward 7d return vs +1.21% base.
+  //     Majors only, n=3,343: -0.95% vs +0.98%. Stocks, n=3,687: +0.84%
+  //     vs +0.64%, i.e. no edge. A falling asset that has ticked up for a
+  //     few days is not a bottom; it is the middle of the distribution.
+  //
+  // Note both conditions' *hit rates* sit within a point or two of the base
+  // rate (chg7d >= 45 resolves up 47.9% of the time against a 46.6% base).
+  // The entire effect is in the size of the move, not its frequency, which
+  // is why a direction-accuracy scoreboard never flagged either rule. See
+  // xsForecast below for the lane that measures magnitude directly.
+  //
+  // They are deleted rather than sign-flipped on purpose: a magnitude effect
+  // does not belong in a direction vote at all, and flipping would just be
+  // the same category error pointed the other way.
 
   const notes = (dir) => applicable
     .filter(t => t.dir === dir && t.note)
@@ -4882,6 +5086,47 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
     });
   }
   const priceLog = scored.map(({ m }) => ({ asset_class: kind, symbol: m.symbol, price: m.price }));
+
+  // Cross-sectional lane, shadow only. Computed over the SAME full universe
+  // the boards were scored on (not the top 10), logged, and scored later by
+  // scripts/cross-sectional.mjs. Nothing here reaches the payload: it has no
+  // published surface until its own decile evidence clears its own gate, in
+  // exactly the way the direction model's calls do.
+  //
+  // Abstains as a whole — no partial panel — when the class is too small to
+  // rank or no coefficients have been fitted for it yet. A cross-sectional
+  // percentile computed over a handful of names is not a weaker signal, it is
+  // a different and unvalidated one.
+  const xsLog = [];
+  const xsCoefficients = ctx.xsCoefficients && ctx.xsCoefficients[kind];
+  if (xsCoefficients) {
+    const panel = buildXsPanel(scored.map(({ m }) => m));
+    if (panel) {
+      for (const horizonDays of XS_LOG_HORIZONS_DAYS) {
+        const coefficients = xsCoefficients[String(horizonDays)];
+        if (!coefficients) continue;
+        const forecasts = panel.map((row) => xsForecast(row.ranks, coefficients));
+        const percentiles = xsPercentiles(forecasts);
+        for (let i = 0; i < panel.length; i++) {
+          const f = forecasts[i];
+          if (!f || percentiles[i] == null) continue;
+          const m = scored[i].m;
+          if (!(m.price > 0)) continue;
+          xsLog.push({
+            asset_class: kind,
+            symbol: panel[i].symbol,
+            horizon_days: horizonDays,
+            expected_return_pct: f.expectedReturnPct,
+            percentile: percentiles[i],
+            decile: Math.min(9, Math.floor(percentiles[i] / 10)),
+            entry_price: m.price,
+            features_used: f.featuresUsed,
+            universe_size: panel.length
+          });
+        }
+      }
+    }
+  }
   const entry = (x, side) => {
     const dir = side === 'long' ? 1 : -1;
     const score = side === 'long' ? x.c.long : x.c.short;
@@ -4981,7 +5226,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
         .filter(x => longTermBottomStatus[x.m.symbol])
         .map(x => entry(x, x.c.long >= x.c.short ? 'long' : 'short'))
     : [];
-  return { breakout: sortSide('long'), breakdown: sortSide('short'), universe: metrics.length, votesLog, priceLog, rangeLog, allSymbols, favorites, longTermPotential };
+  return { breakout: sortSide('long'), breakdown: sortSide('short'), universe: metrics.length, votesLog, priceLog, rangeLog, xsLog, allSymbols, favorites, longTermPotential };
 }
 
 // ----------------------------- HANDLER --------------------------------------
@@ -4995,7 +5240,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration, dailyRangeStats, todEdge, scoreCalibration) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration, dailyRangeStats, todEdge, scoreCalibration, xsCoefficients) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -5063,7 +5308,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   // Shared by both rankBoards calls below (crypto and stock) — see
   // evaluateTechniques' docs for why this is one object, not positional args.
   const qualityScores = computeQualityScores(qualityData || {});
-  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityScores, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines };
+  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityScores, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, xsCoefficients };
 
   let cryptoBoards = { breakout: [], breakdown: [], universe: 0 };
   let cryptoStableValue = [];
@@ -5233,8 +5478,8 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   // Pull the reliability-learning log out before the boards go into the
   // public payload — votesLog/priceLog/rangeLog/allSymbols are internal
   // bookkeeping, not something the dashboard or API consumer needs to see.
-  const { votesLog: cryptoVotes, priceLog: cryptoPrices, rangeLog: cryptoRanges, allSymbols: cryptoAll, ...cryptoPublicRaw } = cryptoBoards;
-  const { votesLog: stockVotes, priceLog: stockPrices, rangeLog: stockRanges, allSymbols: stockAll, ...stockPublicRaw } = stockBoards;
+  const { votesLog: cryptoVotes, priceLog: cryptoPrices, rangeLog: cryptoRanges, xsLog: cryptoXs, allSymbols: cryptoAll, ...cryptoPublicRaw } = cryptoBoards;
+  const { votesLog: stockVotes, priceLog: stockPrices, rangeLog: stockRanges, xsLog: stockXs, allSymbols: stockAll, ...stockPublicRaw } = stockBoards;
 
   // Publish a class's directional calls only while its own measured record
   // clears its own no-skill baseline. The votes above are logged either way,
@@ -5254,6 +5499,9 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     votes: [...(cryptoVotes || []), ...(stockVotes || [])],
     prices: [...(cryptoPrices || []), ...(stockPrices || [])],
     ranges: [...(cryptoRanges || []), ...(stockRanges || [])],
+    // Cross-sectional lane casts, written to xs_forecast_log by
+    // build-signals.mjs and scored later. Shadow only — see rankBoards.
+    xsForecasts: [...(cryptoXs || []), ...(stockXs || [])],
     // Research lane, never a board (see the split in the crypto pipeline
     // above). build-signals.mjs writes these to stable_value_observations
     // so peg supply/volume/tightness accumulates as a real time series to

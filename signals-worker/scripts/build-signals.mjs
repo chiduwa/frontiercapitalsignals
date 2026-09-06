@@ -17,6 +17,7 @@ import { checkAndNotifyReversals, checkAndNotifySuddenMoves, checkAndNotifyConso
 import { upsertMarketSentiment, loadRecentBars, loadTvlSeries, loadMarketReturn, loadYieldSpreadChange } from './archive.mjs';
 import { selectIntradayWatchlist } from './intraday.mjs';
 import { loadLatestMarketContext } from './market-context.mjs';
+import { loadXsCoefficients, writeXsForecasts } from './cross-sectional.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES, GITHUB_EVENT_NAME, FORCE_REFRESH, NTFY_TOPIC } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID })) {
@@ -117,6 +118,9 @@ if (obeyFreshnessGate) {
 // descriptive screens while calls fail closed. Unknown evidence is never
 // treated as a full-weight heuristic vote.
 let reliability, techniquePriors, comboReliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, directionBaselines, detailedCalibration, scoreCalibration, dailyRangeStats, todEdge;
+// Cross-sectional lane coefficients. Defaults to {} so a D1 outage makes the
+// lane abstain silently rather than throwing inside the build.
+let xsCoefficients = {};
 if (FCS_D1_DATABASE_ID) {
   try {
     const rel = await loadReliability(env);
@@ -184,6 +188,13 @@ if (FCS_D1_DATABASE_ID) {
     console.log(`loaded pooled calibration buckets: ${Object.keys(scoreCalibration).length}`);
     dailyRangeStats = await loadDailyRangeStats(env);
     console.log(`loaded median daily ranges for ${Object.keys(dailyRangeStats).length} symbols`);
+    xsCoefficients = await loadXsCoefficients(env);
+    const xsSummary = Object.entries(xsCoefficients).flatMap(([cls, byHorizon]) =>
+      Object.entries(byHorizon).map(([h, feats]) => {
+        const sel = Object.keys(feats).filter((k) => feats[k].selected);
+        return `${cls}/${h}d: ${sel.length ? sel.join(',') : 'none selected'}`;
+      })).join('; ');
+    console.log(`loaded cross-sectional coefficients — ${xsSummary || 'no fit yet, lane abstains'}`);
     todEdge = await loadTimeOfDayEdge(env);
     const edgeSummary = Object.entries(todEdge).map(([sym, e]) =>
       `${sym}${e.buyHour ? ` buy@${String(e.buyHour.hour).padStart(2,'0')}:00(${e.buyHour.meanPct.toFixed(3)}%,t=${e.buyHour.t.toFixed(1)})` : ''}${e.sellHour ? ` sell@${String(e.sellHour.hour).padStart(2,'0')}:00(${e.sellHour.meanPct.toFixed(3)}%)` : ''}`).join('; ');
@@ -196,7 +207,7 @@ if (FCS_D1_DATABASE_ID) {
 }
 
 const started = Date.now();
-const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration, dailyRangeStats, todEdge, scoreCalibration);
+const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration, dailyRangeStats, todEdge, scoreCalibration, xsCoefficients);
 console.log(`built payload in ${Date.now() - started}ms — crypto ${payload.crypto.universe} assets, stocks ${payload.stocks.universe} assets`);
 console.log('health:', JSON.stringify(payload.health));
 
@@ -274,6 +285,14 @@ if (FCS_D1_DATABASE_ID) {
     await logRun(env, payload.generated_at, log);
     const evaluatedCount = await evaluateMatured(env, payload.generated_at);
     console.log(`logged ${log.votes.length} votes + ${log.prices.length} prices + ${log.ranges.length} range predictions; scored ${evaluatedCount} matured outcomes`);
+    // Cross-sectional shadow lane, in its own try: this lane is research, and
+    // failing to record it must never cost the run its direction-model logging.
+    try {
+      const xs = await writeXsForecasts(env, log.xsForecasts || []);
+      console.log(`cross-sectional lane: ${xs.written} cast(s) logged${xs.written ? '' : ' (no fitted coefficients yet, or universe too small to rank)'}`);
+    } catch (e) {
+      console.error('cross-sectional forecast logging failed (shadow lane only, nothing published depends on it):', e.message || e);
+    }
   } catch (e) {
     console.error('reliability logging/evaluation failed (KV already updated, dashboard unaffected):', e.message || e);
   }

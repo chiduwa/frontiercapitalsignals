@@ -71,6 +71,32 @@ jobs:
           BINANCE_ROW_BUDGET: ${{ vars.BINANCE_ROW_BUDGET || '120000' }}
           BINANCE_PER_SYMBOL_ROW_CAP: ${{ vars.BINANCE_PER_SYMBOL_ROW_CAP || '20000' }}
 
+      # Refits the cross-sectional lane's per-feature coefficients from the
+      # archive that was just brought current, then scores whichever logged
+      # forecasts have matured and folds them into decile evidence.
+      #
+      # Reads asset_daily_bars and writes three small tables. No upstream
+      # supplier is called, so this step adds no API cost, no rate-limit
+      # pressure, and no new secret — it is arithmetic over data the hourly
+      # build has already paid for.
+      #
+      # Runs daily rather than hourly on purpose: the estimation window is 156
+      # weekly cross-sections, so a refit between two hourly builds cannot
+      # move a coefficient enough to matter, and hourly refitting would just
+      # spend D1 writes to watch the same number.
+      #
+      # continue-on-error: this is a shadow research lane. It publishes
+      # nothing, and a failure here must not fail a job whose main purpose is
+      # keeping the archive and sentiment current.
+      - name: Refit cross-sectional lane
+        working-directory: signals-worker
+        continue-on-error: true
+        run: node scripts/cross-sectional.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+
       - name: Refresh per-asset sentiment
         working-directory: signals-worker
         run: node scripts/daily-refresh.mjs
