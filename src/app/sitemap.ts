@@ -9,6 +9,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const staticRoutes: MetadataRoute.Sitemap = [
     { url: BASE, changeFrequency: "daily", priority: 1 },
     { url: `${BASE}/intelligence`, changeFrequency: "daily", priority: 0.9 },
+    // Served by the separate `frontier-capital-signals` worker at /signals*, so it
+    // never comes from getAllPosts() — list it explicitly or it stays uncrawled.
+    { url: `${BASE}/signals/`, changeFrequency: "hourly", priority: 0.9 },
     { url: `${BASE}/services`, changeFrequency: "weekly", priority: 0.8 },
     { url: `${BASE}/resources`, changeFrequency: "weekly", priority: 0.8 },
     { url: `${BASE}/about`, changeFrequency: "monthly", priority: 0.6 },

@@ -5980,8 +5980,17 @@ const PAGE_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Frontier Capital Signals — Hourly confluence screens</title>
-<meta name="description" content="Hourly confluence screens across the top 100 cryptos and 61 US equities. Up to 32 techniques per asset must agree before a signal ranks.">
+<title>Crypto &amp; US Equity Confluence Screens | Frontier Capital Signals</title>
+<meta name="description" content="Hourly quant confluence screens across 150+ cryptocurrencies and 290 US equities. Direction is published only when the setup beats its measured no-skill baseline.">
+<link rel="canonical" href="https://frontiercapitalsignals.com/signals/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Frontier Capital Signals">
+<meta property="og:url" content="https://frontiercapitalsignals.com/signals/">
+<meta property="og:title" content="Crypto &amp; US Equity Confluence Screens">
+<meta property="og:description" content="Hourly quant confluence screens across 150+ cryptocurrencies and 290 US equities. Direction is published only when the setup beats its measured no-skill baseline.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Crypto &amp; US Equity Confluence Screens">
+<meta name="twitter:description" content="Hourly quant confluence screens across 150+ cryptocurrencies and 290 US equities. Direction is published only when the setup beats its measured no-skill baseline.">
 <!-- Consent Mode v2 defaults, same scheme as the main site (fcs_consent_v1 in
      localStorage, shared across the whole origin since localStorage is
      origin- not path-scoped): respects a prior choice made on the main site,
@@ -6337,7 +6346,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           <a class="home-link rss-link" href="/signals/api/feed" title="Subscribe in any RSS reader for a persistent, browsable history of every alert — a complement to the ntfy push channel, which only shows what's live right now">📡 Alerts RSS feed</a>
         </div>
         <h1>Frontier Capital<br><span class="amber">Signals</span></h1>
-        <p class="dek">Quant screens across the <b>top 100 cryptos</b> and <b>61 US equities</b>. Up to <b>32 candidate evidence sources</b> are measured, but an unknown or unproven source receives zero live weight. A direction, timeframe, and range are published only when the asset class and the <b>exact asset/side/score/horizon setup</b> beat their measured no-skill baselines on independent outcomes. Otherwise the page says <b>withheld</b>. <b>Analysis syncs hourly; price and 24h change tick live</b> in between.</p>
+        <p class="dek">Quant screens across <b>150+ cryptocurrencies</b> and <b>290 US equities</b>. Up to <b>32 candidate evidence sources</b> are measured, but an unknown or unproven source receives zero live weight. A direction, timeframe, and range are published only when the asset class and the <b>exact asset/side/score/horizon setup</b> beat their measured no-skill baselines on independent outcomes. Otherwise the page says <b>withheld</b>. <b>Analysis syncs hourly; price and 24h change tick live</b> in between.</p>
       </div>
       <div class="mast-meta">
         ANALYSIS REFRESH <b>HOURLY</b><br>
