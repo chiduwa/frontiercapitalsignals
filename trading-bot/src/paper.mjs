@@ -37,14 +37,15 @@ export async function recordEntry({ mode, candidate, decision, entryPrice, stopP
   const holding = candidate.holding || null;
   await d1(env, `
     INSERT INTO trading_bot_shadow_trades
-      (opened_at, mode, source, symbol, signal_symbol, side, entry_price, stop_price,
+      (opened_at, signal_generated_at, mode, source, symbol, signal_symbol, side, entry_price, stop_price,
        target_price, position_pct, leverage, extreme_boost, withheld_reason,
        horizon_hours, time_exit_after_ms, edge, holding_n, holding_mfe_pct,
        holding_mae_pct, holding_hours_to_peak)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT DO NOTHING
   `, [
-    openedAt, mode, candidate.source, candidate.symbol, candidate.signalSymbol,
+    openedAt, candidate.signalGeneratedAt ?? null,
+    mode, candidate.source, candidate.symbol, candidate.signalSymbol,
     decision.side, entryPrice, stopPrice ?? null, targetPrice ?? null,
     decision.positionPct, decision.leverage, decision.extremeBoost ? 1 : 0,
     mode === 'shadow' ? (decision.reason || null) : null,

@@ -1,0 +1,35 @@
+[Unit]
+Description=FrontierCapitalSignals Binance account journal — one read-only sync
+Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/account-journal/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=fcsbot
+Group=fcsbot
+WorkingDirectory=/opt/fcs/account-journal
+# Reuse the existing read-enabled Binance and D1 credentials. The journal
+# sends GET requests only; no order endpoint exists in its code.
+EnvironmentFile=/etc/fcs-trading-bot.env
+EnvironmentFile=/etc/fcs-spot-bot.env
+ExecStart=/usr/bin/node src/index.mjs
+TimeoutStartSec=900
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fcs-account-journal

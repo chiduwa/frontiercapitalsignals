@@ -7,7 +7,14 @@ process.env.CLOUDFLARE_API_TOKEN = 'test';
 process.env.CLOUDFLARE_ACCOUNT_ID = 'test';
 process.env.FCS_D1_DATABASE_ID = 'test';
 
-const { config } = await import('./src/config.mjs');
+const { config, parseBoolean } = await import('./src/config.mjs');
+const {
+  makeClientOrderId, executedMarketOrder, isActiveAlgoOrder, algoOrderDisposition,
+  protectiveOrderMatches, protectionClientOrderId, protectionClientOrderIds,
+  MAX_PROTECTION_GENERATIONS, marketClientOrderId, MAX_MARKET_ORDER_GENERATIONS,
+  marketOrderMatches, isExecutionOutcomeUnknown
+} = await import('./src/binance.mjs');
+const { acquireExecutionLease, releaseExecutionLease } = await import('../signals-worker/scripts/execution-lease.mjs');
 const { ENGINE, authorizeRow, authorizeResearch, classAuthorized, holdingFor, dayRangePosition } = await import('./src/contract.mjs');
 const {
   conservativeEdge, sizePosition, currentExposurePct, wouldExceedExposure,
@@ -17,7 +24,10 @@ const {
 } = await import('./src/risk.mjs');
 const { evaluateCandidate, decideEntries } = await import('./src/strategy.mjs');
 const { resolveShadowTrade } = await import('./src/paper.mjs');
-const { positionOrigin, distanceToLiquidationPct, assessRisk, emergencyStopPrice } = await import('./src/positions.mjs');
+const {
+  positionOrigin, positionQuantitiesMatch, distanceToLiquidationPct,
+  assessRisk, emergencyStopPrice
+} = await import('./src/positions.mjs');
 const { buildCandidates, toBinanceSymbol, dedupeBySymbol } = await import('./src/signals.mjs');
 
 let failures = 0;
@@ -413,9 +423,9 @@ check('contradictory authorized directions abstain on both', (() => {
   const r = dedupeBySymbol([long, short]);
   return r.length === 1 && r[0].authorized === false && r[0].unauthorizedReason.includes('contradictory');
 })());
-check('the two sources are kept separate, not merged', (() => {
+check('two sources for one symbol cannot produce two execution candidates', (() => {
   const research = { ...dupA, source: 'research-confirmed' };
-  return dedupeBySymbol([dupA, research]).length === 2;
+  return dedupeBySymbol([dupA, research]).length === 1;
 })());
 check('buildCandidates emits one row per symbol even when a symbol is on two boards', (() => {
   const row = authorizedRow();
@@ -426,9 +436,112 @@ check('buildCandidates emits one row per symbol even when a symbol is on two boa
   return both.filter((c) => c.signalSymbol === 'SOL').length === 1;
 })());
 
+console.log('\n== execution identity and live-mode parsing ==');
+const entryId = makeClientOrderId('entry', 'SOLUSDT', 'BUY', '2026-09-08T12:00:00Z');
+check('the same futures intent always produces the same client ID',
+  entryId === makeClientOrderId('entry', 'SOLUSDT', 'BUY', '2026-09-08T12:00:00Z'));
+check('a different futures intent produces a different client ID',
+  entryId !== makeClientOrderId('entry', 'SOLUSDT', 'SELL', '2026-09-08T12:00:00Z'));
+check('futures client IDs fit Binance\'s 36-character limit and alphabet',
+  entryId.length <= 36 && /^[.A-Z:/a-z0-9_-]+$/.test(entryId), entryId);
+check('strict boolean parsing accepts an explicit false', parseBoolean('DRY_RUN', 'false', true) === false);
+check('terminal zero-fill market replacements have a bounded deterministic ID chain', (() => {
+  const ids = Array.from({ length: MAX_MARKET_ORDER_GENERATIONS }, (_, generation) =>
+    marketClientOrderId(entryId, generation));
+  return ids[0] === entryId && new Set(ids).size === ids.length
+    && ids.every((id) => id.length <= 36 && /^[.A-Z:/a-z0-9_-]+$/.test(id));
+})());
+check('strict boolean parsing rejects ambiguous live-mode text', (() => {
+  try { parseBoolean('DRY_RUN', 'False', true); return false; } catch { return true; }
+})());
+const filledEntry = {
+  symbol: 'SOLUSDT', side: 'BUY', type: 'MARKET', clientOrderId: entryId,
+  status: 'FILLED', executedQty: '1.25'
+};
+check('only the exact positively-executed market intent is accepted',
+  executedMarketOrder(filledEntry, { symbol: 'SOLUSDT', side: 'BUY', clientOrderId: entryId }));
+check('a zero-fill historical order cannot claim a live position',
+  !executedMarketOrder({ ...filledEntry, status: 'CANCELED', executedQty: '0' },
+    { symbol: 'SOLUSDT', side: 'BUY', clientOrderId: entryId }));
+check('a positive but nonterminal partial fill is retained as pending, not settled',
+  !executedMarketOrder({ ...filledEntry, status: 'PARTIALLY_FILLED', executedQty: '0.5' },
+    { symbol: 'SOLUSDT', side: 'BUY', clientOrderId: entryId }));
+check('a mismatched market order cannot claim a live position',
+  !executedMarketOrder({ ...filledEntry, side: 'SELL' },
+    { symbol: 'SOLUSDT', side: 'BUY', clientOrderId: entryId }));
+check('documented Binance timeout codes remain ambiguous even on HTTP 4xx',
+  isExecutionOutcomeUnknown({ httpStatus: 400, binanceCode: -1007 }));
+check('an ordinary malformed-request 4xx is a definite rejection',
+  !isExecutionOutcomeUnknown({ httpStatus: 400, binanceCode: -1102 }));
+const stopBaseId = makeClientOrderId('stop', 'SOLUSDT', entryId, 'BUY');
+check('protection replacement IDs are deterministic and distinct',
+  protectionClientOrderId(stopBaseId, 1) === protectionClientOrderId(stopBaseId, 1)
+    && protectionClientOrderId(stopBaseId, 1) !== stopBaseId);
+check('the full deterministic protection chain stays within Binance ID rules', (() => {
+  const ids = protectionClientOrderIds(stopBaseId);
+  return ids.length === MAX_PROTECTION_GENERATIONS && new Set(ids).size === ids.length
+    && ids.every((id) => id.length <= 36 && /^[.A-Z:/a-z0-9_-]+$/.test(id));
+})());
+const activeStop = {
+  symbol: 'SOLUSDT', side: 'SELL', orderType: 'STOP_MARKET',
+  closePosition: true, workingType: 'MARK_PRICE', triggerPrice: '95',
+  clientAlgoId: stopBaseId, algoStatus: 'NEW'
+};
+check('NEW and trigger-in-flight algo orders count as active protection',
+  isActiveAlgoOrder(activeStop)
+  && isActiveAlgoOrder({ ...activeStop, algoStatus: 'TRIGGERING' })
+  && isActiveAlgoOrder({ ...activeStop, algoStatus: 'TRIGGERED' })
+  && !isActiveAlgoOrder({ ...activeStop, algoStatus: 'FINISHED' }));
+check('only never-triggered terminal algo states are automatically replaceable',
+  algoOrderDisposition({ ...activeStop, algoStatus: 'CANCELED' }) === 'replaceable'
+  && algoOrderDisposition({ ...activeStop, algoStatus: 'EXPIRED' }) === 'replaceable'
+  && algoOrderDisposition({ ...activeStop, algoStatus: 'REJECTED' }) === 'replaceable'
+  && algoOrderDisposition({ ...activeStop, algoStatus: 'FINISHED' }) === 'finished'
+  && algoOrderDisposition({ ...activeStop, algoStatus: 'TRIGGERED' }) === 'pending'
+  && algoOrderDisposition({ ...activeStop, algoStatus: 'NOT_A_REAL_STATE' }) === 'unknown');
+check('protective reconciliation requires the exact stop intent',
+  protectiveOrderMatches(activeStop, {
+    symbol: 'SOLUSDT', side: 'SELL', type: 'STOP_MARKET',
+    triggerPrice: 95, clientAlgoId: stopBaseId
+  }) && !protectiveOrderMatches({ ...activeStop, workingType: 'CONTRACT_PRICE' }, {
+    symbol: 'SOLUSDT', side: 'SELL', type: 'STOP_MARKET',
+    triggerPrice: 95, clientAlgoId: stopBaseId
+  }));
+check('market intent matching includes quantity and reduce-only semantics',
+  marketOrderMatches({ ...filledEntry, origQty: '2', reduceOnly: false }, {
+    symbol: 'SOLUSDT', side: 'BUY', quantity: 2,
+    clientOrderId: entryId, reduceOnly: false
+  }) && !marketOrderMatches({ ...filledEntry, origQty: '2', reduceOnly: true }, {
+    symbol: 'SOLUSDT', side: 'BUY', quantity: 2,
+    clientOrderId: entryId, reduceOnly: false
+  }));
+
+const leaseEnv = {
+  CLOUDFLARE_API_TOKEN: 'test', CLOUDFLARE_ACCOUNT_ID: 'test', FCS_D1_DATABASE_ID: 'test'
+};
+const lease = await acquireExecutionLease(leaseEnv, 'test-cycle', 60,
+  async (_env, _sql, params) => [{ owner: params[1], expires_at: 123 }]);
+check('execution lease accepts only the owner returned by atomic D1 compare-and-swap',
+  lease?.name === 'test-cycle' && lease?.expiresAtSeconds === 123);
+check('execution lease contention returns no lease',
+  await acquireExecutionLease(leaseEnv, 'test-cycle', 60, async () => []) === null);
+check('execution lease release is owner-qualified',
+  await releaseExecutionLease(leaseEnv, lease,
+    async (_env, _sql, params) => [{ owner: params[1] }]) === true);
+
 console.log('\n== positions.mjs: the operator\'s trades are not the bot\'s to manage ==');
 check('a position the bot recorded opening is its own',
-  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: { side: 'BUY' } } }) === 'bot');
+  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: { side: 'BUY', entryExecutedQty: 2 } } }, 'BUY', 2) === 'bot');
+check('an opposite live side is an ownership conflict, not a bot position',
+  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: { side: 'BUY', entryExecutedQty: 2 } } }, 'SELL', -2) === 'conflict');
+check('a same-side operator addition is an ownership conflict',
+  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: { side: 'BUY', entryExecutedQty: 2 } } }, 'BUY', 2.5) === 'conflict');
+check('a same-side external partial close is an ownership conflict',
+  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: { side: 'BUY', entryExecutedQty: 2 } } }, 'BUY', 1.5) === 'conflict');
+check('tiny decimal serialization noise does not create a false conflict',
+  positionQuantitiesMatch(2, 2 + 1e-10));
+check('legacy ownership records remain side-compatible until naturally closed',
+  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: { side: 'BUY' } } }, 'BUY', 2.5) === 'bot');
 check('a position the bot has no record of is the operator\'s',
   positionOrigin('TRXUSDT', { openOrders: {} }) === 'manual');
 // If state were lost, the bot's own positions read as foreign and stop being

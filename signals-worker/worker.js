@@ -30,6 +30,8 @@
 //   `npx wrangler deploy`.
 // ===========================================================================
 
+import { dispatchTradeJournalAlerts, handleTradeJournalRequest } from './trade-journal.js';
+
 const MOUNT = '/signals';
 export const CACHE_KEY = 'signals:latest';
 // Confirmed live: a single simple/price call for ~20 displayed crypto ids
@@ -2019,29 +2021,45 @@ export function earliestDetectableSurge(bars, { baselineHours = 48, minRatio = 2
 //
 // So: find the largest trough-to-peak run in the recent window first, and
 // only then look for the surge that preceded THAT run.
-export function findMoveEpisode(bars, { windowHours = 72, minGainPct = 8 } = {}) {
+export function findMoveEpisode(bars, {
+  windowHours = 72, minGainPct = 8, windowStartAt = null, windowEndAt = null
+} = {}) {
   if (!Array.isArray(bars) || bars.length < 12) return null;
-  const recent = bars.slice(-windowHours);
+  const hasExplicitWindow = windowStartAt != null || windowEndAt != null;
+  const startMs = windowStartAt == null ? null : new Date(windowStartAt).getTime();
+  const endMs = windowEndAt == null ? null : new Date(windowEndAt).getTime();
+  if ((windowStartAt != null && !Number.isFinite(startMs))
+    || (windowEndAt != null && !Number.isFinite(endMs))
+    || (startMs != null && endMs != null && !(startMs < endMs))) return null;
+  const eligible = hasExplicitWindow
+    ? bars.map((bar, index) => ({ bar, index, at: new Date(bar && bar.openTime).getTime() }))
+      .filter(({ at }) => Number.isFinite(at)
+        && (startMs == null || at >= startMs) && (endMs == null || at <= endMs))
+    : bars.slice(-windowHours).map((bar, offset) => ({
+      bar, index: bars.length - Math.min(windowHours, bars.length) + offset
+    }));
+  if (eligible.length < 2) return null;
   let best = null;
   // Running minimum, so this is one pass rather than the obvious O(n^2)
   // pair scan — the trough for any peak is just the lowest low before it.
   let troughIdx = 0;
-  for (let i = 1; i < recent.length; i++) {
-    if (recent[i].low < recent[troughIdx].low) troughIdx = i;
-    const gain = ((recent[i].high / recent[troughIdx].low) - 1) * 100;
+  for (let i = 1; i < eligible.length; i++) {
+    if (eligible[i].bar.low < eligible[troughIdx].bar.low) troughIdx = i;
+    const gain = ((eligible[i].bar.high / eligible[troughIdx].bar.low) - 1) * 100;
     if (gain >= minGainPct && (!best || gain > best.gainPct)) {
       best = { gainPct: gain, startIdx: troughIdx, peakIdx: i };
     }
   }
   if (!best) return null;
-  const offset = bars.length - recent.length;
+  const start = eligible[best.startIdx], peak = eligible[best.peakIdx];
   return {
-    startIndex: offset + best.startIdx,
-    peakIndex: offset + best.peakIdx,
-    startAt: recent[best.startIdx].openTime,
-    peakAt: recent[best.peakIdx].openTime,
-    troughPrice: recent[best.startIdx].low,
-    peakPrice: recent[best.peakIdx].high,
+    startIndex: start.index,
+    peakIndex: peak.index,
+    windowEndIndex: eligible[eligible.length - 1].index,
+    startAt: start.bar.openTime,
+    peakAt: peak.bar.openTime,
+    troughPrice: start.bar.low,
+    peakPrice: peak.bar.high,
     gainPct: best.gainPct
   };
 }
@@ -2067,9 +2085,11 @@ export function findMoveEpisode(bars, { windowHours = 72, minGainPct = 8 } = {})
 // covers both, downside episodes return detected:false with a stated
 // reason and are counted separately. Better an acknowledged gap in the
 // ledger than a confident wrong entry in it.
-export function describeMissedMove(bars, { preHours = 12, moveDir = 1 } = {}) {
+export function describeMissedMove(bars, {
+  preHours = 12, moveDir = 1, windowStartAt = null, windowEndAt = null
+} = {}) {
   if (moveDir !== 1) return { detected: false, reason: 'downside-analysis-not-implemented', episodeGainPct: null };
-  const ep = findMoveEpisode(bars);
+  const ep = findMoveEpisode(bars, { windowStartAt, windowEndAt });
   if (!ep) return null;
   const from = Math.max(0, ep.startIndex - preHours);
   // +1 so a move that ignites on its own surge bar (the common case: ARB's
@@ -2079,7 +2099,7 @@ export function describeMissedMove(bars, { preHours = 12, moveDir = 1 } = {}) {
   const entryIdx = surge ? surge.index : ep.startIndex;
   const entry = bars[entryIdx];
   const peak = bars[ep.peakIndex];
-  const last = bars[bars.length - 1];
+  const last = bars[ep.windowEndIndex ?? (bars.length - 1)];
   let trough = entry;
   for (let i = entryIdx; i <= ep.peakIndex; i++) if (bars[i].low < trough.low) trough = bars[i];
   return {
@@ -2109,19 +2129,32 @@ export function describeMissedMove(bars, { preHours = 12, moveDir = 1 } = {}) {
 // cannot be aggregated, and the aggregate is what tells the engine what to
 // fix next.
 //
-//   out-of-universe     never fetched at all (below CRYPTO_UNIVERSE rank)
-//   filtered-out        fetched, then dropped by the mcap/volume floors
+//   out-of-universe     absent from the exact pre-window scored universe
+//   filtered-out        legacy classification retained for old rows/tests
 //   unranked            scored, but never reached a board
+//   withheld            surfaced, but the evidence gate removed direction
+//   conflicted          both directions were simultaneously published
 //   wrong-side          scored, and put on the OPPOSITE board — the worst
 //                       kind, since the engine had an opinion and it was
 //                       backwards
 //   late                on the right board, but only after the move had
 //                       substantially run
 //   caught              on the right board before the move ran
-export const MISS_CAUSES = ['out-of-universe', 'filtered-out', 'unranked', 'wrong-side', 'late', 'caught'];
+export const MISS_CAUSES = ['out-of-universe', 'filtered-out', 'unranked', 'withheld', 'conflicted', 'wrong-side', 'late', 'caught'];
 
-export function classifyMiss({ inUniverse, onBoard, boardSide, moveDir, scoredAt, detectableAt, passedFloors }) {
+export function classifyMiss({
+  inUniverse, onBoard, boardSide, boardDirections, withheld,
+  moveDir, scoredAt, detectableAt, passedFloors
+}) {
   if (!inUniverse) return passedFloors === false ? 'filtered-out' : 'out-of-universe';
+  if (withheld) return 'withheld';
+  const directions = [...new Set((boardDirections || [])
+    .map(Number).filter((direction) => direction === 1 || direction === -1))];
+  if (directions.length > 1) return 'conflicted';
+  if (directions.length === 1) {
+    boardSide = directions[0];
+    onBoard = true;
+  }
   if (!onBoard) return 'unranked';
   if (boardSide && moveDir && boardSide !== moveDir) return 'wrong-side';
   if (scoredAt && detectableAt && new Date(scoredAt) > new Date(detectableAt)) return 'late';
@@ -6823,9 +6856,11 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     if(d.retrospective && d.retrospective.patterns && d.retrospective.patterns.length){
       var rt = d.retrospective;
       var causeLabel = {
-        'out-of-universe':'Never fetched (outside the ranked universe)',
-        'filtered-out':'Fetched, then dropped by the size/volume floors',
+        'out-of-universe':'Absent from the pre-move scored universe',
+        'filtered-out':'Legacy: dropped by size/volume floors',
         'unranked':'Scored, but never reached a board',
+        'withheld':'Surfaced, but direction withheld for insufficient evidence',
+        'conflicted':'Both directions were published at once',
         'wrong-side':'Called, on the opposite side',
         'late':'Called, but only after the move had run',
         'caught':'Called before the move'
@@ -7672,6 +7707,9 @@ export default {
   // did, silently, with HTTP 403 for as long as the token stayed unscoped).
   scheduled(_controller, env, ctx) {
     ctx.waitUntil(refreshLivePriceLayer(env));
+    ctx.waitUntil(dispatchTradeJournalAlerts(env).catch((error) => {
+      console.error('Account journal alert dispatch failed:', error.message);
+    }));
     ctx.waitUntil(dispatchRefreshIfStale(env).catch((error) => {
       console.error('Stale signals payload refresh dispatch failed:', error.message);
     }));
@@ -7688,7 +7726,21 @@ export default {
     }
     if (path.startsWith(MOUNT)) path = path.slice(MOUNT.length) || '/';
 
-    // API — this Worker only ever reads KV. The engine (buildPayload, ~130
+    // Private account journal. Authentication is checked before any D1 read;
+    // these responses never use the public API's CORS or cache headers.
+    if (path === '/trades' || path === 'trades') {
+      return handleTradeJournalRequest(request, env, url, 'html');
+    }
+    if (path === '/api/trades' || path === 'api/trades') {
+      return handleTradeJournalRequest(request, env, url, 'json');
+    }
+    if (path === '/api/trades.csv' || path === 'api/trades.csv') {
+      return handleTradeJournalRequest(request, env, url, 'csv');
+    }
+
+    // Public signals API — this route only reads KV. The authenticated trade
+    // journal above is the deliberately separate D1-backed exception. The
+    // engine (buildPayload, ~130
     // outbound fetches + indicator math across ~260 assets) runs in a
     // scheduled GitHub Actions job instead, which writes the result straight
     // into this namespace. Keeping fetch() to a single KV read means this

@@ -7,9 +7,18 @@
 // comes fresh from Binance each cycle (binance.mjs), never trusted from
 // here, so a stale or lost row here can't cause a double-open.
 import { d1 } from '../../signals-worker/scripts/d1-client.mjs';
+import { acquireExecutionLease as acquireLease, releaseExecutionLease as releaseLease } from '../../signals-worker/scripts/execution-lease.mjs';
 import { config } from './config.mjs';
 
 const env = { CLOUDFLARE_API_TOKEN: config.cloudflareApiToken, CLOUDFLARE_ACCOUNT_ID: config.cloudflareAccountId, FCS_D1_DATABASE_ID: config.d1DatabaseId };
+
+// Thirty minutes is longer than every supported launcher (systemd: 3 minutes,
+// manual GitHub dispatch: 10 minutes). A hard-killed cycle can therefore delay
+// later execution, but can never outlive the lease and overlap it.
+export const acquireExecutionLease = (ttlSeconds = 1800) =>
+  acquireLease(env, 'futures-cycle', ttlSeconds);
+
+export const releaseExecutionLease = (lease) => releaseLease(env, lease);
 
 export async function loadState() {
   const [equityRow] = await d1(env, 'SELECT peak_equity, day_start_equity, day_start_date FROM trading_bot_equity_state WHERE id = 1');
@@ -58,7 +67,19 @@ export async function saveState(state) {
           edge: o.edge ?? null, horizonHours: o.horizonHours ?? null,
           holdingMfePct: o.holdingMfePct ?? null, holdingMaePct: o.holdingMaePct ?? null,
           holdingHoursToPeak: o.holdingHoursToPeak ?? null,
-          extremeBoost: !!o.extremeBoost, equityAtOpen: o.equityAtOpen ?? null
+          extremeBoost: !!o.extremeBoost, equityAtOpen: o.equityAtOpen ?? null,
+          entryClientOrderId: o.entryClientOrderId ?? null,
+          entryExecutedQty: o.entryExecutedQty ?? null,
+          entryRequestedQty: o.entryRequestedQty ?? null,
+          entryOrderPending: !!o.entryOrderPending,
+          entrySubmissionUnknownAt: o.entrySubmissionUnknownAt ?? null,
+          timeExitClientOrderId: o.timeExitClientOrderId ?? null,
+          timeExitRequestedQty: o.timeExitRequestedQty ?? null,
+          timeExitPositionBefore: o.timeExitPositionBefore ?? null,
+          timeExitOrderPending: !!o.timeExitOrderPending,
+          timeExitSubmissionUnknownAt: o.timeExitSubmissionUnknownAt ?? null,
+          exitReason: o.exitReason ?? null,
+          protectionOrders: Array.isArray(o.protectionOrders) ? o.protectionOrders : []
         }), o.openedAt]);
   }
   // Positions this cycle detected as closed (see index.mjs) were already

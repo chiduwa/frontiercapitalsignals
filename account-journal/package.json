@@ -1,0 +1,12 @@
+{
+  "name": "fcs-account-journal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only, provenance-aware Binance spot and USDS-M futures fill journal",
+  "main": "src/index.mjs",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node --test test/*.test.mjs"
+  }
+}

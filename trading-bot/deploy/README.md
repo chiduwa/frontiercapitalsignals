@@ -93,6 +93,8 @@ sudo systemctl start fcs-trading-bot    # one cycle, by hand
 journalctl -u fcs-trading-bot -n 100 --no-pager
 sudo systemctl start fcs-spot-bot
 journalctl -u fcs-spot-bot -n 60 --no-pager
+sudo systemctl start fcs-account-journal
+journalctl -u fcs-account-journal -n 100 --no-pager
 ```
 
 Confirm in that log: `equity` is a real number **for the account you intend**
@@ -107,6 +109,7 @@ Once that looks right:
 ```bash
 sudo systemctl enable --now fcs-trading-bot.timer      # every 5 min
 sudo systemctl enable --now fcs-spot-bot.timer         # every 4 h
+sudo systemctl enable --now fcs-account-journal.timer  # read-only sync every 15 min
 sudo systemctl enable --now fcs-trading-bot-update.timer
 ```
 
@@ -117,6 +120,7 @@ systemctl list-timers 'fcs-*'                        # next firing
 journalctl -u fcs-trading-bot -f                     # follow decisions live
 journalctl -u fcs-trading-bot --since '2 hours ago' | grep decision_open
 journalctl -u fcs-bot-update -n 50 --no-pager        # update history
+journalctl -u fcs-account-journal -n 100 --no-pager  # imported account fills
 sudo systemctl stop fcs-trading-bot.timer            # stop trading now
 ```
 

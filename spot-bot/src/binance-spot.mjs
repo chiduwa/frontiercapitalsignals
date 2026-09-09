@@ -5,25 +5,55 @@
 // Note this is a DIFFERENT API surface from the futures bot: spot lives at
 // api.binance.com/api/v3/*, futures at fapi.binance.com/fapi/*. Separate
 // host, separate key, separate permissions.
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { config } from './config.mjs';
 
 let exchangeInfoCache = null;
+const BINANCE_REQUEST_TIMEOUT_MS = 20000;
 
 async function signedRequest(method, path, params = {}) {
   const query = new URLSearchParams({ ...params, timestamp: Date.now(), recvWindow: 10000 });
   const signature = createHmac('sha256', config.apiSecret).update(query.toString()).digest('hex');
   query.set('signature', signature);
-  const res = await fetch(`${config.base}${path}?${query.toString()}`, {
-    method, headers: { 'X-MBX-APIKEY': config.apiKey }
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), BINANCE_REQUEST_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`${config.base}${path}?${query.toString()}`, {
+      method, headers: { 'X-MBX-APIKEY': config.apiKey }, signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
   const body = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(`Binance spot ${method} ${path} failed: HTTP ${res.status} ${JSON.stringify(body)}`);
+  if (!res.ok) {
+    const error = new Error(`Binance spot ${method} ${path} failed: HTTP ${res.status} ${JSON.stringify(body)}`);
+    error.httpStatus = res.status;
+    error.binanceCode = body?.code ?? null;
+    error.binanceBody = body;
+    throw error;
+  }
   return body;
 }
 
+export const MAX_SPOT_ORDER_GENERATIONS = 16;
+
+export function makeClientOrderId(intentEpoch, symbol, generation = 0) {
+  const digest = createHash('sha256').update(`${intentEpoch}\u001f${symbol}\u001f${generation}`).digest('hex').slice(0, 26);
+  return `fcss-${digest}`;
+}
+
 async function publicRequest(path, params = {}) {
-  const res = await fetch(`${config.base}${path}?${new URLSearchParams(params).toString()}`);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), BINANCE_REQUEST_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`${config.base}${path}?${new URLSearchParams(params).toString()}`, {
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
   const body = await res.json().catch(() => null);
   if (!res.ok) throw new Error(`Binance spot GET ${path} failed: HTTP ${res.status} ${JSON.stringify(body)}`);
   return body;
@@ -96,14 +126,124 @@ export async function getWeeklyKlines(symbol, weeks) {
 
 // Market buy for a fixed amount of quote currency — the natural expression of
 // "spend this tranche", and it sidesteps having to round a quantity at all.
-export async function marketBuyQuote(symbol, quoteQty) {
+export async function marketBuyQuote(symbol, quoteQty, clientOrderId) {
+  if (!clientOrderId) throw new Error('marketBuyQuote requires a deterministic clientOrderId');
   return signedRequest('POST', '/api/v3/order', {
-    symbol, side: 'BUY', type: 'MARKET', quoteOrderQty: quoteQty.toFixed(2)
+    symbol, side: 'BUY', type: 'MARKET', quoteOrderQty: quoteQty.toFixed(2),
+    newClientOrderId: clientOrderId, newOrderRespType: 'FULL'
   });
 }
 
-export async function marketBuyQuantity(symbol, quantity) {
+export async function marketBuyQuantity(symbol, quantity, clientOrderId) {
+  if (!clientOrderId) throw new Error('marketBuyQuantity requires a deterministic clientOrderId');
   return signedRequest('POST', '/api/v3/order', {
-    symbol, side: 'BUY', type: 'MARKET', quantity
+    symbol, side: 'BUY', type: 'MARKET', quantity,
+    newClientOrderId: clientOrderId, newOrderRespType: 'FULL'
   });
+}
+
+export async function findOrderByClientId(symbol, clientOrderId) {
+  try {
+    return await signedRequest('GET', '/api/v3/order', { symbol, origClientOrderId: clientOrderId });
+  } catch (error) {
+    if (Number(error.binanceCode) === -2013) return null;
+    throw error;
+  }
+}
+
+// A market-order timeout has an unknown execution status. Always query the
+// deterministic client ID before retrying or reporting failure; a later bot
+// cycle uses the same ID and therefore follows the same reconciliation path.
+export function spotBuyIntentMatches(order, symbol, clientOrderId) {
+  return order?.symbol === symbol && order?.side === 'BUY'
+    && (order?.type || order?.origType) === 'MARKET'
+    && order?.clientOrderId === clientOrderId;
+}
+
+export function terminalSpotOrder(order) {
+  return ['FILLED', 'CANCELED', 'EXPIRED', 'REJECTED', 'EXPIRED_IN_MATCH']
+    .includes(String(order?.status || '').toUpperCase());
+}
+
+// These documented server/message-bus errors have unknown execution status;
+// their HTTP class alone is not conclusive.
+export function isExecutionOutcomeUnknown(error) {
+  const code = Number(error?.binanceCode);
+  return !error?.httpStatus || Number(error.httpStatus) >= 500
+    || [-1000, -1001, -1006, -1007].includes(code);
+}
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function settleVisibleSpotOrder(order, symbol, clientOrderId) {
+  let current = order;
+  let settlementError = null;
+  for (let attempt = 0; attempt < 6 && !terminalSpotOrder(current); attempt++) {
+    await wait(250 * (attempt + 1));
+    try {
+      const refreshed = await findOrderByClientId(symbol, clientOrderId);
+      if (refreshed) {
+        if (!spotBuyIntentMatches(refreshed, symbol, clientOrderId)) {
+          const error = new Error(`spot order ${clientOrderId} changed incompatibly while settling`);
+          error.spotOrderIntentMismatch = true;
+          throw error;
+        }
+        current = refreshed;
+      }
+    } catch (error) {
+      if (error.spotOrderIntentMismatch) throw error;
+      settlementError = error.message;
+      break;
+    }
+  }
+  return {
+    ...current,
+    clientOrderId: current?.clientOrderId || clientOrderId,
+    pending: !terminalSpotOrder(current),
+    ...(settlementError ? { settlementError } : {})
+  };
+}
+
+export async function marketBuyReconciled({ symbol, quoteQty, quantity, clientOrderId, intentEpoch }) {
+  if (!clientOrderId || intentEpoch == null) throw new Error('marketBuyReconciled requires deterministic intentEpoch and clientOrderId');
+  for (let generation = 0; generation < MAX_SPOT_ORDER_GENERATIONS; generation++) {
+    const currentId = generation === 0 ? clientOrderId : makeClientOrderId(intentEpoch, symbol, generation);
+    const prior = await findOrderByClientId(symbol, currentId);
+    if (prior) {
+      if (!spotBuyIntentMatches(prior, symbol, currentId)) {
+        throw new Error(`spot order ${currentId} exists but does not match the intended market buy`);
+      }
+      if (Number(prior.executedQty) > 0 || !terminalSpotOrder(prior)) {
+        return { ...(await settleVisibleSpotOrder(prior, symbol, currentId)), reconciled: true };
+      }
+      continue;
+    }
+    try {
+      const placed = quoteQty != null
+        ? await marketBuyQuote(symbol, quoteQty, currentId)
+        : await marketBuyQuantity(symbol, quantity, currentId);
+      if (!spotBuyIntentMatches(placed, symbol, currentId)) {
+        throw new Error(`Binance returned a spot order that does not match intent ${currentId}`);
+      }
+      return settleVisibleSpotOrder(placed, symbol, currentId);
+    } catch (submissionError) {
+      try {
+        const recovered = await findOrderByClientId(symbol, currentId);
+        if (recovered) {
+          if (!spotBuyIntentMatches(recovered, symbol, currentId)) {
+            throw new Error(`recovered spot order ${currentId} does not match the intended market buy`);
+          }
+          return { ...(await settleVisibleSpotOrder(recovered, symbol, currentId)), reconciled: true };
+        }
+      } catch (reconciliationError) {
+        submissionError.reconciliationError = reconciliationError.message;
+      }
+      // A signed HTTP 4xx response is a definite exchange rejection. A
+      // transport abort/timeout or server-side failure is ambiguous and the
+      // tranche must be quarantined rather than followed by sibling orders.
+      submissionError.outcomeUnknown = isExecutionOutcomeUnknown(submissionError);
+      throw submissionError;
+    }
+  }
+  throw new Error(`exhausted ${MAX_SPOT_ORDER_GENERATIONS} deterministic spot-order IDs for ${symbol}`);
 }

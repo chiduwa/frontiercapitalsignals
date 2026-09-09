@@ -55,6 +55,7 @@ export function buildCandidates(signals, scalp) {
       : null;
     candidates.push({
       source: 'confluence-v7',
+      signalGeneratedAt: signals.generated_at ?? null,
       signalSymbol: row.symbol,
       symbol: toBinanceSymbol(row.symbol),
       // Direction comes from the engine's published call, never from which
@@ -89,6 +90,7 @@ export function buildCandidates(signals, scalp) {
     const auth = authorizeResearch(row);
     candidates.push({
       source: 'research-confirmed',
+      signalGeneratedAt: signals.generated_at ?? null,
       signalSymbol: row.symbol,
       symbol: toBinanceSymbol(row.symbol),
       side: auth.ok ? auth.side : (row.side === 'short' ? 'SELL' : 'BUY'),
@@ -127,22 +129,30 @@ export function buildCandidates(signals, scalp) {
 }
 
 export function dedupeBySymbol(candidates) {
-  const bySymbol = new Map();
-  for (const c of candidates) {
-    const key = `${c.source}|${c.symbol}`;
-    const existing = bySymbol.get(key);
-    if (!existing) { bySymbol.set(key, c); continue; }
-    if (existing.authorized && c.authorized && existing.side !== c.side) {
-      bySymbol.set(key, {
-        ...existing, authorized: false,
-        unauthorizedReason: `contradictory published directions for this symbol (${existing.side} and ${c.side}) — abstaining on both`
+  const groups = new Map();
+  for (const candidate of candidates) {
+    if (!groups.has(candidate.symbol)) groups.set(candidate.symbol, []);
+    groups.get(candidate.symbol).push(candidate);
+  }
+
+  const out = [];
+  for (const rows of groups.values()) {
+    const authorized = rows.filter((r) => r.authorized);
+    const sides = new Set(authorized.map((r) => r.side));
+    if (sides.size > 1) {
+      out.push({
+        ...authorized[0], authorized: false, source: 'conflict',
+        unauthorizedReason: `contradictory authorized directions across sources for this symbol (${[...sides].join(' and ')}) — abstaining`
       });
       continue;
     }
-    // Otherwise keep whichever row the engine actually authorized.
-    if (!existing.authorized && c.authorized) bySymbol.set(key, c);
+    // At most one decision may reach sizing/execution for an instrument. When
+    // sources agree, prefer an authorized row; the existing source ordering
+    // (confluence before research) remains the tie-breaker and does not change
+    // valid signal frequency.
+    out.push(authorized[0] || rows[0]);
   }
-  return [...bySymbol.values()];
+  return out;
 }
 
 export function getFearGreed(signals) {

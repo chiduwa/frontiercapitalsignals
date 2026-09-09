@@ -3,7 +3,14 @@
 // default here reflects an explicit user instruction (see README) except
 // where noted.
 const num = (v, d) => (v == null || v === '' ? d : Number(v));
-const bool = (v, d) => (v == null || v === '' ? d : v === 'true' || v === '1');
+export function parseBoolean(name, value, defaultValue) {
+  if (value == null || value === '') return defaultValue;
+  if (value === 'true' || value === '1') return true;
+  if (value === 'false' || value === '0') return false;
+  throw new Error(`${name} must be exactly true, false, 1, or 0; received ${JSON.stringify(value)}`);
+}
+
+const bool = (name, v, d) => parseBoolean(name, v, d);
 
 const { BINANCE_API_KEY, BINANCE_API_SECRET, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
 
@@ -19,7 +26,7 @@ for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUN
 // real-money system. It should never place a real order until someone
 // deliberately sets DRY_RUN=false after reviewing what it WOULD have
 // done (dry-run logs every decision exactly as if it were live).
-const DRY_RUN = bool(process.env.DRY_RUN, true);
+const DRY_RUN = bool('DRY_RUN', process.env.DRY_RUN, true);
 
 // Required even in dry-run: dry-run still reads REAL account balance/
 // positions/prices so the simulation is realistic (it only skips the
@@ -140,7 +147,7 @@ export const config = {
   // Whether to place an emergency stop on a foreign position at 'extreme'.
   // On by default: closing short of liquidation loses less than a liquidation
   // does. Set false to make the bot alert and never touch the position.
-  emergencyStopForeign: bool(process.env.EMERGENCY_STOP_FOREIGN, true),
+  emergencyStopForeign: bool('EMERGENCY_STOP_FOREIGN', process.env.EMERGENCY_STOP_FOREIGN, true),
   // How far from the mark toward liquidation to place it. 0.5 is halfway --
   // clear of the current price so it does not fill instantly, clear of the
   // liquidation price so it actually gets the chance to.
@@ -150,6 +157,6 @@ export const config = {
   // start), record what the bot WOULD have opened and resolve those against
   // real subsequent prices, so it accumulates its own track record instead
   // of idling. Never places an order — see paper.mjs.
-  shadowLedger: bool(process.env.SHADOW_LEDGER, true),
+  shadowLedger: bool('SHADOW_LEDGER', process.env.SHADOW_LEDGER, true),
   shadowMaxOpen: num(process.env.SHADOW_MAX_OPEN, 40) // cap concurrent unresolved shadow entries so the resolver's per-cycle price reads stay bounded
 };

@@ -17,8 +17,33 @@ import { config } from './config.mjs';
 // it. If that record were ever lost, its positions read as the operator's and
 // stop being managed — the safe direction to fail, since it withholds action
 // rather than taking one on a trade nobody asked the bot to touch.
-export function positionOrigin(symbol, state) {
-  return state?.openOrders?.[symbol] ? 'bot' : 'manual';
+export function positionQuantitiesMatch(expected, actual) {
+  const a = Number(expected);
+  const b = Number(actual);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  const tolerance = Math.max(1e-12, Math.abs(a) * 1e-9);
+  return Math.abs(a - b) <= tolerance;
+}
+
+export function positionOrigin(symbol, state, actualSide = null, actualQuantity = null) {
+  const recorded = state?.openOrders?.[symbol];
+  if (!recorded) return 'manual';
+  // Binance one-way mode nets a symbol into one position. If the live side no
+  // longer matches what the bot actually opened, an operator action (or an
+  // external order) has changed ownership semantics. Do not manage that net
+  // position as though it were still the bot's original trade.
+  if (actualSide && recorded.side !== actualSide) return 'conflict';
+  // One-way mode nets manual and automated fills together. A same-side manual
+  // addition is therefore just as important an ownership conflict as a side
+  // flip: closePosition=true would otherwise close the operator's addition as
+  // well. New records retain the bot's exact confirmed residual quantity.
+  const hasOwnedQuantity = recorded.entryExecutedQty != null;
+  const ownedQuantity = Number(recorded.entryExecutedQty);
+  if (actualQuantity != null && hasOwnedQuantity && Number.isFinite(ownedQuantity)
+      && !positionQuantitiesMatch(ownedQuantity, Math.abs(Number(actualQuantity)))) {
+    return 'conflict';
+  }
+  return 'bot';
 }
 
 // Distance from the mark to the liquidation price, as a percentage of the

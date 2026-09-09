@@ -1,0 +1,14 @@
+[Unit]
+Description=Sync the read-only Binance account journal every 15 minutes
+Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/account-journal/README.md
+
+[Timer]
+# Offset from the five-minute futures decision cycle. This is a separate
+# reader and never stops, starts, or locks either trading bot.
+OnCalendar=*:2/15
+AccuracySec=30s
+Persistent=true
+Unit=fcs-account-journal.service
+
+[Install]
+WantedBy=timers.target

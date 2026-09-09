@@ -6,6 +6,7 @@
 // cycle and never trusted from here — a stale or lost row can therefore
 // under- or over-defer a tranche, but it can never cause a phantom buy.
 import { d1 } from '../../signals-worker/scripts/d1-client.mjs';
+import { acquireExecutionLease as acquireLease, releaseExecutionLease as releaseLease } from '../../signals-worker/scripts/execution-lease.mjs';
 import { config } from './config.mjs';
 
 const env = {
@@ -13,6 +14,13 @@ const env = {
   CLOUDFLARE_ACCOUNT_ID: config.cloudflareAccountId,
   FCS_D1_DATABASE_ID: config.d1DatabaseId
 };
+
+// Longer than the five-minute systemd timeout and any supported manual cycle.
+// Normal completion releases immediately; only a hard kill retains the lease.
+export const acquireExecutionLease = (ttlSeconds = 1800) =>
+  acquireLease(env, 'spot-cycle', ttlSeconds);
+
+export const releaseExecutionLease = (lease) => releaseLease(env, lease);
 
 export async function loadState() {
   const [row] = await d1(env, 'SELECT last_tranche_at, dry_powder FROM spot_bot_state WHERE id = 1');
@@ -37,12 +45,16 @@ export async function recordFill(fill) {
     INSERT INTO spot_bot_fills
       (filled_at, mode, symbol, signal_symbol, sleeve, trigger, trigger_reason,
        quote_spent, price, quantity, order_id, weekly_sigma, typical_drawdown, weeks_history)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    WHERE ? != 'live' OR ? IS NULL OR NOT EXISTS (
+      SELECT 1 FROM spot_bot_fills WHERE mode = 'live' AND symbol = ? AND order_id = ?
+    )
   `, [
     fill.filledAt, fill.mode, fill.symbol, fill.signalSymbol, fill.sleeve,
     fill.trigger, fill.triggerReason, fill.quoteSpent, fill.price,
     fill.quantity ?? null, fill.orderId ?? null,
-    fill.weeklySigma ?? null, fill.typicalDrawdown ?? null, fill.weeksHistory ?? null
+    fill.weeklySigma ?? null, fill.typicalDrawdown ?? null, fill.weeksHistory ?? null,
+    fill.mode, fill.orderId ?? null, fill.symbol, fill.orderId ?? null
   ]);
 }
 

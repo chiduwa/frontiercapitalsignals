@@ -10,7 +10,12 @@
 // below is either a portfolio-policy choice or is derived per-asset from
 // measured history — none of them is a price forecast.
 const num = (v, d) => (v == null || v === '' ? d : Number(v));
-const bool = (v, d) => (v == null || v === '' ? d : v === 'true' || v === '1');
+export function parseBoolean(name, value, defaultValue) {
+  if (value == null || value === '') return defaultValue;
+  if (value === 'true' || value === '1') return true;
+  if (value === 'false' || value === '0') return false;
+  throw new Error(`${name} must be exactly true, false, 1, or 0; received ${JSON.stringify(value)}`);
+}
 
 const { BINANCE_SPOT_API_KEY, BINANCE_SPOT_API_SECRET, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
 
@@ -23,7 +28,7 @@ if (!BINANCE_SPOT_API_KEY || !BINANCE_SPOT_API_SECRET) {
 }
 
 export const config = {
-  dryRun: bool(process.env.SPOT_DRY_RUN, true),
+  dryRun: parseBoolean('SPOT_DRY_RUN', process.env.SPOT_DRY_RUN, true),
   apiKey: BINANCE_SPOT_API_KEY,
   apiSecret: BINANCE_SPOT_API_SECRET,
   base: process.env.BINANCE_SPOT_BASE || 'https://api.binance.com',

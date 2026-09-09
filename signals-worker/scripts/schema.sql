@@ -710,6 +710,17 @@ CREATE TABLE IF NOT EXISTS intraday_backtest_reliability (
 -- (see trading-bot/src/state.mjs) — everything else (balance, open
 -- positions) is always re-read fresh from Binance each cycle, never
 -- trusted from here, so stale/lost state here can't cause a double-open.
+CREATE TABLE IF NOT EXISTS trading_execution_leases (
+  name TEXT PRIMARY KEY,
+  owner TEXT NOT NULL,
+  acquired_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  CHECK (expires_at > acquired_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_trading_execution_leases_expiry
+  ON trading_execution_leases(expires_at);
+
 CREATE TABLE IF NOT EXISTS trading_bot_equity_state (
   id INTEGER PRIMARY KEY CHECK (id = 1), -- single row, upsert-only
   peak_equity REAL,
@@ -752,6 +763,7 @@ CREATE TABLE IF NOT EXISTS trading_bot_open_orders (
 CREATE TABLE IF NOT EXISTS trading_bot_shadow_trades (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   opened_at TEXT NOT NULL,
+  signal_generated_at TEXT,
   -- shadow = engine had not authorized; dry = authorized but DRY_RUN;
   -- live = authorized and executed. Never pooled across modes.
   mode TEXT NOT NULL CHECK (mode IN ('shadow', 'dry', 'live')),
@@ -792,6 +804,9 @@ CREATE INDEX IF NOT EXISTS idx_trading_bot_shadow_symbol
   ON trading_bot_shadow_trades(symbol, opened_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_trading_bot_shadow_one_open
   ON trading_bot_shadow_trades(symbol, mode) WHERE resolved_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shadow_signal_identity
+  ON trading_bot_shadow_trades(mode, source, symbol, side, signal_generated_at)
+  WHERE signal_generated_at IS NOT NULL;
 
 -- ------------------------- SUPPORT/RESISTANCE (srbreak) ---------------------
 -- Added 2026-08-20 after a post-mortem on the 08-19 crypto pump: BTC's
@@ -1213,11 +1228,45 @@ CREATE TABLE IF NOT EXISTS retrospective_misses (
   lead_hours REAL,
   gain_to_peak_pct REAL,
   max_drawdown_pct REAL,
+  -- Migration 0022: why this episode entered the retrospective. The broad
+  -- universe still uses the global threshold; an always-tracked favorite
+  -- may use a lower value only when its lagged history cleared the baseline
+  -- sample gate.
+  always_tracked INTEGER NOT NULL DEFAULT 0,
+  trigger_threshold_pct REAL,
+  trigger_basis TEXT,
+  baseline_samples INTEGER,
+  baseline_fit_through TEXT,
+  -- All feature rows used to explain this episode must predate this cutoff.
+  feature_cutoff_at TEXT,
+  -- Exact pre-window publication state (migration 0026). The older
+  -- in_universe/passed_floors fields remain endpoint observations for legacy
+  -- compatibility and are never used to grade new rows.
+  prewindow_in_universe INTEGER CHECK (prewindow_in_universe IN (0, 1)),
+  publication_snapshot_at TEXT,
+  publication_state TEXT CHECK (publication_state IN (
+    'published', 'conflicted', 'withheld', 'not-surfaced', 'not-in-universe'
+  )),
+  state_basis TEXT,
   PRIMARY KEY (run_at, symbol)
 );
 
 CREATE INDEX IF NOT EXISTS idx_retrospective_misses_cause ON retrospective_misses(cause, run_at);
 CREATE INDEX IF NOT EXISTS idx_retrospective_misses_symbol ON retrospective_misses(symbol, run_at);
+
+-- Exact post-sanitizer state written alongside each reliability run. The
+-- retrospective reads this instead of reconstructing side-specific/public
+-- boards from the full-universe composite learning log.
+CREATE TABLE IF NOT EXISTS signal_publication_snapshots (
+  run_at TEXT NOT NULL,
+  asset_class TEXT NOT NULL CHECK (asset_class IN ('crypto', 'stock')),
+  universe_json TEXT NOT NULL CHECK (json_valid(universe_json)),
+  boards_json TEXT NOT NULL CHECK (json_valid(boards_json)),
+  universe_count INTEGER NOT NULL CHECK (universe_count >= 0),
+  PRIMARY KEY (run_at, asset_class)
+);
+CREATE INDEX IF NOT EXISTS idx_signal_publication_snapshots_latest
+  ON signal_publication_snapshots(asset_class, run_at DESC);
 
 -- Recomputed wholesale from the ledger each run (not incremented), so it
 -- can never drift from the rows it summarises.
@@ -1235,6 +1284,169 @@ CREATE TABLE IF NOT EXISTS retrospective_patterns (
   n_detected INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL
 );
+
+-- Asset-relative unusual-move thresholds for pinned favorites. Inputs end
+-- before the 24h outcome window begins; estimates are append-only so an
+-- episode can always be matched to the threshold used at the time.
+CREATE TABLE IF NOT EXISTS retrospective_asset_baselines (
+  computed_at TEXT NOT NULL,
+  asset_class TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  fit_through TEXT,
+  samples INTEGER NOT NULL,
+  abs_return_p80_pct REAL,
+  daily_range_p50_pct REAL,
+  realized_volatility_pct REAL,
+  candidate_threshold_pct REAL,
+  effective_threshold_pct REAL NOT NULL,
+  global_threshold_pct REAL NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('adaptive', 'global', 'insufficient')),
+  method_version TEXT NOT NULL,
+  PRIMARY KEY (computed_at, asset_class, symbol),
+  CHECK (samples >= 0),
+  CHECK (effective_threshold_pct > 0),
+  CHECK (global_threshold_pct > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_retrospective_asset_baselines_latest
+  ON retrospective_asset_baselines(asset_class, symbol, computed_at DESC);
+
+-- Point-in-time technique state from before each selected move. Alignment is
+-- descriptive only because episodes are chosen after their outcomes are
+-- known; this table is deliberately disconnected from live scoring.
+CREATE TABLE IF NOT EXISTS retrospective_feature_snapshots (
+  run_at TEXT NOT NULL,
+  asset_class TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  feature_cutoff_at TEXT NOT NULL,
+  source_run_at TEXT NOT NULL,
+  technique_id TEXT NOT NULL,
+  technique_dir INTEGER NOT NULL CHECK (technique_dir IN (-1, 1)),
+  technique_score REAL,
+  move_pct REAL NOT NULL,
+  move_dir INTEGER NOT NULL CHECK (move_dir IN (-1, 1)),
+  aligned INTEGER NOT NULL CHECK (aligned IN (0, 1)),
+  regime TEXT NOT NULL,
+  time_bucket TEXT NOT NULL,
+  source_lag_hours REAL NOT NULL CHECK (source_lag_hours >= 0),
+  method_version TEXT NOT NULL,
+  PRIMARY KEY (run_at, asset_class, symbol, technique_id, method_version),
+  CHECK (source_run_at < feature_cutoff_at)
+);
+CREATE INDEX IF NOT EXISTS idx_retrospective_feature_snapshots_cell
+  ON retrospective_feature_snapshots(asset_class, symbol, technique_id, regime, time_bucket, run_at);
+
+-- Multiple-testing-aware summaries of the outcome-conditioned snapshots.
+-- Even a notable cell is research-only and cannot become a live weight until
+-- a separate prospective study measures every trigger, including failures.
+CREATE TABLE IF NOT EXISTS retrospective_feature_correlations (
+  asset_class TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  technique_id TEXT NOT NULL,
+  regime TEXT NOT NULL,
+  time_bucket TEXT NOT NULL,
+  n INTEGER NOT NULL,
+  independent_dates INTEGER NOT NULL,
+  alignment_rate REAL,
+  correlation REAL,
+  fisher_z REAL,
+  first_half_correlation REAL,
+  second_half_correlation REAL,
+  tests_in_family INTEGER NOT NULL,
+  corrected_z_threshold REAL,
+  status TEXT NOT NULL CHECK (status IN ('insufficient', 'descriptive-only', 'notable-retrospective-only')),
+  live_edge_eligible INTEGER NOT NULL DEFAULT 0 CHECK (live_edge_eligible = 0),
+  updated_at TEXT NOT NULL,
+  method_version TEXT NOT NULL,
+  PRIMARY KEY (asset_class, symbol, technique_id, regime, time_bucket, method_version),
+  CHECK (n >= 0),
+  CHECK (independent_dates >= 0),
+  CHECK (tests_in_family >= 1)
+);
+
+-- Migration 0023: unlike retrospective_feature_snapshots above, this lane is
+-- not selected on the outcome. It records every eligible daily return once,
+-- with compact predictor frames frozen strictly before that return window, so
+-- lead/lag and seasonal hypotheses include quiet days and failed triggers.
+CREATE TABLE IF NOT EXISTS retrospective_lead_lag_daily (
+  observation_date TEXT NOT NULL,
+  run_at TEXT NOT NULL,
+  window_start_at TEXT NOT NULL,
+  window_end_at TEXT NOT NULL,
+  outcome_provider TEXT NOT NULL,
+  outcomes_json TEXT NOT NULL CHECK (json_valid(outcomes_json)),
+  predictors_json TEXT NOT NULL CHECK (json_valid(predictors_json)),
+  method_version TEXT NOT NULL,
+  PRIMARY KEY (observation_date, method_version),
+  CHECK (window_start_at < window_end_at),
+  CHECK (run_at = window_end_at)
+);
+CREATE INDEX IF NOT EXISTS idx_retrospective_lead_lag_daily_window
+  ON retrospective_lead_lag_daily(method_version, observation_date);
+
+-- Research evidence across individual techniques, pre-registered technique
+-- pairs, cross-asset composites, market breadth, and causally normalized cycle
+-- metrics at fixed lead horizons. Calendar and frozen-regime cells share one
+-- multiple-testing family. Discovery is checkpointed and alpha-spent, then
+-- frozen before genuinely later OOS observations. This table is deliberately
+-- impossible to activate directly: promotion belongs to the separate after-
+-- cost research lifecycle.
+CREATE TABLE IF NOT EXISTS retrospective_seasonal_lead_lag (
+  asset_class TEXT NOT NULL,
+  target_symbol TEXT NOT NULL,
+  feature_kind TEXT NOT NULL,
+  source_symbol TEXT NOT NULL,
+  feature_id TEXT NOT NULL,
+  indicator_role TEXT NOT NULL,
+  lag_hours REAL NOT NULL CHECK (lag_hours >= 0),
+  context_type TEXT NOT NULL,
+  context_value TEXT NOT NULL,
+  n INTEGER NOT NULL CHECK (n >= 0),
+  correlation REAL,
+  hac_z REAL,
+  mean_actual_lead_hours REAL,
+  discovery_n INTEGER NOT NULL DEFAULT 0 CHECK (discovery_n >= 0),
+  discovery_correlation REAL,
+  discovery_hac_z REAL,
+  holdout_n INTEGER NOT NULL DEFAULT 0 CHECK (holdout_n >= 0),
+  holdout_correlation REAL,
+  holdout_hac_z REAL,
+  discovery_tests_in_family INTEGER,
+  corrected_z_threshold REAL,
+  family_alpha_spent REAL,
+  next_checkpoint_n INTEGER,
+  walk_forward_verdict TEXT NOT NULL CHECK (walk_forward_verdict IN ('insufficient', 'passed', 'failed')),
+  walk_forward_folds INTEGER NOT NULL DEFAULT 0 CHECK (walk_forward_folds >= 0),
+  walk_forward_positive_folds INTEGER NOT NULL DEFAULT 0 CHECK (walk_forward_positive_folds >= 0),
+  discovered_at TEXT,
+  discovery_fit_through TEXT,
+  oos_n INTEGER NOT NULL DEFAULT 0 CHECK (oos_n >= 0),
+  oos_correlation REAL,
+  oos_hac_z REAL,
+  oos_tests_in_family INTEGER,
+  oos_corrected_z_threshold REAL,
+  oos_alpha_spent REAL,
+  oos_next_checkpoint_n INTEGER,
+  status TEXT NOT NULL CHECK (status IN ('insufficient', 'descriptive-only', 'provisional-research-only', 'replicated-research-only', 'decayed-research-only')),
+  live_edge_eligible INTEGER NOT NULL DEFAULT 0 CHECK (live_edge_eligible = 0),
+  updated_at TEXT NOT NULL,
+  method_version TEXT NOT NULL,
+  PRIMARY KEY (asset_class, target_symbol, feature_kind, source_symbol, feature_id,
+               lag_hours, context_type, context_value, method_version),
+  CHECK (discovery_tests_in_family IS NULL OR discovery_tests_in_family >= 1),
+  CHECK (family_alpha_spent IS NULL OR (family_alpha_spent > 0 AND family_alpha_spent < 1)),
+  CHECK (next_checkpoint_n IS NULL OR next_checkpoint_n > 0),
+  CHECK (oos_tests_in_family IS NULL OR oos_tests_in_family >= 1),
+  CHECK (oos_alpha_spent IS NULL OR (oos_alpha_spent > 0 AND oos_alpha_spent < 1)),
+  CHECK (oos_next_checkpoint_n IS NULL OR oos_next_checkpoint_n > 0),
+  CHECK (mean_actual_lead_hours IS NULL OR mean_actual_lead_hours >= lag_hours),
+  CHECK ((discovered_at IS NULL AND discovery_fit_through IS NULL)
+      OR (discovered_at IS NOT NULL AND discovery_fit_through IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_retrospective_seasonal_lead_lag_status
+  ON retrospective_seasonal_lead_lag(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_retrospective_seasonal_lead_lag_target
+  ON retrospective_seasonal_lead_lag(target_symbol, context_type, context_value,
+                                     lag_hours, updated_at DESC);
 
 -- Keyed by DATE, not by run timestamp, for three reasons that all point
 -- the same way. It bounds the table (~26 rows/day rather than ~26/hour,
@@ -1710,3 +1922,180 @@ CREATE TABLE IF NOT EXISTS microstructure_findings (
   updated_at TEXT NOT NULL,
   FOREIGN KEY (hypothesis) REFERENCES research_registry(hypothesis) ON DELETE CASCADE
 );
+
+-- Read-only Binance account journal (migration 0021). Exchange fills are
+-- stored independently of bot outcome tables, with conservative provenance:
+-- an unmatched order is UNKNOWN, never presumed manual.
+CREATE TABLE IF NOT EXISTS account_journal_orders (
+  market TEXT NOT NULL CHECK (market IN ('spot', 'futures')),
+  symbol TEXT NOT NULL,
+  order_id TEXT NOT NULL,
+  client_order_id TEXT,
+  side TEXT CHECK (side IS NULL OR side IN ('BUY', 'SELL')),
+  order_type TEXT,
+  status TEXT,
+  order_time TEXT,
+  updated_time TEXT,
+  ingested_at TEXT NOT NULL,
+  PRIMARY KEY (market, symbol, order_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_journal_orders_client
+  ON account_journal_orders(market, client_order_id)
+  WHERE client_order_id IS NOT NULL;
+
+-- Parent conditional orders must be retained separately: Binance does not
+-- promise that a parent outside a later rolling window will reappear when
+-- actual_order_id is assigned after a stop or take-profit triggers (0027).
+CREATE TABLE IF NOT EXISTS account_journal_futures_algos (
+  symbol TEXT NOT NULL,
+  algo_id TEXT NOT NULL,
+  client_algo_id TEXT,
+  actual_order_id TEXT,
+  side TEXT CHECK (side IS NULL OR side IN ('BUY', 'SELL')),
+  order_type TEXT,
+  actual_type TEXT,
+  algo_status TEXT,
+  create_time_ms INTEGER,
+  update_time_ms INTEGER,
+  trigger_time_ms INTEGER,
+  last_polled_at TEXT,
+  polling_closed_at TEXT,
+  ingested_at TEXT NOT NULL,
+  PRIMARY KEY (symbol, algo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_journal_algos_pending
+  ON account_journal_futures_algos(last_polled_at, symbol)
+  WHERE actual_order_id IS NULL AND polling_closed_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_account_journal_algos_actual_order
+  ON account_journal_futures_algos(symbol, actual_order_id)
+  WHERE actual_order_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS account_journal_fills (
+  market TEXT NOT NULL CHECK (market IN ('spot', 'futures')),
+  symbol TEXT NOT NULL,
+  trade_id TEXT NOT NULL,
+  order_id TEXT NOT NULL,
+  client_order_id TEXT,
+  event_time TEXT NOT NULL,
+  side TEXT NOT NULL CHECK (side IN ('BUY', 'SELL')),
+  position_side TEXT CHECK (position_side IS NULL OR position_side IN ('BOTH', 'LONG', 'SHORT')),
+  price REAL NOT NULL CHECK (price > 0),
+  quantity REAL NOT NULL CHECK (quantity > 0),
+  quote_quantity REAL CHECK (quote_quantity IS NULL OR quote_quantity >= 0),
+  realized_pnl REAL,
+  commission REAL CHECK (commission IS NULL OR commission >= 0),
+  commission_asset TEXT,
+  is_maker INTEGER CHECK (is_maker IS NULL OR is_maker IN (0, 1)),
+  origin TEXT NOT NULL CHECK (origin IN ('bot', 'manual', 'unknown')),
+  classification_method TEXT NOT NULL,
+  classification_evidence TEXT,
+  ingested_at TEXT NOT NULL,
+  PRIMARY KEY (market, symbol, trade_id),
+  FOREIGN KEY (market, symbol, order_id)
+    REFERENCES account_journal_orders(market, symbol, order_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_journal_fills_time
+  ON account_journal_fills(event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_account_journal_fills_origin
+  ON account_journal_fills(origin, market, event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_account_journal_fills_order
+  ON account_journal_fills(market, symbol, order_id);
+CREATE INDEX IF NOT EXISTS idx_account_journal_fills_symbol
+  ON account_journal_fills(market, symbol, event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_account_journal_fills_ingested
+  ON account_journal_fills(origin, ingested_at);
+
+CREATE TABLE IF NOT EXISTS account_journal_origin_overrides (
+  market TEXT NOT NULL CHECK (market IN ('spot', 'futures')),
+  symbol TEXT NOT NULL,
+  order_id TEXT NOT NULL,
+  origin TEXT NOT NULL CHECK (origin IN ('bot', 'manual')),
+  note TEXT,
+  set_at TEXT NOT NULL,
+  PRIMARY KEY (market, symbol, order_id)
+);
+
+CREATE TABLE IF NOT EXISTS account_journal_checkpoints (
+  market TEXT NOT NULL CHECK (market IN ('spot', 'futures')),
+  symbol TEXT NOT NULL,
+  stream TEXT NOT NULL CHECK (stream IN ('trades', 'orders')),
+  last_trade_id TEXT,
+  cursor_time_ms INTEGER,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (market, symbol, stream)
+);
+
+CREATE TABLE IF NOT EXISTS account_journal_runs (
+  run_id TEXT PRIMARY KEY,
+  started_at TEXT NOT NULL,
+  completed_at TEXT,
+  status TEXT NOT NULL CHECK (status IN ('running', 'ok', 'partial', 'failed')),
+  markets_requested INTEGER NOT NULL DEFAULT 0,
+  symbols_requested INTEGER NOT NULL DEFAULT 0,
+  fills_seen INTEGER NOT NULL DEFAULT 0,
+  pages_read INTEGER NOT NULL DEFAULT 0,
+  error_count INTEGER NOT NULL DEFAULT 0,
+  error_summary TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_journal_runs_time
+  ON account_journal_runs(started_at DESC);
+
+CREATE TABLE IF NOT EXISTS account_journal_daily_stats (
+  day TEXT NOT NULL,
+  market TEXT NOT NULL CHECK (market IN ('spot', 'futures')),
+  origin TEXT NOT NULL CHECK (origin IN ('bot', 'manual', 'unknown')),
+  symbol TEXT NOT NULL,
+  fill_count INTEGER NOT NULL,
+  order_count INTEGER NOT NULL,
+  buy_fill_count INTEGER NOT NULL,
+  sell_fill_count INTEGER NOT NULL,
+  buy_quantity REAL NOT NULL,
+  sell_quantity REAL NOT NULL,
+  buy_quote_quantity REAL NOT NULL,
+  sell_quote_quantity REAL NOT NULL,
+  realized_pnl REAL,
+  first_fill_at TEXT NOT NULL,
+  last_fill_at TEXT NOT NULL,
+  refreshed_at TEXT NOT NULL,
+  PRIMARY KEY (day, market, origin, symbol)
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_journal_daily_origin
+  ON account_journal_daily_stats(origin, day DESC, market);
+
+CREATE TABLE IF NOT EXISTS account_journal_daily_fees (
+  day TEXT NOT NULL,
+  market TEXT NOT NULL CHECK (market IN ('spot', 'futures')),
+  origin TEXT NOT NULL CHECK (origin IN ('bot', 'manual', 'unknown')),
+  symbol TEXT NOT NULL,
+  commission_asset TEXT NOT NULL,
+  commission_amount REAL NOT NULL,
+  refreshed_at TEXT NOT NULL,
+  PRIMARY KEY (day, market, origin, symbol, commission_asset)
+);
+
+CREATE VIEW IF NOT EXISTS account_journal_manual_fills AS
+  SELECT * FROM account_journal_fills WHERE origin = 'manual';
+
+CREATE VIEW IF NOT EXISTS account_journal_review_queue AS
+  SELECT * FROM account_journal_fills WHERE origin = 'unknown';
+
+CREATE VIEW IF NOT EXISTS account_journal_origin_summary AS
+  SELECT
+    market,
+    origin,
+    COUNT(*) AS fill_count,
+    COUNT(DISTINCT symbol || ':' || order_id) AS order_count,
+    COUNT(DISTINCT symbol) AS symbol_count,
+    MIN(event_time) AS first_fill_at,
+    MAX(event_time) AS last_fill_at,
+    SUM(CASE WHEN side = 'BUY' THEN COALESCE(quote_quantity, 0) ELSE 0 END) AS buy_quote_quantity,
+    SUM(CASE WHEN side = 'SELL' THEN COALESCE(quote_quantity, 0) ELSE 0 END) AS sell_quote_quantity,
+    CASE WHEN market = 'futures' THEN SUM(realized_pnl) ELSE NULL END AS realized_pnl
+  FROM account_journal_fills
+  GROUP BY market, origin;

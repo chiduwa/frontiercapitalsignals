@@ -6,7 +6,11 @@ process.env.CLOUDFLARE_API_TOKEN = 'test';
 process.env.CLOUDFLARE_ACCOUNT_ID = 'test';
 process.env.FCS_D1_DATABASE_ID = 'test';
 
-const { config } = await import('./src/config.mjs');
+const { config, parseBoolean } = await import('./src/config.mjs');
+const {
+  isExecutionOutcomeUnknown, makeClientOrderId,
+  MAX_SPOT_ORDER_GENERATIONS, terminalSpotOrder
+} = await import('./src/binance-spot.mjs');
 const { selectAssets, weeklyProfile, evaluateTrigger, tranchePool, trancheDue, periodsElapsed, allocate } = await import('./src/strategy.mjs');
 
 let failures = 0;
@@ -221,6 +225,32 @@ check('satellites are funded once the pool is big enough for the core too',
   allocate(nine, 90, min5).some((a) => a.sleeve === 'satellite'));
 check('no triggers means no allocation', allocate([], 100, min5).length === 0);
 check('a zero pool allocates nothing', allocate(nine, 0, min5).length === 0);
+
+console.log('\n== execution identity and live-mode parsing ==');
+const spotOrderId = makeClientOrderId('2026-09-01T00:00:00Z', 'BTCUSDT');
+check('the same tranche/asset produces the same spot client ID',
+  spotOrderId === makeClientOrderId('2026-09-01T00:00:00Z', 'BTCUSDT'));
+check('a different asset produces a different spot client ID',
+  spotOrderId !== makeClientOrderId('2026-09-01T00:00:00Z', 'ETHUSDT'));
+check('spot client IDs fit Binance\'s 36-character limit and alphabet',
+  spotOrderId.length <= 36 && /^[.A-Z:/a-z0-9_-]+$/.test(spotOrderId), spotOrderId);
+check('spot terminal-order replacements have a bounded deterministic ID chain', (() => {
+  const ids = Array.from({ length: MAX_SPOT_ORDER_GENERATIONS }, (_, generation) =>
+    makeClientOrderId('2026-09-01T00:00:00Z', 'BTCUSDT', generation));
+  return new Set(ids).size === ids.length
+    && ids.every((id) => id.length <= 36 && /^[.A-Z:/a-z0-9_-]+$/.test(id));
+})());
+check('a partial spot fill is not terminally settled',
+  !terminalSpotOrder({ status: 'PARTIALLY_FILLED', executedQty: '1' })
+  && terminalSpotOrder({ status: 'FILLED', executedQty: '2' }));
+check('a documented spot timeout code remains ambiguous even on HTTP 4xx',
+  isExecutionOutcomeUnknown({ httpStatus: 400, binanceCode: -1007 }));
+check('a normal malformed spot request is a definite rejection',
+  !isExecutionOutcomeUnknown({ httpStatus: 400, binanceCode: -1102 }));
+check('strict boolean parsing accepts an explicit false', parseBoolean('SPOT_DRY_RUN', '0', true) === false);
+check('strict boolean parsing rejects ambiguous live-mode text', (() => {
+  try { parseBoolean('SPOT_DRY_RUN', 'no', true); return false; } catch { return true; }
+})());
 
 console.log(failures === 0 ? '\nSPOT BOT OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

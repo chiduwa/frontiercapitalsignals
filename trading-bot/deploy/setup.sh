@@ -99,11 +99,13 @@ echo "    $(git -C "$INSTALL_DIR" log --oneline -1)"
 # The bot has no third-party dependencies (plain fetch + node:crypto), so
 # there is no npm install step and no lockfile to trust on this box.
 log "Running the guardrail tests"
-sudo -u "$RUN_USER" env HOME=/tmp node "$INSTALL_DIR/trading-bot/test.mjs" >/dev/null \
+sudo -u "$RUN_USER" node "$INSTALL_DIR/trading-bot/test.mjs" >/dev/null \
   || die "futures guardrail tests failed on this checkout — refusing to install a bot that fails its own tests"
-sudo -u "$RUN_USER" env HOME=/tmp node "$INSTALL_DIR/spot-bot/test.mjs" >/dev/null \
+sudo -u "$RUN_USER" node "$INSTALL_DIR/spot-bot/test.mjs" >/dev/null \
   || die "spot guardrail tests failed on this checkout — refusing to install a bot that fails its own tests"
-echo "    passed (both suites)"
+sudo -u "$RUN_USER" node --test "$INSTALL_DIR"/account-journal/test/*.test.mjs >/dev/null \
+  || die "account-journal tests failed on this checkout — refusing to install an unverified importer"
+echo "    passed (all three suites)"
 
 # ---------------------------------------------------------------------------
 # Secrets. Created empty; you fill them in. 0600, owned by the service user.
@@ -167,6 +169,8 @@ install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-trading-bot.service" /etc/sy
 install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-trading-bot.timer" /etc/systemd/system/
 install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-spot-bot.service" /etc/systemd/system/
 install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-spot-bot.timer" /etc/systemd/system/
+install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-account-journal.service" /etc/systemd/system/
+install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-account-journal.timer" /etc/systemd/system/
 install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-trading-bot-update.service" /etc/systemd/system/
 install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-trading-bot-update.timer" /etc/systemd/system/
 install -m 755 "$INSTALL_DIR/trading-bot/deploy/update.sh" /usr/local/bin/fcs-bot-update
@@ -186,8 +190,11 @@ Installed. NOT started — the env file is still empty.
   4. Read what it did:            journalctl -u fcs-trading-bot -n 100 --no-pager
   5. Same for spot:               sudo systemctl start fcs-spot-bot
                                   journalctl -u fcs-spot-bot -n 60 --no-pager
-  6. Once both look right:        sudo systemctl enable --now fcs-trading-bot.timer
+  6. Import account history:      sudo systemctl start fcs-account-journal
+                                  journalctl -u fcs-account-journal -n 100 --no-pager
+  7. Once all look right:         sudo systemctl enable --now fcs-trading-bot.timer
                                   sudo systemctl enable --now fcs-spot-bot.timer
+                                  sudo systemctl enable --now fcs-account-journal.timer
                                   sudo systemctl enable --now fcs-trading-bot-update.timer
 
 Expect zero opens: the signals engine withholds every call during its

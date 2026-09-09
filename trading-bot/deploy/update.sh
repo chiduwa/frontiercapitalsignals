@@ -37,8 +37,9 @@ log "updating ${PREVIOUS:0:7} -> ${TARGET:0:7}"
 git reset --quiet --hard "$TARGET"
 chown -R "$RUN_USER:$RUN_USER" "$INSTALL_DIR"
 
-if sudo -u "$RUN_USER" env HOME=/tmp node "$INSTALL_DIR/trading-bot/test.mjs" >/tmp/fcs-bot-test.log 2>&1 \
-   && sudo -u "$RUN_USER" env HOME=/tmp node "$INSTALL_DIR/spot-bot/test.mjs" >>/tmp/fcs-bot-test.log 2>&1; then
+if sudo -u "$RUN_USER" node "$INSTALL_DIR/trading-bot/test.mjs" >/tmp/fcs-bot-test.log 2>&1 \
+   && sudo -u "$RUN_USER" node "$INSTALL_DIR/spot-bot/test.mjs" >>/tmp/fcs-bot-test.log 2>&1 \
+   && sudo -u "$RUN_USER" node --test "$INSTALL_DIR"/account-journal/test/*.test.mjs >>/tmp/fcs-bot-test.log 2>&1; then
   log "guardrail tests passed on ${TARGET:0:7}"
   # Reinstall the units and helper scripts. Without this the updater ships new
   # CODE but never new UNITS, so a commit that adds a timer or a script lands

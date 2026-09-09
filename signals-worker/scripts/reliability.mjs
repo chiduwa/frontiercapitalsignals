@@ -403,6 +403,44 @@ export async function loadDetailedCalibration(env) {
   return out;
 }
 
+// Exact, post-sanitizer publication state for causal retrospectives. Composite
+// votes cannot reconstruct this: the two ranked boards use side-specific
+// scores, favorites are pinned, and the final evidence gate may withhold an
+// otherwise ranked row. Recording the object actually written to KV is the
+// only honest answer to "what did a user see before the move?".
+export function buildPublicationSnapshots(publicPayload, prices, runAt) {
+  if (!publicPayload || !runAt) return [];
+  const sections = ['breakout', 'breakdown', 'favorites', 'longTermPotential'];
+  const definitions = [
+    { assetClass: 'crypto', payloadKey: 'crypto' },
+    { assetClass: 'stock', payloadKey: 'stocks' }
+  ];
+  return definitions.map(({ assetClass, payloadKey }) => {
+    const universe = [...new Set((prices || [])
+      .filter((row) => row && row.asset_class === assetClass && row.symbol)
+      .map((row) => String(row.symbol).toUpperCase()))].sort();
+    const boards = [];
+    const payloadSection = publicPayload[payloadKey] || {};
+    for (const section of sections) {
+      for (const row of Array.isArray(payloadSection[section]) ? payloadSection[section] : []) {
+        const symbol = String(row && row.symbol || '').toUpperCase();
+        if (!symbol) continue;
+        const direction = Number(row.dir);
+        boards.push({
+          section,
+          symbol,
+          dir: direction === 1 || direction === -1 ? direction : 0,
+          score: Number.isFinite(Number(row.score)) ? Number(row.score) : null,
+          abstainedReason: row.abstained && row.abstained.reason || null
+        });
+      }
+    }
+    boards.sort((a, b) => a.section.localeCompare(b.section)
+      || a.symbol.localeCompare(b.symbol) || a.dir - b.dir);
+    return { runAt, assetClass, universe, boards };
+  });
+}
+
 // Persists this run's per-asset price and per-technique directional votes,
 // to be scored once they mature (see evaluateMatured).
 export async function logRun(env, runAt, log) {
@@ -458,6 +496,15 @@ export async function logRun(env, runAt, log) {
         basis = excluded.basis, last_seen_at = excluded.last_seen_at`,
       batch.flatMap((r) => [obsDate, r.symbol, r.name ?? null, r.price ?? null, r.mcap ?? null, r.volume ?? null, r.medianBarPct ?? null, r.chg24h ?? null, r.deviationPct ?? null, r.basis, runAt]));
   });
+  for (const snapshot of log.publicationSnapshots || []) {
+    await d1(env, `
+      INSERT OR REPLACE INTO signal_publication_snapshots
+        (run_at, asset_class, universe_json, boards_json, universe_count)
+      VALUES (?,?,?,?,?)`,
+    [snapshot.runAt || runAt, snapshot.assetClass,
+     JSON.stringify(snapshot.universe || []), JSON.stringify(snapshot.boards || []),
+     (snapshot.universe || []).length]);
+  }
 }
 
 // Per-asset realized move size at each horizon, learned continuously —
@@ -1737,7 +1784,9 @@ export async function loadRetrospective(env, limit = 12) {
     const [patterns, recent] = await Promise.all([
       d1(env, 'SELECT cause, n, share, avg_move_pct, avg_available_pct, avg_lead_hours, n_detected, updated_at FROM retrospective_patterns ORDER BY n DESC'),
       d1(env, `SELECT run_at, symbol, name, mcap_rank, move_pct, cause, detected, detectable_at, surge_ratio, trade_ratio, lead_hours, gain_to_peak_pct
-                 FROM retrospective_misses ORDER BY run_at DESC, ABS(move_pct) DESC LIMIT ?`, [limit])
+                 FROM retrospective_misses
+                WHERE state_basis = 'published-snapshot-v1'
+                ORDER BY run_at DESC, ABS(move_pct) DESC LIMIT ?`, [limit])
     ]);
     if (!patterns.length && !recent.length) return null;
     return {

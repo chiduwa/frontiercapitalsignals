@@ -12,11 +12,10 @@ enabled = true
 binding = "FCS_CACHE"
 id = "9dd922a242fc4fa58853b954693b9eee"
 
-# Same D1 database the hourly build (scripts/build-signals.mjs, via the
-# REST API) already writes the reliability-learning tables into — bound
-# here too, read-only in practice, ONLY for the narrow /api/asset/:symbol
-# drill-down route (one symbol's technique breakdown on request, not the
-# heavy engine). Everything else in this Worker still only ever reads KV.
+# Same D1 database the hourly build (scripts/build-signals.mjs, via the REST
+# API) already writes. The Worker reads it only for the narrow asset drill-down,
+# RSS feed, and authenticated account-journal routes; the heavy engine remains
+# outside the request path. The account-journal alert watermark is stored in KV.
 [[d1_databases]]
 binding = "FCS_DB"
 database_name = "frontier-capital-signals-reliability"

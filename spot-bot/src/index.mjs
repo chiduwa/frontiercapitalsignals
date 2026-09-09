@@ -12,9 +12,15 @@
 // valuation call and the engine withholds both, so a sell rule written today
 // would be invented rather than measured.
 import { config } from './config.mjs';
-import { getExchangeInfo, getFreeBalance, getPrice, getWeeklyKlines, marketBuyQuote, roundQuantity, marketBuyQuantity } from './binance-spot.mjs';
+import {
+  getExchangeInfo, getFreeBalance, getPrice, getWeeklyKlines, makeClientOrderId,
+  marketBuyReconciled, roundQuantity, terminalSpotOrder
+} from './binance-spot.mjs';
 import { selectAssets, weeklyProfile, evaluateTrigger, tranchePool, trancheDue, periodsElapsed, allocate } from './strategy.mjs';
-import { loadState, saveState, recordFill, recordSkip, costBasis, logValuation } from './state.mjs';
+import {
+  acquireExecutionLease, releaseExecutionLease, loadState, saveState,
+  recordFill, recordSkip, costBasis, logValuation
+} from './state.mjs';
 
 const log = (event, data = {}) => console.log(JSON.stringify({ t: new Date().toISOString(), event, ...data }));
 
@@ -24,7 +30,7 @@ async function fetchSignals() {
   return res.json();
 }
 
-async function buyOne(asset, quoteAmount, price, profile, trigger, nowIso, tradable) {
+async function buyOne(asset, quoteAmount, price, profile, trigger, nowIso, tradable, trancheIntent) {
   const info = tradable[asset.symbol];
   const minNotional = Math.max(config.minOrderQuote, info?.minNotional || 0);
   if (quoteAmount < minNotional) {
@@ -48,19 +54,49 @@ async function buyOne(asset, quoteAmount, price, profile, trigger, nowIso, trada
   // quoteOrderQty is the natural expression of "spend this tranche" and needs
   // no quantity rounding at all. Where a pair does not allow it, fall back to
   // a step-rounded quantity.
+  const clientOrderId = makeClientOrderId(trancheIntent, asset.symbol);
   let order;
   if (info?.quoteOrderQtyAllowed) {
-    order = await marketBuyQuote(asset.symbol, quoteAmount);
+    order = await marketBuyReconciled({ symbol: asset.symbol, quoteQty: quoteAmount, clientOrderId, intentEpoch: trancheIntent });
   } else {
     const qty = await roundQuantity(asset.symbol, quoteAmount / price);
     if (!(qty > 0)) return { spent: 0, deferred: quoteAmount, reason: 'rounded quantity is zero for this pair' };
-    order = await marketBuyQuantity(asset.symbol, qty);
+    order = await marketBuyReconciled({ symbol: asset.symbol, quantity: qty, clientOrderId, intentEpoch: trancheIntent });
   }
 
   const filledQty = Number(order.executedQty ?? 0) || null;
-  const spentQuote = Number(order.cummulativeQuoteQty ?? quoteAmount);
-  log('bought', { symbol: asset.symbol, sleeve: asset.sleeve, quote: Number(spentQuote.toFixed(2)), qty: filledQty, orderId: order.orderId, trigger: trigger.trigger });
-  await recordFill({ ...base, mode: 'live', quoteSpent: spentQuote, quantity: filledQty, orderId: String(order.orderId ?? '') });
+  const spentQuote = Number(order.cummulativeQuoteQty ?? 0);
+  if (order.pending || !terminalSpotOrder(order)) {
+    const error = new Error(`Binance spot order ${order.orderId ?? clientOrderId} remains ${order.status || 'nonterminal'} after settlement polling`);
+    error.outcomeUnknown = true;
+    error.clientOrderId = order.clientOrderId || clientOrderId;
+    error.executedQty = Number(order.executedQty ?? 0);
+    error.cummulativeQuoteQty = Number(order.cummulativeQuoteQty ?? 0);
+    throw error;
+  }
+  if (!(filledQty > 0) || !(spentQuote > 0)) {
+    throw new Error(`Binance order ${order.orderId ?? clientOrderId} has no confirmed fill (status ${order.status || 'unknown'})`);
+  }
+  const fillPrice = spentQuote / filledQty;
+  log('bought', {
+    symbol: asset.symbol, sleeve: asset.sleeve, quote: Number(spentQuote.toFixed(2)),
+    qty: filledQty, orderId: order.orderId, clientOrderId: order.clientOrderId || clientOrderId, reconciled: !!order.reconciled,
+    trigger: trigger.trigger
+  });
+  try {
+    await recordFill({
+      ...base, mode: 'live', quoteSpent: spentQuote, price: fillPrice,
+      quantity: filledQty, orderId: String(order.orderId ?? '')
+    });
+  } catch (error) {
+    // The exchange fill is authoritative even if its D1 mirror is briefly
+    // unavailable. Surface the confirmed spend so the parent tranche still
+    // advances and cannot be submitted again under a new epoch.
+    error.confirmedSpentQuote = spentQuote;
+    error.confirmedOrderId = order.orderId ?? null;
+    error.fillPersistenceFailed = true;
+    throw error;
+  }
   return { spent: spentQuote, deferred: 0 };
 }
 
@@ -68,6 +104,11 @@ async function runCycle() {
   const nowIso = new Date().toISOString();
   const nowMs = Date.now();
   const state = await loadState();
+  // Stable across retries until a tranche is actually completed. If a
+  // process dies after Binance fills an order but before D1 advances the
+  // marker, the next cycle queries the same client IDs instead of buying the
+  // same assets twice.
+  let trancheIntent = state.lastTrancheAt || 'initial-tranche';
 
   const periods = periodsElapsed(state.lastTrancheAt, nowMs);
   const due = trancheDue(state.lastTrancheAt, nowMs);
@@ -110,6 +151,7 @@ async function runCycle() {
   const triggered = [];
   let spentTotal = 0;
   let deferredTotal = 0;
+  let quarantineTranche = false;
 
   for (const asset of selected) {
     try {
@@ -140,6 +182,7 @@ async function runCycle() {
   const minNotionalFor = (symbol) =>
     Math.max(config.minOrderQuote, tradable[symbol]?.minNotional || 0);
   const funded = allocate(triggered, pool, minNotionalFor);
+  let trancheReserved = false;
 
   if (triggered.length && !funded.length) {
     log('pool_too_small', {
@@ -155,9 +198,23 @@ async function runCycle() {
     });
   }
 
+  if (!config.dryRun && funded.length) {
+    // Reserve the tranche clock durably before the first exchange submission.
+    // If this process is killed after one fill, the next cycle cannot recompute
+    // and spend the full pool again on a different set of assets. The rare
+    // failure trade-off is a deferred/forfeited remainder, never over-allocation.
+    trancheIntent = nowIso;
+    await saveState({ lastTrancheAt: nowIso, dryPowder: 0 }, nowIso);
+    trancheReserved = true;
+    log('tranche_reserved', {
+      trancheIntent, budget: Number(pool.toFixed(2)), allocations: funded.length,
+      reason: 'write-ahead clock committed before any live market order'
+    });
+  }
+
   for (const asset of funded) {
     try {
-      const result = await buyOne(asset, asset.quote, asset.price, asset.profile, asset.trigger, nowIso, tradable);
+      const result = await buyOne(asset, asset.quote, asset.price, asset.profile, asset.trigger, nowIso, tradable, trancheIntent);
       spentTotal += result.spent;
       deferredTotal += result.deferred;
       if (result.deferred > 0) {
@@ -166,23 +223,41 @@ async function runCycle() {
       }
     } catch (e) {
       log('error_asset', { symbol: asset.symbol, error: e.message });
+      if (Number(e.confirmedSpentQuote) > 0) spentTotal += Number(e.confirmedSpentQuote);
+      if (e.outcomeUnknown || e.fillPersistenceFailed) {
+        quarantineTranche = true;
+        log('tranche_execution_quarantined', {
+          symbol: asset.symbol,
+          clientOrderId: e.clientOrderId ?? null,
+          executedQtyObserved: e.executedQty ?? null,
+          quoteObserved: e.cummulativeQuoteQty ?? e.confirmedSpentQuote ?? null,
+          reason: e.fillPersistenceFailed
+            ? 'a confirmed fill could not be mirrored to D1'
+            : 'exchange outcome is not terminally known',
+          action: 'no more sibling orders this cycle; tranche epoch advances to prevent duplicate spend'
+        });
+        break;
+      }
     }
   }
   deferredTotal += Math.max(0, pool - spentTotal - deferredTotal);
 
-  // The marker only advances when something was actually bought. If the whole
-  // cycle was declined, the tranche stays due and the next firing (hours, not
-  // a week) re-checks — and once a whole further period has passed, the pool
-  // grows by one tranche on its own. Nothing is stored to make that happen.
+  // The marker advances after a confirmed buy, or after an ambiguous exchange
+  // submission which is deliberately quarantined so a different client ID can
+  // never spend the same tranche twice. Purely declined cycles remain due; the
+  // next firing re-checks and later periods grow the pool from the clock.
   log('cycle_summary', {
     spent: Number(spentTotal.toFixed(2)),
     deferred: Number(deferredTotal.toFixed(2)),
-    trancheAdvanced: spentTotal > 0,
+    trancheAdvanced: trancheReserved || spentTotal > 0 || quarantineTranche,
     note: spentTotal > 0 ? 'tranche spent; clock restarts'
+      : quarantineTranche ? 'ambiguous exchange outcome quarantined; clock advances so it cannot duplicate'
       : 'nothing met its bar; tranche stays due and the pool grows a tranche per further period'
   });
 
-  if (spentTotal > 0) await saveState({ lastTrancheAt: nowIso, dryPowder: 0 }, nowIso);
+  if (!trancheReserved && (spentTotal > 0 || quarantineTranche)) {
+    await saveState({ lastTrancheAt: nowIso, dryPowder: 0 }, nowIso);
+  }
 
   // Mark to market. Prices for the selected set were already fetched above, so
   // the only extra work is for a holding no longer in the current selection —
@@ -221,10 +296,28 @@ async function runCycle() {
 }
 
 log('spot_bot_starting', { dryRun: config.dryRun });
+let lease = null;
 try {
-  await runCycle();
-  log('cycle_end', {});
+  lease = await acquireExecutionLease();
+  if (!lease) {
+    log('cycle_skipped_overlap', {
+      lease: 'spot-cycle',
+      reason: 'another spot process holds the execution lease; no exchange action attempted'
+    });
+  } else {
+    await runCycle();
+    log('cycle_end', {});
+  }
 } catch (e) {
   log('error_cycle', { error: e.message, stack: e.stack });
   process.exitCode = 1;
+} finally {
+  if (lease) {
+    await releaseExecutionLease(lease).catch((error) => {
+      log('warning_execution_lease_release_failed', {
+        lease: lease.name, error: error.message,
+        action: 'lease expires automatically; a later cycle may be delayed but cannot overlap this one'
+      });
+    });
+  }
 }

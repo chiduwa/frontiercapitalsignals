@@ -30,6 +30,16 @@ jobs:
         with:
           node-version: "24"
 
+      # Fail before touching remote schema or code if the public Worker, the
+      # private journal route, or the lagged retrospective statistics regress.
+      - name: Test Worker and analytical additions
+        working-directory: signals-worker
+        run: |
+          node test-worker.mjs
+          node test-trade-journal.mjs
+          node test-retrospective.mjs
+          node --test ../account-journal/test/*.test.mjs
+
       # Schema migrations are applied before code that reads the new table is
       # deployed. Re-running is safe: Wrangler records applied migrations.
       - name: Apply D1 migrations
@@ -53,6 +63,23 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           HUB_ACTIONS_TOKEN: ${{ secrets.HUB_ACTIONS_TOKEN }}
+
+      # The Worker cron sends a compact summary when the read-only account
+      # journal imports a non-bot/unknown fill. The same private topic is
+      # already used by the analytical workflows; syncing it as a Worker
+      # secret keeps it out of source, KV, and browser responses.
+      - name: Sync private notification topic
+        working-directory: signals-worker
+        run: |
+          if [ -z "$PRIVATE_NTFY_TOPIC" ]; then
+            echo "NTFY_TOPIC is not configured; account-journal pushes remain disabled"
+            exit 0
+          fi
+          printf '%s' "$PRIVATE_NTFY_TOPIC" | npx --yes wrangler@4 secret put NTFY_TOPIC
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PRIVATE_NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
 
       # Exercise the exact GitHub API call used by the Worker. This makes a
       # bad/revoked token visible in this deployment's log instead of leaving

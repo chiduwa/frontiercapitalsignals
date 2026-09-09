@@ -12,7 +12,7 @@
 // Optional env: TREFIS_OVERRIDES
 // Optional (enables reliability weighting when set): FCS_D1_DATABASE_ID
 import { buildPayload, sanitizePayloadForPublication, CACHE_KEY, coingeckoSimplePrice, yahooQuote, getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, hasCrossClassTickerCollision } from '../worker.js';
-import { loadReliability, loadTechniquePriors, loadComboReliability, loadMoveStats, loadRangeReliability, loadCalibration, loadDetailedCalibration, loadDirectionBaselines, loadDailyRangeStats, loadTimeOfDayEdge, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, loadSwingTimeStats, loadRecentEvents, loadIvHistory, loadRegimeReliability, loadSrLevels, loadSrBreakStats, loadQualityData, loadRotationStatus, loadCallFlipData, loadLongTermBottomStatus, loadRetrospective, loadQuantResearch, loadExcursionEvidence, EXCURSION_MIN_SAMPLES, logRun, evaluateMatured, evaluateTimeOfDay, snapshotAssetScores, detectAndLogCallFlips, evaluateCallFlips } from './reliability.mjs';
+import { loadReliability, loadTechniquePriors, loadComboReliability, loadMoveStats, loadRangeReliability, loadCalibration, loadDetailedCalibration, loadDirectionBaselines, loadDailyRangeStats, loadTimeOfDayEdge, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, loadSwingTimeStats, loadRecentEvents, loadIvHistory, loadRegimeReliability, loadSrLevels, loadSrBreakStats, loadQualityData, loadRotationStatus, loadCallFlipData, loadLongTermBottomStatus, loadRetrospective, loadQuantResearch, loadExcursionEvidence, EXCURSION_MIN_SAMPLES, buildPublicationSnapshots, logRun, evaluateMatured, evaluateTimeOfDay, snapshotAssetScores, detectAndLogCallFlips, evaluateCallFlips } from './reliability.mjs';
 import { checkAndNotifyReversals, checkAndNotifySuddenMoves, checkAndNotifyConsolidations, checkAndNotifyConfidentMoves } from './notify.mjs';
 import { upsertMarketSentiment, loadRecentBars, loadTvlSeries, loadMarketReturn, loadYieldSpreadChange } from './archive.mjs';
 import { selectIntradayWatchlist } from './intraday.mjs';
@@ -266,6 +266,12 @@ if (FCS_D1_DATABASE_ID) {
 // written to KV is the public contract. Sanitize that exact object so a future
 // auxiliary section cannot accidentally bypass the evidence requirements.
 const publicPayload = sanitizePayloadForPublication(payload);
+// Freeze the exact post-sanitizer boards and the exact scored universe. The
+// retrospective must never infer what was published from lossy composite
+// votes after the fact.
+log.publicationSnapshots = buildPublicationSnapshots(
+  publicPayload, log.prices || [], payload.generated_at
+);
 
 const url = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${FCS_KV_NAMESPACE_ID}/values/${encodeURIComponent(CACHE_KEY)}`;
 const res = await fetch(url, {

@@ -9,12 +9,12 @@
 //
 // Run: node test-worker.mjs
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { computeSwingTimeTallies, barsRowsToReturnsBySymbol, matchProtocolsToUniverse, findPivots, walkSrLevels, isYahooCryptoDataTrustworthy, fundingSnapshotToRows } from './scripts/archive.mjs';
 import { selectIntradayWatchlist, CRYPTO_WATCHLIST_SIZE, firstTickAtOrAfter } from './scripts/intraday.mjs';
 import { parseBinanceKlines } from './scripts/archive.mjs';
-import { EXCURSION_MIN_SAMPLES, insertForecastOutcomes, loadReliability, OUTCOME_LABEL_VERSION, OUTCOME_MODEL_VERSION, pathExcursionStats, selectMaturityPrice, selectNonOverlappingForecasts, summarizeExcursionEvidence } from './scripts/reliability.mjs';
+import { EXCURSION_MIN_SAMPLES, buildPublicationSnapshots, insertForecastOutcomes, loadReliability, OUTCOME_LABEL_VERSION, OUTCOME_MODEL_VERSION, pathExcursionStats, selectMaturityPrice, selectNonOverlappingForecasts, summarizeExcursionEvidence } from './scripts/reliability.mjs';
 import { forEachConcurrent } from './scripts/d1-client.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -306,7 +306,7 @@ const ctx = { waitUntil: (p) => { if (p && p.then) p.catch(() => {}); } };
 
 const src = readFileSync(join(__dirname, 'worker.js'), 'utf8');
 const deployedSrc = readFileSync(join(__dirname, 'src', 'worker.js'), 'utf8');
-const mod = await import('data:text/javascript,' + encodeURIComponent(src));
+const mod = await import(`${pathToFileURL(join(__dirname, 'worker.js')).href}?test=${Date.now()}`);
 
 console.log('\n== cross-class ticker collision quarantine ==');
 check('known DASH/DoorDash collision is detected', mod.hasCrossClassTickerCollision('dash') === true);
@@ -3176,6 +3176,11 @@ check('the move is reported as detectable in advance', retroDescribed && retroDe
 check('the tell lands at or before the peak', retroDescribed && new Date(retroDescribed.detectableAt) <= new Date(retroDescribed.peakAt));
 check('a meaningful gain was still available from the tell', retroDescribed && retroDescribed.gainToPeakPct > 5, JSON.stringify(retroDescribed && retroDescribed.gainToPeakPct));
 check('a flat, uneventful series produces no episode at all', mod.describeMissedMove(retroQuiet) === null);
+check('retrospective episode search is bounded to the exact outcome window',
+  mod.describeMissedMove(retroBars, {
+    windowStartAt: '2026-08-21T00:00:00.000Z',
+    windowEndAt: '2026-08-21T23:00:00.000Z'
+  }) === null);
 
 // The PROM case: a -16% day whose bull trap the upside-only search would
 // otherwise have reported as a confident long entry.
@@ -3185,10 +3190,31 @@ check('a downside move is NOT reported as a detectable long', retroDownside && r
 check('out-of-universe is classified', mod.classifyMiss({ inUniverse: false, passedFloors: true, onBoard: false, moveDir: 1 }) === 'out-of-universe');
 check('filtered-out is distinguished from never-fetched', mod.classifyMiss({ inUniverse: false, passedFloors: false, onBoard: false, moveDir: 1 }) === 'filtered-out');
 check('scored-but-unranked is classified', mod.classifyMiss({ inUniverse: true, passedFloors: true, onBoard: false, moveDir: 1 }) === 'unranked');
+check('an evidence-gated surfaced row is classified withheld', mod.classifyMiss({ inUniverse: true, withheld: true, onBoard: false, moveDir: 1 }) === 'withheld');
+check('simultaneous opposite publications are classified conflicted', mod.classifyMiss({ inUniverse: true, boardDirections: [-1, 1], onBoard: true, moveDir: 1 }) === 'conflicted');
 check('a backwards call is classified wrong-side', mod.classifyMiss({ inUniverse: true, passedFloors: true, onBoard: true, boardSide: -1, moveDir: 1 }) === 'wrong-side');
 check('a correct, timely call is classified caught', mod.classifyMiss({ inUniverse: true, passedFloors: true, onBoard: true, boardSide: 1, moveDir: 1, scoredAt: '2026-08-30T10:00:00Z', detectableAt: '2026-08-30T14:00:00Z' }) === 'caught');
 check('a call made only after the tell is classified late', mod.classifyMiss({ inUniverse: true, passedFloors: true, onBoard: true, boardSide: 1, moveDir: 1, scoredAt: '2026-08-31T20:00:00Z', detectableAt: '2026-08-30T14:00:00Z' }) === 'late');
 check('every cause emitted is in the declared vocabulary', mod.MISS_CAUSES.includes(mod.classifyMiss({ inUniverse: true, passedFloors: true, onBoard: false, moveDir: 1 })));
+
+const publicationSnapshots = buildPublicationSnapshots({
+  generated_at: '2026-09-08T11:00:00.000Z',
+  crypto: {
+    breakout: [{ symbol: 'BTC', dir: 1, score: 91 }],
+    breakdown: [],
+    favorites: [{ symbol: 'PEPE', dir: 0, score: 82, abstained: { reason: 'unproven-current-setup' } }],
+    longTermPotential: []
+  },
+  stocks: { breakout: [], breakdown: [], favorites: [], longTermPotential: [] }
+}, [
+  { asset_class: 'crypto', symbol: 'PEPE', price: 1 },
+  { asset_class: 'crypto', symbol: 'BTC', price: 2 },
+  { asset_class: 'stock', symbol: 'NVDA', price: 3 }
+], '2026-09-08T11:00:00.000Z');
+check('publication snapshots freeze the complete scored universe',
+  JSON.stringify(publicationSnapshots[0].universe) === JSON.stringify(['BTC', 'PEPE']));
+check('publication snapshots preserve post-gate abstention exactly',
+  publicationSnapshots[0].boards.some((row) => row.symbol === 'PEPE' && row.dir === 0 && row.abstainedReason === 'unproven-current-setup'));
 
 // ---- forward surge scanning (2026-09-01) -----------------------------------
 // The measured finding these encode: mean forward return falls

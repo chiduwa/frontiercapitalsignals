@@ -263,6 +263,98 @@ Without that point-in-time entity/exposure data, the model should say what it is
 watching and what would confirm it. It should not advise that an industry is
 “next” merely because current chatter resembles a successful historical story.
 
+## Miss-correlation extension (added 2026-09-08)
+
+The daily retrospective now gives each pinned crypto a lagged, asset-relative
+unusual-move threshold. It uses up to one year of daily bars ending before the
+rolling 24-hour outcome window, requires at least 60 returns, and combines the
+80th percentile absolute return, median high-low range, and realized
+volatility. It may lower the broad 12% review threshold, never raise it or
+relax the threshold for the rest of the universe. Thin history keeps the broad
+threshold and records `insufficient`; it does not borrow a value from another
+asset.
+
+For every selected miss, the job freezes the most recent technique votes that
+existed before the outcome window. Miss attribution itself now uses the exact
+post-sanitizer board and universe snapshot that was published before that
+window; it no longer reconstructs a side-specific board from the lossy
+composite log. If that snapshot is absent, attribution waits. It records
+alignment by asset, technique, market regime, weekday, and six-hour UTC bucket,
+deduplicates workflow retries to one independent date, requires 20 independent
+dates, checks that the sign agrees in both chronological halves, and applies a
+Bonferroni family correction.
+These are outcome-conditioned observations—only unusual moves and misses enter
+the sample—so even a statistically notable cell is labelled
+`notable-retrospective-only` with `live_edge_eligible = 0`. Automatic production
+weights continue to come from the prospective outcome ledger, which includes
+failures and non-events. This prevents a compelling explanation of yesterday's
+move from becoming an overfit order tomorrow.
+
+## Seasonal lead/lag evidence extension (added 2026-09-08)
+
+The retrospective now also maintains a separate all-outcome daily archive.
+Unlike the miss-correlation table above, this records every liquid crypto in
+the engine universe on quiet days as well as large-move days. Each 24-hour
+CoinGecko outcome is joined only to complete engine cross-sections timestamped
+strictly before the outcome-window start at four pre-registered separations:
+0, 6, 24, and 72 hours. A delayed build older than four hours is rejected; the
+job does not substitute current state or an arbitrarily stale vote.
+
+The predictor frame covers:
+
+- individual technique direction, carrying the engine's existing documented
+  (judgment-based) leading versus confirming/lagging label while the separate
+  lag results provide the empirical check;
+- six pre-registered, economically coherent same-asset technique pairs, only
+  when both techniques agreed at the frozen timestamp;
+- composite calls from the pinned cross-asset leaders, plus whole-universe
+  composite breadth as an asset-combination feature;
+- market-cycle metrics only as causal percentiles with at least 60 earlier
+  observations, and only when both provider time and first-known time precede
+  the predictor anchor; stale values beyond the metric's 48- or 72-hour
+  freshness limit are omitted.
+
+Every candidate is evaluated globally and within calendar quarter, weekday,
+the target's regime frozen separately at each predictor lag, and quarter x
+regime. Calendar month was removed because a two-year window cannot reach even
+the first 64-date checkpoint per month; the daily job's fixed 04:20 UTC schedule
+also makes a six-hour run-session cell unidentifiable. These are separate cells
+so a broad relationship is not silently relabelled as a seasonal one. The
+family is frozen to the seven pinned assets, four lag horizons, 32 named
+techniques plus composite, six declared technique pairs, pinned cross-assets,
+breadth, and four versioned market-context feeds. Every possible calendar and
+regime cell is charged in a fixed 30,800-test correction even when some data is
+missing. The job uses a Newey-West/HAC correlation statistic,
+at least 40 discovery dates plus 20 chronological holdout dates, an anchored
+walk-forward stability test, Bonferroni correction, and geometric alpha
+spending at doubling checkpoints (64, 128, 256, ... observations). This avoids
+turning a daily repeated search into uncounted chances to find noise.
+
+A passing historical cell is only `provisional-research-only`, with its fit
+date frozen. It needs at least 20 genuinely later observations with the same
+direction and an independently significant HAC statistic to become
+`replicated-research-only`; a significant reversal becomes
+`decayed-research-only`. Out-of-sample verdicts are also made only at doubling
+checkpoints, with geometric alpha spending and a Bonferroni bar across all
+provisional candidates; the module does not repeatedly peek every day until a
+borderline result happens to pass. The database enforces
+`live_edge_eligible = 0` for
+every status. This retrospective does not estimate costs, slippage, funding,
+or executable entries, so it cannot safely change a production weight by
+itself. Promotion still requires the project's separate prospective,
+after-cost strategy lifecycle and a versioned challenger-vs-champion review.
+
+Detailed mining remains fixed to the pinned assets. Today's movers and symbols
+already in the miss ledger are not added after their outcomes are seen. Compact
+daily frames retain the wider pre-window universe, and outcome eligibility is
+frozen from that predictor frame; endpoint rank, liquidity, or peg status can
+describe the result but cannot delete a loser from the sample.
+
+This lane studies daily-to-multi-day lead/lag. It does not claim evidence about
+15-minute scalps from one rolling daily observation; those horizons require the
+separate intraday and microstructure ledgers. If a seasonal cell, combination,
+or lag lacks variation or sample depth, its correct output is `insufficient`.
+
 ## Rollout and monitoring
 
 1. Apply migrations `0009` through `0014` before running the new builders.
