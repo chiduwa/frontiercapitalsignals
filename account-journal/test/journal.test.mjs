@@ -14,7 +14,8 @@ import {
   reclassifyJournalFills, reclassifyStoredFill
 } from '../src/store.mjs';
 import {
-  fetchFuturesAlgoOrders, mergeFuturesOrderProvenance, scanFuturesOrderWindow
+  fetchFuturesAlgoOrders, futuresRetentionStart, mergeFuturesOrderProvenance,
+  scanFuturesOrderWindow
 } from '../src/index.mjs';
 
 const baseEnv = {
@@ -396,6 +397,19 @@ test('time windows cover the interval once and respect the API width', () => {
   assert.deepEqual(timeWindows(0, 10, 4), [
     { start: 0, end: 3 }, { start: 4, end: 7 }, { start: 8, end: 10 }
   ]);
+});
+
+test('futures history requests remain inside Binance rolling retention at send time', () => {
+  const day = 86_400_000;
+  const requestNow = Date.parse('2026-09-09T12:00:00Z');
+  assert.equal(
+    futuresRetentionStart(requestNow - 90 * day, requestNow),
+    requestNow - 90 * day + 60_000
+  );
+  assert.equal(
+    futuresRetentionStart(requestNow - 7 * day, requestNow),
+    requestNow - 7 * day
+  );
 });
 
 test('saturated account-wide futures order windows are narrowed until complete', async () => {

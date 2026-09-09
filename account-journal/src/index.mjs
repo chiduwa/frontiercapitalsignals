@@ -13,6 +13,19 @@ import {
 } from './store.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const DAY_MS = 86_400_000;
+const FUTURES_RETENTION_MS = 90 * DAY_MS;
+const FUTURES_RETENTION_GUARD_MS = 60_000;
+
+// A request built at exactly now-90d is already outside Binance's rolling
+// window by the time it arrives. Re-clamp at each request, not just once at
+// run start, because a full first import spans many symbols.
+export function futuresRetentionStart(requestedStartMs, requestNowMs = Date.now()) {
+  return Math.max(
+    requestedStartMs,
+    requestNowMs - FUTURES_RETENTION_MS + FUTURES_RETENTION_GUARD_MS
+  );
+}
 
 function maxTradeId(rows) {
   if (!rows.length) return null;
@@ -92,7 +105,7 @@ export function mergeFuturesOrderProvenance(orders, algoExecutionOrders) {
 
 async function fetchFuturesOrders(config, client, nowMs, nowIso) {
   const checkpoint = await getCheckpoint(config, 'futures', '*', 'orders');
-  const officialFloor = nowMs - 90 * 86_400_000;
+  const officialFloor = futuresRetentionStart(0, nowMs);
   const start = checkpoint?.cursorTimeMs != null
     ? Math.max(officialFloor, checkpoint.cursorTimeMs - config.timeOverlapMs)
     : Math.max(officialFloor, config.backfillStartMs);
@@ -102,7 +115,9 @@ async function fetchFuturesOrders(config, client, nowMs, nowIso) {
   for (const window of timeWindows(start, nowMs, WINDOWS.futures)) {
     const result = await scanFuturesOrderWindow(
       (windowStart, windowEnd) => client.signedGet('/fapi/v1/allOrders', {
-        startTime: windowStart, endTime: windowEnd, limit: config.orderPageLimit
+        startTime: futuresRetentionStart(windowStart),
+        endTime: windowEnd,
+        limit: config.orderPageLimit
       }),
       window.start, window.end, budget, config.orderPageLimit
     );
@@ -125,7 +140,7 @@ async function fetchFuturesOrders(config, client, nowMs, nowIso) {
 
 export async function fetchFuturesAlgoOrders(config, client, symbol, nowMs, nowIso) {
   const checkpoint = await getCheckpoint(config, 'futures', symbol, 'orders');
-  const officialFloor = nowMs - 90 * 86_400_000;
+  const officialFloor = futuresRetentionStart(0, nowMs);
   const start = checkpoint?.cursorTimeMs != null
     ? Math.max(officialFloor, checkpoint.cursorTimeMs - config.timeOverlapMs)
     : Math.max(officialFloor, config.backfillStartMs);
@@ -135,7 +150,10 @@ export async function fetchFuturesAlgoOrders(config, client, symbol, nowMs, nowI
   for (const window of timeWindows(start, nowMs, WINDOWS.futures)) {
     const result = await scanFuturesOrderWindow(
       (windowStart, windowEnd) => client.signedGet('/fapi/v1/allAlgoOrders', {
-        symbol, startTime: windowStart, endTime: windowEnd, limit: config.orderPageLimit
+        symbol,
+        startTime: futuresRetentionStart(windowStart),
+        endTime: windowEnd,
+        limit: config.orderPageLimit
       }),
       window.start, window.end, budget, config.orderPageLimit
     );
@@ -223,7 +241,7 @@ async function fetchFuturesTrades(config, client, symbol, nowMs, nowIso, discove
       await sleep(125);
     }
   } else {
-    const officialFloor = nowMs - 90 * 86_400_000;
+    const officialFloor = futuresRetentionStart(0, nowMs);
     const start = checkpoint?.cursorTimeMs != null
       ? Math.max(officialFloor, checkpoint.cursorTimeMs - config.timeOverlapMs)
       : Math.max(officialFloor, config.backfillStartMs);
@@ -231,7 +249,10 @@ async function fetchFuturesTrades(config, client, symbol, nowMs, nowIso, discove
     for (const window of timeWindows(start, nowMs, WINDOWS.futures)) {
       if (pages >= config.maxPagesPerSymbol) break;
       const page = await client.signedGet('/fapi/v1/userTrades', {
-        symbol, startTime: window.start, endTime: window.end, limit: config.tradePageLimit
+        symbol,
+        startTime: futuresRetentionStart(window.start),
+        endTime: window.end,
+        limit: config.tradePageLimit
       });
       rawRows.push(...page); pages++;
       if (page.length === config.tradePageLimit) {
