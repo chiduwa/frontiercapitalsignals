@@ -1,4 +1,7 @@
 import { createHmac } from 'node:crypto';
+import { parseBinanceJson } from '../../shared/binance-json.mjs';
+
+export { parseBinanceJson };
 
 function requestParams(params) {
   const out = new URLSearchParams();
@@ -29,7 +32,9 @@ export function createBinanceClient({ key, secret, base, requestTimeoutMs = 20_0
     } finally {
       clearTimeout(timer);
     }
-    const body = await response.json().catch(() => null);
+    const body = await response.text()
+      .then((text) => parseBinanceJson(text))
+      .catch(() => null);
     if (!response.ok) {
       const error = new Error(`Binance GET ${path} failed: HTTP ${response.status} ${JSON.stringify(body)}`);
       error.httpStatus = response.status;

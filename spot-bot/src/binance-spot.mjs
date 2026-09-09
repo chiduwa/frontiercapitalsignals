@@ -7,6 +7,7 @@
 // host, separate key, separate permissions.
 import { createHash, createHmac } from 'node:crypto';
 import { config } from './config.mjs';
+import { parseBinanceJson } from '../../shared/binance-json.mjs';
 
 let exchangeInfoCache = null;
 const BINANCE_REQUEST_TIMEOUT_MS = 20000;
@@ -25,7 +26,7 @@ async function signedRequest(method, path, params = {}) {
   } finally {
     clearTimeout(timeout);
   }
-  const body = await res.json().catch(() => null);
+  const body = await res.text().then(parseBinanceJson).catch(() => null);
   if (!res.ok) {
     const error = new Error(`Binance spot ${method} ${path} failed: HTTP ${res.status} ${JSON.stringify(body)}`);
     error.httpStatus = res.status;
@@ -54,7 +55,7 @@ async function publicRequest(path, params = {}) {
   } finally {
     clearTimeout(timeout);
   }
-  const body = await res.json().catch(() => null);
+  const body = await res.text().then(parseBinanceJson).catch(() => null);
   if (!res.ok) throw new Error(`Binance spot GET ${path} failed: HTTP ${res.status} ${JSON.stringify(body)}`);
   return body;
 }

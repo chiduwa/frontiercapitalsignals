@@ -6,7 +6,7 @@ import { classifyOrder } from '../src/classify.mjs';
 import { loadConfig } from '../src/config.mjs';
 import {
   createBinanceClient, incrementIdentifier, normalizeAlgoExecutionOrder,
-  normalizeAlgoState, normalizeOrder, normalizeTrade, timeWindows
+  normalizeAlgoState, normalizeOrder, normalizeTrade, parseBinanceJson, timeWindows
 } from '../src/binance.mjs';
 import {
   attachProvenance, loadAlgoExecutionOrders, loadPendingAlgoStates,
@@ -363,6 +363,35 @@ test('identifier increment is exact beyond Number safe integer range', () => {
   assert.throws(() => incrementIdentifier('not-an-id'), /invalid Binance identifier/);
 });
 
+test('Binance JSON parsing preserves numeric identifier lexemes beyond Number range', () => {
+  const [row] = parseBinanceJson(`[{"symbol":"PEPEUSDT","id":9007199254740993123,
+    "orderId":1806822347416039490,"algoId":1806822347416039491,
+    "actualOrderId":1806822347416039492,"orderListId":1806822347416039493,
+    "clientOrderId":"fcsf-entry-exact","time":1788825600000,
+    "price":0.00001234,"safeInteger":9007199254740991,
+    "unsafeInteger":9007199254740992,"isBuyer":true}]`);
+  assert.equal(row.id, '9007199254740993123');
+  assert.equal(row.orderId, '1806822347416039490');
+  assert.equal(row.algoId, '1806822347416039491');
+  assert.equal(row.actualOrderId, '1806822347416039492');
+  assert.equal(row.orderListId, '1806822347416039493');
+  assert.equal(row.clientOrderId, 'fcsf-entry-exact');
+  assert.equal(row.time, 1788825600000);
+  assert.equal(row.price, 0.00001234);
+  assert.equal(row.safeInteger, 9007199254740991);
+  assert.equal(row.unsafeInteger, '9007199254740992');
+  assert.equal(row.isBuyer, true);
+});
+
+test('adjacent 19-digit Binance order IDs remain distinct after response parsing', () => {
+  const rows = parseBinanceJson('[{"orderId":8389766206455564000},{"orderId":8389766206455564001}]');
+  assert.deepEqual(rows.map((row) => row.orderId), [
+    '8389766206455564000',
+    '8389766206455564001'
+  ]);
+  assert.equal(new Set(rows.map((row) => row.orderId)).size, 2);
+});
+
 test('time windows cover the interval once and respect the API width', () => {
   assert.deepEqual(timeWindows(0, 10, 4), [
     { start: 0, end: 3 }, { start: 4, end: 7 }, { start: 8, end: 10 }
@@ -399,11 +428,27 @@ test('signed client sends a signature and never puts the API secret in the URL',
     key: 'key', secret: 'do-not-leak', base: 'https://example.test',
     fetchImpl: async (url, options) => {
       seen = { url: String(url), options };
-      return { ok: true, status: 200, json: async () => [] };
+      return { ok: true, status: 200, text: async () => '[]' };
     }
   });
   await client.signedGet('/api/v3/myTrades', { symbol: 'BTCUSDT' });
   assert.match(seen.url, /signature=[0-9a-f]{64}/);
   assert.doesNotMatch(seen.url, /do-not-leak/);
   assert.equal(seen.options.headers['X-MBX-APIKEY'], 'key');
+});
+
+test('signed client returns exact futures and spot IDs from raw response JSON', async () => {
+  const client = createBinanceClient({
+    key: 'key', secret: 'secret', base: 'https://example.test',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      text: async () => '[{"id":1806822347416039494,"orderId":1806822347416039495}]'
+    })
+  });
+  const [row] = await client.signedGet('/fapi/v1/userTrades', { symbol: 'PEPEUSDT' });
+  assert.deepEqual(row, {
+    id: '1806822347416039494',
+    orderId: '1806822347416039495'
+  });
 });
