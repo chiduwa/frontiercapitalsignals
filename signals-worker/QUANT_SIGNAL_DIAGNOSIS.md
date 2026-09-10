@@ -355,9 +355,55 @@ This lane studies daily-to-multi-day lead/lag. It does not claim evidence about
 separate intraday and microstructure ledgers. If a seasonal cell, combination,
 or lag lacks variation or sample depth, its correct output is `insufficient`.
 
+## Crash-onset and long-recovery research (added 2026-09-09)
+
+The ZEC and CVNA examples exposed a separate selection problem in the older
+`detectBottomThenMoonshot` study: it selected the eventual trough using future
+prices, discarded a candidate when a later lower low appeared, treated recent
+incomplete histories as controls, and searched only the currently archived
+survivors. Those rows can describe famous winners after the fact, but they
+cannot estimate what was knowable when a trade could have been opened.
+
+`scripts/crash-recovery-research.mjs` is the bounded replacement cohort. It
+anchors an observation when a close first crosses a predeclared drawdown from a
+strictly trailing peak, freezes only features available at that close, and uses
+the next daily close as its reference entry. Crypto and stocks have separate
+one- and two-year clocks (365/730 continuous daily bars versus 252/504 observed
+equity sessions). Each complete path records prior-peak recovery and the first
+2x/5x/10x/20x crossings, terminal return, favorable/adverse excursion, and its
+eventual low. The eventual low is explicitly an outcome diagnostic; it is never
+fed back as a contemporaneous feature or represented as an executable fill.
+
+Recent paths remain `pending` until their entire declared horizon exists. A
+resource cap cannot relabel missing publication history or advance a scan past
+unread bars. The first successfully scanned archive boundary is frozen:
+historical rows are `bootstrap`, and only later observations are prospective.
+The job also joins the exact pre-signal publication snapshot, distinguishing a
+published long from a published short, withheld/conflicted rows, and assets the
+engine did not surface.
+
+Association summaries intentionally report raw counts, rates, unique symbols,
+and time cohorts without an IID confidence interval. Same-asset paths,
+one-/two-year horizons, and market-wide crashes are dependent, so a binomial
+interval would manufacture precision. Any candidate pattern still needs a
+predeclared, block/cluster-aware prospective test, execution costs, and the
+existing registry's walk-forward/holdout promotion gates.
+
+This module is narrowly a **crash-threshold-entry/recovery study**. It does not
+yet identify the final bottom, establish why an asset crashed, prove that news
+caused a reversal, or measure an executable intraday strategy. Its source is a
+bounded slice of `asset_daily_bars`, not a point-in-time dead/delisted universe;
+CVNA is not currently in that archive and is not silently added after its known
+outcome. A later deep-drawdown reversal-confirmation cohort and a properly
+timestamped fundamentals/news event study must be declared before looking at
+prospective results. Every table is hard-locked `live_edge_eligible = 0`, and
+the weekly workflow has no code path to model weights, signals, alerts, or
+orders.
+
 ## Rollout and monitoring
 
-1. Apply migrations `0009` through `0014` before running the new builders.
+1. Apply every unapplied migration through `0029` before running the matching
+   builders; the deployment and research workflows do this idempotently.
 2. Deploy the Worker and builder together so the API and dashboard share the
    `confluence-v7` contract.
 3. Expect a cold-start abstention period while corrected 24-hour and seven-day
@@ -373,6 +419,7 @@ or lag lacks variation or sample depth, its correct output is `insufficient`.
    evidence contradicts it; preserve every model/feature version and decision in
    the audit trail.
 
-No production deployment is performed by this audit. The migrations reset
-invalid derived evidence, so rollout order and the expected abstention window
-should be reviewed before release.
+Deployment status is recorded by the repository commit and GitHub workflow
+runs rather than asserted in this design note. Migration `0009` reset invalid
+derived evidence; later migrations are additive, and the expected abstention
+window remains part of the release contract.

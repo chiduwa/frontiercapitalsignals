@@ -13,7 +13,7 @@ WorkingDirectory=/opt/fcs/account-journal
 # sends GET requests only; no order endpoint exists in its code.
 EnvironmentFile=/etc/fcs-trading-bot.env
 EnvironmentFile=/etc/fcs-spot-bot.env
-ExecStart=/usr/bin/node src/index.mjs
+ExecStart=/usr/bin/flock --exclusive --wait 890 /run/lock/fcs-account-journal-runtime.lock /usr/bin/node src/index.mjs
 TimeoutStartSec=900
 
 NoNewPrivileges=yes

@@ -63,6 +63,7 @@ export function isoFromMs(value) {
 }
 
 function finiteNumber(value, { positive = false, nonnegative = false } = {}) {
+  if (value == null || (typeof value === 'string' && value.trim() === '')) return null;
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
   if (positive && !(n > 0)) return null;
@@ -167,6 +168,35 @@ export function normalizeTrade(market, row, ingestedAt) {
     isMaker: typeof row.maker === 'boolean' ? row.maker
       : typeof row.isMaker === 'boolean' ? row.isMaker : null,
     ingestedAt
+  };
+}
+
+// A read-only snapshot of an actually open USDⓈ-M position. Provenance is
+// attached separately from durable bot state; this normalizer records only
+// exchange facts and never assumes that an unmatched position is manual.
+export function normalizeFuturesPosition(row, observedAt) {
+  const symbol = String(row?.symbol || '').toUpperCase();
+  const positionAmt = finiteNumber(row?.positionAmt);
+  const positionSide = ['BOTH', 'LONG', 'SHORT'].includes(row?.positionSide)
+    ? row.positionSide : null;
+  if (!symbol || positionAmt == null || positionAmt === 0 || !positionSide
+      || !isoFromMs(Date.parse(observedAt))) {
+    return null;
+  }
+  const side = positionAmt > 0 ? 'BUY' : 'SELL';
+  return {
+    symbol, positionSide, side, positionAmt,
+    quantity: Math.abs(positionAmt),
+    entryPrice: finiteNumber(row.entryPrice, { positive: true }),
+    breakEvenPrice: finiteNumber(row.breakEvenPrice, { positive: true }),
+    markPrice: finiteNumber(row.markPrice, { positive: true }),
+    unrealizedPnl: finiteNumber(row.unRealizedProfit ?? row.unrealizedProfit),
+    liquidationPrice: finiteNumber(row.liquidationPrice, { positive: true }),
+    leverage: finiteNumber(row.leverage, { positive: true }),
+    marginType: row.marginType == null ? null : String(row.marginType),
+    isolatedMargin: finiteNumber(row.isolatedMargin, { nonnegative: true }),
+    notional: finiteNumber(row.notional),
+    observedAt
   };
 }
 

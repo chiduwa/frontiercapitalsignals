@@ -3,13 +3,14 @@ import { pathToFileURL } from 'node:url';
 import { loadConfig, WINDOWS } from './config.mjs';
 import {
   createBinanceClient, incrementIdentifier, normalizeAlgoState,
-  normalizeOrder, normalizeTrade, timeWindows
+  normalizeFuturesPosition, normalizeOrder, normalizeTrade, timeWindows
 } from './binance.mjs';
 import {
   attachProvenance, beginRun, finishRun, getCheckpoint, journalSummary,
   knownSymbols, loadAlgoExecutionOrders, loadClassificationEvidence,
   loadPendingAlgoStates, markAlgoPolled, persistAlgoStates,
-  persistJournalPage, persistOrders, reclassifyJournalFills, refreshAnalytics
+  persistCurrentFuturesPositions, persistJournalPage, persistOrders,
+  reclassifyJournalFills, refreshAnalytics
 } from './store.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -365,9 +366,9 @@ export async function runJournal(environment = process.env, nowMs = Date.now()) 
       let orders = [];
       try { orders = await fetchFuturesOrders(config, client, nowMs, nowIso); }
       catch (error) { result.errors.push(`futures order discovery: ${error.message}`); }
-      const active = await client.signedGet('/fapi/v3/positionRisk').catch((error) => {
-        result.errors.push(`futures position discovery: ${error.message}`); return [];
-      });
+      let active = null;
+      try { active = await client.signedGet('/fapi/v3/positionRisk'); }
+      catch (error) { result.errors.push(`futures position discovery: ${error.message}`); }
       const exchange = await client.publicGet('/fapi/v1/exchangeInfo').catch((error) => {
         result.errors.push(`futures exchange-info discovery: ${error.message}`); return null;
       });
@@ -378,7 +379,7 @@ export async function runJournal(environment = process.env, nowMs = Date.now()) 
         ...config.futures.configuredSymbols,
         ...await knownSymbols(config, 'futures'),
         ...orders.map((order) => order.symbol),
-        ...active.filter((row) => Math.abs(Number(row.positionAmt)) > 0).map((row) => row.symbol)
+        ...(active || []).filter((row) => Math.abs(Number(row.positionAmt)) > 0).map((row) => row.symbol)
       ])].filter((symbol) => !tradable || tradable.has(symbol)).sort();
       result.symbolsRequested += symbols.length;
       for (const symbol of symbols) {
@@ -394,6 +395,19 @@ export async function runJournal(environment = process.env, nowMs = Date.now()) 
           const counts = await fetchFuturesTrades(config, client, symbol, nowMs, nowIso, symbolOrders);
           result.fillsSeen += counts.fills; result.pagesRead += counts.pages;
         } catch (error) { result.errors.push(`futures ${symbol}: ${error.message}`); }
+      }
+      if (active) {
+        try {
+          const current = active.map((row) => normalizeFuturesPosition(row, nowIso)).filter(Boolean);
+          const classified = await persistCurrentFuturesPositions(config, current, nowIso);
+          log('journal_current_positions', {
+            count: classified.length,
+            bot: classified.filter((position) => position.origin === 'bot').length,
+            externalUnknown: classified.filter((position) => position.origin !== 'bot').length
+          });
+        } catch (error) {
+          result.errors.push(`futures current-position snapshot: ${error.message}`);
+        }
       }
     }
 

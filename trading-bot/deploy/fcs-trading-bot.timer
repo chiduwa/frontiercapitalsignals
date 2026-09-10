@@ -9,7 +9,7 @@ Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/tradin
 # GitHub Actions could not deliver it (measured: zero firings of the same
 # request), which is why execution moved to this host.
 OnCalendar=*:0/5
-AccuracySec=15s
+AccuracySec=1s
 # Do NOT catch up on missed firings. A backlog of cycles fired back-to-back
 # after downtime would each read the same stale signals payload and re-decide
 # on it; the next scheduled cycle is the correct behaviour instead.

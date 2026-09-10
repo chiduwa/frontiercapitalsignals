@@ -8,7 +8,7 @@
 // to verify it still produces a sane payload.
 //
 // Run: node test-worker.mjs
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { computeSwingTimeTallies, barsRowsToReturnsBySymbol, matchProtocolsToUniverse, findPivots, walkSrLevels, isYahooCryptoDataTrustworthy, fundingSnapshotToRows } from './scripts/archive.mjs';
@@ -21,12 +21,22 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const reliabilitySource = readFileSync(join(__dirname, 'scripts', 'reliability.mjs'), 'utf8');
 const independentOutcomeMigration = readFileSync(join(__dirname, 'migrations', '0009_independent_retry_safe_outcomes.sql'), 'utf8');
 const outcomeProvenanceMigration = readFileSync(join(__dirname, 'migrations', '0013_outcome_provenance_and_versions.sql'), 'utf8');
+const currentSchemaBaseline = readFileSync(join(__dirname, 'scripts', 'current-schema-baseline.sql'), 'utf8');
 
 let failures = 0;
 const check = (name, cond, detail = '') => {
   if (cond) console.log(`  PASS  ${name}`);
   else { failures++; console.error(`  FAIL  ${name} ${detail}`); }
 };
+
+console.log('\n== fresh-D1 snapshot migration baseline ==');
+const migrationNames = readdirSync(join(__dirname, 'migrations'))
+  .filter((name) => name.endsWith('.sql')).sort();
+const baselineNames = [...currentSchemaBaseline.matchAll(/\('([^']+\.sql)'\)/g)]
+  .map((match) => match[1]).sort();
+check('the fresh-snapshot baseline exactly covers every current Wrangler migration',
+  JSON.stringify(baselineNames) === JSON.stringify(migrationNames),
+  `baseline=${baselineNames.length}, migrations=${migrationNames.length}`);
 
 console.log('\n== forEachConcurrent: bounded D1 bulk-write queue ==');
 const processedBatches = [];
@@ -3273,7 +3283,8 @@ console.log('\n== excursion evidence: side-aware entry/exit measurement ==');
 const longExcursion = {
   asset_class: 'crypto', symbol: 'SOL', dir: 1, horizon_hours: 24, n: 40,
   sum_mfe: 6 * 40, sum_mae: -2 * 40, sum_minutes_to_peak: 360 * 40,
-  sum_signed_return: 1 * 40, n_favorable_first: 10
+  sum_signed_return: 1 * 40, n_favorable_first: 10,
+  n_wrong: 12, sum_wrong_mae: -3 * 12
 };
 const [longSummary] = summarizeExcursionEvidence([longExcursion]);
 check('the best available price and its timing are reported as measured', longSummary
@@ -3282,6 +3293,11 @@ check('the peak is placed at its real share of the declared horizon', longSummar
 // The whole point: holding to maturity gave back 5 of the 6 points offered.
 check('give-back is the best price minus what maturity actually returned', longSummary && Math.abs(longSummary.giveBackPct - 5) < 1e-9);
 check('the worst excursion against the call is preserved with its sign', longSummary && Math.abs(longSummary.maePct + 2) < 1e-9);
+check('wrong-call margin of error is conditioned on a qualified losing sample', longSummary
+  && longSummary.wrongN === 12 && Math.abs(longSummary.wrongMaePct + 3) < 1e-9,
+  JSON.stringify(longSummary));
+check('thin wrong-call subsets are withheld rather than presented as reliable',
+  summarizeExcursionEvidence([{ ...longExcursion, n_wrong: 9, sum_wrong_mae: -45 }])[0].wrongMaePct === null);
 check('adverse-first is the complement of favorable-first', longSummary && Math.abs(longSummary.adverseFirstRate - 0.75) < 1e-9);
 check('the adverse-first rate carries a conservative lower bound below it', longSummary
   && longSummary.adverseFirstLower > 0 && longSummary.adverseFirstLower < longSummary.adverseFirstRate,

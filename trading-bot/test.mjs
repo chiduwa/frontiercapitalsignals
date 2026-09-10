@@ -12,23 +12,29 @@ const {
   makeClientOrderId, executedMarketOrder, isActiveAlgoOrder, algoOrderDisposition,
   protectiveOrderMatches, protectionClientOrderId, protectionClientOrderIds,
   MAX_PROTECTION_GENERATIONS, marketClientOrderId, MAX_MARKET_ORDER_GENERATIONS,
-  marketOrderMatches, isExecutionOutcomeUnknown
+  marketOrderMatches, limitOrderMatches, isExecutionOutcomeUnknown,
+  isLegacyAssistedProtectionId, isFuturesBotOrderId, roundLimitToStep,
+  boundedHistoryWindows, marketEligibleForAssetClass
 } = await import('./src/binance.mjs');
 const { acquireExecutionLease, releaseExecutionLease } = await import('../signals-worker/scripts/execution-lease.mjs');
+const { entryIntentMatches } = await import('./src/state.mjs');
 const { ENGINE, authorizeRow, authorizeResearch, classAuthorized, holdingFor, dayRangePosition } = await import('./src/contract.mjs');
 const {
   conservativeEdge, sizePosition, currentExposurePct, wouldExceedExposure,
   wouldExceedResearchExposure, circuitBreakerTripped, dailyLossLimitHit, inCooldown,
   fundingUnfavorable, stopLossPrice, stopLossPriceForResearch, takeProfitPrice,
-  timeExitAfterMs, patienceUnmet
+  timeExitAfterMs, patienceUnmet, entryOffsetPlan, entryLimitPrice,
+  entryOrderTtlMs, entryOrderExpiryMs, signalReferenceIssue
 } = await import('./src/risk.mjs');
 const { evaluateCandidate, decideEntries } = await import('./src/strategy.mjs');
 const { resolveShadowTrade } = await import('./src/paper.mjs');
 const {
   positionOrigin, positionQuantitiesMatch, distanceToLiquidationPct,
-  assessRisk, emergencyStopPrice
+  assessRisk
 } = await import('./src/positions.mjs');
 const { buildCandidates, toBinanceSymbol, dedupeBySymbol } = await import('./src/signals.mjs');
+const { summarizeExactRoundTrip } = await import('./src/outcome.mjs');
+const { assessLimitReachability } = await import('./src/entry-research.mjs');
 
 let failures = 0;
 function check(name, condition, detail) {
@@ -53,7 +59,9 @@ const authorizedRow = () => ({
     range_coverage: 0.7, range_samples: 60, range_effective_samples: 40,
     range_nominal_coverage: 0.68, range_calibrated: true
   },
-  funding: 0, drivers: []
+  funding: 0, drivers: [], chg24h: 2.5,
+  dailyMoves: { medianAbsPct: 3.2, samples: 364 },
+  analysis: { reference_price: 100, analyzed_at: '2026-09-05T11:55:00Z' }
 });
 const provenClass = { crypto: { proven: true, lowerEdge: 0.05, significant: true } };
 
@@ -147,7 +155,7 @@ check('short maps to SELL', authorizeResearch({ ...confirmedResearch, side: 'sho
 
 console.log('\n== contract.mjs: measured path evidence lookup ==');
 const evidence = { minSamples: 30, rows: [
-  { assetClass: 'crypto', symbol: 'SOL', dir: 1, horizonHours: 24, n: 41, mfePct: 6, maePct: -2.4, hoursToPeak: 7, peakShare: 0.29, heldPct: 1.2, giveBackPct: 4.8, adverseFirstRate: 0.7, adverseFirstLower: 0.56 }
+  { assetClass: 'crypto', symbol: 'SOL', dir: 1, horizonHours: 24, n: 41, mfePct: 6, maePct: -2.4, wrongN: 12, wrongMaePct: -6.5, hoursToPeak: 7, peakShare: 0.29, heldPct: 1.2, giveBackPct: 4.8, adverseFirstRate: 0.7, adverseFirstLower: 0.56 }
 ] };
 check('the exact asset/side/horizon record is found', holdingFor(evidence, 'crypto', 'SOL', 1, 24)?.n === 41);
 check('the opposite side is not borrowed', holdingFor(evidence, 'crypto', 'SOL', -1, 24) === null);
@@ -255,6 +263,70 @@ check('when the favorable extreme usually lands first, no patience is demanded',
 check('missing day-range data blocks rather than assumes the heat arrived',
   typeof patienceUnmet({ side: 'BUY', holding, dayRangePos: null }) === 'string');
 
+console.log('\n== risk.mjs: evidence-labelled resting entry offset ==');
+const quietOffset = entryOffsetPlan({
+  signalPrice: 100, edge: ENGINE.minActionableEdge,
+  medianAbsDailyMovePct: 3, dailyMoveSamples: 300, currentMovePct: 2,
+  holding: null
+});
+check('the explicit policy prior supplies a 5% floor when exact-asset movement is quieter',
+  quietOffset.ok && quietOffset.offsetPct === config.entryOffsetMinPct
+    && quietOffset.basis === 'operator policy floor', JSON.stringify(quietOffset));
+const wrongSideOffset = entryOffsetPlan({
+  signalPrice: 100, edge: 0.26,
+  medianAbsDailyMovePct: 3, dailyMoveSamples: 300, currentMovePct: 2,
+  holding: { n: 40, maePct: -2.5, wrongN: 12, wrongMaePct: -6.5 }
+});
+check('a qualified exact-asset wrong-call excursion widens the offset and is labelled',
+  wrongSideOffset.ok && wrongSideOffset.offsetPct > quietOffset.offsetPct
+    && wrongSideOffset.adverseBasis === 'wrong-call mean adverse excursion',
+  JSON.stringify(wrongSideOffset));
+const highConfidenceOffset = entryOffsetPlan({
+  signalPrice: 100, edge: config.edgeFullSize,
+  medianAbsDailyMovePct: 3, dailyMoveSamples: 300, currentMovePct: 2,
+  holding: { n: 40, maePct: -2.5, wrongN: 12, wrongMaePct: -6.5 }
+});
+check('higher calibrated edge reduces the same asset/volatility offset only modestly',
+  highConfidenceOffset.offsetPct < wrongSideOffset.offsetPct
+    && highConfidenceOffset.offsetPct >= config.entryOffsetHighConfidenceFloorPct,
+  JSON.stringify(highConfidenceOffset));
+const volatileOffset = entryOffsetPlan({
+  signalPrice: 100, edge: ENGINE.minActionableEdge,
+  medianAbsDailyMovePct: 12, dailyMoveSamples: 300, currentMovePct: 14,
+  holding: null
+});
+check('higher observed volatility widens but never exceeds the requested cap',
+  volatileOffset.offsetPct === config.entryOffsetMaxPct, JSON.stringify(volatileOffset));
+check('thin wrong-call data is ignored in favor of the qualified all-call fallback', (() => {
+  const r = entryOffsetPlan({
+    signalPrice: 100, edge: ENGINE.minActionableEdge,
+    holding: { n: 40, maePct: -5.5, wrongN: 3, wrongMaePct: -20 }
+  });
+  return r.adverseBasis === 'all-call mean adverse excursion' && r.offsetPct === 5.5;
+})());
+check('missing signal reference abstains rather than using the live mark',
+  entryOffsetPlan({ price: 100 }).ok === false);
+check('longs rest below and shorts rest above the same signal reference',
+  entryLimitPrice(100, 'BUY', 5) === 95 && entryLimitPrice(100, 'SELL', 5) === 105);
+check('an invalid side cannot manufacture an entry price', entryLimitPrice(100, 'HOLD', 5) === null);
+check('limit tick rounding never erodes the offset on either side',
+  roundLimitToStep(94.9991, 'BUY', 0.01, 2) === 94.99
+    && roundLimitToStep(105.0001, 'SELL', 0.01, 2) === 105.01);
+check('invalid limit tick geometry is withheld',
+  Number.isNaN(roundLimitToStep(100, 'HOLD', 0.01, 2))
+    && Number.isNaN(roundLimitToStep(100, 'BUY', 0, 2)));
+check('measured hours-to-peak sets a shorter evidence clock than the one-day cap',
+  entryOrderTtlMs({ holding: { hoursToPeak: 7 }, horizonHours: 24 }) === 7 * 3600000);
+check('order lifetime is capped at one day when the forecast is longer',
+  entryOrderTtlMs({ holding: null, horizonHours: 168 }) === 24 * 3600000);
+check('the same immutable observation always produces the same GTD expiry',
+  entryOrderExpiryMs({ signalPriceAt: '2026-09-05T12:00:00.987Z', holding: { hoursToPeak: 7 }, horizonHours: 24 })
+    === Date.parse('2026-09-05T19:00:00.000Z'));
+check('fresh matching references pass and stale/cross-market references abstain',
+  signalReferenceIssue({ signalPrice: 100, signalPriceAt: '2026-09-05T11:55:00Z' }, Date.parse('2026-09-05T12:00:00Z'), 101) === null
+    && signalReferenceIssue({ signalPrice: 100, signalPriceAt: '2026-09-05T10:00:00Z' }, Date.parse('2026-09-05T12:00:00Z'), 101)?.includes('old')
+    && signalReferenceIssue({ signalPrice: 100, signalPriceAt: '2026-09-05T11:55:00Z' }, Date.parse('2026-09-05T12:00:00Z'), 110)?.includes('differs'));
+
 console.log('\n== strategy.mjs: an unauthorized row can never become an order ==');
 const nowMs = Date.parse('2026-09-05T12:00:00Z');
 const baseCtx = {
@@ -263,8 +335,10 @@ const baseCtx = {
 };
 const authorizedCandidate = {
   source: 'confluence-v7', signalSymbol: 'SOL', symbol: 'SOLUSDT', side: 'BUY',
+  assetClass: 'crypto', signalPrice: 100, signalPriceAt: '2026-09-05T11:55:00Z',
   authorized: true, unauthorizedReason: null, rangePos: 0.1, range: { low: 96, high: 108 },
-  horizonHours: 24, edge: 0.26, holding: null, dayRangePos: 0.2, funding: 0
+  horizonHours: 24, edge: 0.26, holding: null, dayRangePos: 0.2, funding: 0,
+  medianAbsDailyMovePct: 3, dailyMoveSamples: 364, currentMovePct: 2
 };
 check('an authorized, in-zone candidate opens', evaluateCandidate(authorizedCandidate, baseCtx).action === 'OPEN');
 // THE critical safety property of this whole upgrade.
@@ -273,20 +347,21 @@ check('the identical candidate, unauthorized, becomes SHADOW and never OPEN',
   evaluateCandidate(withheld, baseCtx).action === 'SHADOW');
 check('the shadow decision carries the engine\'s reason for withholding',
   evaluateCandidate(withheld, baseCtx).reason.includes('insufficient-evidence'));
-check('authorization is checked LAST, so a shadow entry still passed every risk gate',
-  evaluateCandidate({ ...withheld, rangePos: 0.9 }, baseCtx).action === 'SKIP');
+check('authorization is checked LAST, so an otherwise-valid withheld row becomes shadow',
+  evaluateCandidate({ ...withheld, rangePos: 0.9 }, baseCtx).action === 'SHADOW');
 check('already holding this symbol is skipped', evaluateCandidate(authorizedCandidate, { ...baseCtx, openSymbols: new Set(['SOLUSDT']) }).action === 'SKIP');
 check('a symbol in cooldown is skipped', evaluateCandidate(authorizedCandidate, {
   ...baseCtx, state: { ...baseCtx.state, lastClosedAt: { SOLUSDT: new Date(nowMs - 60000).toISOString() } }
 }).action === 'SKIP');
-check('an out-of-zone candidate waits for a better price',
-  evaluateCandidate({ ...authorizedCandidate, rangePos: 0.9 }, baseCtx).action === 'SKIP');
+check('an out-of-zone candidate can place a patient resting limit instead of a market entry',
+  evaluateCandidate({ ...authorizedCandidate, rangePos: 0.9 }, baseCtx).action === 'OPEN');
 check('unfavorable funding is skipped',
   evaluateCandidate({ ...authorizedCandidate, funding: 0.01 }, baseCtx).action === 'SKIP');
-check('a research candidate with no range bypasses the range gate rather than being blocked by it',
+check('a research candidate without a published reference price abstains instead of inventing one',
   evaluateCandidate({
-    ...authorizedCandidate, source: 'research-confirmed', rangePos: null, range: null, edge: 0
-  }, baseCtx).action === 'OPEN');
+    ...authorizedCandidate, source: 'research-confirmed', rangePos: null, range: null,
+    signalPrice: null, signalPriceAt: null, edge: 0
+  }, baseCtx).action === 'SKIP');
 
 // Fear & Greed extreme + reversal, now sourced from the scalp day-range.
 const extremeCtx = { ...baseCtx, fearGreed: 12 };
@@ -295,10 +370,10 @@ check('at an extreme with price at the session low, the range gate is substitute
   evaluateCandidate(outOfZone, extremeCtx).action === 'OPEN');
 check('the extreme boost is flagged on that decision',
   evaluateCandidate(outOfZone, extremeCtx).extremeBoost === true);
-check('an extreme reading alone, without price at the session extreme, does not substitute',
-  evaluateCandidate({ ...outOfZone, dayRangePos: 0.5 }, extremeCtx).action === 'SKIP');
+check('an extreme reading alone, without price at the session extreme, does not add the aggression boost',
+  evaluateCandidate({ ...outOfZone, dayRangePos: 0.5 }, extremeCtx).extremeBoost === false);
 check('greed does not boost a long',
-  evaluateCandidate(outOfZone, { ...baseCtx, fearGreed: 95 }).action === 'SKIP');
+  evaluateCandidate(outOfZone, { ...baseCtx, fearGreed: 95 }).extremeBoost === false);
 
 console.log('\n== strategy.mjs: ranking and exposure accounting ==');
 const strong = { ...authorizedCandidate, symbol: 'AUSDT', edge: 0.33 };
@@ -473,6 +548,13 @@ check('documented Binance timeout codes remain ambiguous even on HTTP 4xx',
   isExecutionOutcomeUnknown({ httpStatus: 400, binanceCode: -1007 }));
 check('an ordinary malformed-request 4xx is a definite rejection',
   !isExecutionOutcomeUnknown({ httpStatus: 400, binanceCode: -1102 }));
+const historyWindows = boundedHistoryWindows(0, 15 * 24 * 60 * 60 * 1000);
+check('account-history reads cover long holds with non-overlapping Binance-safe windows',
+  historyWindows.length === 3
+    && historyWindows[0].startTime === 0
+    && historyWindows[0].endTime < 7 * 24 * 60 * 60 * 1000
+    && historyWindows[1].startTime === historyWindows[0].endTime + 1
+    && historyWindows.at(-1).endTime === 15 * 24 * 60 * 60 * 1000);
 const stopBaseId = makeClientOrderId('stop', 'SOLUSDT', entryId, 'BUY');
 check('protection replacement IDs are deterministic and distinct',
   protectionClientOrderId(stopBaseId, 1) === protectionClientOrderId(stopBaseId, 1)
@@ -484,7 +566,8 @@ check('the full deterministic protection chain stays within Binance ID rules', (
 })());
 const activeStop = {
   symbol: 'SOLUSDT', side: 'SELL', orderType: 'STOP_MARKET',
-  closePosition: true, workingType: 'MARK_PRICE', triggerPrice: '95',
+  closePosition: false, reduceOnly: true, quantity: '2',
+  workingType: 'MARK_PRICE', triggerPrice: '95',
   clientAlgoId: stopBaseId, algoStatus: 'NEW'
 };
 check('NEW and trigger-in-flight algo orders count as active protection',
@@ -502,10 +585,16 @@ check('only never-triggered terminal algo states are automatically replaceable',
 check('protective reconciliation requires the exact stop intent',
   protectiveOrderMatches(activeStop, {
     symbol: 'SOLUSDT', side: 'SELL', type: 'STOP_MARKET',
-    triggerPrice: 95, clientAlgoId: stopBaseId
+    triggerPrice: 95, quantity: 2, clientAlgoId: stopBaseId
   }) && !protectiveOrderMatches({ ...activeStop, workingType: 'CONTRACT_PRICE' }, {
     symbol: 'SOLUSDT', side: 'SELL', type: 'STOP_MARKET',
-    triggerPrice: 95, clientAlgoId: stopBaseId
+    triggerPrice: 95, quantity: 2, clientAlgoId: stopBaseId
+  }) && !protectiveOrderMatches({ ...activeStop, quantity: '3' }, {
+    symbol: 'SOLUSDT', side: 'SELL', type: 'STOP_MARKET',
+    triggerPrice: 95, quantity: 2, clientAlgoId: stopBaseId
+  }) && !protectiveOrderMatches({ ...activeStop, reduceOnly: false }, {
+    symbol: 'SOLUSDT', side: 'SELL', type: 'STOP_MARKET',
+    triggerPrice: 95, quantity: 2, clientAlgoId: stopBaseId
   }));
 check('market intent matching includes quantity and reduce-only semantics',
   marketOrderMatches({ ...filledEntry, origQty: '2', reduceOnly: false }, {
@@ -515,6 +604,118 @@ check('market intent matching includes quantity and reduce-only semantics',
     symbol: 'SOLUSDT', side: 'BUY', quantity: 2,
     clientOrderId: entryId, reduceOnly: false
   }));
+const limitEntry = {
+  symbol: 'SOLUSDT', side: 'BUY', type: 'LIMIT', timeInForce: 'GTD',
+  clientOrderId: entryId, origQty: '2', price: '95',
+  goodTillDate: 1_757_073_600_000, status: 'NEW', executedQty: '0'
+};
+check('resting entry identity freezes side, quantity, price and GTD expiry',
+  limitOrderMatches(limitEntry, {
+    symbol: 'SOLUSDT', side: 'BUY', quantity: 2, price: 95,
+    clientOrderId: entryId, goodTillDate: 1_757_073_600_999
+  }) && !limitOrderMatches({ ...limitEntry, price: '95.01' }, {
+    symbol: 'SOLUSDT', side: 'BUY', quantity: 2, price: 95,
+    clientOrderId: entryId, goodTillDate: 1_757_073_600_999
+  }));
+const frozenIntent = {
+  clientOrderId: 'fcsf-entry-deadbeef', mode: 'live', expiresAt: '2026-09-05T19:00:00.000Z',
+  assetClass: 'crypto', symbol: 'SOLUSDT', signalSymbol: 'SOL', side: 'BUY',
+  source: 'confluence-v7', signalGeneratedAt: '2026-09-05T12:00:00Z',
+  signalPriceAt: '2026-09-05T12:00:00Z', signalPrice: 100, limitPrice: 94,
+  offsetPct: 6, offsetBasis: 'wrong-call mean adverse excursion',
+  positionPct: 0.1, leverage: 8, requestedQty: 1.25, stopPrice: 93,
+  targetPrice: 104, timeExitAfterMs: 3600000, horizonHours: 24
+};
+const frozenIntentRow = {
+  client_order_id: frozenIntent.clientOrderId, mode: frozenIntent.mode,
+  expires_at: frozenIntent.expiresAt, asset_class: frozenIntent.assetClass,
+  symbol: frozenIntent.symbol, signal_symbol: frozenIntent.signalSymbol,
+  side: frozenIntent.side, source: frozenIntent.source,
+  signal_generated_at: frozenIntent.signalGeneratedAt,
+  signal_price_at: frozenIntent.signalPriceAt, signal_price: frozenIntent.signalPrice,
+  limit_price: frozenIntent.limitPrice, offset_pct: frozenIntent.offsetPct,
+  offset_basis: frozenIntent.offsetBasis, position_pct: frozenIntent.positionPct,
+  leverage: frozenIntent.leverage, requested_qty: frozenIntent.requestedQty,
+  stop_price: frozenIntent.stopPrice, target_price: frozenIntent.targetPrice,
+  time_exit_after_ms: frozenIntent.timeExitAfterMs, horizon_hours: frozenIntent.horizonHours
+};
+check('a durable intent can only be reused with identical frozen execution geometry',
+  entryIntentMatches(frozenIntentRow, frozenIntent)
+    && !entryIntentMatches({ ...frozenIntentRow, requested_qty: 2 }, frozenIntent)
+    && entryIntentMatches({
+      ...frozenIntentRow, signal_generated_at: 'later payload publication'
+    }, frozenIntent));
+
+const cryptoMarket = {
+  status: 'TRADING', contractType: 'PERPETUAL', baseAsset: 'SOL',
+  quoteAsset: 'USDT', marginAsset: 'USDT', underlyingType: 'COIN',
+  underlyingSubType: [], permissionSets: [],
+  orderTypes: ['LIMIT', 'MARKET'], timeInForce: ['GTC', 'GTD']
+};
+const stockMarket = {
+  ...cryptoMarket, contractType: 'TRADIFI_PERPETUAL', baseAsset: 'NVDA',
+  underlyingType: 'EQUITY', underlyingSubType: ['TradFi']
+};
+check('market identity requires exact class and bare symbol metadata',
+  marketEligibleForAssetClass(cryptoMarket, 'crypto', 'SOL')
+    && !marketEligibleForAssetClass(cryptoMarket, 'stock', 'SOL')
+    && !marketEligibleForAssetClass(cryptoMarket, 'crypto', 'S')
+    && marketEligibleForAssetClass(stockMarket, 'stock', 'NVDA')
+    && !marketEligibleForAssetClass(stockMarket, 'crypto', 'NVDA'));
+check('TradFi ticker coincidence without exchange class evidence is withheld',
+  !marketEligibleForAssetClass({ ...stockMarket, underlyingSubType: [] }, 'stock', 'NVDA')
+    && !marketEligibleForAssetClass({ ...stockMarket, timeInForce: ['GTC'] }, 'stock', 'NVDA')
+    && !marketEligibleForAssetClass({ ...stockMarket, timeInForce: [] }, 'stock', 'NVDA')
+    && !marketEligibleForAssetClass({ ...stockMarket, orderTypes: [] }, 'stock', 'NVDA'));
+
+const exactOutcomeRecord = { side: 'BUY', entryExecutedQty: 2 };
+const exactOutcomeFills = [
+  { orderId: 10, side: 'BUY', qty: '2', price: '95', realizedPnl: '0', commission: '0.04', commissionAsset: 'USDT', marginAsset: 'USDT' },
+  { orderId: 11, side: 'SELL', qty: '0.75', price: '105', realizedPnl: '7.5', commission: '0.02', commissionAsset: 'USDT', marginAsset: 'USDT' },
+  { orderId: 12, side: 'SELL', qty: '1.25', price: '104', realizedPnl: '11.25', commission: '0.03', commissionAsset: 'USDT', marginAsset: 'USDT' }
+];
+check('outcome reconstruction uses exact entry and quantity-balanced closing fills', (() => {
+  const summary = summarizeExactRoundTrip(exactOutcomeRecord, exactOutcomeFills, 10);
+  return summary.quantity === 2 && Math.abs(summary.exitPrice - 104.375) < 1e-9
+    && summary.realizedPnl === 18.75 && Math.abs(summary.commission + 0.09) < 1e-9;
+})());
+check('outcome reconstruction rejects interleaved personal or incomplete fills', (() => {
+  try {
+    summarizeExactRoundTrip(exactOutcomeRecord, [
+      ...exactOutcomeFills,
+      { ...exactOutcomeFills[0], orderId: 99, qty: '0.1' }
+    ], 10);
+    return false;
+  } catch {}
+  try {
+    summarizeExactRoundTrip(exactOutcomeRecord, exactOutcomeFills.slice(0, 2), 10);
+    return false;
+  } catch { return true; }
+})());
+check('outcome reconstruction refuses missing P&L or fee fields instead of treating them as zero', (() => {
+  for (const field of ['realizedPnl', 'commission']) {
+    try {
+      summarizeExactRoundTrip(exactOutcomeRecord, exactOutcomeFills.map((fill, index) =>
+        index === 1 ? { ...fill, [field]: null } : fill), 10);
+      return false;
+    } catch {}
+  }
+  return true;
+})());
+const reachabilityRow = {
+  side: 'BUY', signal_price_at: '2026-09-05T00:00:00Z',
+  expires_at: '2026-09-05T06:00:00Z', signal_price: 100, limit_price: 95,
+  observation_count: 6, first_bar_at: '2026-09-05T00:00:00Z',
+  last_bar_at: '2026-09-05T05:00:00Z', observed_low: 96, observed_high: 104
+};
+check('hourly research can prove a limit touch without pretending it executed',
+  assessLimitReachability({ ...reachabilityRow, observed_low: 94 }).decision === 'touched');
+check('an untouched limit expires only with adequate window coverage',
+  assessLimitReachability(reachabilityRow).decision === 'expired'
+    && assessLimitReachability({
+      ...reachabilityRow, observation_count: 1,
+      last_bar_at: '2026-09-05T00:00:00Z'
+    }).decision === 'awaiting-bars');
 
 const leaseEnv = {
   CLOUDFLARE_API_TOKEN: 'test', CLOUDFLARE_ACCOUNT_ID: 'test', FCS_D1_DATABASE_ID: 'test'
@@ -531,17 +732,25 @@ check('execution lease release is owner-qualified',
 
 console.log('\n== positions.mjs: the operator\'s trades are not the bot\'s to manage ==');
 check('a position the bot recorded opening is its own',
-  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: { side: 'BUY', entryExecutedQty: 2 } } }, 'BUY', 2) === 'bot');
+  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: {
+    side: 'BUY', entryExecutedQty: 2, entryClientOrderId: entryId,
+    ownershipVerified: true
+  } } }, 'BUY', 2) === 'bot');
 check('an opposite live side is an ownership conflict, not a bot position',
-  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: { side: 'BUY', entryExecutedQty: 2 } } }, 'SELL', -2) === 'conflict');
+  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: { side: 'BUY', entryExecutedQty: 2, entryClientOrderId: entryId, ownershipVerified: true } } }, 'SELL', -2) === 'conflict');
 check('a same-side operator addition is an ownership conflict',
-  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: { side: 'BUY', entryExecutedQty: 2 } } }, 'BUY', 2.5) === 'conflict');
+  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: { side: 'BUY', entryExecutedQty: 2, entryClientOrderId: entryId, ownershipVerified: true } } }, 'BUY', 2.5) === 'conflict');
 check('a same-side external partial close is an ownership conflict',
-  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: { side: 'BUY', entryExecutedQty: 2 } } }, 'BUY', 1.5) === 'conflict');
+  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: { side: 'BUY', entryExecutedQty: 2, entryClientOrderId: entryId, ownershipVerified: true } } }, 'BUY', 1.5) === 'conflict');
 check('tiny decimal serialization noise does not create a false conflict',
   positionQuantitiesMatch(2, 2 + 1e-10));
-check('legacy ownership records remain side-compatible until naturally closed',
-  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: { side: 'BUY' } } }, 'BUY', 2.5) === 'bot');
+check('legacy/incomplete ownership records fail closed as conflicts',
+  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: { side: 'BUY' } } }, 'BUY', 2.5) === 'conflict');
+check('a persisted intent without a verified fill cannot claim a personal position',
+  positionOrigin('SOLUSDT', { openOrders: { SOLUSDT: {
+    side: 'BUY', entryExecutedQty: 0, entryClientOrderId: entryId,
+    ownershipVerified: false
+  } } }, 'BUY', 2) === 'conflict');
 check('a position the bot has no record of is the operator\'s',
   positionOrigin('TRXUSDT', { openOrders: {} }) === 'manual');
 // If state were lost, the bot's own positions read as foreign and stop being
@@ -575,17 +784,11 @@ check('the assessment always carries the numbers behind it',
 check('an unknown equity does not manufacture a loss reading',
   assessRisk({ ...calm, equity: 0 }).metrics.unrealizedVsEquityPct === null);
 
-// An emergency stop must sit strictly between the mark and liquidation: at or
-// through the mark it fills instantly, past liquidation it never fills.
-const es = emergencyStopPrice(100, 80, 'BUY');
-check('an emergency stop for a long sits between mark and liquidation', es > 80 && es < 100, String(es));
-check('halfway is the default placement', Math.abs(es - 90) < 1e-9);
-const esShort = emergencyStopPrice(100, 120, 'SELL');
-check('an emergency stop for a short sits between mark and liquidation', esShort > 100 && esShort < 120, String(esShort));
-check('an unusable liquidation price produces no stop rather than a bad one',
-  emergencyStopPrice(100, 0, 'BUY') === null);
-check('a liquidation price on the wrong side of the mark produces no stop',
-  emergencyStopPrice(100, 120, 'BUY') === null);
+check('manual-position stop configuration has been removed rather than merely defaulted off',
+  !Object.hasOwn(config, 'emergencyStopForeign') && !Object.hasOwn(config, 'emergencyStopFraction'));
+check('bot and retired-assisted client namespaces are recognized exactly',
+  isFuturesBotOrderId(entryId) && !isFuturesBotOrderId('personal-order')
+    && isLegacyAssistedProtectionId('fcsa-abc') && !isLegacyAssistedProtectionId(entryId));
 
 console.log(failures === 0 ? '\nTRADING BOT OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

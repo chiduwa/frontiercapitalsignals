@@ -53,14 +53,14 @@ echo "    an ephemeral IP changes when the instance is stopped and started."
 # ---------------------------------------------------------------------------
 if command -v dnf >/dev/null 2>&1; then
   log "Installing packages (dnf)"
-  dnf install -y git curl >/dev/null
+  dnf install -y git curl util-linux >/dev/null
   curl -fsSL "https://rpm.nodesource.com/setup_${NODE_MAJOR}.x" | bash - >/dev/null
   dnf install -y nodejs >/dev/null
 elif command -v apt-get >/dev/null 2>&1; then
   log "Installing packages (apt)"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  apt-get install -y -qq git curl ca-certificates >/dev/null
+  apt-get install -y -qq git curl ca-certificates util-linux >/dev/null
   curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - >/dev/null
   apt-get install -y -qq nodejs >/dev/null
 else
@@ -101,6 +101,9 @@ echo "    $(git -C "$INSTALL_DIR" log --oneline -1)"
 log "Running the guardrail tests"
 sudo -u "$RUN_USER" node "$INSTALL_DIR/trading-bot/test.mjs" >/dev/null \
   || die "futures guardrail tests failed on this checkout — refusing to install a bot that fails its own tests"
+sudo -u "$RUN_USER" node --check "$INSTALL_DIR/trading-bot/src/index.mjs" >/dev/null \
+  && sudo -u "$RUN_USER" node --check "$INSTALL_DIR/trading-bot/src/protection-cycle.mjs" >/dev/null \
+  || die "futures execution scripts failed syntax validation"
 sudo -u "$RUN_USER" node "$INSTALL_DIR/spot-bot/test.mjs" >/dev/null \
   || die "spot guardrail tests failed on this checkout — refusing to install a bot that fails its own tests"
 sudo -u "$RUN_USER" node --test "$INSTALL_DIR"/account-journal/test/*.test.mjs >/dev/null \
@@ -167,6 +170,8 @@ chmod 640 "$SPOT_ENV_FILE"
 log "Installing the systemd units"
 install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-trading-bot.service" /etc/systemd/system/
 install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-trading-bot.timer" /etc/systemd/system/
+install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-trading-protection.service" /etc/systemd/system/
+install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-trading-protection.timer" /etc/systemd/system/
 install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-spot-bot.service" /etc/systemd/system/
 install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-spot-bot.timer" /etc/systemd/system/
 install -m 644 "$INSTALL_DIR/trading-bot/deploy/fcs-account-journal.service" /etc/systemd/system/
@@ -193,6 +198,7 @@ Installed. NOT started — the env file is still empty.
   6. Import account history:      sudo systemctl start fcs-account-journal
                                   journalctl -u fcs-account-journal -n 100 --no-pager
   7. Once all look right:         sudo systemctl enable --now fcs-trading-bot.timer
+                                  sudo systemctl enable --now fcs-trading-protection.timer
                                   sudo systemctl enable --now fcs-spot-bot.timer
                                   sudo systemctl enable --now fcs-account-journal.timer
                                   sudo systemctl enable --now fcs-trading-bot-update.timer

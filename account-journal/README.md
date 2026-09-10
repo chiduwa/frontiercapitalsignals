@@ -14,9 +14,10 @@ Provenance is deliberately conservative:
 - `unknown`: the exchange does not provide enough evidence. An unmatched
   historical fill is never relabelled “manual” just to make the report neat.
 
-Emergency protection submitted by FCS for an externally opened futures
-position uses the separate `fcsa-` namespace and remains `unknown` rather than
-contaminating the bot-strategy P&L cohort.
+Legacy emergency protection from older FCS versions used the separate `fcsa-`
+namespace and remains `unknown` rather than contaminating the bot-strategy P&L
+cohort. Current code never creates protection for an externally opened trade
+and retires only those exact legacy IDs.
 
 Spot does not supply realized P&L, so the journal reports spot buy/sell quote
 flow and fees by their actual fee asset. It does not invent cost-basis P&L.
@@ -50,6 +51,15 @@ ingestion pass, all stored fills are reclassified from the latest order IDs,
 bot ledgers, and operator overrides before analytics are rebuilt; an early
 `unknown` label therefore cannot become permanently stale.
 
+Each successful futures account read also refreshes a read-only table of open
+positions and appends a timestamped position snapshot. A live position is
+classified `bot` only when its side and quantity exactly match the bot's
+exchange-confirmed durable ownership record; every unmatched or mixed net
+position remains `unknown` rather than being guessed manual. Current rows that
+disappear from Binance are removed only after the replacement snapshot has
+been stored successfully. Historical snapshots have no automatic deletion and
+can support later trade-path/behavior analysis without changing any order.
+
 ## Operations
 
 ```bash
@@ -65,6 +75,30 @@ Worker secret, not a query string or a repository variable. Browser access uses
 HTTP Basic authentication with username `fcs` and that token as the password;
 API clients may instead send `Authorization: Bearer <token>` to
 `/signals/api/trades` or `/signals/api/trades.csv`.
+
+The HTML report, JSON endpoint, and CSV endpoint share the same filters:
+
+- `period=week|month|year|all` uses rolling 7-, 30-, or 365-day windows, or all
+  retained rows. `from=YYYY-MM-DD` and/or `to=YYYY-MM-DD` select an inclusive
+  UTC calendar-date range and take precedence over a preset.
+- `symbol`, `market=spot|futures|all`, `origin=external|manual|unknown|bot|all`,
+  and `side=BUY|SELL|all` filter exchange facts. `external` means the union of
+  proven-manual and unknown-provenance fills, not a claim that every row was
+  submitted manually.
+- `pnl=reported|win|loss|breakeven|all`, `min_pnl`, and `max_pnl` apply only to
+  individual futures fills with Binance-reported realized P&L. They never
+  derive spot P&L. Fees remain separate in their actual commission asset.
+- `sort=time|symbol|market|origin|side|price|quantity|quote|pnl|commission` and
+  `direction=asc|desc` are server-whitelisted. `page` and `page_size` paginate
+  deterministically; page size is capped at 500 and the CSV link exports the
+  current filtered page.
+
+The journal has no automatic retention cutoff, and this service never deletes
+rows from `account_journal_fills`, `account_journal_orders`, or
+`account_journal_position_snapshots`. The finite D1 database capacity still
+applies and should be monitored. Daily statistics and fee tables are derived
+materializations: the importer may clear and rebuild those derived rows from
+the retained raw fills without deleting the raw ledger.
 
 The Worker checks for newly ingested `manual` or `unknown` fills every five
 minutes and sends a compact count, affected symbols, and exchange-reported

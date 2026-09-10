@@ -1,0 +1,17 @@
+[Unit]
+Description=Verify protection for futures LIMIT fills every 15 seconds
+Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/trading-bot/README.md
+
+[Timer]
+# Protection only: this never fetches signals or submits a new entry. A
+# one-shot timer does not overlap itself, and the shared D1 execution lease
+# also excludes overlap with the five-minute decision cycle.
+# Offset from the five-minute decision cycle at second :00. If a slow decision
+# run still overlaps, the shared D1 lease makes this pass skip safely.
+OnCalendar=*-*-* *:*:07,22,37,52
+AccuracySec=1s
+Persistent=false
+Unit=fcs-trading-protection.service
+
+[Install]
+WantedBy=timers.target

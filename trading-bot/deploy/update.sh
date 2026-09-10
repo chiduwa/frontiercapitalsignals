@@ -12,6 +12,7 @@ INSTALL_DIR="/opt/fcs"
 RUN_USER="fcsbot"
 
 log() { printf '%s fcs-bot-update: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+die() { log "ERROR: $*"; exit 1; }
 
 # Self-heal on a box provisioned before this was added to setup.sh: the
 # checkout belongs to the service user while this runs as root, and git
@@ -22,48 +23,69 @@ log() { printf '%s fcs-bot-update: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; 
 git config --system --get-all safe.directory 2>/dev/null | grep -qx "$INSTALL_DIR" \
   || git config --system --add safe.directory "$INSTALL_DIR"
 
-cd "$INSTALL_DIR"
-PREVIOUS="$(git rev-parse HEAD)"
+PREVIOUS="$(git -C "$INSTALL_DIR" rev-parse HEAD)"
 
-git fetch --quiet origin main
-TARGET="$(git rev-parse origin/main)"
+git -C "$INSTALL_DIR" fetch --quiet origin main
+TARGET="$(git -C "$INSTALL_DIR" rev-parse origin/main)"
 
 if [[ "$PREVIOUS" == "$TARGET" ]]; then
   log "already at ${PREVIOUS:0:7}, nothing to do"
   exit 0
 fi
 
-log "updating ${PREVIOUS:0:7} -> ${TARGET:0:7}"
-git reset --quiet --hard "$TARGET"
-chown -R "$RUN_USER:$RUN_USER" "$INSTALL_DIR"
+log "staging ${PREVIOUS:0:7} -> ${TARGET:0:7}; active services remain on the old checkout"
+TEST_LOG="$(mktemp /tmp/fcs-bot-test.XXXXXX.log)"
+STAGE_DIR="$(mktemp -d /opt/fcs-update.XXXXXX)"
+STAGE_ATTACHED=false
+cleanup() {
+  if [[ "$STAGE_ATTACHED" == true ]]; then
+    git -C "$INSTALL_DIR" worktree remove --force "$STAGE_DIR" >/dev/null 2>&1 || true
+  else
+    rmdir "$STAGE_DIR" >/dev/null 2>&1 || true
+  fi
+  rm -f "$TEST_LOG"
+}
+trap cleanup EXIT
+rmdir "$STAGE_DIR"
+git -C "$INSTALL_DIR" worktree add --quiet --detach "$STAGE_DIR" "$TARGET"
+STAGE_ATTACHED=true
 
-if sudo -u "$RUN_USER" node "$INSTALL_DIR/trading-bot/test.mjs" >/tmp/fcs-bot-test.log 2>&1 \
-   && sudo -u "$RUN_USER" node "$INSTALL_DIR/spot-bot/test.mjs" >>/tmp/fcs-bot-test.log 2>&1 \
-   && sudo -u "$RUN_USER" node --test "$INSTALL_DIR"/account-journal/test/*.test.mjs >>/tmp/fcs-bot-test.log 2>&1; then
-  log "guardrail tests passed on ${TARGET:0:7}"
-  # Reinstall the units and helper scripts. Without this the updater ships new
-  # CODE but never new UNITS, so a commit that adds a timer or a script lands
-  # in the checkout and silently does nothing — which is exactly how the
-  # go-live gate ended up with an armed timer and no service to trigger.
-  # Idempotent: install(1) overwrites, and daemon-reload is a no-op if nothing
-  # changed. Deliberately does NOT restart or enable anything, so it can never
-  # arm a timer the operator had disabled.
-  for unit in "$INSTALL_DIR"/trading-bot/deploy/fcs-*.service "$INSTALL_DIR"/trading-bot/deploy/fcs-*.timer; do
-    [ -f "$unit" ] || continue
-    install -m 644 "$unit" /etc/systemd/system/
-  done
-  install -m 755 "$INSTALL_DIR/trading-bot/deploy/update.sh" /usr/local/bin/fcs-bot-update
-  install -m 755 "$INSTALL_DIR/trading-bot/deploy/golive.sh" /usr/local/bin/fcs-golive
-  systemctl daemon-reload
-  log "units and helper scripts reinstalled; ${TARGET:0:7} now live"
-  exit 0
+if ! sudo -u "$RUN_USER" node --check "$STAGE_DIR/trading-bot/src/index.mjs" >"$TEST_LOG" 2>&1 \
+   || ! sudo -u "$RUN_USER" node --check "$STAGE_DIR/trading-bot/src/protection-cycle.mjs" >>"$TEST_LOG" 2>&1 \
+   || ! sudo -u "$RUN_USER" node "$STAGE_DIR/trading-bot/test.mjs" >>"$TEST_LOG" 2>&1 \
+   || ! sudo -u "$RUN_USER" node "$STAGE_DIR/spot-bot/test.mjs" >>"$TEST_LOG" 2>&1 \
+   || ! sudo -u "$RUN_USER" node --test "$STAGE_DIR"/account-journal/test/*.test.mjs >>"$TEST_LOG" 2>&1; then
+  log "GUARDRAIL TESTS FAILED on staged ${TARGET:0:7} — live checkout was not changed"
+  sed -n '1,40p' "$TEST_LOG" | while IFS= read -r line; do log "  $line"; done
+  exit 1
 fi
+log "guardrail tests passed on staged ${TARGET:0:7}"
 
-# Roll back rather than leave an untested bot armed. The next hourly run will
-# try again, so a genuine fix lands on its own without intervention.
-log "GUARDRAIL TESTS FAILED on ${TARGET:0:7} — rolling back to ${PREVIOUS:0:7}"
-sed -n '1,40p' /tmp/fcs-bot-test.log | while IFS= read -r line; do log "  $line"; done
-git reset --quiet --hard "$PREVIOUS"
+# Services execute files directly from /opt/fcs. Take their filesystem locks
+# only for the short tested-checkout switch; they keep running the old version
+# throughout the longer test phase. Acquire the futures lock last so fill
+# protection is never held behind a journal sync. The updated units take these
+# same locks before Node starts, preventing mixed-version imports on all later
+# automatic updates.
+exec 9>/run/lock/fcs-account-journal-runtime.lock
+flock --exclusive --wait 900 9 || die "timed out waiting for account-journal runtime lock"
+exec 8>/run/lock/fcs-spot-runtime.lock
+flock --exclusive --wait 300 8 || die "timed out waiting for spot runtime lock"
+exec 7>/run/lock/fcs-futures-runtime.lock
+flock --exclusive --wait 180 7 || die "timed out waiting for futures runtime lock"
+
+[[ "$(git -C "$INSTALL_DIR" rev-parse HEAD)" == "$PREVIOUS" ]] \
+  || die "live checkout changed during staging; refusing to overwrite it"
+git -C "$INSTALL_DIR" reset --quiet --hard "$TARGET"
 chown -R "$RUN_USER:$RUN_USER" "$INSTALL_DIR"
-log "rolled back; the previous version is still running"
-exit 1
+
+# Reinstall units and helpers from the already-tested target. This does not
+# restart a service or enable a timer the operator disabled.
+for unit in "$INSTALL_DIR"/trading-bot/deploy/fcs-*.service "$INSTALL_DIR"/trading-bot/deploy/fcs-*.timer; do
+  [ -f "$unit" ] || continue
+  install -m 644 "$unit" /etc/systemd/system/
+done
+install -m 755 "$INSTALL_DIR/trading-bot/deploy/update.sh" /usr/local/bin/fcs-bot-update
+install -m 755 "$INSTALL_DIR/trading-bot/deploy/golive.sh" /usr/local/bin/fcs-golive
+systemctl daemon-reload
+log "units and helper scripts reinstalled; tested ${TARGET:0:7} now live (no service restarted)"

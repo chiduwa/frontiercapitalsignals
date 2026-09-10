@@ -547,6 +547,10 @@ export async function loadMoveStats(env) {
 // gate. Same discipline as everything else here: below the sample floor a
 // row simply does not exist rather than being shown thin.
 export const EXCURSION_MIN_SAMPLES = 30;
+// A wrong-call conditional average is much thinner than the all-call path
+// sample. Do not expose it until at least this many independent opposite-side
+// outcomes exist for the exact asset + side + horizon cell.
+export const WRONG_CALL_EXCURSION_MIN_SAMPLES = 10;
 
 // Turns grouped ledger rows into the published summary. Kept pure so the
 // side-awareness (a short's favorable extreme is the path LOW) and the
@@ -566,6 +570,12 @@ export function summarizeExcursionEvidence(rows, minSamples = EXCURSION_MIN_SAMP
     const hoursToPeak = Number(r.sum_minutes_to_peak) / n / 60;
     if (![mfePct, maePct, heldPct, hoursToPeak].every(Number.isFinite)) continue;
     const adverseFirst = n - Number(r.n_favorable_first);
+    const wrongN = r?.n_wrong == null ? NaN : Number(r.n_wrong);
+    const wrongMaePct = Number.isFinite(wrongN)
+      && wrongN >= WRONG_CALL_EXCURSION_MIN_SAMPLES
+      && Number.isFinite(Number(r.sum_wrong_mae))
+      ? Number(r.sum_wrong_mae) / wrongN
+      : null;
     // The favorable extreme cannot be worse than the price at maturity: the
     // maturity observation is itself a point on the measured path. So
     // give-back is a non-negative quantity by construction, and a large one
@@ -590,6 +600,12 @@ export function summarizeExcursionEvidence(rows, minSamples = EXCURSION_MIN_SAMP
       // extreme usually arriving first, says the signal price was not the
       // best available entry.
       maePct,
+      // Mean adverse excursion conditional on the call finishing flat/wrong.
+      // This is the directly measured "margin of error" requested for entry
+      // patience. It remains null below its own independent-sample floor;
+      // callers may use the all-call MAE but must label that fallback honestly.
+      wrongN: Number.isFinite(wrongN) ? wrongN : 0,
+      wrongMaePct,
       adverseFirstRate: adverseFirst / n,
       // Conservative floor on that rate, so a thin or lucky-looking split is
       // not presented as a reliable "wait for a better fill" instruction.
@@ -607,6 +623,11 @@ export async function loadExcursionEvidence(env, minSamples = EXCURSION_MIN_SAMP
            COUNT(*) AS n,
            SUM(CASE WHEN dir = 1 THEN path_high_pct ELSE -path_low_pct END) AS sum_mfe,
            SUM(CASE WHEN dir = 1 THEN path_low_pct ELSE -path_high_pct END) AS sum_mae,
+           SUM(CASE WHEN actual_dir = -dir
+                    THEN 1 ELSE 0 END) AS n_wrong,
+           SUM(CASE WHEN actual_dir = -dir
+                    THEN (CASE WHEN dir = 1 THEN path_low_pct ELSE -path_high_pct END)
+                    ELSE 0 END) AS sum_wrong_mae,
            SUM(CASE WHEN dir = 1 THEN minutes_to_high ELSE minutes_to_low END) AS sum_minutes_to_peak,
            SUM(CASE WHEN dir = 1 THEN return_pct ELSE -return_pct END) AS sum_signed_return,
            SUM(CASE WHEN (CASE WHEN dir = 1 THEN minutes_to_high ELSE minutes_to_low END)

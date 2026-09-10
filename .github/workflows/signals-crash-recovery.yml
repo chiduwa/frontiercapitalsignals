@@ -1,0 +1,67 @@
+name: Signals Crash Recovery Research
+
+# Low-cadence, research-only scan of the existing daily archive. It cannot
+# publish a signal or place an order; all output tables hard-lock live use off.
+on:
+  schedule:
+    # Weekly, after their usual Sunday archive/discovery windows. Correctness
+    # does not rely on wall-clock completion: the scanner freezes each
+    # symbol's archive watermark from its initial universe snapshot and is
+    # incremental/research-only if an upstream job was delayed.
+    - cron: "15 6 * * 0"
+  workflow_dispatch:
+    inputs:
+      max_symbols:
+        description: "Maximum rotated archive symbols to consider"
+        required: false
+        default: "80"
+      max_bars:
+        description: "Maximum daily bars read in this run"
+        required: false
+        default: "120000"
+      max_publication_lookups:
+        description: "Maximum exact publication-snapshot lookups"
+        required: false
+        default: "200"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signals-crash-recovery-research
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Verify point-in-time and censoring guardrails
+        working-directory: signals-worker
+        run: node test-crash-recovery-research.mjs
+
+      - name: Apply additive D1 migrations
+        working-directory: signals-worker
+        run: npx --yes wrangler@4 d1 migrations apply frontier-capital-signals-reliability --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Update bounded crash-onset recovery cohorts
+        working-directory: signals-worker
+        run: node scripts/crash-recovery-research.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+          FCS_CRASH_SCAN_MAX_SYMBOLS: ${{ inputs.max_symbols || '80' }}
+          FCS_CRASH_SCAN_MAX_BARS: ${{ inputs.max_bars || '120000' }}
+          FCS_CRASH_SCAN_MAX_PUBLICATION_LOOKUPS: ${{ inputs.max_publication_lookups || '200' }}

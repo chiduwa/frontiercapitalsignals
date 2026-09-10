@@ -37,6 +37,7 @@ jobs:
         run: |
           node test-worker.mjs
           node test-trade-journal.mjs
+          node test-crash-recovery-research.mjs
           node test-retrospective.mjs
           node --test ../account-journal/test/*.test.mjs
 

@@ -62,6 +62,11 @@ export const config = {
   // levels."
   minLeverage: num(process.env.MIN_LEVERAGE, 3),
   maxLeverage: num(process.env.MAX_LEVERAGE, 20),
+  // The operator requested a modestly more aggressive leverage curve. This
+  // multiplier changes leverage only after the evidence gate has passed and
+  // remains hard-capped by MAX_LEVERAGE; margin/exposure ceilings are not
+  // loosened. 1.15 turns (for example) a measured 10x allocation into 12x.
+  leverageAggressionMultiplier: num(process.env.LEVERAGE_AGGRESSION_MULTIPLIER, 1.15),
 
   // Sizing input. The old confidence gate (technique agreement x that
   // asset's best technique accuracy) is gone: agreement across correlated
@@ -95,6 +100,28 @@ export const config = {
   // Lower bound on "the worst price arrived before the best" above which the
   // bot waits for that drawdown instead of filling at the signal price.
   patienceAdverseFirstBound: num(process.env.PATIENCE_ADVERSE_FIRST_BOUND, 0.5),
+
+  // Resting entry policy. Authorized calls place a LIMIT below the published
+  // signal for a long and above it for a short; the bot never deliberately
+  // enters at the signal price. The 5-10% policy band is the operator's
+  // requested prior. Exact-asset daily moves and independently measured
+  // adverse excursion can widen it, while the calibrated edge can reduce it
+  // by at most one point (to a hard 4% floor) for the strongest calls.
+  entryOffsetMinPct: num(process.env.ENTRY_OFFSET_MIN_PCT, 5),
+  entryOffsetMaxPct: num(process.env.ENTRY_OFFSET_MAX_PCT, 10),
+  entryOffsetHighConfidenceFloorPct: num(process.env.ENTRY_OFFSET_HIGH_CONFIDENCE_FLOOR_PCT, 4),
+  entryOffsetMaxConfidenceReductionPct: num(process.env.ENTRY_OFFSET_MAX_CONFIDENCE_REDUCTION_PCT, 1),
+  entryOffsetDailyMoveMinSamples: num(process.env.ENTRY_OFFSET_DAILY_MOVE_MIN_SAMPLES, 30),
+  entryOffsetWrongCallMinSamples: num(process.env.ENTRY_OFFSET_WRONG_CALL_MIN_SAMPLES, 10),
+  // Refuse stale/cross-market references. This is especially important for
+  // an equity future while the underlying stock feed is closed or delayed.
+  maxSignalAgeMinutes: num(process.env.MAX_SIGNAL_AGE_MINUTES, 30),
+  maxSignalMarkDeviationPct: num(process.env.MAX_SIGNAL_MARK_DEVIATION_PCT, 3),
+  // Binance GTD requires an expiry more than ten minutes out. Measured
+  // hours-to-peak shortens the order's life when available; otherwise the
+  // declared forecast horizon applies, always capped at one day.
+  entryOrderMinMinutes: num(process.env.ENTRY_ORDER_MIN_MINUTES, 15),
+  entryOrderMaxHours: num(process.env.ENTRY_ORDER_MAX_HOURS, 24),
 
   // Range-position entry gate. rangePos is already computed by the live
   // engine (0 = at the predicted range's low end, 1 = at the high end).
@@ -144,15 +171,6 @@ export const config = {
   // bleeding badly while still nowhere near liquidation.
   unrealizedLossWarnPct: num(process.env.UNREALIZED_LOSS_WARN_PCT, -20),
   unrealizedLossExtremePct: num(process.env.UNREALIZED_LOSS_EXTREME_PCT, -35),
-  // Whether to place an emergency stop on a foreign position at 'extreme'.
-  // On by default: closing short of liquidation loses less than a liquidation
-  // does. Set false to make the bot alert and never touch the position.
-  emergencyStopForeign: bool('EMERGENCY_STOP_FOREIGN', process.env.EMERGENCY_STOP_FOREIGN, true),
-  // How far from the mark toward liquidation to place it. 0.5 is halfway --
-  // clear of the current price so it does not fill instantly, clear of the
-  // liquidation price so it actually gets the chance to.
-  emergencyStopFraction: num(process.env.EMERGENCY_STOP_FRACTION, 0.5),
-
   // Shadow ledger: while the engine withholds every call (the v7 cold
   // start), record what the bot WOULD have opened and resolve those against
   // real subsequent prices, so it accumulates its own track record instead

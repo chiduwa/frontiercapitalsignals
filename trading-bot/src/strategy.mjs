@@ -6,7 +6,8 @@
 import { config } from './config.mjs';
 import {
   conservativeEdge, sizePosition, wouldExceedExposure, wouldExceedResearchExposure,
-  circuitBreakerTripped, dailyLossLimitHit, inCooldown, fundingUnfavorable, patienceUnmet
+  circuitBreakerTripped, dailyLossLimitHit, inCooldown, fundingUnfavorable,
+  signalReferenceIssue
 } from './risk.mjs';
 
 // Evaluates ONE candidate against every gate, in the order a human reading
@@ -26,7 +27,7 @@ import {
 // resolves those against real subsequent prices, so by the time the engine
 // opens up the bot has its own track record instead of a blank one.
 export function evaluateCandidate(candidate, ctx) {
-  const { symbol, side, rangePos, funding } = candidate;
+  const { symbol, side, funding } = candidate;
   const { fearGreed, openSymbols, openPositions, balance, state, nowMs } = ctx;
 
   if (openSymbols.has(symbol)) return { action: 'SKIP', reason: 'already holding a position in this symbol' };
@@ -46,28 +47,23 @@ export function evaluateCandidate(candidate, ctx) {
     side === 'BUY' ? candidate.dayRangePos <= config.reversalDayRangeLow
       : candidate.dayRangePos >= config.reversalDayRangeHigh
   );
-  const extremeBoost = atExtreme && fearGreed != null && (
+  const extremeBoost = candidate.assetClass === 'crypto' && atExtreme && fearGreed != null && (
     (side === 'BUY' && fearGreed <= config.fearGreedExtremeLow) ||
     (side === 'SELL' && fearGreed >= config.fearGreedExtremeHigh)
   );
 
-  // Value gate: where price sits inside the engine's own predicted range.
-  // Research candidates carry no range — their entry condition IS the
-  // pattern's trigger, already evaluated by discovery — so they bypass it.
-  if (!extremeBoost && Number.isFinite(rangePos)) {
-    const inZone = side === 'BUY' ? rangePos <= config.entryLowRangePos : rangePos >= config.entryHighRangePos;
-    if (!inZone) return { action: 'SKIP', reason: `rangePos ${rangePos.toFixed(2)} not in the ${side === 'BUY' ? 'low' : 'high'} entry zone — patience, wait for a better price` };
-  }
+  // Price patience now lives in the order itself: an authorized long rests
+  // below its fresh signal reference and a short rests above it, with the
+  // offset widened by exact-asset movement/adverse-excursion evidence. This
+  // allows more authorized setups to place an order without buying the high
+  // or shorting the low. Stale/missing references still abstain here.
+  const referenceIssue = signalReferenceIssue(candidate, nowMs);
+  if (referenceIssue) return { action: 'SKIP', reason: referenceIssue };
 
-  // Timing gate, measured rather than assumed: if this asset/side/horizon
-  // historically puts its worst price in before its best, entering at the
-  // signal price is measurably the wrong fill.
-  if (!extremeBoost) {
-    const impatient = patienceUnmet(candidate);
-    if (impatient) return { action: 'SKIP', reason: impatient };
+  if (funding == null || !Number.isFinite(Number(funding))) {
+    return { action: 'SKIP', reason: 'current Binance funding rate unavailable' };
   }
-
-  if (fundingUnfavorable(side, funding)) return { action: 'SKIP', reason: `funding ${funding} unfavorable for ${side}` };
+  if (fundingUnfavorable(side, Number(funding))) return { action: 'SKIP', reason: `funding ${funding} unfavorable for ${side}` };
 
   const { positionPct, leverage } = sizePosition(candidate, extremeBoost);
   if (wouldExceedExposure(openPositions, balance, positionPct)) return { action: 'SKIP', reason: 'would exceed max total exposure' };

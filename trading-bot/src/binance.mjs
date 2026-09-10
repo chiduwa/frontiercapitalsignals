@@ -7,8 +7,8 @@
 // as of 2025-12-09, Binance migrated conditional orders (STOP_MARKET /
 // TAKE_PROFIT_MARKET) to a separate Algo Order API — the old
 // POST /fapi/v1/order now REJECTS those types with error -4120. Plain
-// MARKET entry orders are unaffected and still go through /fapi/v1/order;
-// stop-loss/take-profit protection orders go through the new
+// Normal MARKET/LIMIT orders are unaffected and still go through
+// /fapi/v1/order; stop-loss/take-profit protection orders go through the new
 // POST /fapi/v1/algoOrder instead. Getting this wrong would mean a
 // protective stop silently fails to place on a leveraged position, so
 // this was verified against Binance's current documentation before
@@ -55,13 +55,10 @@ export function makeClientOrderId(kind, ...intentParts) {
   return `fcsf-${tag}-${digest}`;
 }
 
-// Distinct from the bot-position namespace: this is used only when the risk
-// watcher closes an externally opened position near liquidation. The account
-// journal must not attribute that position's realized P&L to model trades.
-export function makeAssistedProtectionClientOrderId(...intentParts) {
-  const digest = createHash('sha256').update(intentParts.map((v) => String(v ?? '')).join('\u001f')).digest('hex').slice(0, 27);
-  return `fcsa-${digest}`;
-}
+export const isLegacyAssistedProtectionId = (value) =>
+  typeof value === 'string' && value.startsWith('fcsa-');
+export const isFuturesBotOrderId = (value) =>
+  typeof value === 'string' && value.startsWith('fcsf-');
 
 async function publicRequest(path, params = {}) {
   const query = new URLSearchParams(params);
@@ -91,6 +88,16 @@ export async function getExchangeInfo() {
     const lot = s.filters.find((f) => f.filterType === 'LOT_SIZE');
     const price = s.filters.find((f) => f.filterType === 'PRICE_FILTER');
     bySymbol[s.symbol] = {
+      status: s.status,
+      contractType: s.contractType,
+      baseAsset: s.baseAsset,
+      quoteAsset: s.quoteAsset,
+      marginAsset: s.marginAsset,
+      underlyingType: s.underlyingType ?? null,
+      underlyingSubType: Array.isArray(s.underlyingSubType) ? s.underlyingSubType : [],
+      permissionSets: Array.isArray(s.permissionSets) ? s.permissionSets : [],
+      orderTypes: Array.isArray(s.orderTypes) ? s.orderTypes : [],
+      timeInForce: Array.isArray(s.timeInForce) ? s.timeInForce : [],
       quantityStep: Number(lot?.stepSize || 1),
       quantityPrecision: s.quantityPrecision,
       pricePrecision: s.pricePrecision,
@@ -99,6 +106,41 @@ export async function getExchangeInfo() {
   }
   exchangeInfoCache = bySymbol;
   return bySymbol;
+}
+
+// A ticker suffix is not proof that the exchange contract represents the
+// same instrument as the model row. In particular, Binance's equity and
+// commodity futures are TRADIFI_PERPETUAL contracts rather than ordinary
+// crypto PERPETUAL contracts. Require the exact class metadata as well as the
+// bare model symbol before an execution candidate can reach sizing.
+export function marketEligibleForAssetClass(market, assetClass, signalSymbol) {
+  if (!market || !signalSymbol) return false;
+  const orderTypes = Array.isArray(market.orderTypes) ? market.orderTypes : [];
+  const timeInForce = Array.isArray(market.timeInForce) ? market.timeInForce : [];
+  const underlyingSubType = Array.isArray(market.underlyingSubType)
+    ? market.underlyingSubType : [];
+  const permissionSets = Array.isArray(market.permissionSets) ? market.permissionSets : [];
+  const common = market.status === 'TRADING'
+    && market.baseAsset === String(signalSymbol).toUpperCase()
+    && market.quoteAsset === 'USDT'
+    && market.marginAsset === 'USDT'
+    && orderTypes.includes('LIMIT')
+    && timeInForce.includes('GTD');
+  if (!common) return false;
+  if (assetClass === 'crypto') {
+    return market.contractType === 'PERPETUAL' && market.underlyingType === 'COIN';
+  }
+  const tradFiTagged = underlyingSubType.includes('TradFi')
+    || permissionSets.includes('TRADFI');
+  if (assetClass === 'stock') {
+    return market.contractType === 'TRADIFI_PERPETUAL'
+      && market.underlyingType === 'EQUITY' && tradFiTagged;
+  }
+  if (assetClass === 'commodity') {
+    return market.contractType === 'TRADIFI_PERPETUAL'
+      && market.underlyingType === 'COMMODITY' && tradFiTagged;
+  }
+  return false;
 }
 
 function roundToStep(value, step, precision) {
@@ -116,6 +158,27 @@ export async function roundPrice(symbol, price) {
   const info = (await getExchangeInfo())[symbol];
   if (!info) throw new Error(`no exchange info for ${symbol}`);
   return roundToStep(price, info.priceStep, info.pricePrecision);
+}
+
+// A SELL resting above the signal must round upward or it silently moves
+// closer than the measured offset. BUY rounds downward for the symmetric
+// reason. Protective triggers keep their existing conservative floor helper.
+export function roundLimitToStep(price, side, priceStep, pricePrecision) {
+  const raw = Number(price);
+  const step = Number(priceStep);
+  if (!Number.isFinite(raw) || !(raw > 0) || !Number.isFinite(step) || !(step > 0)
+      || !Number.isInteger(pricePrecision) || pricePrecision < 0
+      || !['BUY', 'SELL'].includes(side)) return NaN;
+  const units = side === 'SELL'
+    ? Math.ceil((raw / step) - 1e-12)
+    : Math.floor((raw / step) + 1e-12);
+  return Number((units * step).toFixed(pricePrecision));
+}
+
+export async function roundLimitPrice(symbol, price, side) {
+  const info = (await getExchangeInfo())[symbol];
+  if (!info) throw new Error(`no exchange info for ${symbol}`);
+  return roundLimitToStep(price, side, info.priceStep, info.pricePrecision);
 }
 
 // v3 is Binance's current recommended account/balance endpoint (v2 still
@@ -169,18 +232,63 @@ export async function setLeverage(symbol, leverage) {
 // straight from Binance's own income ledger. Deliberately not inferred from
 // entry/exit prices: fees and funding are real costs, and an edge that only
 // exists gross of them is not an edge.
-export async function getIncomeSince(symbol, startMs) {
-  const rows = await signedRequest('GET', '/fapi/v1/income', {
-    symbol, startTime: Math.max(0, Math.floor(startMs)), limit: 1000
-  });
-  const totals = { realizedPnl: 0, commission: 0, fundingFee: 0, rows: 0 };
-  for (const r of Array.isArray(rows) ? rows : []) {
+const MAX_ACCOUNT_HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000 - 1;
+
+export function boundedHistoryWindows(startMs, endMs, maxWindowMs = MAX_ACCOUNT_HISTORY_WINDOW_MS) {
+  const start = Math.max(0, Math.floor(Number(startMs)));
+  const end = Math.floor(Number(endMs));
+  const width = Math.floor(Number(maxWindowMs));
+  if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(width)
+      || end < start || width < 1) return [];
+  const windows = [];
+  for (let cursor = start; cursor <= end;) {
+    const windowEnd = Math.min(end, cursor + width);
+    windows.push({ startTime: cursor, endTime: windowEnd });
+    cursor = windowEnd + 1;
+  }
+  return windows;
+}
+
+export async function getIncomeSince(symbol, startMs, endMs = Date.now()) {
+  const all = [];
+  for (const window of boundedHistoryWindows(startMs, endMs)) {
+    for (let page = 1; page <= 100; page++) {
+      const rows = await signedRequest('GET', '/fapi/v1/income', {
+        symbol, ...window, page, limit: 1000
+      });
+      const batch = Array.isArray(rows) ? rows : [];
+      all.push(...batch);
+      if (batch.length < 1000) break;
+      if (page === 100) throw new Error(`income history pagination exceeded 100 pages for ${symbol}`);
+    }
+  }
+  const unique = [...new Map(all.map((row) => [
+    [row?.incomeType, row?.tranId, row?.tradeId, row?.time, row?.income, row?.symbol].join('\u001f'), row
+  ])).values()];
+  const totals = {
+    realizedPnl: 0, commission: 0, fundingFee: 0, rows: 0,
+    byAsset: {}
+  };
+  for (const r of unique) {
     const v = Number(r.income);
     if (!Number.isFinite(v)) continue;
+    const asset = String(r.asset || 'UNKNOWN');
+    if (!totals.byAsset[asset]) {
+      totals.byAsset[asset] = { realizedPnl: 0, commission: 0, fundingFee: 0, rows: 0 };
+    }
+    const assetTotals = totals.byAsset[asset];
     totals.rows++;
-    if (r.incomeType === 'REALIZED_PNL') totals.realizedPnl += v;
-    else if (r.incomeType === 'COMMISSION') totals.commission += v;
-    else if (r.incomeType === 'FUNDING_FEE') totals.fundingFee += v;
+    assetTotals.rows++;
+    if (r.incomeType === 'REALIZED_PNL') {
+      totals.realizedPnl += v;
+      assetTotals.realizedPnl += v;
+    } else if (r.incomeType === 'COMMISSION') {
+      totals.commission += v;
+      assetTotals.commission += v;
+    } else if (r.incomeType === 'FUNDING_FEE') {
+      totals.fundingFee += v;
+      assetTotals.fundingFee += v;
+    }
   }
   totals.netPnl = totals.realizedPnl + totals.commission + totals.fundingFee;
   return totals;
@@ -189,15 +297,53 @@ export async function getIncomeSince(symbol, startMs) {
 // Fills for one symbol since a time — used to recover the average exit price
 // of a position the bot did not close itself (a stop, a target, or the
 // operator closing by hand).
-export async function getUserTradesSince(symbol, startMs) {
+async function getUserTradesWindow(symbol, startTime, endTime, depth = 0) {
+  const rows = await signedRequest('GET', '/fapi/v1/userTrades', {
+    symbol, startTime, endTime, limit: 1000
+  });
+  const batch = Array.isArray(rows) ? rows : [];
+  if (batch.length < 1000) return batch;
+  if (depth >= 24 || endTime <= startTime) {
+    throw new Error(`saturated account-trade history could not be proven complete for ${symbol}`);
+  }
+  const midpoint = Math.floor((startTime + endTime) / 2);
+  // Sequential recursion deliberately bounds request pressure. A saturated
+  // interval is already exceptional; turning every split into a parallel
+  // fan-out can exceed Binance's request-weight limits exactly while outcome
+  // capture is trying to preserve a real trade.
+  const left = await getUserTradesWindow(symbol, startTime, midpoint, depth + 1);
+  const right = await getUserTradesWindow(symbol, midpoint + 1, endTime, depth + 1);
+  return [...left, ...right];
+}
+
+export async function getUserTradesSince(symbol, startMs, endMs = Date.now()) {
+  const all = [];
+  for (const window of boundedHistoryWindows(startMs, endMs)) {
+    all.push(...await getUserTradesWindow(symbol, window.startTime, window.endTime));
+  }
+  return [...new Map(all.map((row) => [String(row?.id), row])).values()];
+}
+
+// Exact fills for one order. This is preferable to inferring a fill time from
+// the order's updateTime: after a partial fill is canceled, updateTime is the
+// cancellation time rather than the first moment capital was at risk.
+export async function getUserTradesForOrder(symbol, orderId) {
+  if (!symbol || orderId == null || String(orderId) === '') {
+    throw new Error('getUserTradesForOrder requires symbol and orderId');
+  }
   return signedRequest('GET', '/fapi/v1/userTrades', {
-    symbol, startTime: Math.max(0, Math.floor(startMs)), limit: 1000
+    symbol, orderId: String(orderId), limit: 1000
   });
 }
 
 export async function getMarkPrice(symbol) {
   const r = await publicRequest('/fapi/v1/premiumIndex', { symbol });
-  return { price: Number(r.markPrice), fundingRate: Number(r.lastFundingRate) };
+  const price = r?.markPrice == null ? null : Number(r.markPrice);
+  const fundingRate = r?.lastFundingRate == null ? null : Number(r.lastFundingRate);
+  return {
+    price: Number.isFinite(price) && price > 0 ? price : null,
+    fundingRate: Number.isFinite(fundingRate) ? fundingRate : null
+  };
 }
 
 // Plain market entry — NOT affected by the Dec 2025 conditional-order
@@ -206,6 +352,21 @@ export async function placeMarketOrder(symbol, side, quantity, { clientOrderId, 
   const params = { symbol, side, type: 'MARKET', quantity, newOrderRespType: 'RESULT' };
   if (clientOrderId) params.newClientOrderId = clientOrderId;
   if (reduceOnly) params.reduceOnly = 'true';
+  return signedRequest('POST', '/fapi/v1/order', params);
+}
+
+// Resting entry. ACK is deliberate: RESULT with a GTD LIMIT may wait for the
+// final status, which could be hours away and exceed the one-shot service's
+// timeout. The deterministic client ID is queried/reconciled below.
+export async function placeLimitOrder(symbol, side, quantity, price, {
+  clientOrderId, goodTillDate
+} = {}) {
+  const params = {
+    symbol, side, type: 'LIMIT', timeInForce: 'GTD', quantity, price,
+    goodTillDate: Math.floor(Number(goodTillDate) / 1000) * 1000,
+    newOrderRespType: 'ACK'
+  };
+  if (clientOrderId) params.newClientOrderId = clientOrderId;
   return signedRequest('POST', '/fapi/v1/order', params);
 }
 
@@ -241,9 +402,107 @@ export function marketOrderMatches(order, { symbol, side, quantity, clientOrderI
     && exactReduceOnly;
 }
 
+export function limitOrderMatches(order, {
+  symbol, side, quantity, price, clientOrderId, goodTillDate
+}) {
+  const type = order?.type || order?.origType;
+  const actualQuantity = Number(order?.origQty);
+  const expectedQuantity = Number(quantity);
+  const actualPrice = Number(order?.price);
+  const expectedPrice = Number(price);
+  const quantityTolerance = Math.max(1e-12, Math.abs(expectedQuantity) * 1e-10);
+  const priceTolerance = Math.max(1e-12, Math.abs(expectedPrice) * 1e-10);
+  const actualGtd = Number(order?.goodTillDate);
+  const expectedGtd = Math.floor(Number(goodTillDate) / 1000) * 1000;
+  return order?.symbol === symbol && order?.side === side && type === 'LIMIT'
+    && order?.timeInForce === 'GTD'
+    && order?.clientOrderId === clientOrderId
+    && Number.isFinite(actualQuantity) && Number.isFinite(expectedQuantity)
+    && Math.abs(actualQuantity - expectedQuantity) <= quantityTolerance
+    && Number.isFinite(actualPrice) && Number.isFinite(expectedPrice)
+    && Math.abs(actualPrice - expectedPrice) <= priceTolerance
+    && Number.isFinite(actualGtd) && actualGtd === expectedGtd;
+}
+
 export function isTerminalMarketOrder(order) {
   return ['FILLED', 'CANCELED', 'EXPIRED', 'REJECTED', 'EXPIRED_IN_MATCH']
     .includes(String(order?.status || '').toUpperCase());
+}
+
+export const isTerminalEntryOrder = isTerminalMarketOrder;
+
+// One immutable signal intent maps to one exchange order. Unlike a market
+// retry, a terminal, unfilled resting order is not replaced under the same
+// signal: doing so would turn a bounded wait into an indefinite one.
+export async function placeLimitOrderReconciled(
+  symbol, side, quantity, price, { clientOrderId, goodTillDate, onBeforeSubmit } = {}
+) {
+  if (!clientOrderId) return placeLimitOrder(symbol, side, quantity, price, { goodTillDate });
+  const expected = { symbol, side, quantity, price, clientOrderId, goodTillDate };
+  const prior = await findOrderByClientId(symbol, clientOrderId);
+  if (prior) {
+    if (!limitOrderMatches(prior, expected)) {
+      const error = new Error(`limit order ${clientOrderId} exists but does not match the intended entry`);
+      error.limitOrderIntentMismatch = true;
+      throw error;
+    }
+    return { ...prior, reconciled: true };
+  }
+  // A caller veto means no request was sent and therefore has no ambiguous
+  // exchange outcome. Keep it outside the submission reconciliation block.
+  if (typeof onBeforeSubmit === 'function') await onBeforeSubmit({ expected });
+  try {
+    const placed = await placeLimitOrder(symbol, side, quantity, price, { clientOrderId, goodTillDate });
+    // ACK responses should carry the immutable intent. If an exchange version
+    // omits fields, query the order rather than accepting incomplete proof.
+    const visible = limitOrderMatches(placed, expected)
+      ? placed : await findOrderByClientId(symbol, clientOrderId);
+    if (!visible) {
+      const error = new Error(`Binance accepted a limit request but did not yet expose intent ${clientOrderId}`);
+      error.outcomeUnknown = true;
+      throw error;
+    }
+    if (!limitOrderMatches(visible, expected)) {
+      const error = new Error(`Binance exposed a mismatched limit intent ${clientOrderId}`);
+      error.limitOrderIntentMismatch = true;
+      throw error;
+    }
+    return visible;
+  } catch (submissionError) {
+    if (submissionError.limitOrderIntentMismatch) throw submissionError;
+    try {
+      const recovered = await findOrderByClientId(symbol, clientOrderId);
+      if (recovered) {
+        if (!limitOrderMatches(recovered, expected)) {
+          const error = new Error(`recovered limit order ${clientOrderId} does not match the intended entry`);
+          error.limitOrderIntentMismatch = true;
+          throw error;
+        }
+        return { ...recovered, reconciled: true };
+      }
+    } catch (reconciliationError) {
+      if (reconciliationError.limitOrderIntentMismatch) throw reconciliationError;
+      submissionError.reconciliationError = reconciliationError.message;
+    }
+    submissionError.outcomeUnknown = isExecutionOutcomeUnknown(submissionError);
+    submissionError.clientOrderId = clientOrderId;
+    submissionError.limitOrderIntent = expected;
+    throw submissionError;
+  }
+}
+
+export async function getOpenOrders(symbol) {
+  const rows = await signedRequest('GET', '/fapi/v1/openOrders', symbol ? { symbol } : {});
+  return Array.isArray(rows) ? rows : [];
+}
+
+export async function cancelOrder({ symbol, orderId, clientOrderId }) {
+  if (!symbol || (orderId == null && !clientOrderId)) {
+    throw new Error('cancelOrder requires symbol and orderId or clientOrderId');
+  }
+  return signedRequest('DELETE', '/fapi/v1/order', {
+    symbol, ...(orderId != null ? { orderId } : { origClientOrderId: clientOrderId })
+  });
 }
 
 // Binance documents these message-bus/backend failures as having unknown
@@ -315,10 +574,10 @@ export async function placeMarketOrderReconciled(symbol, side, quantity, options
       continue;
     }
 
+    if (typeof options.onBeforeSubmit === 'function') {
+      await options.onBeforeSubmit({ clientOrderId, expected, generation });
+    }
     try {
-      if (typeof options.onBeforeSubmit === 'function') {
-        await options.onBeforeSubmit({ clientOrderId, expected, generation });
-      }
       const placed = await placeMarketOrder(symbol, side, quantity, { ...options, clientOrderId });
       if (!marketOrderMatches(placed, expected)) {
         const error = new Error(`Binance returned a market order that does not match intent ${clientOrderId}`);
@@ -362,24 +621,21 @@ export function executedMarketOrder(order, { symbol, side, clientOrderId } = {})
 }
 
 // Protective stop-loss / take-profit — MUST use the Algo Order API (see
-// this file's top comment). closePosition=true means "close the whole
-// position when triggered," so we don't need to track/re-round an exact
-// quantity for the protective leg — it always exits everything.
+// this file's top comment). Quantity + reduceOnly bounds each order to the
+// bot-confirmed fill. This is safer than closePosition=true on a shared
+// one-way account because a later manual addition cannot increase the amount
+// this conditional order is allowed to close.
 // workingType=MARK_PRICE (not the default CONTRACT_PRICE) specifically to
 // avoid a thin-orderbook wick on the last-traded price triggering a stop
 // that the broader market never actually reached.
-export async function placeProtectiveOrder(symbol, side, type, triggerPrice, clientAlgoId) {
+export async function placeProtectiveOrder(symbol, side, type, triggerPrice, quantity, clientAlgoId) {
   const params = {
     algoType: 'CONDITIONAL', symbol, side, type,
-    triggerPrice, closePosition: 'true', workingType: 'MARK_PRICE',
+    triggerPrice, quantity, reduceOnly: 'true', workingType: 'MARK_PRICE',
     newOrderRespType: 'RESULT'
   };
   if (clientAlgoId) params.clientAlgoId = clientAlgoId;
   return signedRequest('POST', '/fapi/v1/algoOrder', params);
-}
-
-export async function cancelAllOpenOrders(symbol) {
-  return signedRequest('DELETE', '/fapi/v1/allOpenOrders', { symbol });
 }
 
 // Confirmed live via Binance's current docs: algo (conditional) orders
@@ -436,19 +692,28 @@ export function protectionClientOrderIds(baseClientAlgoId, count = MAX_PROTECTIO
     protectionClientOrderId(baseClientAlgoId, generation));
 }
 
-export function protectiveOrderMatches(order, { symbol, side, type, triggerPrice, clientAlgoId }) {
+export function protectiveOrderMatches(order, {
+  symbol, side, type, triggerPrice, quantity, clientAlgoId
+}) {
   const actualTrigger = Number(order?.triggerPrice);
   const expectedTrigger = Number(triggerPrice);
+  const actualQuantity = Number(order?.quantity ?? order?.origQty);
+  const expectedQuantity = Number(quantity);
   const triggerTolerance = Number.isFinite(expectedTrigger)
     ? Math.max(1e-12, Math.abs(expectedTrigger) * 1e-10) : 0;
+  const quantityTolerance = Number.isFinite(expectedQuantity)
+    ? Math.max(1e-12, Math.abs(expectedQuantity) * 1e-10) : 0;
   return order?.symbol === symbol
     && order?.side === side
     && (order?.orderType || order?.type) === type
-    && (order?.closePosition === true || order?.closePosition === 'true')
+    && (order?.closePosition === false || order?.closePosition === 'false' || order?.closePosition == null)
+    && (order?.reduceOnly === true || order?.reduceOnly === 'true')
     && order?.workingType === 'MARK_PRICE'
     && (!clientAlgoId || order?.clientAlgoId === clientAlgoId)
     && Number.isFinite(actualTrigger) && Number.isFinite(expectedTrigger)
-    && Math.abs(actualTrigger - expectedTrigger) <= triggerTolerance;
+    && Math.abs(actualTrigger - expectedTrigger) <= triggerTolerance
+    && Number.isFinite(actualQuantity) && Number.isFinite(expectedQuantity)
+    && Math.abs(actualQuantity - expectedQuantity) <= quantityTolerance;
 }
 
 function validateReconciledProtection(order, expected) {
@@ -466,20 +731,20 @@ function validateReconciledProtection(order, expected) {
 }
 
 export async function placeProtectiveOrderReconciled(
-  symbol, side, type, triggerPrice, clientAlgoId,
-  { verifyFinishedReplacement } = {}
+  symbol, side, type, triggerPrice, quantity, clientAlgoId,
+  { verifyFinishedReplacement, onBeforeSubmit } = {}
 ) {
   // Calls without an identity retain the direct behavior for backwards
   // compatibility. Production protection always supplies an identity.
   if (!clientAlgoId) {
-    const expected = { symbol, side, type, triggerPrice, clientAlgoId };
+    const expected = { symbol, side, type, triggerPrice, quantity, clientAlgoId };
     return validateReconciledProtection(
-      await placeProtectiveOrder(symbol, side, type, triggerPrice, clientAlgoId), expected);
+      await placeProtectiveOrder(symbol, side, type, triggerPrice, quantity, clientAlgoId), expected);
   }
 
   for (let generation = 0; generation < MAX_PROTECTION_GENERATIONS; generation++) {
     const currentClientAlgoId = protectionClientOrderId(clientAlgoId, generation);
-    const expected = { symbol, side, type, triggerPrice, clientAlgoId: currentClientAlgoId };
+    const expected = { symbol, side, type, triggerPrice, quantity, clientAlgoId: currentClientAlgoId };
     const prior = await findAlgoOrderByClientId(currentClientAlgoId);
     if (prior) {
       try {
@@ -498,8 +763,13 @@ export async function placeProtectiveOrderReconciled(
       }
     }
 
+    if (typeof onBeforeSubmit === 'function') {
+      await onBeforeSubmit({ clientAlgoId: currentClientAlgoId, expected, generation });
+    }
     try {
-      const placed = await placeProtectiveOrder(symbol, side, type, triggerPrice, currentClientAlgoId);
+      const placed = await placeProtectiveOrder(
+        symbol, side, type, triggerPrice, quantity, currentClientAlgoId
+      );
       const validated = validateReconciledProtection(placed, expected);
       return { ...validated, clientAlgoId: validated.clientAlgoId || currentClientAlgoId };
     } catch (submissionError) {

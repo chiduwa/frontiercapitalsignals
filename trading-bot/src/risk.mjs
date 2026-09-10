@@ -45,6 +45,7 @@ export function sizePosition(candidate, extremeBoost) {
   const edge = conservativeEdge(candidate);
   let positionPct = scaleByEdge(edge, config.minPositionPct, config.maxPositionPct);
   let leverage = scaleByEdge(edge, config.minLeverage, config.maxLeverage);
+  leverage *= Math.max(1, Number(config.leverageAggressionMultiplier) || 1);
   if (extremeBoost) {
     positionPct *= config.extremeAggressionBoost;
     leverage *= config.extremeAggressionBoost;
@@ -53,6 +54,146 @@ export function sizePosition(candidate, extremeBoost) {
     positionPct: Math.min(positionPct, config.maxPositionPct),
     leverage: Math.min(Math.max(Math.round(leverage), config.minLeverage), config.maxLeverage)
   };
+}
+
+// ---------------------------------------------------------------------------
+// Entry geometry: an evidence-labelled margin of error, not a guessed bottom.
+// ---------------------------------------------------------------------------
+
+const positiveFinite = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+
+export function entryOffsetPlan(candidate) {
+  const signalPrice = positiveFinite(candidate?.signalPrice);
+  if (signalPrice == null) {
+    return { ok: false, reason: 'no positive published signal price from which to calculate a limit entry' };
+  }
+
+  const minPct = positiveFinite(config.entryOffsetMinPct);
+  const maxPct = positiveFinite(config.entryOffsetMaxPct);
+  const confidenceFloor = positiveFinite(config.entryOffsetHighConfidenceFloorPct);
+  const maxReduction = Number(config.entryOffsetMaxConfidenceReductionPct);
+  if (minPct == null || maxPct == null || confidenceFloor == null
+      || maxPct < minPct || confidenceFloor >= minPct
+      || !Number.isFinite(maxReduction) || maxReduction < 0) {
+    return { ok: false, reason: 'entry-offset configuration is invalid' };
+  }
+
+  // Exact-asset historical daily movement is admitted only with a real sample
+  // count. chg24h is labelled separately: it is a current realized move, not
+  // a volatility estimator. Both are observable at decision time.
+  const dailyMoveSamples = Number(candidate?.dailyMoveSamples);
+  const medianDailyMovePct = dailyMoveSamples >= config.entryOffsetDailyMoveMinSamples
+    ? positiveFinite(candidate?.medianAbsDailyMovePct) : null;
+  const absolute24hMovePct = candidate?.currentMovePct != null
+      && Number.isFinite(Number(candidate.currentMovePct))
+    ? Math.abs(Number(candidate.currentMovePct)) : null;
+
+  const holding = candidate?.holding;
+  const wrongN = Number(holding?.wrongN);
+  const wrongMae = Number(holding?.wrongMaePct);
+  const allMae = Number(holding?.maePct);
+  const wrongCallAdversePct = wrongN >= config.entryOffsetWrongCallMinSamples
+      && Number.isFinite(wrongMae) && wrongMae < 0
+    ? -wrongMae : null;
+  const allCallAdversePct = Number(holding?.n) >= 30
+      && Number.isFinite(allMae) && allMae < 0
+    ? -allMae : null;
+  const adversePct = wrongCallAdversePct ?? allCallAdversePct;
+  const adverseBasis = wrongCallAdversePct != null
+    ? 'wrong-call mean adverse excursion'
+    : allCallAdversePct != null ? 'all-call mean adverse excursion' : null;
+
+  const empirical = [
+    ['operator policy floor', minPct],
+    ['historical median absolute daily move', medianDailyMovePct],
+    ['current absolute 24h move', absolute24hMovePct],
+    [adverseBasis, adversePct]
+  ].filter(([, value]) => Number.isFinite(value));
+  const strongest = empirical.sort((a, b) => b[1] - a[1])[0];
+  const beforeConfidence = Math.min(maxPct, Math.max(minPct, strongest[1]));
+
+  // Only the engine's already-conservative edge may tighten the offset. The
+  // reduction is bounded and cannot reach the signal price even at full size.
+  const edge = conservativeEdge(candidate);
+  const edgeSpan = Math.max(1e-9, config.edgeFullSize - ENGINE.minActionableEdge);
+  const confidenceProgress = Math.max(0, Math.min(1,
+    (edge - ENGINE.minActionableEdge) / edgeSpan));
+  const confidenceReductionPct = Math.min(maxReduction,
+    Math.max(0, maxReduction * confidenceProgress));
+  const offsetPct = Math.min(maxPct,
+    Math.max(confidenceFloor, beforeConfidence - confidenceReductionPct));
+
+  return {
+    ok: true,
+    signalPrice,
+    offsetPct,
+    beforeConfidencePct: beforeConfidence,
+    confidenceReductionPct,
+    confidenceProgress,
+    basis: strongest[0],
+    medianDailyMovePct,
+    dailyMoveSamples: Number.isFinite(dailyMoveSamples) ? dailyMoveSamples : null,
+    absolute24hMovePct,
+    adversePct,
+    adverseBasis,
+    wrongCallSamples: Number.isFinite(wrongN) ? wrongN : null
+  };
+}
+
+export function entryLimitPrice(signalPrice, side, offsetPct) {
+  const reference = positiveFinite(signalPrice);
+  const offset = Number(offsetPct);
+  if (reference == null || !Number.isFinite(offset) || !(offset > 0 && offset < 100)) return null;
+  if (side === 'BUY') return reference * (1 - offset / 100);
+  if (side === 'SELL') return reference * (1 + offset / 100);
+  return null;
+}
+
+export function entryOrderTtlMs(candidate) {
+  const minMinutes = positiveFinite(config.entryOrderMinMinutes);
+  const maxHours = positiveFinite(config.entryOrderMaxHours);
+  if (minMinutes == null || maxHours == null) return null;
+  const minMs = minMinutes * 60_000;
+  const maxMs = maxHours * 3_600_000;
+  if (!(minMs > 10 * 60_000) || !(maxMs >= minMs)) return null;
+  const measuredHours = positiveFinite(candidate?.holding?.hoursToPeak);
+  const horizonHours = positiveFinite(candidate?.horizonHours);
+  const evidenceClockMs = (measuredHours ?? horizonHours ?? config.entryOrderMaxHours) * 3_600_000;
+  return Math.min(maxMs, Math.max(minMs, evidenceClockMs));
+}
+
+// Freeze GTD against the immutable signal observation, not the bot cycle's
+// wall clock. Re-running the same signal must address the same bounded order
+// intent instead of extending its life by another day on every retry.
+export function entryOrderExpiryMs(candidate) {
+  const ttlMs = entryOrderTtlMs(candidate);
+  const observedAt = Date.parse(candidate?.signalPriceAt || candidate?.signalGeneratedAt || '');
+  if (!(ttlMs > 0) || !Number.isFinite(observedAt)) return null;
+  return Math.floor((observedAt + ttlMs) / 1000) * 1000;
+}
+
+export function signalReferenceIssue(candidate, nowMs, markPrice = null) {
+  const signalPrice = positiveFinite(candidate?.signalPrice);
+  if (signalPrice == null) return 'no positive published signal price';
+  const observedAt = Date.parse(candidate?.signalPriceAt || candidate?.signalGeneratedAt || '');
+  if (!Number.isFinite(observedAt)) return 'published signal price has no parseable observation time';
+  const ageMs = Number(nowMs) - observedAt;
+  if (!Number.isFinite(ageMs) || ageMs < -60_000) return 'published signal price timestamp is in the future';
+  if (ageMs > config.maxSignalAgeMinutes * 60_000) {
+    return `published signal price is ${(ageMs / 60_000).toFixed(1)} minutes old (maximum ${config.maxSignalAgeMinutes})`;
+  }
+  if (markPrice != null) {
+    const mark = positiveFinite(markPrice);
+    if (mark == null) return 'Binance mark price is unavailable';
+    const deviationPct = Math.abs(mark / signalPrice - 1) * 100;
+    if (deviationPct > config.maxSignalMarkDeviationPct) {
+      return `Binance mark differs from the published reference by ${deviationPct.toFixed(2)}% (maximum ${config.maxSignalMarkDeviationPct}%)`;
+    }
+  }
+  return null;
 }
 
 // Total margin already committed across every open position, as a fraction

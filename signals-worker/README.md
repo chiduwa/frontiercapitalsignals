@@ -49,7 +49,20 @@ Then in the Cloudflare dashboard: Worker → Settings → Domains & Routes → c
 npx wrangler d1 create frontier-capital-signals-reliability
 ```
 
-Then run the schema in `scripts/schema.sql` against it (`npx wrangler d1 execute frontier-capital-signals-reliability --file=scripts/schema.sql --remote`). Future additive schema changes live in `migrations/`; both the Worker deploy and refresh workflows apply them before running code that depends on them. To apply one manually, run `npx wrangler d1 migrations apply frontier-capital-signals-reliability --remote`.
+For a **brand-new empty database only**, install the current snapshot and then
+seed Wrangler's migration journal:
+
+```bash
+npx --yes wrangler@4 d1 execute frontier-capital-signals-reliability --file=scripts/schema.sql --remote
+npx --yes wrangler@4 d1 execute frontier-capital-signals-reliability --file=scripts/current-schema-baseline.sql --remote
+```
+
+Do not use those snapshot commands to upgrade an existing or partially built
+database: `CREATE TABLE IF NOT EXISTS` cannot add later columns. Existing
+databases are upgraded only with
+`npx --yes wrangler@4 d1 migrations apply frontier-capital-signals-reliability --remote`.
+Both the Worker deploy and refresh workflows apply pending migrations before
+running code that depends on them.
 
 **3. GitHub repo secrets/variables** (repo → Settings → Secrets and variables → Actions), used by `signals-refresh.yml`:
 
@@ -141,7 +154,7 @@ CoinGecko (top 100, daily history, global, trending, and derivatives positioning
 
 ## Security
 
-The dashboard sends `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy` headers. All data rendered into the page goes through the client-side `esc()` helper before hitting `innerHTML`, including fields (asset names, symbols) that ultimately originate from third-party feeds. The JSON API is public/read-only with no auth and `Access-Control-Allow-Origin: *` by design — it carries no secrets and no user-specific data, only market data that's already public. The reliability D1 database holds only prices and directional vote history, no PII, and is never exposed to the Worker or the public API.
+The dashboard sends `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy` headers. All data rendered into the page goes through the client-side `esc()` helper before hitting `innerHTML`, including fields (asset names, symbols) that ultimately originate from third-party feeds. The public JSON signal API is read-only and uses `Access-Control-Allow-Origin: *` by design because it carries public market data only. The same D1 database now also contains the private account-journal ledger; those rows are reachable only through the separately authenticated, no-store journal routes and are never included in public signal payloads.
 
 ## Support/resistance breaks and accumulation/distribution (added 2026-08-20)
 
@@ -308,6 +321,14 @@ The discovery-time stress test is anchored walk-forward: each expanding training
 The default round-trip deductions are explicit assumptions—0.30% for crypto and 0.15% for equities—and can be overridden with `FCS_CRYPTO_ROUND_TRIP_COST_PCT` and `FCS_STOCK_ROUND_TRIP_COST_PCT`. They cover a conservative fee/spread allowance, not market impact, borrow, perpetual funding, taxes, or guaranteed fills. Those omissions are repeated in alerts; no exact entry, exit, top, or bottom is inferred from this daily-bar research lane.
 
 This is not yet a portfolio backtester: the archive is built from the currently observed universe and is therefore not guaranteed survivorship-bias-free, while simultaneous signals, capacity, and cross-position correlation are not netted into a portfolio equity curve. Maximum drawdown is measured on the event-close curve, not intratrade adverse excursion. Per-pattern rankings are useful research triage, not a claim that the top row was historically investable at arbitrary size.
+
+## Long-recovery shadow study
+
+`scripts/crash-recovery-research.mjs` runs as a separate, resource-capped weekly job over the bounded daily archive. It records point-in-time first crossings below a declared trailing-peak drawdown, uses the next close as the reproducible reference entry, and keeps incomplete outcomes pending. Separate 365/730-bar crypto and 252/504-session stock paths record prior-peak recovery, first 2x/5x/10x/20x milestones, terminal return, favorable/adverse excursion, and an explicitly hindsight-only path low. It also aligns the exact pre-event published long/short/withheld state so misses can be counted without reconstructing what the page might have shown.
+
+The configured per-run bar cap counts physical database rows, including the one-row truncation sentinel. A range that consumes that sentinel is deferred rather than partially checkpointed. Histories that genuinely contain too few point-in-time observations to form the declared lookback are checkpointed at their latest archived date and rotated normally; the incremental overlap revisits later dates as new bars arrive, while an unevaluable sparse symbol cannot permanently monopolize first-run priority or inflate the deferred count of an otherwise completed run.
+
+The summaries are raw descriptive associations with sample, unique-symbol, and time-cohort counts—no IID confidence interval is reported for dependent crash episodes. Historical bootstrap evidence is permanently separated from new prospective observations. This is a crash-onset/recovery cohort, not a bottom detector, causal news model, or trading rule. The current archive is not guaranteed to include dead/delisted instruments (and does not currently contain CVNA), so it cannot supply a survivorship-free market base rate. Every row is database-constrained to `live_edge_eligible = 0`; any hypothesis must independently enter the existing prospective, walk-forward, after-cost research lifecycle before it may affect a signal.
 
 ## Entry and exit timing, measured (added 2026-09-04)
 

@@ -43,9 +43,11 @@ rate-limits the launch API itself (`Too many requests for the user`)
 independently of capacity, so a retry loop needs a real backoff or it makes
 its own odds worse.
 
-Both bots run on this one instance, with separate keys — see the note on that
-in [`../README.md`](../README.md). A second instance would double the capacity
-wait and consume the whole 2-OCPU quota for no benefit.
+Both bot processes run on this one instance, with separate keys — see the note
+in [`../README.md`](../README.md). This process/key separation does not isolate
+manual Futures trades from the futures bot when both use the same Binance
+one-way account. Use a dedicated Futures subaccount/account if hard position
+isolation is required.
 
 **Reserve the public IP.** OCI cannot convert an ephemeral IP to reserved in
 place: you must release the ephemeral one and create a `RESERVED` public IP
@@ -102,12 +104,13 @@ Confirm in that log: `equity` is a real number **for the account you intend**
 if you meant the Lead Trader portfolio), `signals_contract` shows
 `confluence-v7`, skips cite real gates, and there are no `error_*` lines.
 Expect **zero opens** — the engine withholds every call during its cold start,
-and the bot records shadow entries instead.
+and the bot records unfilled shadow LIMIT proposals instead.
 
 Once that looks right:
 
 ```bash
 sudo systemctl enable --now fcs-trading-bot.timer      # every 5 min
+sudo systemctl enable --now fcs-trading-protection.timer # protection-only every 15 s
 sudo systemctl enable --now fcs-spot-bot.timer         # every 4 h
 sudo systemctl enable --now fcs-account-journal.timer  # read-only sync every 15 min
 sudo systemctl enable --now fcs-trading-bot-update.timer
@@ -118,16 +121,56 @@ sudo systemctl enable --now fcs-trading-bot-update.timer
 ```bash
 systemctl list-timers 'fcs-*'                        # next firing
 journalctl -u fcs-trading-bot -f                     # follow decisions live
+journalctl -u fcs-trading-protection -n 100 --no-pager # resting-fill protection
 journalctl -u fcs-trading-bot --since '2 hours ago' | grep decision_open
 journalctl -u fcs-bot-update -n 50 --no-pager        # update history
 journalctl -u fcs-account-journal -n 100 --no-pager  # imported account fills
 sudo systemctl stop fcs-trading-bot.timer            # stop trading now
 ```
 
-The update timer pulls `main` hourly and **rolls back** if the new commit
-fails the guardrail tests, so a broken push cannot arm an untested bot. The
+The update timer pulls `main` hourly into a detached staging worktree and runs
+all guardrail suites there. A failed target never replaces `/opt/fcs`. After a
+pass, the updater takes the journal, spot and futures runtime locks and switches
+the checkout only for the short install step; services therefore cannot import
+a half-switched tree. It neither restarts services nor enables timers. The
 decision log is JSON on journald — that is the audit trail, the same role the
 Actions job log used to play.
+
+Schema is deployed separately from the host updater. Before pulling a version
+that uses a new D1 table, apply migrations from a trusted checkout:
+
+```bash
+cd signals-worker
+npx --yes wrangler@4 d1 migrations apply frontier-capital-signals-reliability --remote
+```
+
+For this release, verify that migrations through
+`0031_account_journal_position_snapshots.sql` are reported as applied before
+the next bot or journal cycle. Migration 0030 supplies the durable write-ahead
+intent required before any live LIMIT submission and the conservative
+hourly-OHLC reachability fields used by dry/shadow research; migration 0031
+supplies the separate read-only current-position and append-only snapshot
+journal tables.
+
+The futures bot now places authorized entries as adaptive `LIMIT`/`GTD`
+orders, 4–10% away from the immutable signal reference, and expires them after
+the evidence clock (never longer than 24 hours). It reconciles and cancels by
+the exact bot client ID. The protection-only timer checks resting fills every
+15 seconds without fetching signals or opening trades; it shares the main
+execution lease, so the two one-shot services do not mutate state together.
+Dry and shadow rows are proposals, not fills. Manual
+positions remain alert-only; inspect `foreign_position_*`,
+`position_ownership_conflict`, `cancelled_tracked_entry` and
+`retired_legacy_assisted_protection` events during rollout.
+
+On an existing host, the updater installs but intentionally does not enable a
+new timer. After this release has passed its staged update, explicitly arm the
+protection-only timer without stopping or restarting the decision bot:
+
+```bash
+sudo systemctl enable --now fcs-trading-protection.timer
+systemctl is-active fcs-trading-bot.timer fcs-trading-protection.timer
+```
 
 ## Going live
 

@@ -6,11 +6,13 @@ import { classifyOrder } from '../src/classify.mjs';
 import { loadConfig } from '../src/config.mjs';
 import {
   createBinanceClient, incrementIdentifier, normalizeAlgoExecutionOrder,
-  normalizeAlgoState, normalizeOrder, normalizeTrade, parseBinanceJson, timeWindows
+  normalizeAlgoState, normalizeFuturesPosition, normalizeOrder, normalizeTrade,
+  parseBinanceJson, timeWindows
 } from '../src/binance.mjs';
 import {
-  attachProvenance, loadAlgoExecutionOrders, loadPendingAlgoStates,
-  markAlgoPolled, persistAlgoStates, persistJournalPage,
+  attachProvenance, classifyCurrentFuturesPosition, loadAlgoExecutionOrders,
+  loadPendingAlgoStates, markAlgoPolled, persistAlgoStates,
+  persistCurrentFuturesPositions, persistJournalPage,
   reclassifyJournalFills, reclassifyStoredFill
 } from '../src/store.mjs';
 import {
@@ -71,6 +73,68 @@ test('configuration defaults to the bot-reserved provenance prefixes and tracked
   assert.ok(config.spot.configuredSymbols.includes('FILUSDT'));
   assert.equal(config.tradePageLimit, 1000);
   assert.equal(config.maxAlgoPollsPerSymbol, 25);
+});
+
+test('open futures position snapshots preserve exchange facts and abstain on provenance', () => {
+  const observedAt = '2026-09-09T12:00:00.000Z';
+  const position = normalizeFuturesPosition({
+    symbol: 'PEPEUSDT', positionSide: 'BOTH', positionAmt: '1000',
+    entryPrice: '0.0000100', breakEvenPrice: '0.0000101', markPrice: '0.0000110',
+    unRealizedProfit: '0.001', liquidationPrice: '0.000005', leverage: '5',
+    marginType: 'cross', isolatedMargin: '0', notional: '0.011'
+  }, observedAt);
+  assert.equal(position.side, 'BUY');
+  assert.equal(position.quantity, 1000);
+  assert.equal(normalizeFuturesPosition({ symbol: 'PEPEUSDT', positionAmt: '0' }, observedAt), null);
+  assert.equal(normalizeFuturesPosition({ symbol: 'PEPEUSDT', positionAmt: '1' }, observedAt), null);
+  const sparse = normalizeFuturesPosition({
+    symbol: 'PEPEUSDT', positionSide: 'BOTH', positionAmt: '-2'
+  }, observedAt);
+  assert.equal(sparse.side, 'SELL');
+  assert.equal(sparse.unrealizedPnl, null);
+  assert.equal(sparse.notional, null);
+  const exact = classifyCurrentFuturesPosition(position, {
+    side: 'BUY', evidence: {
+      ownershipVerified: true, ownershipConflict: false,
+      outcomePending: false, entryExecutedQty: 1000
+    }
+  });
+  assert.equal(exact.origin, 'bot');
+  assert.equal(classifyCurrentFuturesPosition(position, {
+    side: 'BUY', evidence: { ownershipVerified: true, entryExecutedQty: 999 }
+  }).origin, 'unknown');
+  assert.equal(classifyCurrentFuturesPosition(position, null).origin, 'unknown');
+});
+
+test('current positions refresh separately while historical snapshots remain append-only', async () => {
+  const database = new DatabaseSync(':memory:');
+  database.exec(readFileSync(new URL(
+    '../../signals-worker/migrations/0031_account_journal_position_snapshots.sql', import.meta.url
+  ), 'utf8'));
+  database.exec(`CREATE TABLE trading_bot_open_orders (
+    symbol TEXT PRIMARY KEY, side TEXT NOT NULL, entry_evidence TEXT
+  )`);
+  database.prepare(`INSERT INTO trading_bot_open_orders
+    (symbol, side, entry_evidence) VALUES (?, ?, ?)`).run(
+    'PEPEUSDT', 'BUY', JSON.stringify({ ownershipVerified: true, entryExecutedQty: 1000 })
+  );
+  const config = loadConfig(baseEnv, Date.parse('2026-09-09T12:00:00Z'));
+  const position = normalizeFuturesPosition({
+    symbol: 'PEPEUSDT', positionSide: 'BOTH', positionAmt: '1000',
+    entryPrice: '0.00001', markPrice: '0.000011', unRealizedProfit: '0.001'
+  }, '2026-09-09T12:00:00.000Z');
+  await withLocalD1(database, async () => {
+    const stored = await persistCurrentFuturesPositions(
+      config, [position], '2026-09-09T12:00:00.000Z'
+    );
+    assert.equal(stored[0].origin, 'bot');
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM account_journal_current_positions').get().n, 1);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM account_journal_position_snapshots').get().n, 1);
+    await persistCurrentFuturesPositions(config, [], '2026-09-09T12:15:00.000Z');
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM account_journal_current_positions').get().n, 0);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM account_journal_position_snapshots').get().n, 1);
+  });
+  database.close();
 });
 
 test('overlapping manual and bot prefixes are rejected', () => {

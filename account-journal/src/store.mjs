@@ -28,6 +28,112 @@ export async function knownSymbols(config, market) {
   return rows.map((row) => String(row.symbol || '').toUpperCase()).filter(Boolean);
 }
 
+function currentPositionQuantitiesMatch(expected, actual) {
+  const a = Number(expected);
+  const b = Number(actual);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  return Math.abs(a - b) <= Math.max(1e-12, Math.abs(a) * 1e-9);
+}
+
+export function classifyCurrentFuturesPosition(position, claim) {
+  const evidence = claim?.evidence || {};
+  const exactBot = claim
+    && evidence.ownershipVerified === true
+    && evidence.ownershipConflict !== true
+    && evidence.outcomePending !== true
+    && claim.side === position.side
+    && Number(evidence.entryExecutedQty) > 0
+    && currentPositionQuantitiesMatch(evidence.entryExecutedQty, position.quantity);
+  return exactBot
+    ? {
+        origin: 'bot',
+        classificationMethod: 'durable_exact_bot_position_quantity',
+        classificationEvidence: 'live side and quantity match the exchange-confirmed FCS entry ownership record'
+      }
+    : {
+        origin: 'unknown',
+        classificationMethod: 'no_exact_bot_position_ownership',
+        classificationEvidence: claim
+          ? 'a bot state row exists but does not currently prove the exact live side and quantity'
+          : 'no durable FCS position ownership row exists; exchange records do not prove UI-vs-API origin'
+      };
+}
+
+async function loadBotPositionClaims(config) {
+  const rows = await d1(cf(config), `SELECT symbol, side, entry_evidence
+    FROM trading_bot_open_orders`);
+  return new Map(rows.map((row) => {
+    let evidence = {};
+    try { evidence = JSON.parse(row.entry_evidence || '{}'); } catch {}
+    return [String(row.symbol), { side: row.side, evidence }];
+  }));
+}
+
+export async function persistCurrentFuturesPositions(config, positions, observedAt) {
+  const claims = await loadBotPositionClaims(config);
+  const classified = (positions || []).map((position) => ({
+    ...position, ...classifyCurrentFuturesPosition(position, claims.get(position.symbol))
+  }));
+  const currentStatements = classified.map((position) => ({
+    sql: `INSERT INTO account_journal_current_positions (
+      symbol, position_side, side, position_amt, quantity, entry_price,
+      break_even_price, mark_price, unrealized_pnl, liquidation_price,
+      leverage, margin_type, isolated_margin, notional, origin,
+      classification_method, classification_evidence, observed_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(symbol, position_side) DO UPDATE SET
+      side=excluded.side, position_amt=excluded.position_amt,
+      quantity=excluded.quantity, entry_price=excluded.entry_price,
+      break_even_price=excluded.break_even_price, mark_price=excluded.mark_price,
+      unrealized_pnl=excluded.unrealized_pnl,
+      liquidation_price=excluded.liquidation_price, leverage=excluded.leverage,
+      margin_type=excluded.margin_type, isolated_margin=excluded.isolated_margin,
+      notional=excluded.notional, origin=excluded.origin,
+      classification_method=excluded.classification_method,
+      classification_evidence=excluded.classification_evidence,
+      observed_at=excluded.observed_at`,
+    params: [position.symbol, position.positionSide, position.side,
+      position.positionAmt, position.quantity, position.entryPrice,
+      position.breakEvenPrice, position.markPrice, position.unrealizedPnl,
+      position.liquidationPrice, position.leverage, position.marginType,
+      position.isolatedMargin, position.notional, position.origin,
+      position.classificationMethod, position.classificationEvidence, observedAt]
+  }));
+  const snapshotStatements = classified.map((position) => ({
+    sql: `INSERT INTO account_journal_position_snapshots (
+      observed_at, symbol, position_side, side, position_amt, quantity,
+      entry_price, break_even_price, mark_price, unrealized_pnl,
+      liquidation_price, leverage, margin_type, isolated_margin, notional,
+      origin, classification_method, classification_evidence)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(observed_at, symbol, position_side) DO UPDATE SET
+      side=excluded.side, position_amt=excluded.position_amt,
+      quantity=excluded.quantity, entry_price=excluded.entry_price,
+      break_even_price=excluded.break_even_price, mark_price=excluded.mark_price,
+      unrealized_pnl=excluded.unrealized_pnl,
+      liquidation_price=excluded.liquidation_price, leverage=excluded.leverage,
+      margin_type=excluded.margin_type, isolated_margin=excluded.isolated_margin,
+      notional=excluded.notional, origin=excluded.origin,
+      classification_method=excluded.classification_method,
+      classification_evidence=excluded.classification_evidence`,
+    params: [observedAt, position.symbol, position.positionSide, position.side,
+      position.positionAmt, position.quantity, position.entryPrice,
+      position.breakEvenPrice, position.markPrice, position.unrealizedPnl,
+      position.liquidationPrice, position.leverage, position.marginType,
+      position.isolatedMargin, position.notional, position.origin,
+      position.classificationMethod, position.classificationEvidence]
+  }));
+  for (const batch of chunk([...currentStatements, ...snapshotStatements], 40)) {
+    await d1Batch(cf(config), batch);
+  }
+  // Delete a prior position only after every current row and durable snapshot
+  // succeeded. A failed sync therefore leaves a stale-but-labelled timestamp,
+  // never a falsely empty account view.
+  await d1(cf(config), `DELETE FROM account_journal_current_positions
+    WHERE observed_at <> ?`, [observedAt]);
+  return classified;
+}
+
 export async function getCheckpoint(config, market, symbol, stream) {
   const [row] = await d1(cf(config), `
     SELECT last_trade_id, cursor_time_ms, updated_at

@@ -11,9 +11,12 @@ It ran on GitHub Actions until 2026-09-05. That moved for two reasons with
 one cause: the `*/5` schedule **never fired once**, and GitHub-hosted runners
 egress from ~7,251 rotating CIDR blocks, so the Binance API key could never
 be IP-restricted — which the security section below had flagged as this
-design's weakest point. One instance you own fixes both. This is a **separate process, targeting the Lead Trader
-futures account**, and does not touch or depend on the existing
-personal-account "Ben 10" bot in any way. All state that needs to
+design's weakest point. One instance you own fixes both. This is a **separate
+process, targeting the Lead Trader futures account**, and does not depend on
+the existing personal-account "Ben 10" bot. If an operator also trades
+manually in the same Futures account, those positions are classified
+separately and are alert-only: this bot does not add a stop, target or time
+exit to them. All state that needs to
 survive between runs (equity curve, per-symbol cooldowns, this bot's own
 record of open orders) lives in the same D1 database the rest of this
 repo already writes to (`trading_bot_*` tables, `signals-worker/scripts/schema.sql`)
@@ -63,13 +66,16 @@ the engine still stands behind.
 
 ### Second authorized source: confirmed research
 
-A strategy from the engine's discovery lane may also open a position, but only
-in the `confirmed` lifecycle state — family-corrected discovery, then purged
-walk-forward folds, then a **positive after-cost 95% lower bound replicated on
-data that did not exist when the pattern was found**. `provisional` may not
-trade. Because that evidence is an event study rather than per-asset
-calibration, these positions always take the floor size and floor leverage,
-sit under their own much lower exposure ceiling
+A strategy from the engine's discovery lane retains a second authorization
+path, but only in the `confirmed` lifecycle state — family-corrected discovery,
+then purged walk-forward folds, then a **positive after-cost 95% lower bound
+replicated on data that did not exist when the pattern was found**.
+`provisional` may not trade. The current research payload does not publish an
+immutable reference price, so the LIMIT-entry policy withholds those rows until
+it does; it never invents one from the live mark. Once that field is supplied,
+these positions take the floor size and floor leverage because the evidence is
+an event study rather than per-asset calibration, and sit under their own much
+lower exposure ceiling
 (`MAX_RESEARCH_EXPOSURE_PCT`), and never outrank a calibrated directional call
 for the same margin. Their stop is sized off the strategy's **own measured
 worst trade** rather than a generic fraction — a stop tighter than the
@@ -99,13 +105,30 @@ asset clears the floor:
   order), so it is enforced in-process and is strictly additive: a missed
   cycle delays it, it never removes the stop or target underneath. It never
   extends past the declared horizon.
-- **Entry patience.** `adverseFirstLower` is the lower bound on how often the
-  window's worst price arrived *before* its best. When that clears 50%, the
-  evidence says this setup goes against you first, so filling at the signal
-  price is measurably the wrong fill — the bot waits for price to reach the
-  session's low band (or high, for a short) instead. It runs again in five
-  minutes; a resting limit order would need an order lifecycle a one-shot
-  process cannot supervise.
+- **Resting LIMIT entry.** The immutable `analysis.reference_price`, not the
+  later live dashboard price, anchors every entry. A long limit rests below
+  that reference and a short limit above it. The offset begins at 5%, widens
+  with adequately sampled exact-asset median daily movement, the current
+  absolute 24-hour move, or measured adverse excursion (preferring the
+  wrong-call subset), and is capped at 10%. The strongest calibrated edge may
+  reduce it by at most one percentage point, never below 4%; the bot never
+  deliberately submits at the signal price. A reference older than 30 minutes
+  or more than 3% from the live Binance mark fails closed.
+- **Bounded order life.** Entries use Binance `LIMIT` + `GTD`. Their expiry is
+  the measured mean time-to-peak when available, otherwise the forecast
+  horizon, clamped to 15 minutes through 24 hours. Resting exposure is reserved
+  against the portfolio cap. A partial fill causes the exact remainder to be
+  canceled before the filled quantity can be protected.
+- **Exact lifecycle reconciliation.** A deterministic client order ID and the
+  frozen symbol/side/quantity/price/expiry are checked on every retry. Expiry,
+  ownership conflicts and cleanup cancel only that exact bot-tagged order;
+  there is no account- or symbol-wide cancellation.
+
+Migration `0030_futures_limit_entry_intents.sql` is the durable write-ahead
+ledger for live, dry and shadow proposals. It retains the signal reference,
+offset inputs, expiry, fills/cancellations and realized outcome so unfilled
+orders remain evidence about whether an asset's margin of error was too near
+or too far. Apply it before running this version of the bot.
 
 ## The shadow ledger, and why the bot may place nothing for weeks
 
@@ -117,14 +140,27 @@ to change it.
 
 Rather than idle through that window, every candidate that clears each gate
 the bot itself owns and fails **only** on the engine's authorization is
-recorded in `trading_bot_shadow_trades` with the exact entry, stop, target and
-clock it would have used. Later cycles resolve those against real subsequent
-prices. So when the engine does open up, the bot arrives with a record of its
-own selection quality instead of a blank one.
+recorded as a shadow LIMIT proposal in `trading_bot_entry_intents`, including
+its exact reference, offset and expiry. It is **not** recorded as a fill and
+does not enter performance statistics merely because it was proposed. Any
+later evaluation must first establish from subsequent market data that the
+limit actually traded. Historical pre-0030 market-entry shadows remain in
+`trading_bot_shadow_trades` and continue to resolve under their original
+methodology.
 
 Three provenances are kept strictly separate and never pooled: `shadow`
 (engine had not authorized), `dry` (authorized, `DRY_RUN` on), and `live`.
-Resolution judges against the extremes seen since entry, not the latest mark,
+New crypto dry and shadow proposals are resolved only as LIMIT
+**reachability research** from subsequent hourly OHLC bars. A low/high crossing
+can establish that the price touched the limit, but it cannot establish queue
+position, venue liquidity, slippage, or intrabar ordering, so it is never
+counted as an execution or P&L. A non-touch is marked expired only when at
+least 75% of the expected bars and both window boundaries are present;
+otherwise it remains `awaiting-bars`. Stock proposals remain unresolved until
+a point-in-time stock-bar source is available rather than borrowing crypto
+evidence or current prices. For the
+historical filled-form ledger rows, resolution judges against the extremes
+seen since entry, not the latest mark,
 because a stop breached and then recovered between two cycles is a closed
 trade and scoring on the current price alone would silently drop exactly the
 losers. When both levels have been seen it resolves as the **stop** — which
@@ -138,26 +174,64 @@ exchange and trigger on any tick. The ledger is therefore biased slightly
 optimistic against a live position and must not be read as a like-for-like
 backtest of one.
 
-## Risk controls (unchanged in intent)
+## Risk controls
 
-- 5–20% of the portfolio per trade, 3–20x leverage, now scaled on the
-  conservative edge over baseline rather than a raw win rate — a flat win-rate
-  threshold demands wildly different edges in different classes, purely as an
-  artifact of where each baseline sits.
+- 5–20% of the portfolio per trade. Evidence-scaled leverage receives a modest
+  1.15 multiplier after authorization and is still hard-capped at 20x; it does
+  not loosen the per-position or total exposure ceilings. Confirmed-research
+  trades retain their separate floor sizing.
 - Max 20% per position, max 50% total exposure, enforced regardless of edge.
-- Real exchange-side stop-loss AND take-profit on every position, so
-  protection survives a failed or skipped cycle.
+- Quantity-bounded, reduce-only exchange-side stop-loss AND take-profit on
+  every verified bot-owned filled position, so protection survives a failed
+  or skipped cycle. A protection-only service checks resting fills every 15
+  seconds (subject to host, network, exchange and scheduler latency) and shares
+  the decision cycle's execution lease, so it cannot race a five-minute run.
 - Funding-rate check, per-symbol cooldown, 15% drawdown circuit breaker, 10%
   daily loss limit. A shadow entry consumes no exposure and can never crowd
   out a real one.
 - Every decision is logged as structured JSON to the job log, including every
   skip and the engine's own reason for withholding.
-- `node test.mjs` covers the contract binding, sizing, exit geometry, patience
-  and ledger resolution with no network or Binance key. The engine's numeric
+- `node test.mjs` covers the contract binding, sizing, entry/exit geometry,
+  order identity, ownership and ledger resolution with no network or Binance
+  key. The engine's numeric
   bars are pinned there, so a drift that would leave the bot laxer than the
   system it follows fails the suite. `deploy/setup.sh` refuses to install a
   checkout that fails them, and the hourly update rolls back rather than arm
   an untested bot.
+
+### Personal trades and account isolation
+
+Manual/foreign positions are alert-only at every risk level. The bot records
+their risk readings but has no setting that can turn those readings into a
+stop, target or close. If a manual position appears while a bot entry rests,
+the bot attempts to cancel only its own exact tagged entry; if ownership of a
+net position cannot be proved from an exchange-confirmed fill and exact
+quantity, automated management is quarantined. Legacy `fcsa-*` assisted stops
+from older versions are retired by exact ID.
+
+That software policy is not hard isolation. Binance one-way mode nets manual
+and automated fills for the same symbol into one position, and a manual fill
+can race between two API checks. New protection is exact-quantity and
+`reduceOnly=true`, and ownership is rechecked before each protective POST and
+again afterward; if ownership changes, the bot cancels only its own exact IDs.
+That bounds and narrows the race, but software cannot eliminate it on a netted
+position. If “the bot can never affect a personal trade” is a hard requirement,
+use a dedicated Futures subaccount/account; a second API key on the same
+one-way account is not sufficient isolation.
+
+### Asset-class boundary
+
+Stocks pass the same class-skill and exact calibration gates as crypto, then
+must map to an active USDT-margined Binance `TRADIFI_PERPETUAL` whose exchange
+metadata identifies it as equity/TradFi and which supports LIMIT/GTD,
+have a fresh reference within 3% of that contract's mark, and expose live
+funding. The bot never accepts or signs a Binance TradFi agreement; account
+eligibility remains an operator/exchange decision. A ticker-name match alone
+does not authorize a trade. Commodities are
+not currently an execution class: the bot abstains until the signal engine has
+a commodity board, class baseline/calibration, immutable references and an
+explicit verified Binance-contract mapping. Exchange availability alone is
+not evidence.
 
 ## Security — non-negotiable
 
@@ -179,9 +253,7 @@ trade-only / no-withdrawal scope as well: IP restriction and scope are
 independent controls, and rotate the key if the instance or this repo is ever
 suspected compromised.
 
-Store the real key as GitHub repo secrets (`BINANCE_API_KEY`,
-`BINANCE_API_SECRET`) — Settings → Secrets and variables → Actions.
-Never put real keys in `.env.example`, `.env` is only for local dry-run
+Never put real keys in `.env.example`; `.env` is only for local dry-run
 testing and is gitignored.
 
 ## Setup
@@ -198,27 +270,19 @@ node src/index.mjs       # runs ONE cycle and exits — no internal loop
 ```
 
 With `DRY_RUN=true` (the default), it does REAL reads (account balance,
-positions, live prices) so the simulation is realistic, but every order
-placement is logged as `dry_run_would_*` instead of actually sent. Watch
-several days of job logs (Actions tab → Trading Bot Cycle) before
-considering `DRY_RUN=false`.
+positions, live prices) so the proposal uses current inputs, but it sends no
+orders or leverage changes and does not fabricate a fill. Watch several days
+of logs before considering `DRY_RUN=false`.
 
 ## Running in production
 
-There's nothing to deploy — the code runs directly from this repo via
-`.github/workflows/trading-bot-cycle.yml`, same as the rest of this
-repo's scheduled scripts. To go live:
-
-1. Add repo secrets `BINANCE_API_KEY` / `BINANCE_API_SECRET` (trade-only,
-   see above). `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` and the
-   `FCS_D1_DATABASE_ID` variable are already set for this repo and are
-   reused as-is — nothing to add there.
-2. Push to `main` (or use "Run workflow" in the Actions tab to fire one
-   cycle on demand without waiting for the cron).
-3. Leave the `TRADING_BOT_DRY_RUN` repo variable unset (defaults to
-   `true`) until satisfied with several days of dry-run job logs. Set it
-   to `false` (Settings → Secrets and variables → Actions → Variables)
-   only when ready to place real orders.
+Production runs from the Oracle host under systemd; see
+[`deploy/README.md`](deploy/README.md). Before the host pulls this version,
+apply D1 migrations (through 0031), push `main`, let the hourly updater run
+its tests, and inspect the service log. The updater deliberately does not
+restart or enable timers. Keep the trade-only credentials in
+`/etc/fcs-trading-bot.env` and keep `DRY_RUN=true` until the proposals and
+ownership classifications have been reviewed.
 
 ## What I verified vs. what still needs your own verification before going live
 

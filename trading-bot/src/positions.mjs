@@ -5,10 +5,8 @@
 // unrequested protective order can close somebody else's trade against their
 // intent, which is its own kind of loss.
 //
-// The single exception the operator asked for is a reading that suggests a
-// large loss is imminent. That is not a judgement about whether the trade is
-// good — it is the narrow case where doing nothing risks losing the whole
-// margin to a liquidation.
+// Even an extreme reading is alert-only. A warning can inform the operator,
+// but it does not authorize this process to create an order on their trade.
 //
 // Pure: every threshold here is testable without an exchange.
 import { config } from './config.mjs';
@@ -28,6 +26,14 @@ export function positionQuantitiesMatch(expected, actual) {
 export function positionOrigin(symbol, state, actualSide = null, actualQuantity = null) {
   const recorded = state?.openOrders?.[symbol];
   if (!recorded) return 'manual';
+  // A row written before an exchange-confirmed fill is only an intent, not
+  // proof that the current net position came from the bot. The same is true
+  // of legacy rows which lack the explicit ownership marker. Failing these
+  // to conflict is safer than attaching a close-all stop or time exit to a
+  // manual position which happened to reuse the same symbol/side/quantity.
+  if (recorded.ownershipVerified !== true
+      || !recorded.entryClientOrderId
+      || !(Number(recorded.entryExecutedQty) > 0)) return 'conflict';
   // Binance one-way mode nets a symbol into one position. If the live side no
   // longer matches what the bot actually opened, an operator action (or an
   // external order) has changed ownership semantics. Do not manage that net
@@ -37,9 +43,8 @@ export function positionOrigin(symbol, state, actualSide = null, actualQuantity 
   // addition is therefore just as important an ownership conflict as a side
   // flip: closePosition=true would otherwise close the operator's addition as
   // well. New records retain the bot's exact confirmed residual quantity.
-  const hasOwnedQuantity = recorded.entryExecutedQty != null;
   const ownedQuantity = Number(recorded.entryExecutedQty);
-  if (actualQuantity != null && hasOwnedQuantity && Number.isFinite(ownedQuantity)
+  if (actualQuantity != null && Number.isFinite(ownedQuantity)
       && !positionQuantitiesMatch(ownedQuantity, Math.abs(Number(actualQuantity)))) {
     return 'conflict';
   }
@@ -92,22 +97,4 @@ export function assessRisk({ symbol, side, markPrice, liquidationPrice, unrealiz
   }
 
   return { severity, reason: reasons.join('; ') || 'within normal bounds', metrics };
-}
-
-// Where to put an emergency stop on somebody else's position.
-//
-// Placed BETWEEN the mark and the liquidation price, not at the operator's
-// preferred exit — the bot has no idea what that is. The only claim being made
-// is that closing here loses less than a liquidation would. Never tighter than
-// the mark (which would fill instantly) and never past liquidation (which
-// would never fill).
-export function emergencyStopPrice(markPrice, liquidationPrice, side) {
-  if (!(markPrice > 0) || !(liquidationPrice > 0)) return null;
-  const fraction = Math.min(0.9, Math.max(0.1, config.emergencyStopFraction));
-  const price = side === 'BUY'
-    ? markPrice - (markPrice - liquidationPrice) * fraction
-    : markPrice + (liquidationPrice - markPrice) * fraction;
-  if (side === 'BUY' && !(price > liquidationPrice && price < markPrice)) return null;
-  if (side === 'SELL' && !(price < liquidationPrice && price > markPrice)) return null;
-  return price;
 }
