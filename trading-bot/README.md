@@ -138,8 +138,8 @@ A correctly-gated bot therefore opens nothing until that evidence rebuilds —
 which is the right answer, not a bug, and the thresholds must not be lowered
 to change it.
 
-Rather than idle through that window, every candidate that clears each gate
-the bot itself owns and fails **only** on the engine's authorization is
+During that window, each already-withheld candidate that clears the bot's
+per-candidate gates is
 recorded as a shadow LIMIT proposal in `trading_bot_entry_intents`, including
 its exact reference, offset and expiry. It is **not** recorded as a fill and
 does not enter performance statistics merely because it was proposed. Any
@@ -147,6 +147,14 @@ later evaluation must first establish from subsequent market data that the
 limit actually traded. Historical pre-0030 market-entry shadows remain in
 `trading_bot_shadow_trades` and continue to resolve under their original
 methodology.
+
+Account drawdown and daily-loss gates still block **every live entry**, but
+do not by themselves block these research-only proposals. Freshness, funding,
+existing-position, cooldown and exposure checks still apply. An authorized
+candidate remains `SKIP` while an account gate is active; the bot does not
+turn a shadow proposal into an order. This preserves prospective learning
+without resetting the account's risk baseline or treating a research record
+as profit.
 
 Three provenances are kept strictly separate and never pooled: `shadow`
 (engine had not authorized), `dry` (authorized, `DRY_RUN` on), and `live`.

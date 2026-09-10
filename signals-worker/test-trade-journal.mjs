@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import {
   constantTimeCredentialEqual, dispatchTradeJournalAlerts,
   handleTradeJournalRequest, isTradeJournalRequestAuthorized, loadTradeJournal,
-  parseTradeJournalQuery
+  loadTradeJournalDeliveryStatus, parseRetryAfterMs, parseTradeJournalQuery
 } from './trade-journal.js';
 
 class MockStatement {
@@ -168,6 +168,9 @@ test('journal data keeps bot/manual/unknown definitions and spot caveat explicit
   assert.equal(data.days, 14);
   assert.equal(data.reviewCount, 2);
   assert.equal(data.coverage.retentionPolicy, 'no-automatic-expiry');
+  assert.deepEqual(data.alertDelivery, {
+    configured: false, state: 'disabled', lastSentAt: null
+  });
   assert.match(data.definitions.unknown, /never presumed manual/);
   assert.match(data.definitions.spotPnl, /do not supply realized P&L/);
   assert.match(data.definitions.pnlFilter, /futures fills/);
@@ -339,37 +342,153 @@ test('notification watermark advances only after a successful push', async () =>
     max_ingested_at: '2026-09-08T12:00:00.000Z', max_rowid: 42
   }];
   const kv = new MockKv();
-  const originalFetch = globalThis.fetch;
   let pushed;
-  globalThis.fetch = async (url, options) => {
+  const fetchImpl = async (url, options) => {
     pushed = { url: String(url), options };
     return { ok: true, status: 200 };
   };
-  try {
-    const count = await dispatchTradeJournalAlerts({ FCS_DB: db, FCS_CACHE: kv, NTFY_TOPIC: 'private topic' });
-    assert.equal(count, 3);
-    assert.match(pushed.url, /private%20topic$/);
-    assert.match(pushed.options.body, /1 proven manual, 2 awaiting provenance review/);
-    assert.match(pushed.options.body, /Spot realized P&L.*not supplied/);
-    assert.equal(kv.puts.length, 1);
-    assert.deepEqual(JSON.parse(kv.puts[0].value).maxRowid, 42);
-  } finally { globalThis.fetch = originalFetch; }
+  const count = await dispatchTradeJournalAlerts(
+    { FCS_DB: db, FCS_CACHE: kv, NTFY_TOPIC: 'private topic' },
+    { nowMs: Date.parse('2026-09-08T12:01:00.000Z'), fetchImpl }
+  );
+  assert.equal(count, 3);
+  assert.match(pushed.url, /private%20topic$/);
+  assert.match(pushed.options.body, /1 proven manual, 2 awaiting provenance review/);
+  assert.match(pushed.options.body, /Spot realized P&L.*not supplied/);
+  assert.equal(kv.puts.length, 1);
+  const state = JSON.parse(kv.puts[0].value);
+  assert.equal(state.maxRowid, 42);
+  assert.equal(state.sentAt, '2026-09-08T12:01:00.000Z');
+  assert.equal(state.consecutiveFailures, 0);
 });
 
-test('a failed notification leaves the watermark unchanged for retry', async () => {
+test('Retry-After accepts delta-seconds and HTTP dates without shortening long valid delays', () => {
+  const now = Date.parse('2026-09-08T21:00:00.000Z');
+  assert.equal(parseRetryAfterMs('120', now), 120_000);
+  assert.equal(parseRetryAfterMs('Tue, 08 Sep 2026 22:00:00 GMT', now), 3_600_000);
+  assert.equal(parseRetryAfterMs(String(10 * 24 * 60 * 60), now), 10 * 24 * 60 * 60 * 1000);
+  assert.equal(parseRetryAfterMs('not a delay', now), null);
+});
+
+test('daily-quota 429 persists a midnight-UTC cooldown without advancing the watermark', async () => {
   const db = new MockDb();
   db.notificationRows = [{
     fill_count: 1, manual_count: 0, unknown_count: 1,
     futures_realized_pnl: 0, symbols: 'spot:FILUSDT',
     max_ingested_at: '2026-09-08T13:00:00.000Z', max_rowid: 43
   }];
-  const kv = new MockKv();
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: false, status: 503 });
-  try {
-    await assert.rejects(() => dispatchTradeJournalAlerts({ FCS_DB: db, FCS_CACHE: kv, NTFY_TOPIC: 't' }), /HTTP 503/);
-    assert.equal(kv.puts.length, 0);
-  } finally { globalThis.fetch = originalFetch; }
+  const kv = new MockKv(JSON.stringify({
+    maxRowid: 41, sentAt: '2026-09-08T12:00:00.000Z'
+  }));
+  const nowMs = Date.parse('2026-09-08T21:00:00.000Z');
+  const fetchImpl = async () => new Response(JSON.stringify({
+    code: 42908,
+    http: 429,
+    error: 'limit reached: daily message quota reached; private provider detail'
+  }), {
+    status: 429,
+    headers: { 'Content-Type': 'application/json', 'Retry-After': '3600' }
+  });
+  await assert.rejects(() => dispatchTradeJournalAlerts(
+    { FCS_DB: db, FCS_CACHE: kv, NTFY_TOPIC: 'private-topic' },
+    { nowMs, fetchImpl }
+  ), /HTTP 429 \(provider code 42908\)/);
+  assert.equal(kv.puts.length, 1);
+  const state = JSON.parse(kv.value);
+  assert.equal(state.maxRowid, 41);
+  assert.equal(state.attemptedMaxRowid, 43);
+  assert.equal(state.attemptedFillCount, 1);
+  assert.equal(state.providerHttpStatus, 429);
+  assert.equal(state.providerErrorCode, 42908);
+  assert.equal(state.consecutiveFailures, 1);
+  assert.equal(state.nextAttemptAt, '2026-09-09T00:05:00.000Z');
+  assert.doesNotMatch(kv.value, /private-topic|daily message quota|private provider detail/);
+});
+
+test('burst-limit 429 uses Retry-After instead of the daily midnight cooldown', async () => {
+  const db = new MockDb();
+  db.notificationRows = [{
+    fill_count: 1, manual_count: 0, unknown_count: 1,
+    futures_realized_pnl: null, symbols: 'spot:FILUSDT',
+    max_ingested_at: '2026-09-08T13:00:00.000Z', max_rowid: 43
+  }];
+  const kv = new MockKv(JSON.stringify({ maxRowid: 41 }));
+  const nowMs = Date.parse('2026-09-08T21:00:00.000Z');
+  await assert.rejects(() => dispatchTradeJournalAlerts(
+    { FCS_DB: db, FCS_CACHE: kv, NTFY_TOPIC: 't' },
+    {
+      nowMs,
+      fetchImpl: async () => new Response(JSON.stringify({ code: 42901 }), {
+        status: 429,
+        headers: { 'Content-Type': 'application/json', 'Retry-After': '1800' }
+      })
+    }
+  ), /provider code 42901/);
+  assert.equal(JSON.parse(kv.value).nextAttemptAt, '2026-09-08T21:30:00.000Z');
+});
+
+test('durable cooldown skips both D1 and provider until retry time', async () => {
+  const db = new MockDb();
+  db.notificationRows = [{
+    fill_count: 1, manual_count: 0, unknown_count: 1,
+    futures_realized_pnl: null, symbols: 'spot:PEPEUSDT',
+    max_ingested_at: '2026-09-08T14:00:00.000Z', max_rowid: 78
+  }];
+  const kv = new MockKv(JSON.stringify({
+    maxRowid: 77,
+    consecutiveFailures: 1,
+    nextAttemptAt: '2026-09-09T00:05:00.000Z',
+    providerHttpStatus: 429,
+    providerErrorCode: 42908
+  }));
+  let fetches = 0;
+  const result = await dispatchTradeJournalAlerts(
+    { FCS_DB: db, FCS_CACHE: kv, NTFY_TOPIC: 't' },
+    {
+      nowMs: Date.parse('2026-09-08T23:00:00.000Z'),
+      fetchImpl: async () => { fetches++; return { ok: true, status: 200 }; }
+    }
+  );
+  assert.equal(result, 0);
+  assert.equal(db.reads, 0);
+  assert.equal(fetches, 0);
+  assert.equal(kv.puts.length, 0);
+});
+
+test('successful retry advances the watermark, clears failure state, and supports an optional token', async () => {
+  const db = new MockDb();
+  db.notificationRows = [{
+    fill_count: 2, manual_count: 1, unknown_count: 1,
+    futures_realized_pnl: null, symbols: 'spot:PEPEUSDT',
+    max_ingested_at: '2026-09-09T00:04:00.000Z', max_rowid: 80
+  }];
+  const kv = new MockKv(JSON.stringify({
+    maxRowid: 77,
+    sentAt: '2026-09-08T12:00:00.000Z',
+    consecutiveFailures: 3,
+    nextAttemptAt: '2026-09-09T00:05:00.000Z',
+    providerHttpStatus: 429,
+    providerErrorCode: 42908
+  }));
+  let authorization;
+  const count = await dispatchTradeJournalAlerts({
+    FCS_DB: db, FCS_CACHE: kv, NTFY_TOPIC: 't', NTFY_TOKEN: 'token-value'
+  }, {
+    nowMs: Date.parse('2026-09-09T00:05:01.000Z'),
+    fetchImpl: async (_url, options) => {
+      authorization = options.headers.Authorization;
+      return { ok: true, status: 200 };
+    }
+  });
+  assert.equal(count, 2);
+  assert.equal(authorization, 'Bearer token-value');
+  const state = JSON.parse(kv.value);
+  assert.equal(state.maxRowid, 80);
+  assert.equal(state.consecutiveFailures, 0);
+  assert.equal(state.nextAttemptAt, null);
+  assert.equal(state.providerHttpStatus, null);
+  assert.equal(state.providerErrorCode, null);
+  assert.doesNotMatch(kv.value, /token-value/);
 });
 
 test('alert paging uses row identity so equal ingestion timestamps cannot be skipped', async () => {
@@ -382,11 +501,123 @@ test('alert paging uses row identity so equal ingestion timestamps cannot be ski
   const kv = new MockKv(JSON.stringify({
     maxRowid: 77, maxIngestedAt: '2026-09-08T14:00:00.000Z'
   }));
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: true, status: 200 });
-  try {
-    await dispatchTradeJournalAlerts({ FCS_DB: db, FCS_CACHE: kv, NTFY_TOPIC: 't' });
-    assert.deepEqual(db.notificationParams, [77]);
-    assert.equal(JSON.parse(kv.value).maxRowid, 78);
-  } finally { globalThis.fetch = originalFetch; }
+  await dispatchTradeJournalAlerts(
+    { FCS_DB: db, FCS_CACHE: kv, NTFY_TOPIC: 't' },
+    { fetchImpl: async () => ({ ok: true, status: 200 }) }
+  );
+  assert.deepEqual(db.notificationParams, [77]);
+  assert.equal(JSON.parse(kv.value).maxRowid, 78);
+});
+
+test('authenticated journal exposes sanitized delivery health in JSON and HTML', async () => {
+  const kv = new MockKv(JSON.stringify({
+    maxRowid: 77,
+    sentAt: '2026-09-08T12:00:00.000Z',
+    lastAttemptAt: '2026-09-08T21:00:00.000Z',
+    lastFailureAt: '2026-09-08T21:00:00.000Z',
+    nextAttemptAt: '2099-09-09T00:05:00.000Z',
+    consecutiveFailures: 2,
+    attemptedFillCount: 3,
+    attemptedMaxRowid: 80,
+    providerHttpStatus: 429,
+    providerErrorCode: 42908,
+    failureKind: 'http',
+    injected: 'must not escape normalization'
+  }));
+  const env = {
+    TRADE_JOURNAL_TOKEN: 'journal-secret',
+    FCS_DB: new MockDb(),
+    FCS_CACHE: kv,
+    NTFY_TOPIC: 'private-topic',
+    NTFY_TOKEN: 'provider-secret'
+  };
+  const status = await loadTradeJournalDeliveryStatus(env, Date.parse('2026-09-08T22:00:00.000Z'));
+  assert.equal(status.state, 'cooldown');
+  assert.equal(status.providerHttpStatus, 429);
+  assert.equal(status.providerErrorCode, 42908);
+  assert.equal(status.lastSentAt, '2026-09-08T12:00:00.000Z');
+  assert.equal(Object.hasOwn(status, 'injected'), false);
+
+  const jsonRequest = new Request('https://x/signals/api/trades', {
+    headers: { Authorization: 'Bearer journal-secret' }
+  });
+  const jsonResponse = await handleTradeJournalRequest(jsonRequest, env, new URL(jsonRequest.url), 'json');
+  const jsonText = await jsonResponse.text();
+  const body = JSON.parse(jsonText);
+  assert.equal(body.alertDelivery.state, 'cooldown');
+  assert.equal(body.alertDelivery.providerErrorCode, 42908);
+  assert.doesNotMatch(jsonText, /private-topic|provider-secret|journal-secret|must not escape/);
+
+  const htmlRequest = new Request('https://x/signals/trades', {
+    headers: { Authorization: 'Bearer journal-secret' }
+  });
+  const htmlResponse = await handleTradeJournalRequest(htmlRequest, env, new URL(htmlRequest.url), 'html');
+  const html = await htmlResponse.text();
+  assert.match(html, /Account journal alert delivery:.*cooldown until.*provider HTTP 429.*provider code 42908/s);
+  assert.match(html, /last sent 2026-09-08 12:00:00.000Z/);
+  assert.doesNotMatch(html, /private-topic|provider-secret|journal-secret|must not escape/);
+});
+
+test('unavailable delivery state cannot bypass a stored cooldown or send an alert', async () => {
+  const db = new MockDb();
+  let fetches = 0;
+  const env = {
+    FCS_DB: db, NTFY_TOPIC: 'private-topic',
+    FCS_CACHE: { get: async () => { throw new Error('private failure detail'); } }
+  };
+  await assert.rejects(() => dispatchTradeJournalAlerts(env, {
+    fetchImpl: async () => { fetches++; }
+  }), /^Error: account journal delivery state unavailable$/);
+  assert.equal(db.reads, 0);
+  assert.equal(fetches, 0);
+  assert.equal((await loadTradeJournalDeliveryStatus(env)).state, 'unavailable');
+});
+
+test('network failures retain the watermark, back off, and never expose the raw error', async () => {
+  const db = new MockDb();
+  db.notificationRows = [{ fill_count: 1, max_rowid: 43 }];
+  const kv = new MockKv(JSON.stringify({ maxRowid: 41 }));
+  const env = { FCS_DB: db, FCS_CACHE: kv, NTFY_TOPIC: 'private-topic' };
+  const initialTime = Date.parse('2026-09-08T21:00:00.000Z');
+  for (const [i, name] of ['Error', 'AbortError'].entries()) {
+    const nowMs = initialTime + i * 5 * 60_000;
+    await assert.rejects(() => dispatchTradeJournalAlerts(env, {
+      nowMs,
+      fetchImpl: async () => {
+        const error = new Error('private-topic provider-secret');
+        error.name = name;
+        throw error;
+      }
+    }), (error) => {
+      assert.doesNotMatch(String(error), /private-topic|provider-secret/);
+      assert.equal(error.cause, undefined);
+      return true;
+    });
+    const state = JSON.parse(kv.value);
+    assert.equal(state.maxRowid, 41);
+    assert.equal(state.providerHttpStatus, null);
+    assert.equal(state.providerErrorCode, null);
+    assert.equal(state.failureKind, i ? 'timeout' : 'network');
+    assert.equal(state.consecutiveFailures, i + 1);
+    assert.equal(Date.parse(state.nextAttemptAt) - nowMs, 5 * 60_000 * (2 ** i));
+  }
+});
+
+test('missing or oversized provider error codes remain unknown, never a fabricated zero', async () => {
+  for (const payload of [{ code: null }, { code: 42908, detail: 'x'.repeat(5000) }]) {
+    const db = new MockDb();
+    db.notificationRows = [{ fill_count: 1, max_rowid: 43 }];
+    const kv = new MockKv(JSON.stringify({ maxRowid: 41 }));
+    await assert.rejects(() => dispatchTradeJournalAlerts(
+      { FCS_DB: db, FCS_CACHE: kv, NTFY_TOPIC: 't' },
+      {
+        nowMs: Date.parse('2026-09-08T21:00:00.000Z'),
+        fetchImpl: async () => new Response(JSON.stringify(payload), {
+          status: 429, headers: { 'Content-Type': 'application/json' }
+        })
+      }
+    ), /HTTP 429$/);
+    assert.equal(JSON.parse(kv.value).providerErrorCode, null);
+    assert.equal(JSON.parse(kv.value).nextAttemptAt, '2026-09-08T21:05:00.000Z');
+  }
 });

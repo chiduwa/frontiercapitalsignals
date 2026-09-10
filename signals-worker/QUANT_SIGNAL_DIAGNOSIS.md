@@ -402,7 +402,7 @@ orders.
 
 ## Rollout and monitoring
 
-1. Apply every unapplied migration through `0029` before running the matching
+1. Apply every unapplied migration through `0031` before running the matching
    builders; the deployment and research workflows do this idempotently.
 2. Deploy the Worker and builder together so the API and dashboard share the
    `confluence-v7` contract.
@@ -423,3 +423,26 @@ Deployment status is recorded by the repository commit and GitHub workflow
 runs rather than asserted in this design note. Migration `0009` reset invalid
 derived evidence; later migrations are additive, and the expected abstention
 window remains part of the release contract.
+
+### Operational follow-up (2026-09-10)
+
+Two production observations warranted narrow follow-up fixes:
+
+- The account-equity circuit breaker returned before any candidate evaluation,
+  suppressing research-only proposals along with real orders. Qualified,
+  already-withheld candidates can now reach the existing shadow ledger while
+  either account loss gate is active. Every authorized live candidate still
+  skips; per-candidate gates and execution controls are unchanged. These
+  prospective limit observations are not fills or evidence of profitability.
+- Scheduled journal notifications repeatedly received HTTP 429 from ntfy.
+  The unchanged delivery watermark correctly retained unsent fills, but the
+  notifier had no durable retry cooldown or user-visible delivery health.
+  The follow-up records sanitized failure status and a retry time in KV and
+  exposes those fields only in the authenticated journal. Provider rejection
+  never counts as successful delivery or removes raw journal history.
+
+Neither fix proves a predictive edge. The account circuit breaker uses total
+account equity, so manual-position outcomes and capital flows must not be
+attributed to the bot's strategy performance. That baseline was not reset or
+weakened. Strategy attribution and any proposed risk-policy change require a
+separate cash-flow-adjusted review against the exact bot-owned fill ledger.

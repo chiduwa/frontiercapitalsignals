@@ -105,3 +105,25 @@ minutes and sends a compact count, affected symbols, and exchange-reported
 futures realized P&L to the existing private ntfy topic. Its watermark advances
 only after ntfy accepts the message, so a delivery failure is retried rather
 than silently acknowledged.
+
+Failed sends persist a cooldown and sanitized delivery status in KV. Retries
+use exponential backoff (five minutes up to six hours), honoring a longer
+valid `Retry-After` delay. Only ntfy's explicit daily-message-quota code
+`42908` waits for the next UTC daily reset plus a five-minute grace period;
+other HTTP 429 responses are not assumed to be daily quotas. The watermark
+does not advance on an HTTP, network, or timeout failure. Fills imported during
+cooldown are included in the next attempt.
+
+The private HTML report and JSON `alertDelivery` field show the last accepted
+send, failure/cooldown state, provider status, and next allowed attempt. Pending
+fill counts describe the last attempted batch, not an always-current queue
+size. Acceptance by ntfy is not proof that a phone displayed the notification.
+Neither the topic nor credentials appear in these status fields.
+
+An existing authenticated ntfy account can optionally supply `NTFY_TOKEN` as
+a Worker secret (`wrangler secret put NTFY_TOKEN` from `signals-worker`). The
+deployment workflow preserves that secret but does not create an account,
+purchase a subscription, or provision the token. Authentication does not
+override the provider's applicable limits. See the provider's
+[publishing documentation](https://docs.ntfy.sh/publish/) and
+[quota definitions](https://github.com/binwiederhier/ntfy/blob/main/server/errors.go).

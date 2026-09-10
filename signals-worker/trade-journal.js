@@ -6,6 +6,11 @@ const PAGE_SIZE_MAX = 500;
 const PAGE_MAX = 10_000;
 const ANALYTICS_ROW_LIMIT = 1000;
 const ANALYTICS_QUERY_LIMIT = ANALYTICS_ROW_LIMIT + 1;
+const ALERT_RETRY_BASE_MS = 5 * 60 * 1000;
+const ALERT_RETRY_MAX_MS = 6 * 60 * 60 * 1000;
+const ALERT_RATE_LIMIT_RESET_GRACE_MS = 5 * 60 * 1000;
+const NTFY_DAILY_MESSAGE_QUOTA_CODE = 42908;
+const PROVIDER_ERROR_BODY_MAX_BYTES = 4096;
 const PERIOD_DAYS = Object.freeze({ week: 7, month: 30, year: 365, all: null });
 const SORT_COLUMNS = Object.freeze({
   time: 'event_time', symbol: 'symbol', market: 'market', origin: 'origin',
@@ -253,9 +258,179 @@ async function all(db, sql, params = []) {
   return result.results || [];
 }
 
+function safeNonNegativeInteger(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function safeIso(value) {
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) return null;
+  return new Date(value).toISOString();
+}
+
+function normalizeAlertState(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const providerHttpStatus = source.providerHttpStatus == null
+    ? NaN : Number(source.providerHttpStatus);
+  const providerErrorCode = source.providerErrorCode == null
+    ? NaN : Number(source.providerErrorCode);
+  return {
+    maxRowid: safeNonNegativeInteger(source.maxRowid),
+    maxIngestedAt: safeIso(source.maxIngestedAt),
+    sentAt: safeIso(source.sentAt),
+    lastCheckedAt: safeIso(source.lastCheckedAt),
+    lastAttemptAt: safeIso(source.lastAttemptAt),
+    lastFailureAt: safeIso(source.lastFailureAt),
+    nextAttemptAt: safeIso(source.nextAttemptAt),
+    consecutiveFailures: safeNonNegativeInteger(source.consecutiveFailures),
+    attemptedFillCount: safeNonNegativeInteger(source.attemptedFillCount),
+    attemptedMaxRowid: safeNonNegativeInteger(source.attemptedMaxRowid),
+    providerHttpStatus: Number.isSafeInteger(providerHttpStatus)
+      && providerHttpStatus >= 100 && providerHttpStatus <= 599 ? providerHttpStatus : null,
+    providerErrorCode: Number.isSafeInteger(providerErrorCode)
+      && providerErrorCode >= 0 ? providerErrorCode : null,
+    failureKind: ['http', 'network', 'timeout'].includes(source.failureKind)
+      ? source.failureKind : null
+  };
+}
+
+async function readAlertState(cache) {
+  const raw = await cache.get(JOURNAL_STATE_KEY);
+  if (!raw) return normalizeAlertState(null);
+  try { return normalizeAlertState(JSON.parse(raw)); }
+  catch { return normalizeAlertState(null); }
+}
+
+function alertStateRecord(state) {
+  return {
+    version: 2,
+    maxRowid: state.maxRowid,
+    maxIngestedAt: state.maxIngestedAt,
+    sentAt: state.sentAt,
+    lastCheckedAt: state.lastCheckedAt,
+    lastAttemptAt: state.lastAttemptAt,
+    lastFailureAt: state.lastFailureAt,
+    nextAttemptAt: state.nextAttemptAt,
+    consecutiveFailures: state.consecutiveFailures,
+    attemptedFillCount: state.attemptedFillCount,
+    attemptedMaxRowid: state.attemptedMaxRowid,
+    providerHttpStatus: state.providerHttpStatus,
+    providerErrorCode: state.providerErrorCode,
+    failureKind: state.failureKind
+  };
+}
+
+export function parseRetryAfterMs(value, nowMs = Date.now()) {
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  let delay;
+  if (/^\d+$/.test(raw)) {
+    const seconds = Number(raw);
+    delay = Number.isSafeInteger(seconds) ? seconds * 1000 : NaN;
+  } else {
+    const retryAt = Date.parse(raw);
+    delay = Number.isFinite(retryAt) ? Math.max(0, retryAt - nowMs) : NaN;
+  }
+  if (!Number.isFinite(delay) || delay < 0
+      || !Number.isFinite(new Date(nowMs + delay).getTime())) return null;
+  return delay;
+}
+
+function nextUtcRateLimitResetDelay(nowMs) {
+  const now = new Date(nowMs);
+  const reset = Date.UTC(
+    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1
+  ) + ALERT_RATE_LIMIT_RESET_GRACE_MS;
+  return Math.max(ALERT_RETRY_BASE_MS, reset - nowMs);
+}
+
+function retryDelayMs({ failures, httpStatus, providerErrorCode, retryAfter, nowMs }) {
+  const exponent = Math.min(Math.max(0, failures - 1), 16);
+  const exponential = Math.min(ALERT_RETRY_MAX_MS, ALERT_RETRY_BASE_MS * (2 ** exponent));
+  const providerDelay = parseRetryAfterMs(retryAfter, nowMs) || 0;
+  // 429 is also used for a short request-bucket limit (ntfy code 42901).
+  // Only the documented daily-message quota (42908) justifies waiting until
+  // its midnight-UTC reset; every other 429 follows Retry-After/exponential
+  // backoff so a transient burst limit does not suppress alerts all day.
+  const rateLimitDelay = httpStatus === 429
+    && providerErrorCode === NTFY_DAILY_MESSAGE_QUOTA_CODE
+    ? nextUtcRateLimitResetDelay(nowMs) : 0;
+  return Math.max(exponential, providerDelay, rateLimitDelay);
+}
+
+async function readProviderErrorCode(response) {
+  const contentType = response?.headers?.get?.('content-type') || '';
+  if (!/\bjson\b/i.test(contentType) || !response?.body?.getReader) return null;
+  const declaredLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > PROVIDER_ERROR_BODY_MAX_BYTES) return null;
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > PROVIDER_ERROR_BODY_MAX_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const parsed = JSON.parse(new TextDecoder().decode(bytes));
+    const code = parsed?.code == null ? NaN : Number(parsed.code);
+    return Number.isSafeInteger(code) && code >= 0 ? code : null;
+  } catch {
+    return null;
+  } finally {
+    try { reader.releaseLock(); } catch { /* already released/canceled */ }
+  }
+}
+
+export async function loadTradeJournalDeliveryStatus(env, nowMs = Date.now()) {
+  if (!env?.NTFY_TOPIC) {
+    return { configured: false, state: 'disabled', lastSentAt: null };
+  }
+  if (!env?.FCS_CACHE) {
+    return { configured: true, state: 'unavailable', lastSentAt: null };
+  }
+  let state;
+  try { state = await readAlertState(env.FCS_CACHE); }
+  catch { return { configured: true, state: 'unavailable', lastSentAt: null }; }
+  const nextAttemptMs = state.nextAttemptAt ? Date.parse(state.nextAttemptAt) : NaN;
+  const deliveryState = Number.isFinite(nextAttemptMs) && nextAttemptMs > nowMs
+    ? 'cooldown'
+    : state.consecutiveFailures > 0 ? 'failing'
+      : state.sentAt ? 'healthy' : 'ready';
+  return {
+    configured: true,
+    state: deliveryState,
+    lastSentAt: state.sentAt,
+    lastCheckedAt: state.lastCheckedAt,
+    lastAttemptAt: state.lastAttemptAt,
+    lastFailureAt: state.lastFailureAt,
+    nextAttemptAt: state.nextAttemptAt,
+    consecutiveFailures: state.consecutiveFailures,
+    lastDeliveredRowid: state.maxRowid,
+    attemptedFillCount: state.attemptedFillCount,
+    attemptedMaxRowid: state.attemptedMaxRowid,
+    providerHttpStatus: state.providerHttpStatus,
+    providerErrorCode: state.providerErrorCode,
+    failureKind: state.failureKind
+  };
+}
+
 export async function loadTradeJournal(env, url, nowMs = Date.now()) {
   if (!env?.FCS_DB) throw new Error('FCS_DB is not bound');
   const filters = parseTradeJournalQuery(url, nowMs);
+  const deliveryStatusPromise = loadTradeJournalDeliveryStatus(env, nowMs);
   const predicate = journalPredicate(filters);
   const order = journalOrder(filters);
   const offset = (filters.page - 1) * filters.pageSize;
@@ -331,6 +506,7 @@ export async function loadTradeJournal(env, url, nowMs = Date.now()) {
   const feesTruncated = feesResult.length > ANALYTICS_ROW_LIMIT;
   const daily = dailyResult.slice(0, ANALYTICS_ROW_LIMIT);
   const fees = feesResult.slice(0, ANALYTICS_ROW_LIMIT);
+  const alertDelivery = await deliveryStatusPromise;
   return {
     generatedAt: new Date(nowMs).toISOString(),
     selection: filters.origin,
@@ -357,7 +533,7 @@ export async function loadTradeJournal(env, url, nowMs = Date.now()) {
       pnlFilter: 'Win, loss, breakeven, and P&L range filters use individual futures fills with Binance-reported realized P&L only; fees remain separate.'
     },
     reviewCount: Number(reviewRows[0]?.n || 0),
-    currentPositions, origins, daily, fees, fills, runs
+    alertDelivery, currentPositions, origins, daily, fees, fills, runs
   };
 }
 
@@ -476,6 +652,32 @@ function windowLabel(data) {
   return `${from} through ${to}`;
 }
 
+function alertDeliveryHtml(delivery) {
+  if (!delivery?.configured) {
+    return '<p class="muted"><strong>Account journal alert delivery:</strong> disabled.</p>';
+  }
+  if (delivery.state === 'unavailable') {
+    return '<p class="warn"><strong>Account journal alert delivery:</strong> status unavailable.</p>';
+  }
+  const detail = [];
+  if (delivery.state === 'cooldown') detail.push(`cooldown until ${displayTime(delivery.nextAttemptAt)}`);
+  else if (delivery.state === 'failing') detail.push('failed; retry is due');
+  else if (delivery.state === 'healthy') detail.push('healthy');
+  else detail.push('ready; no successful delivery recorded yet');
+  if (delivery.providerHttpStatus != null) detail.push(`provider HTTP ${delivery.providerHttpStatus}`);
+  if (delivery.providerErrorCode != null) detail.push(`provider code ${delivery.providerErrorCode}`);
+  if (delivery.consecutiveFailures > 0) {
+    detail.push(`${delivery.consecutiveFailures} consecutive failure${delivery.consecutiveFailures === 1 ? '' : 's'}`);
+  }
+  if (delivery.attemptedFillCount > 0 && ['cooldown', 'failing'].includes(delivery.state)) {
+    detail.push(`${delivery.attemptedFillCount} fill${delivery.attemptedFillCount === 1 ? '' : 's'} pending at last attempt`);
+  }
+  detail.push(delivery.lastSentAt
+    ? `last sent ${displayTime(delivery.lastSentAt)}` : 'no successful delivery yet');
+  const className = ['cooldown', 'failing'].includes(delivery.state) ? 'warn' : 'muted';
+  return `<p class="${className}"><strong>Account journal alert delivery:</strong> ${escapeHtml(detail.join('; '))}.</p>`;
+}
+
 function journalHtml(data) {
   const originLink = (name, label) => `<a class="${data.selection === name ? 'active' : ''}" href="?${escapeHtml(queryString(data, {
     origin: name, page: 1
@@ -496,6 +698,7 @@ function journalHtml(data) {
   <h1>Private Binance account journal</h1>
   <p class="muted">Exchange fills kept separate from strategy predictions and bot outcome ledgers. Updated ${escapeHtml(displayTime(data.generatedAt))}.</p>
   <p class="warn"><strong>${displayNumber(data.reviewCount, 0)} fill(s) need provenance review.</strong> “Unknown” does not mean manual; it means Binance's documented records do not prove which client submitted the historical order. Spot realized P&amp;L is not supplied and is never fabricated.</p>
+  ${alertDeliveryHtml(data.alertDelivery)}
   <nav class="filters">${originLink('external','Non-bot / review')}${originLink('manual','Proven manual')}${originLink('unknown','Unknown')}${originLink('bot','FCS bots')}${originLink('all','All origins')}</nav>
   <nav class="filters">${periodLink('week','Week')}${periodLink('month','Month')}${periodLink('year','Year')}${periodLink('all','All retained')}</nav>
   <form class="filter-form" method="get">
@@ -571,7 +774,9 @@ function alertBody(row) {
   ].filter(Boolean).join(' ');
 }
 
-export async function dispatchTradeJournalAlerts(env) {
+export async function dispatchTradeJournalAlerts(env, {
+  nowMs = Date.now(), fetchImpl = globalThis.fetch
+} = {}) {
   if (!env?.FCS_DB || !env?.FCS_CACHE || !env?.NTFY_TOPIC) return 0;
   // A journal run deliberately gives every inserted fill the same ingested_at
   // timestamp. The Worker can fire while that run is still committing later
@@ -579,13 +784,18 @@ export async function dispatchTradeJournalAlerts(env) {
   // page and then skip subsequent rows with the identical timestamp. SQLite
   // rowid advances per newly inserted fill and conflict updates retain their
   // original rowid, making it the exact append watermark this alert needs.
-  let afterRowid = 0;
+  let state;
   try {
-    const raw = await env.FCS_CACHE.get(JOURNAL_STATE_KEY);
-    const state = raw ? JSON.parse(raw) : null;
-    const parsed = Number(state?.maxRowid);
-    if (Number.isSafeInteger(parsed) && parsed >= 0) afterRowid = parsed;
-  } catch { /* replay is preferable to silently skipping an alert */ }
+    state = await readAlertState(env.FCS_CACHE);
+  } catch {
+    // An unavailable KV read is not an absent watermark: it may contain an
+    // active provider cooldown. Defer sending rather than bypassing that
+    // cooldown or replaying already-delivered history during a KV outage.
+    throw new Error('account journal delivery state unavailable');
+  }
+  const afterRowid = state.maxRowid;
+  const nextAttemptMs = state.nextAttemptAt ? Date.parse(state.nextAttemptAt) : NaN;
+  if (Number.isFinite(nextAttemptMs) && nextAttemptMs > nowMs) return 0;
 
   const rows = await all(env.FCS_DB, `SELECT
       COUNT(*) AS fill_count,
@@ -602,25 +812,94 @@ export async function dispatchTradeJournalAlerts(env) {
   const activity = rows[0];
   const maxRowid = Number(activity?.max_rowid);
   if (!activity || Number(activity.fill_count || 0) === 0
-      || !Number.isSafeInteger(maxRowid) || maxRowid <= afterRowid) return 0;
+      || !Number.isSafeInteger(maxRowid) || maxRowid <= afterRowid) {
+    if (state.consecutiveFailures > 0) {
+      await env.FCS_CACHE.put(JOURNAL_STATE_KEY, JSON.stringify(alertStateRecord({
+        ...state,
+        lastCheckedAt: new Date(nowMs).toISOString(),
+        lastAttemptAt: null,
+        lastFailureAt: null,
+        nextAttemptAt: null,
+        consecutiveFailures: 0,
+        attemptedFillCount: 0,
+        attemptedMaxRowid: 0,
+        providerHttpStatus: null,
+        providerErrorCode: null,
+        failureKind: null
+      })));
+    }
+    return 0;
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10_000);
   let response;
+  let requestError = null;
+  let providerErrorCode = null;
   try {
-    response = await fetch(`https://ntfy.sh/${encodeURIComponent(env.NTFY_TOPIC)}`, {
+    const headers = {
+      'Content-Type': 'text/plain; charset=utf-8',
+      Title: `Account journal: ${Number(activity.fill_count)} new fill${Number(activity.fill_count) === 1 ? '' : 's'}`,
+      Priority: 'default', Tags: 'ledger,chart_with_upwards_trend', Click: JOURNAL_URL
+    };
+    if (env.NTFY_TOKEN) headers.Authorization = `Bearer ${String(env.NTFY_TOKEN)}`;
+    response = await fetchImpl(`https://ntfy.sh/${encodeURIComponent(env.NTFY_TOPIC)}`, {
       method: 'POST', signal: controller.signal,
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        Title: `Account journal: ${Number(activity.fill_count)} new fill${Number(activity.fill_count) === 1 ? '' : 's'}`,
-        Priority: 'default', Tags: 'ledger,chart_with_upwards_trend', Click: JOURNAL_URL
-      },
+      headers,
       body: alertBody(activity)
     });
+    if (!response.ok) providerErrorCode = await readProviderErrorCode(response);
+  } catch (error) {
+    requestError = error;
   } finally { clearTimeout(timer); }
-  if (!response.ok) throw new Error(`account journal ntfy failed: HTTP ${response.status}`);
-  await env.FCS_CACHE.put(JOURNAL_STATE_KEY, JSON.stringify({
-    maxRowid, maxIngestedAt: activity.max_ingested_at, sentAt: new Date().toISOString()
-  }));
+
+  const attemptedAt = new Date(nowMs).toISOString();
+  if (requestError || !response?.ok) {
+    const providerHttpStatus = Number.isSafeInteger(Number(response?.status))
+      ? Number(response.status) : null;
+    const failures = Math.min(state.consecutiveFailures + 1, 31);
+    const retryAfter = response?.headers?.get?.('retry-after') || null;
+    const delay = retryDelayMs({
+      failures, httpStatus: providerHttpStatus, providerErrorCode, retryAfter, nowMs
+    });
+    const failureKind = requestError
+      ? requestError?.name === 'AbortError' ? 'timeout' : 'network'
+      : 'http';
+    await env.FCS_CACHE.put(JOURNAL_STATE_KEY, JSON.stringify(alertStateRecord({
+      ...state,
+      lastCheckedAt: attemptedAt,
+      lastAttemptAt: attemptedAt,
+      lastFailureAt: attemptedAt,
+      nextAttemptAt: new Date(nowMs + delay).toISOString(),
+      consecutiveFailures: failures,
+      attemptedFillCount: safeNonNegativeInteger(activity.fill_count),
+      attemptedMaxRowid: maxRowid,
+      providerHttpStatus,
+      providerErrorCode,
+      failureKind
+    })));
+    const detail = providerHttpStatus == null ? failureKind
+      : `HTTP ${providerHttpStatus}${providerErrorCode == null ? '' : ` (provider code ${providerErrorCode})`}`;
+    // Do not attach raw provider/network errors: they may contain the topic
+    // or credentials and can be serialized by an upstream logger.
+    throw new Error(`account journal ntfy failed: ${detail}`);
+  }
+
+  await env.FCS_CACHE.put(JOURNAL_STATE_KEY, JSON.stringify(alertStateRecord({
+    ...state,
+    maxRowid,
+    maxIngestedAt: safeIso(activity.max_ingested_at),
+    sentAt: attemptedAt,
+    lastCheckedAt: attemptedAt,
+    lastAttemptAt: attemptedAt,
+    lastFailureAt: null,
+    nextAttemptAt: null,
+    consecutiveFailures: 0,
+    attemptedFillCount: 0,
+    attemptedMaxRowid: 0,
+    providerHttpStatus: null,
+    providerErrorCode: null,
+    failureKind: null
+  })));
   return Number(activity.fill_count);
 }

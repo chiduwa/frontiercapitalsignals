@@ -386,8 +386,39 @@ check('the circuit breaker pauses every entry at once', (() => {
 })());
 check('the daily loss limit pauses every entry at once', (() => {
   const r = decideEntries([strong], { ...baseCtx, equity: 880, state: { ...baseCtx.state, peakEquity: 900, dayStartEquity: 1000 } });
-  return r.paused === 'daily_loss_limit';
+  return r.paused === 'daily_loss_limit' && r.decisions.every((d) => d.action === 'SKIP');
 })());
+for (const [gate, pausedCtx] of [
+  ['circuit_breaker', { ...baseCtx, equity: 800 }],
+  ['daily_loss_limit', { ...baseCtx, equity: 880, state: { ...baseCtx.state, peakEquity: 900, dayStartEquity: 1000 } }]
+]) {
+  check(`${gate} keeps qualified withheld candidates in research while every live candidate stays SKIP`, (() => {
+    const many = Array.from({ length: 8 }, (_, i) => ({ ...withheld, symbol: `P${i}USDT` }));
+    const r = decideEntries([strong, ...many, weak], pausedCtx);
+    const shadows = r.decisions.filter((d) => d.action === 'SHADOW');
+    return r.paused === gate
+      && r.decisions.filter((d) => d.candidate.authorized).every((d) => d.action === 'SKIP')
+      && shadows.length === many.length
+      && shadows.every((d) => d.reason.includes('insufficient-evidence') && d.reason.includes('live entries paused:'))
+      && !r.decisions.some((d) => d.action === 'OPEN')
+      && pausedCtx.openPositions.length === 0;
+  })());
+  check(`${gate} does not bypass research freshness, funding, ownership, cooldown, or exposure gates`, (() => {
+    const stale = { ...withheld, signalPriceAt: '2026-09-05T10:00:00Z' };
+    const badFunding = { ...withheld, funding: 0.01 };
+    const cases = [
+      [stale, pausedCtx, 'old'],
+      [badFunding, pausedCtx, 'funding'],
+      [withheld, { ...pausedCtx, openSymbols: new Set(['SOLUSDT']) }, 'already holding'],
+      [withheld, { ...pausedCtx, state: { ...pausedCtx.state, lastClosedAt: { SOLUSDT: new Date(nowMs - 60000).toISOString() } } }, 'cooldown'],
+      [withheld, { ...pausedCtx, openPositions: [{ notional: 1000, leverage: 1 }] }, 'max total exposure']
+    ];
+    return cases.every(([candidate, ctx, reason]) => {
+      const r = decideEntries([candidate], ctx);
+      return r.paused === gate && r.decisions[0].action === 'SKIP' && r.decisions[0].reason.includes(reason);
+    });
+  })());
+}
 // A shadow entry is not a position: it must not crowd out a real one.
 check('a shadow entry consumes no exposure room', (() => {
   const many = Array.from({ length: 8 }, (_, i) => ({ ...withheld, symbol: `S${i}USDT` }));

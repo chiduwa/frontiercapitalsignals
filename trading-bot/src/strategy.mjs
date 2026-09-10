@@ -85,15 +85,20 @@ export function evaluateCandidate(candidate, ctx) {
 }
 
 // Ranks and filters a full candidate list down to what this cycle should
-// actually act on. Circuit breaker / daily loss limit gate ALL new entries at
-// once (existing positions are managed separately in index.mjs regardless of
-// this function's output).
+// actually act on. Circuit breaker / daily loss limit gate ALL live entries
+// at once. Already-unauthorized candidates may still produce research-only
+// SHADOW proposals if every candidate gate passes, so an account drawdown
+// does not erase opportunities to collect prospective evidence. Existing
+// positions are managed separately in index.mjs regardless of this output.
 export function decideEntries(candidates, ctx) {
+  let paused = null;
+  let pauseReason = null;
   if (circuitBreakerTripped(ctx.state, ctx.equity)) {
-    return { decisions: candidates.map((c) => ({ action: 'SKIP', symbol: c.symbol, reason: `circuit breaker: drawdown >= ${config.circuitBreakerDrawdownPct * 100}% from peak` })), paused: 'circuit_breaker' };
-  }
-  if (dailyLossLimitHit(ctx.state, ctx.equity)) {
-    return { decisions: candidates.map((c) => ({ action: 'SKIP', symbol: c.symbol, reason: `daily loss limit hit (${config.dailyLossLimitPct * 100}%)` })), paused: 'daily_loss_limit' };
+    paused = 'circuit_breaker';
+    pauseReason = `circuit breaker: drawdown >= ${config.circuitBreakerDrawdownPct * 100}% from peak`;
+  } else if (dailyLossLimitHit(ctx.state, ctx.equity)) {
+    paused = 'daily_loss_limit';
+    pauseReason = `daily loss limit hit (${config.dailyLossLimitPct * 100}%)`;
   }
 
   // Strongest measured edge first, so that when exposure room is limited it
@@ -105,7 +110,15 @@ export function decideEntries(candidates, ctx) {
   const decisions = [];
   const openPositions = [...ctx.openPositions]; // local mutable copy — each OPEN this loop reduces remaining exposure room for the next candidate
   for (const candidate of sorted) {
-    const decision = evaluateCandidate(candidate, { ...ctx, openPositions });
+    // Never turn an authorized live trade into an executable decision while
+    // either account gate is active. The research path is available only to
+    // candidates the engine had already withheld, with no live fallback.
+    const decision = paused && candidate.authorized
+      ? { action: 'SKIP', reason: pauseReason }
+      : evaluateCandidate(candidate, { ...ctx, openPositions });
+    if (paused && decision.action === 'SHADOW') {
+      decision.reason = `${decision.reason}; live entries paused: ${pauseReason}`;
+    }
     decisions.push({ ...decision, symbol: candidate.symbol, candidate });
     // Only a real OPEN consumes exposure. A shadow entry must never reduce
     // the room available to a genuinely authorized call.
@@ -117,5 +130,5 @@ export function decideEntries(candidates, ctx) {
       });
     }
   }
-  return { decisions, paused: null };
+  return { decisions, paused };
 }
