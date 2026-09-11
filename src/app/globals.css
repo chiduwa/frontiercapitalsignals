@@ -77,3 +77,25 @@ body {
 .ticker-track:hover {
   animation-play-state: paused;
 }
+
+/* ── Subtle 3D depth on card grids ──────────────────────────────────
+   Pure CSS: the stage supplies perspective, each card lifts and rotates
+   toward the viewer on hover. Disabled for touch and reduced motion. */
+.tilt-stage { perspective: 1000px; }
+.tilt-card {
+  transform-style: preserve-3d;
+  transition: transform .45s cubic-bezier(.22, 1, .36, 1),
+              box-shadow .45s cubic-bezier(.22, 1, .36, 1),
+              border-color .45s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .tilt-card:hover {
+    transform: perspective(1000px) rotateX(4deg) rotateY(-5deg) translateZ(16px);
+    box-shadow: 0 22px 44px rgba(12, 26, 53, .22);
+    border-color: rgba(184, 134, 11, .55);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tilt-card { transition: none; }
+  .tilt-card:hover { transform: none; }
+}

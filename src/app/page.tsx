@@ -138,7 +138,7 @@ export default function HomePage() {
               </div>
               <h2 className="text-4xl font-black text-white mb-5 tracking-tight">Frontier Capital Signals</h2>
               <p className="text-white/70 text-lg leading-relaxed mb-4 max-w-xl">
-                Hourly confluence screens across the top 100 cryptocurrencies and 60 US equities. Up to 16 independent technical and valuation techniques, from RSI and MACD to Wall Street price targets, reversal detection and multi-year seasonal analogs, must agree before a setup ranks.
+                Hourly confluence screens across 290 US equities and 150+ cryptocurrencies. Up to 16 independent technical and valuation techniques, from RSI and MACD to Wall Street price targets, reversal detection and multi-year seasonal analogs, must agree before a setup ranks — and a setup that cannot clear its own historical no-skill baseline is withheld rather than published.
               </p>
               <p className="text-white/40 text-sm mb-8 max-w-xl">
                 Mechanical technical analysis, not investment advice. Markets carry real risk of loss.
@@ -153,14 +153,14 @@ export default function HomePage() {
                 </svg>
               </a>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="tilt-stage grid grid-cols-2 gap-3">
               {[
-                { label: "Assets Screened", value: "160" },
+                { label: "Assets Screened", value: "440+" },
                 { label: "Techniques", value: "16" },
                 { label: "Refresh Rate", value: "Hourly" },
                 { label: "Coverage", value: "Crypto + US Equities" },
               ].map(({ label, value }) => (
-                <div key={label} className="bg-white/5 border border-white/10 rounded-xl p-5">
+                <div key={label} className="tilt-card bg-white/5 border border-white/10 rounded-xl p-5">
                   <p className="text-2xl font-black text-gradient-gold">{value}</p>
                   <p className="text-white/60 text-xs font-semibold mt-1">{label}</p>
                 </div>
@@ -184,9 +184,9 @@ export default function HomePage() {
                 See Full Intelligence Feed
               </Link>
             </div>
-            <div className="space-y-3">
+            <div className="tilt-stage space-y-3">
               {sectors.map(({ name, countries, score }) => (
-                <div key={name} className="bg-white border border-gray-200 rounded-xl p-4">
+                <div key={name} className="tilt-card bg-white border border-gray-200 rounded-xl p-4">
                   <div className="flex items-center justify-between mb-2.5">
                     <div>
                       <span className="text-ink font-semibold text-sm">{name}</span>
