@@ -39,6 +39,13 @@ if (!BINANCE_API_KEY || !BINANCE_API_SECRET) {
 
 export const config = {
   dryRun: DRY_RUN,
+  // Operator-selected experimental LIMIT policy. Enabling this is distinct
+  // from the model proving a forecast; its performance has its own source.
+  activeLimitMode: bool('ACTIVE_LIMIT_MODE', process.env.ACTIVE_LIMIT_MODE, false),
+  activeLimitOffsetFloorPct: num(process.env.ACTIVE_LIMIT_OFFSET_FLOOR_PCT, 7.5),
+  activeLimitHoldHours: num(process.env.ACTIVE_LIMIT_HOLD_HOURS, 24),
+  activeLimitAgreementFloor: num(process.env.ACTIVE_LIMIT_AGREEMENT_FLOOR, 0.6),
+  roiExitPolicy: bool('ROI_EXIT_POLICY', process.env.ROI_EXIT_POLICY, false),
   binanceApiKey: BINANCE_API_KEY,
   binanceApiSecret: BINANCE_API_SECRET,
   binanceBase: process.env.BINANCE_FAPI_BASE || 'https://fapi.binance.com',
@@ -58,15 +65,11 @@ export const config = {
   // not exceeding 50% of the balance/portfolio."
   maxTotalExposurePct: num(process.env.MAX_TOTAL_EXPOSURE_PCT, 0.50),
 
-  // Leverage: "3x to 20x leverage based on confidence and reliability
-  // levels."
-  minLeverage: num(process.env.MIN_LEVERAGE, 3),
+  // 5–20x: BOTH exact-contract trading range and measured reliability.
+  minLeverage: Math.max(5, num(process.env.MIN_LEVERAGE, 5)),
   maxLeverage: num(process.env.MAX_LEVERAGE, 20),
-  // The operator requested a modestly more aggressive leverage curve. This
-  // multiplier changes leverage only after the evidence gate has passed and
-  // remains hard-capped by MAX_LEVERAGE; margin/exposure ceilings are not
-  // loosened. 1.15 turns (for example) a measured 10x allocation into 12x.
-  leverageAggressionMultiplier: num(process.env.LEVERAGE_AGGRESSION_MULTIPLIER, 1.15),
+  legacyMinLeverage: num(process.env.MIN_LEVERAGE, 3),
+  legacyLeverageMultiplier: num(process.env.LEVERAGE_AGGRESSION_MULTIPLIER, 1.15),
 
   // Sizing input. The old confidence gate (technique agreement x that
   // asset's best technique accuracy) is gone: agreement across correlated
@@ -178,3 +181,13 @@ export const config = {
   shadowLedger: bool('SHADOW_LEDGER', process.env.SHADOW_LEDGER, true),
   shadowMaxOpen: num(process.env.SHADOW_MAX_OPEN, 40) // cap concurrent unresolved shadow entries so the resolver's per-cycle price reads stay bounded
 };
+
+if (config.activeLimitMode && (
+  !Number.isFinite(config.activeLimitOffsetFloorPct)
+  || config.activeLimitOffsetFloorPct < config.entryOffsetMinPct
+  || config.activeLimitOffsetFloorPct > config.entryOffsetMaxPct
+  || !Number.isFinite(config.activeLimitAgreementFloor)
+  || config.activeLimitAgreementFloor <= 0.5 || config.activeLimitAgreementFloor > 1
+  || !Number.isFinite(config.activeLimitHoldHours)
+  || config.activeLimitHoldHours < 0.25 || config.activeLimitHoldHours > 24
+)) throw new Error('active-limit configuration is invalid');

@@ -13,7 +13,7 @@ function requiredFiniteNumber(value) {
 // not a null-filled trade row.
 export function summarizeExactRoundTrip(record, fills, entryOrderId) {
   const side = record?.side;
-  const expectedQty = Math.abs(Number(record?.entryExecutedQty));
+  const expectedQty = Math.abs(Number(record?.entryOriginalQty ?? record?.entryExecutedQty));
   if (!['BUY', 'SELL'].includes(side) || !(expectedQty > 0) || entryOrderId == null) {
     throw new Error('outcome requires a side, positive proven entry quantity, and exact entry order id');
   }

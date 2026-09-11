@@ -7,6 +7,7 @@
 // I/O boundary plus the mapping from payload shapes to candidate objects.
 import { config } from './config.mjs';
 import { authorizeRow, authorizeResearch, classAuthorized, holdingFor, dayRangePosition } from './contract.mjs';
+import { activePolicyCandidate, isActivePolicyCandidate } from './active-limit.mjs';
 
 async function getJson(path) {
   const res = await fetch(`${config.signalsBase}${path}`);
@@ -47,8 +48,11 @@ export function buildCandidates(signals, scalp) {
   for (const [payloadKey, assetClass] of [['crypto', 'crypto'], ['stocks', 'stock']]) {
     const classGate = classAuthorized(signals.classSkill, assetClass);
     const board = signals[payloadKey] || {};
-    const rows = [...(board.breakout || []), ...(board.breakdown || [])];
-    for (const row of rows) {
+    const rows = [
+      ...(board.breakout || []).map(row => ({ row, screenSide: 'BUY' })),
+      ...(board.breakdown || []).map(row => ({ row, screenSide: 'SELL' }))
+    ];
+    for (const { row, screenSide } of rows) {
       const auth = authorizeRow(row);
       // A row the engine withheld is still surfaced, marked unauthorized, so
       // the decision log says why no trade was allowed.
@@ -56,7 +60,7 @@ export function buildCandidates(signals, scalp) {
         ? holdingFor(signals.holdingEvidence, assetClass, row.symbol, auth.dir, auth.horizonHours)
         : null;
       const immutableReference = Number(row?.analysis?.reference_price);
-      candidates.push({
+      candidates.push(activePolicyCandidate({
         source: 'confluence-v7',
         assetClass,
         signalGeneratedAt: signals.generated_at ?? null,
@@ -65,7 +69,10 @@ export function buildCandidates(signals, scalp) {
         symbol: toBinanceSymbol(row.symbol),
         // Direction comes from the engine's published call, never from which
         // board the row was screened onto.
-        side: auth.ok ? auth.side : (row.dir === -1 ? 'SELL' : 'BUY'),
+        side: auth.ok ? auth.side : (row.dir === -1 ? 'SELL' : row.dir === 1 ? 'BUY' : null),
+        screenSide, screenAgree: row.conf?.agree, screenTotal: row.conf?.total,
+        dataQuality: row.analysis?.data_quality,
+        abstentionReason: row.abstained?.reason ?? null,
         authorized: auth.ok && classGate.ok,
         unauthorizedReason: !classGate.ok ? classGate.reason : (auth.ok ? null : auth.reason),
         price: row.price,
@@ -86,7 +93,7 @@ export function buildCandidates(signals, scalp) {
         dayRangePos: dayRangePosition(scalp, row.symbol),
         funding: row.funding ?? null,
         drivers: row.drivers || []
-      });
+      }));
     }
   }
 
@@ -106,7 +113,7 @@ export function buildCandidates(signals, scalp) {
       signalPriceAt: null,
       signalSymbol: row.symbol,
       symbol: toBinanceSymbol(row.symbol),
-      side: auth.ok ? auth.side : (row.side === 'short' ? 'SELL' : 'BUY'),
+      side: auth.ok ? auth.side : (row.side === 'short' ? 'SELL' : row.side === 'long' ? 'BUY' : null),
       authorized: auth.ok,
       unauthorizedReason: auth.ok ? null : auth.reason,
       hypothesis: row.hypothesis,
@@ -151,11 +158,13 @@ export function dedupeBySymbol(candidates) {
 
   const out = [];
   for (const rows of groups.values()) {
-    const authorized = rows.filter((r) => r.authorized);
+    const modelRows = rows.filter((r) => r.authorized);
+    const policyRows = rows.filter(isActivePolicyCandidate);
+    const authorized = modelRows.length ? modelRows : policyRows;
     const sides = new Set(authorized.map((r) => r.side));
     if (sides.size > 1) {
       out.push({
-        ...authorized[0], authorized: false, source: 'conflict',
+        ...authorized[0], authorized: false, source: 'conflict', executionPolicy: null,
         unauthorizedReason: `contradictory authorized directions across sources for this symbol (${[...sides].join(' and ')}) — abstaining`
       });
       continue;

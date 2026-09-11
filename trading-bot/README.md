@@ -28,6 +28,124 @@ file before setting `DRY_RUN=false`.**
 
 ## Bound to the engine's publication gate (confluence-v7)
 
+This is the default, evidence-only mode. The optional active-limit mode below
+adds an explicitly experimental rule; it does not change the engine's
+publication or confidence requirements.
+
+## Optional active-limit mode (2026-09-10)
+
+`ACTIVE_LIMIT_MODE=true` permits the `active-limit-v1` rule alongside authorized
+model calls. The rule needs model-ready price history, at least 30 daily-move
+observations, at least three agreeing techniques, and at least 60% directional
+screen agreement. A known `no-edge` row is excluded. Screen agreement is only
+a rule input: correlated techniques are not independent trials and their
+agreement is never labelled a win probability. Opposite qualifying setups for
+the same instrument abstain; an authorized model call takes precedence over
+an experimental setup.
+
+Experimental setups use a 7.5% minimum entry offset, widening with observed
+asset movement up to the existing 10% ceiling. Their calibrated confidence,
+expected range and predicted horizon stay null. Validated model calls retain
+their existing 5–10% offset rule and bounded high-confidence reduction. Wider
+limits may improve the eventual entry price but also reduce fill frequency;
+neither a fill nor subsequent profit is guaranteed.
+
+The experimental defaults commit the existing 5% minimum margin per order at
+5x leverage, subject to the 50% aggregate margin ceiling. This permits up to
+ten minimum-size allocations on an otherwise empty account. Actual exchange
+minimum sizes, available margin, existing personal orders, funding, freshness,
+duplicate-symbol checks and cooldowns can reduce that number. Every pending
+order reserves capacity, and exchange-reported position/order margin is
+checked again immediately before submission.
+
+The new baseline uses a 10–30% stop and staged 60%/120% profit targets measured
+as gross return on ORIGINAL initial margin, with a maximum 24-hour hold.
+At 10x, the profit targets represent 6%/12% favorable price movement.
+These are **policy targets**,
+not predicted extrema. Their parameters are frozen in the ownership record
+so restart/reconciliation cannot replace them with a later setting. Order
+expiry is anchored to the original reference timestamp and capped at 24
+hours; refreshing the decision cycle does not extend a particular order.
+Existing bot ownership checks still prevent stops or targets being placed on
+personal or mixed positions.
+
+`ROI_EXIT_POLICY=true` applies this baseline to newly opened authorized model
+positions too. Existing positions retain their frozen policy. Both new-mode
+flags default false; installing code does not activate live entry mode.
+
+Leverage is 5–20x, capped independently by measured conservative edge and by
+the larger of mean/median 30 CLOSED daily high-low ranges (plus a larger current
+absolute daily move). Missing, malformed or stale range evidence means 5x.
+The initial stability cap is `floor(40 / rangePct)`, bounded to 5–20: 2% or
+less can permit 20x, 8% or more caps at 5x. Reliability must also qualify;
+technique agreement does not justify higher leverage. Sentiment boosts cannot
+override these caps. These anchors are operator baselines, not fitted optima.
+
+Stop ROI is `clamp(rangePct * leverage * (0.25 + 0.25 * reliability), 10, 30)`;
+missing range uses 10%. Reliability is the measured-edge progress from the
+engine's actionable bar to its full-size bar, not a win probability. First
+profit-taking closes 75% at unknown/floor reliability, scaling to 50% at full
+reliability; the remainder targets 120%. Original quantity and initial margin
+remain immutable for full-trade accounting. Exchange lot rounding applies;
+a position too small to split closes at the first target.
+
+The stop and final profit target rest on Binance. First-stage profit and time
+exits run on the protection supervisor's nominal 15-second cadence, subject
+to API/lease/runtime delays; they are not exchange-resident first-stage orders.
+A fresh authorized opposite model signal requests an early close on the full
+decision cycle (nominally five minutes). No immediate news-disruption detector
+is claimed. Fees, funding, slippage and gaps can change realized ROI; the stop
+is a trigger, not a guaranteed loss cap.
+
+### Learning and scalp status
+
+Every new intent retains the exit-policy version, leverage inputs, observed
+range and evidence status. Existing seasonal/regime/lead-lag research remains
+active and research-only. Automatic per-asset leverage/exit optimization is
+NOT connected: it needs chronological after-cost comparisons, untouched
+validation and prospective confirmation before changing the baseline.
+
+The microstructure collector currently produces second-scale correlation
+findings, not timestamped executable setups or calibrated per-asset pattern
+lifetimes. A confirmed correlation alone cannot bypass entry offsets. A
+separate live-trigger, duration and latency-aware after-cost scalp execution
+path is still required; no microstructure orders are enabled by this patch.
+
+In active mode, the loss gate reconstructs cumulative net P&L, its realized
+peak, and UTC daily P&L from `origin='bot'` settled outcomes. It also includes
+negative mark P&L on exactly owned open positions, without crediting open
+gains against booked losses. The 15% drawdown and 10% daily thresholds compare
+those attributed losses with currently available account equity plus those
+losses. Personal trades and cash flows affect available capital but never
+enter the bot-loss numerator; the old account high-water mark is preserved.
+This is an entry-risk measure, not a cash-flow-adjusted fund NAV: fees and
+funding on open trades are incorporated when their exact outcome settles.
+Missing outcomes or mixed ownership prevent new entries until reconciled.
+An additional account-wide gate blocks entries at maintenance margin of at
+least half of equity.
+
+With `ACTIVE_LIMIT_MODE=false`, qualified experimental setups are collected
+as shadow observations, and the original account drawdown gate remains in
+force. No old shadow result is promoted into a real fill or learned confidence.
+
+### Operator activation
+
+Review the settings in `.env.example`, then edit the existing server file:
+
+```bash
+sudoedit /etc/fcs-trading-bot.env
+```
+
+Set `ACTIVE_LIMIT_MODE=true` for the experimental policy. `DRY_RUN=true`
+previews its orders; the operator's explicit `DRY_RUN=false` setting permits
+live execution. The next scheduled five-minute cycle reads the settings;
+no service restart or timer change is needed. Verify `bot_entry_risk`,
+`decision_open`, and `resting_limit_placed` in the service log. A proposal or
+resting order is not proof of a fill. This release does not change the server's
+activation settings automatically.
+
+## Evidence-only contract
+
 This bot does not have its own opinion about direction. It reads the same
 public JSON the dashboard renders from, and it may open a position only when
 the engine has **published an authorized call**. Concretely, in `contract.mjs`:

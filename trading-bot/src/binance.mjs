@@ -16,6 +16,7 @@
 import { createHash, createHmac } from 'node:crypto';
 import { config } from './config.mjs';
 import { parseBinanceJson } from '../../shared/binance-json.mjs';
+import { dailyRangeStats } from './trade-policy.mjs';
 
 let exchangeInfoCache = null;
 const BINANCE_REQUEST_TIMEOUT_MS = 20000;
@@ -185,6 +186,12 @@ export async function roundLimitPrice(symbol, price, side) {
 // works but is the older version) — confirmed against current docs.
 export async function getAccount() {
   return signedRequest('GET', '/fapi/v3/account');
+}
+
+export async function getDailyRangeStats(symbol) {
+  return dailyRangeStats(await publicRequest('/fapi/v1/klines', {
+    symbol, interval: '1d', limit: 32
+  }));
 }
 
 export async function getPositionRisk(symbol) {

@@ -51,6 +51,23 @@ export async function loadState() {
   };
 }
 
+// Exact bot ledger only; personal fills, transfers and shadow rows never
+// enter this accounting. The running sum reconstructs the realized peak
+// after a restart without resetting either loss history or account state.
+export async function loadBotLossSummary(nowIso, query = d1) {
+  const [row] = await query(env, `WITH paths AS (
+      SELECT closed_at, net_pnl,
+        SUM(net_pnl) OVER (ORDER BY closed_at, id ROWS UNBOUNDED PRECEDING) AS running
+      FROM trading_bot_trades WHERE origin = 'bot' AND closed_at <= ?
+    ) SELECT COUNT(*) AS closedCount,
+      COALESCE(SUM(CASE WHEN net_pnl IS NULL THEN 1 ELSE 0 END), 0) AS incomplete,
+      COALESCE(SUM(net_pnl), 0) AS netPnl,
+      MAX(0, COALESCE(MAX(running), 0)) AS peakNetPnl,
+      COALESCE(SUM(CASE WHEN closed_at >= ? THEN net_pnl ELSE 0 END), 0) AS dailyNetPnl
+    FROM paths`, [nowIso, `${nowIso.slice(0, 10)}T00:00:00.000Z`]);
+  return row;
+}
+
 // Called once at the end of a cycle. Diffs against nothing — just
 // upserts the current in-memory state wholesale, since a single cycle's
 // worth of changes is always small (at most a few symbols touched).
@@ -77,6 +94,12 @@ export async function saveState(state) {
           extremeBoost: !!o.extremeBoost, equityAtOpen: o.equityAtOpen ?? null,
           entryClientOrderId: o.entryClientOrderId ?? null,
           entryExecutedQty: o.entryExecutedQty ?? null,
+          entryOriginalQty: o.entryOriginalQty ?? null,
+          roiPolicy: o.roiPolicy ?? null,
+          leverageEvidence: o.leverageEvidence ?? null,
+          managedExit: o.managedExit ?? null,
+          firstProfitFilledQty: o.firstProfitFilledQty ?? 0,
+          firstProfitComplete: o.firstProfitComplete === true,
           entryRequestedQty: o.entryRequestedQty ?? null,
           entryOrderPending: !!o.entryOrderPending,
           entrySubmissionUnknownAt: o.entrySubmissionUnknownAt ?? null,
@@ -93,6 +116,7 @@ export async function saveState(state) {
           entryOffsetBasis: o.entryOffsetBasis ?? null,
           wrongCallSamples: o.wrongCallSamples ?? null,
           assetClass: o.assetClass ?? null,
+          activePolicy: o.activePolicy ?? null,
           worstTradePct: o.worstTradePct ?? null,
           timeExitClientOrderId: o.timeExitClientOrderId ?? null,
           timeExitRequestedQty: o.timeExitRequestedQty ?? null,

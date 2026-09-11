@@ -6,6 +6,8 @@ process.env.BINANCE_API_SECRET = 'test';
 process.env.CLOUDFLARE_API_TOKEN = 'test';
 process.env.CLOUDFLARE_ACCOUNT_ID = 'test';
 process.env.FCS_D1_DATABASE_ID = 'test';
+process.env.ACTIVE_LIMIT_MODE = 'false';
+process.env.ROI_EXIT_POLICY = 'true'; // exercise the opt-in policy without exchange IO
 
 const { config, parseBoolean } = await import('./src/config.mjs');
 const {
@@ -17,7 +19,10 @@ const {
   boundedHistoryWindows, marketEligibleForAssetClass
 } = await import('./src/binance.mjs');
 const { acquireExecutionLease, releaseExecutionLease } = await import('../signals-worker/scripts/execution-lease.mjs');
-const { entryIntentMatches } = await import('./src/state.mjs');
+const { entryIntentMatches, loadBotLossSummary } = await import('./src/state.mjs');
+const { DatabaseSync } = await import('node:sqlite');
+const { ACTIVE_LIMIT_SOURCE, activePolicyCandidate, activeExecutionEligible, activeExitGeometry } = await import('./src/active-limit.mjs');
+const { assessBotEntryRisk, entryCapitalIssue } = await import('./src/bot-risk.mjs');
 const { ENGINE, authorizeRow, authorizeResearch, classAuthorized, holdingFor, dayRangePosition } = await import('./src/contract.mjs');
 const {
   conservativeEdge, sizePosition, currentExposurePct, wouldExceedExposure,
@@ -35,6 +40,8 @@ const {
 const { buildCandidates, toBinanceSymbol, dedupeBySymbol } = await import('./src/signals.mjs');
 const { summarizeExactRoundTrip } = await import('./src/outcome.mjs');
 const { assessLimitReachability } = await import('./src/entry-research.mjs');
+const { leveragePlan, dailyRangeStats, baselineExitPolicy, roiExitGeometry, managedExitReason } = await import('./src/trade-policy.mjs');
+const { managePolicyExits } = await import('./src/managed-exits.mjs');
 
 let failures = 0;
 function check(name, condition, detail) {
@@ -171,11 +178,13 @@ console.log('\n== risk.mjs: sizing scales on measured edge ==');
 const atBar = sizePosition({ source: 'confluence-v7', edge: ENGINE.minActionableEdge }, false);
 check('at the engine\'s bar, sizing/leverage sit at the minimum',
   atBar.positionPct === config.minPositionPct && atBar.leverage === config.minLeverage, JSON.stringify(atBar));
-const atFull = sizePosition({ source: 'confluence-v7', edge: config.edgeFullSize }, false);
+const stableRange = { samples: 30, meanPct: 2, medianPct: 1.8, through: Date.now() - 1000 };
+const stableProven = { source: 'confluence-v7', authorized: true, tradingRange: stableRange };
+const atFull = sizePosition({ ...stableProven, edge: config.edgeFullSize }, false);
 check('at the full-size edge, sizing/leverage reach the maximum',
   atFull.positionPct === config.maxPositionPct && atFull.leverage === config.maxLeverage, JSON.stringify(atFull));
 check('a larger edge never exceeds the hard ceilings', (() => {
-  const huge = sizePosition({ source: 'confluence-v7', edge: 5 }, true);
+  const huge = sizePosition({ ...stableProven, edge: 5 }, true);
   return huge.positionPct === config.maxPositionPct && huge.leverage === config.maxLeverage;
 })());
 const mid = sizePosition({ source: 'confluence-v7', edge: 0.26 }, false);
@@ -820,6 +829,198 @@ check('manual-position stop configuration has been removed rather than merely de
 check('bot and retired-assisted client namespaces are recognized exactly',
   isFuturesBotOrderId(entryId) && !isFuturesBotOrderId('personal-order')
     && isLegacyAssistedProtectionId('fcsa-abc') && !isLegacyAssistedProtectionId(entryId));
+
+console.log('\n== active-limit policy and bot-attributable loss accounting ==');
+const screen = {
+  ...withheld, side: null, screenSide: 'BUY', screenAgree: 4, screenTotal: 6,
+  dataQuality: 'model-ready', abstentionReason: 'insufficient-evidence'
+};
+const experiment = activePolicyCandidate(screen);
+check('experimental setup has an explicit side but never invents forecast confidence or horizon',
+  experiment.source === ACTIVE_LIMIT_SOURCE && experiment.side === 'BUY'
+    && experiment.authorized === false && experiment.confidence === null
+    && experiment.edge === null && experiment.horizonHours === null && experiment.range === null);
+check('experimental defaults stay observation-only until the operator enables live policy',
+  !activeExecutionEligible(experiment) && evaluateCandidate(experiment, baseCtx).action === 'SHADOW');
+check('a withheld direction no longer defaults to a BUY', (() => {
+  const row = { ...authorizedRow(), dir: 0, horizon: null, range: null, confidence: null };
+  const [c] = buildCandidates({ crypto: { breakout: [row] } }, null);
+  return c.side === null && evaluateCandidate(c, baseCtx).action === 'SKIP';
+})());
+check('missing history, bad data, no-edge, sparse votes and split votes cannot qualify a policy setup',
+  [
+    { dailyMoveSamples: 0 }, { dataQuality: 'cadence-mismatch' },
+    { abstentionReason: 'no-edge' }, { screenAgree: 2 },
+    { screenAgree: 3, screenTotal: 6 }, { screenSide: null }
+  ].every(change => activePolicyCandidate({ ...screen, ...change }).source !== ACTIVE_LIMIT_SOURCE));
+check('uncalibrated setups get wider volatility-sensitive offsets without a confidence reduction', (() => {
+  const calm = entryOffsetPlan(experiment);
+  const volatile = entryOffsetPlan({ ...experiment, currentMovePct: 12, edge: 1 });
+  return calm.offsetPct === 7.5 && volatile.offsetPct === 10
+    && calm.confidenceReductionPct === 0 && volatile.confidenceReductionPct === 0;
+})());
+check('policy exits follow the actual fill for both sides, with a frozen one-day clock', (() => {
+  const long = activeExitGeometry('BUY', 90, experiment.activePolicy);
+  const short = activeExitGeometry('SELL', 110, experiment.activePolicy);
+  return Math.abs(long.stop - 88.2) < 1e-9 && Math.abs(long.target - 111.6) < 1e-9
+    && Math.abs(short.stop - 112.2) < 1e-9 && Math.abs(short.target - 83.6) < 1e-9
+    && long.timeExit === 86_400_000
+    && activeExitGeometry('BUY', 90, null) === null;
+})());
+check('policy orders expire from the immutable reference, not a moving cycle clock',
+  entryOrderExpiryMs(experiment) === Date.parse(experiment.signalPriceAt) + 86_400_000);
+check('opposite policy setups for the same symbol abstain even during shadow collection', (() => {
+  const conflict = dedupeBySymbol([experiment, { ...experiment, side: 'SELL' }]);
+  return conflict.length === 1 && conflict[0].source === 'conflict'
+    && evaluateCandidate(conflict[0], baseCtx).action === 'SKIP';
+})());
+
+const cleanSummary = { netPnl: 0, peakNetPnl: 0, dailyNetPnl: 0, incomplete: 0 };
+const flatAccount = {
+  totalMarginBalance: '100', totalMaintMargin: '0', availableBalance: '100',
+  totalPositionInitialMargin: '0', totalOpenOrderInitialMargin: '0', positions: []
+};
+const flatState = { ...baseCtx.state, peakEquity: 1000, openOrders: {} };
+check('personal-account drawdown and withdrawals do not become bot losses',
+  assessBotEntryRisk(cleanSummary, flatAccount, flatState).ok
+    && assessBotEntryRisk(cleanSummary, { ...flatAccount, totalMarginBalance: '20' }, flatState).ok);
+check('actual settled bot drawdown and daily losses still block entries',
+  !assessBotEntryRisk({ ...cleanSummary, netPnl: -20 }, { ...flatAccount, totalMarginBalance: '80' }, flatState).ok
+    && !assessBotEntryRisk({ ...cleanSummary, netPnl: -10, dailyNetPnl: -10 }, { ...flatAccount, totalMarginBalance: '90' }, flatState).ok);
+const ownedState = { ...flatState, openOrders: { SOLUSDT: {
+  ownershipVerified: true, entryClientOrderId: 'fcsf-test', entryExecutedQty: 1, side: 'BUY'
+} } };
+const ownedAccount = { ...flatAccount, positions: [
+  { symbol: 'SOLUSDT', positionAmt: '1', unrealizedProfit: '-25' },
+  { symbol: 'PEPEUSDT', positionAmt: '20', unrealizedProfit: '-500' }
+] };
+check('only exactly owned open-position losses enter bot risk', (() => {
+  const risk = assessBotEntryRisk(cleanSummary, ownedAccount, ownedState);
+  return !risk.ok && risk.openLoss === 25;
+})());
+check('mixed positions, pending outcomes and missing ledger values cannot clear risk',
+  !assessBotEntryRisk(cleanSummary, { ...ownedAccount, positions: [{ ...ownedAccount.positions[0], positionAmt: '2' }] }, ownedState).ok
+    && !assessBotEntryRisk(cleanSummary, flatAccount, { ...ownedState, openOrders: { SOLUSDT: { outcomePending: true } } }).ok
+    && !assessBotEntryRisk({ ...cleanSummary, netPnl: null }, flatAccount, flatState).ok
+    && !assessBotEntryRisk({ ...cleanSummary, incomplete: 1 }, flatAccount, flatState).ok);
+check('current maintenance pressure and personal resting orders still constrain account capacity',
+  !assessBotEntryRisk(cleanSummary, { ...flatAccount, totalMaintMargin: '50' }, flatState).ok
+    && entryCapitalIssue({ ...flatAccount, totalOpenOrderInitialMargin: '48' }, 0.05) != null
+    && entryCapitalIssue({ ...flatAccount, availableBalance: '4' }, 0.05) != null
+    && entryCapitalIssue(flatAccount, 0.05) === null);
+
+const riskDb = new DatabaseSync(':memory:');
+riskDb.exec('CREATE TABLE trading_bot_trades (id INTEGER PRIMARY KEY, origin TEXT, closed_at TEXT, net_pnl REAL)');
+const riskQuery = async (_env, sql, params) => riskDb.prepare(sql).all(...params);
+const riskDate = '2026-09-10T12:00:00.000Z';
+check('empty bot ledger has zero observed losses',
+  (await loadBotLossSummary(riskDate, riskQuery)).netPnl === 0);
+for (const [id, origin, at, pnl] of [
+  [1, 'bot', '2026-09-08T01:00:00.000Z', 30],
+  [2, 'bot', '2026-09-09T01:00:00.000Z', -40],
+  [3, 'bot', '2026-09-10T01:00:00.000Z', 5],
+  [4, 'manual', '2026-09-10T02:00:00.000Z', -1000],
+  [5, 'bot', '2026-09-11T01:00:00.000Z', 999]
+]) riskDb.prepare('INSERT INTO trading_bot_trades VALUES (?,?,?,?)').run(id, origin, at, pnl);
+const historicalRisk = await loadBotLossSummary(riskDate, riskQuery);
+check('real SQL reconstructs realized peaks and UTC daily P&L without manual or future rows',
+  historicalRisk.netPnl === -5 && historicalRisk.peakNetPnl === 30
+    && historicalRisk.dailyNetPnl === 5 && historicalRisk.closedCount === 3);
+riskDb.prepare('INSERT INTO trading_bot_trades VALUES (6,?,?,NULL)').run('bot', '2026-09-10T02:00:00.000Z');
+check('a missing settled outcome stays incomplete instead of becoming zero profit',
+  (await loadBotLossSummary(riskDate, riskQuery)).incomplete === 1);
+riskDb.close();
+
+config.activeLimitMode = true;
+try {
+  const riskCtx = { ...baseCtx, equity: 100, state: flatState, botRisk: assessBotEntryRisk(cleanSummary, flatAccount, flatState) };
+  check('enabled policy can propose orders during a personal-account drawdown with clear bot risk',
+    decideEntries([experiment], riskCtx).decisions[0].action === 'OPEN');
+  check('policy orders use floor margin and modestly higher leverage',
+    sizePosition(experiment, true).positionPct === config.minPositionPct
+      && sizePosition(experiment, true).leverage === 5);
+  check('new mode does not blindly turn all withheld rows into orders',
+    decideEntries([withheld], riskCtx).decisions[0].action === 'SHADOW');
+  check('missing or failed bot accounting still blocks every executable candidate',
+    [undefined, { ok: false, reason: 'loss limit' }].every(botRisk =>
+      decideEntries([experiment, authorizedCandidate], { ...riskCtx, botRisk }).decisions.every(d => d.action === 'SKIP')));
+  check('many active-limit proposals reserve margin across the full candidate list', (() => {
+    const candidates = Array.from({ length: 15 }, (_, i) => ({ ...experiment, symbol: `A${i}USDT` }));
+    const decisions = decideEntries(candidates, riskCtx).decisions;
+    return decisions.filter(d => d.action === 'OPEN').length === 10
+      && decisions.filter(d => d.action === 'SKIP').length === 5;
+  })());
+} finally { config.activeLimitMode = false; }
+
+console.log('\n== return-on-margin policy and staged-exit recovery ==');
+const policyNow = Date.now();
+const midnight = Math.floor(policyNow / 86_400_000) * 86_400_000;
+const rangeBars = Array.from({ length: 30 }, (_, i) => {
+  const at = midnight - (30 - i) * 86_400_000;
+  return [at, '100', '101', '99', '100', '10', at + 86_399_999];
+});
+check('daily trading range measures high-low, not the zero close return',
+  dailyRangeStats(rangeBars, policyNow)?.meanPct === 2);
+check('thin, duplicated, stale and malformed daily candles cannot raise leverage',
+  dailyRangeStats(rangeBars.slice(1), policyNow) === null
+    && dailyRangeStats([...rangeBars.slice(0, 29), rangeBars[28]], policyNow) === null
+    && dailyRangeStats(rangeBars, policyNow + 86_400_000) === null
+    && dailyRangeStats(rangeBars.map((b, i) => i ? b : [b[0], 100, 90, 99, 100, 1, b[6]]), policyNow) === null);
+check('leverage requires BOTH stable ranges and proven reliability',
+  leveragePlan({ ...stableProven, edge: 0.35 }).leverage === 20
+    && leveragePlan({ ...stableProven, edge: 0.35, authorized: false }).leverage === 5
+    && leveragePlan({ ...stableProven, edge: 0.35, tradingRange: null }).leverage === 5
+    && leveragePlan({ ...stableProven, edge: 0.35, currentMovePct: 12 }).leverage === 5);
+const roiPolicy = baselineExitPolicy({ ...stableProven, edge: 0.35 }, 10);
+const geometry = roiExitGeometry('BUY', 100, roiPolicy);
+check('60/120 percent margin targets become 6/12 percent prices at 10x',
+  Math.abs(geometry.firstTarget - 106) < 1e-9 && Math.abs(geometry.target - 112) < 1e-9
+    && roiPolicy.stopRoiPct >= 10 && roiPolicy.stopRoiPct <= 30);
+check('partial-exit outcomes retain the ORIGINAL filled quantity',
+  summarizeExactRoundTrip({ ...exactOutcomeRecord, entryOriginalQty: exactOutcomeRecord.entryExecutedQty,
+    entryExecutedQty: exactOutcomeRecord.entryExecutedQty / 2 }, exactOutcomeFills, 10).quantity === exactOutcomeRecord.entryExecutedQty);
+const managedRecord = () => ({ side: 'BUY', symbol: 'SOLUSDT', assetClass: 'crypto',
+  entryPrice: 100, entryExecutedQty: 10, entryOriginalQty: 10,
+  entryClientOrderId: 'fcsf-owned', ownershipVerified: true,
+  roiPolicy, openedAt: new Date(policyNow - 60_000).toISOString(), timeExitAfterMs: 86_400_000 });
+check('only fresh authorized opposite signals trigger a reversal exit', (() => {
+  const r = { symbol: 'SOLUSDT', assetClass: 'crypto', side: 'SELL', authorized: true,
+    signalPriceAt: new Date(policyNow - 1000).toISOString() };
+  return managedExitReason(managedRecord(), 100, policyNow, r) === 'verified-reversal'
+    && managedExitReason(managedRecord(), 100, policyNow, { ...r, authorized: false }) === null
+    && managedExitReason(managedRecord(), 100, policyNow, { ...r, signalPriceAt: '2020-01-01' }) === null;
+})());
+for (const scenario of ['filled', 'timeout', 'manual', 'save-failed']) {
+  const s = { openOrders: { SOLUSDT: managedRecord() } };
+  let amount = scenario === 'manual' ? 11 : 10;
+  let submissions = 0;
+  let storedOrder = null;
+  const io = {
+    amount: async () => amount, mark: async () => ({ price: 107 }),
+    round: async (_s, q) => Math.floor(q * 100) / 100,
+    find: async () => storedOrder,
+    save: async () => { if (scenario === 'save-failed') throw new Error('D1 unavailable'); },
+    log: () => {}, dryRun: false,
+    close: async (symbol, side, quantity, opts) => {
+      await opts.onBeforeSubmit({ clientOrderId: opts.clientOrderId });
+      submissions++;
+      amount -= quantity;
+      storedOrder = { symbol, side, origQty: quantity, executedQty: quantity,
+        clientOrderId: opts.clientOrderId, reduceOnly: true, status: 'FILLED', type: 'MARKET', orderId: 22 };
+      if (scenario === 'timeout') throw new Error('response lost');
+      return storedOrder;
+    }
+  };
+  try { await managePolicyExits(s, io, { nowMs: policyNow }); } catch (e) {
+    if (scenario !== 'save-failed') throw e;
+  }
+  if (scenario === 'filled' || scenario === 'timeout') {
+    await managePolicyExits(s, io, { nowMs: policyNow + 1000 });
+    check(`${scenario}: one exact half-close survives retry with original quantity intact`,
+      submissions === 1 && amount === 5 && s.openOrders.SOLUSDT.entryExecutedQty === 5
+        && s.openOrders.SOLUSDT.entryOriginalQty === 10 && s.openOrders.SOLUSDT.firstProfitComplete);
+  } else check(`${scenario}: no managed order is submitted`, submissions === 0);
+}
 
 console.log(failures === 0 ? '\nTRADING BOT OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

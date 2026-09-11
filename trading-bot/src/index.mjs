@@ -19,12 +19,12 @@ import { pathToFileURL } from 'node:url';
 import { log } from './logger.mjs';
 import {
   acquireExecutionLease, releaseExecutionLease, loadState, saveState,
-  recordEquity, recordTrade, logEquity, recordRiskAlert, tradeSummary,
+  recordEquity, recordTrade, logEquity, recordRiskAlert, tradeSummary, loadBotLossSummary,
   recordEntryIntent, updateEntryIntent, finalizeEntryIntent,
   loadActiveEntryIntentSymbols, resolveMatureEntryIntentProposals
 } from './state.mjs';
 import {
-  getAccount, getOpenAlgoOrders, setLeverage, getMarkPrice,
+  getAccount, getOpenAlgoOrders, setLeverage, getMarkPrice, getDailyRangeStats,
   placeMarketOrderReconciled, placeLimitOrderReconciled,
   placeProtectiveOrderReconciled, cancelAlgoOrder, cancelOrder,
   roundQuantity, roundPrice, roundLimitPrice, getExchangeInfo, getPositionRiskMap,
@@ -44,6 +44,21 @@ import {
 } from './risk.mjs';
 import { positionOrigin, positionQuantitiesMatch, assessRisk } from './positions.mjs';
 import { summarizeExactRoundTrip } from './outcome.mjs';
+import { ACTIVE_LIMIT_SOURCE, activeExecutionEligible, activeExitGeometry } from './active-limit.mjs';
+import { assessBotEntryRisk, entryCapitalIssue } from './bot-risk.mjs';
+import { baselineExitPolicy, roiExitGeometry, leveragePlan } from './trade-policy.mjs';
+import { managePolicyExits } from './managed-exits.mjs';
+
+export async function applyPolicyExits(state, reversals = []) {
+  try { await managePolicyExits(state, {
+    amount: getPositionAmount, mark: getMarkPrice, round: roundQuantity,
+    find: findOrderByClientId, close: placeMarketOrderReconciled,
+    save: saveState, log, dryRun: config.dryRun
+  }, { reversals }); } catch (error) {
+    log('managed_exit_pass_failed', { error: error.message,
+      action: 'no replacement close; independent protection checks continue' });
+  }
+}
 import {
   loadOpenShadowTrades, recordEntry, resolveShadowTrade, markResolved,
   updateExtremes, shadowSummary
@@ -53,6 +68,12 @@ import {
 // persisted, so a later cycle that did not open the position can still
 // reproduce exactly the same stop, target and clock.
 function exitGeometry(candidate, decision, entryPrice) {
+  if (config.roiExitPolicy || candidate.source === ACTIVE_LIMIT_SOURCE || candidate.roiPolicy) {
+    candidate.roiPolicy ||= baselineExitPolicy(candidate, decision.leverage);
+    const geometry = roiExitGeometry(decision.side, entryPrice, candidate.roiPolicy);
+    if (!geometry) throw new Error('invalid frozen return-on-margin exit policy');
+    return geometry;
+  }
   const stop = candidate.source === 'research-confirmed'
     ? stopLossPriceForResearch(entryPrice, decision.side, decision.leverage, candidate.worstTradePct)
     : stopLossPrice(entryPrice, decision.side, decision.leverage);
@@ -67,6 +88,8 @@ const algoQuantity = (order) => Number(order?.quantity ?? order?.origQty);
 const UNKNOWN_SUBMISSION_QUARANTINE_MS = 60 * 60 * 1000;
 
 function protectionClientId(record, symbol, role) {
+  if (record?.roiPolicy) return makeClientOrderId(role, symbol, record.entryClientOrderId,
+    record.side, record.entryExecutedQty);
   return makeClientOrderId(role, symbol, record?.entryClientOrderId || record?.openedAt || 'legacy', record?.side || '');
 }
 
@@ -85,7 +108,8 @@ function trackProtection(record, role, order, fallbackClientId) {
     algoId: order?.algoId ?? null,
     clientAlgoId: order?.clientAlgoId || fallbackClientId || null
   };
-  const at = record.protectionOrders.findIndex((r) => r.role === role);
+  const at = record.protectionOrders.findIndex((r) => r.role === role
+    && (!record.roiPolicy || r.clientAlgoId === item.clientAlgoId));
   if (at >= 0) record.protectionOrders[at] = item;
   else record.protectionOrders.push(item);
 }
@@ -345,6 +369,8 @@ export async function ensureProtection(position, state, risk) {
   const stopClientAlgoId = protectionClientId(recorded, symbol, 'stop');
   const tpClientAlgoId = protectionClientId(recorded, symbol, 'tp');
   const expected = expectedProtectionIds(recorded, symbol);
+  const staleOwned = recorded.roiPolicy ? existing.filter(o =>
+    trackedProtection(o, recorded, expected) && !positionQuantitiesMatch(algoQuantity(o), protectiveQty)) : [];
   const suitable = (o, type) => o?.symbol === symbol && o?.side === closingSide
     && algoReduceOnly(o) && algoType(o) === type
     && positionQuantitiesMatch(algoQuantity(o), protectiveQty);
@@ -358,6 +384,12 @@ export async function ensureProtection(position, state, risk) {
       && trackedProtection(order, recorded, expected));
     if (!verifiedStop) {
       throw new Error(`fresh verification found no exact quantity-bounded stop for ${symbol}`);
+    }
+    // Replacement stop is confirmed BEFORE stale oversized bot siblings are
+    // removed. Only exact previously tracked IDs are eligible for cleanup.
+    for (const order of staleOwned) {
+      try { await cancelAlgoOrder({ algoId: order.algoId, clientAlgoId: order.clientAlgoId }); }
+      catch (error) { if (![-2011, -2013].includes(Number(error.binanceCode))) throw error; }
     }
     return true;
   };
@@ -402,7 +434,9 @@ export async function ensureProtection(position, state, risk) {
     // sized off that strategy's own measured worst trade, which this generic
     // fallback knows nothing about.
     const raw = recorded?.stopPrice ?? stopLossPrice(entryPrice, side, leverage);
-    const price = await roundPrice(symbol, raw);
+    const price = recorded.roiPolicy
+      ? await roundLimitPrice(symbol, raw, side === 'BUY' ? 'SELL' : 'BUY')
+      : await roundPrice(symbol, raw);
     if (!Number.isFinite(price) || !(price > 0)) {
       log('error_bad_stop_price', { symbol, raw, computed: price, action: 'NO STOP PLACED — investigate immediately' });
       return false;
@@ -455,6 +489,7 @@ async function applyTimeExits(openPositionsRaw, state, nowMs) {
   for (const position of openPositionsRaw) {
     const symbol = position.symbol;
     const recorded = state.openOrders[symbol];
+    if (recorded?.roiPolicy) continue; // handled by exact staged-exit coordinator
     if (!recorded || !Number.isFinite(Number(recorded.timeExitAfterMs))) continue;
     const openedMs = Date.parse(recorded.openedAt);
     if (!Number.isFinite(openedMs) || nowMs - openedMs < Number(recorded.timeExitAfterMs)) continue;
@@ -553,6 +588,7 @@ async function applyTimeExits(openPositionsRaw, state, nowMs) {
           log('pending_time_exit_settled_flat', { symbol, clientOrderId: pendingId });
           continue;
         }
+        recorded.entryOriginalQty ??= recorded.entryExecutedQty;
         recorded.entryExecutedQty = Math.abs(amount);
         await saveState(state).catch((error) =>
           log('critical_pending_time_exit_state_persist_failed', { symbol, error: error.message }));
@@ -676,6 +712,7 @@ async function applyTimeExits(openPositionsRaw, state, nowMs) {
           // A verified partial reduce-only fill leaves a smaller bot-owned
           // residual. Persist it immediately so the next cycle does not
           // confuse our own partial exit with an operator addition.
+          recorded.entryOriginalQty ??= recorded.entryExecutedQty;
           recorded.entryExecutedQty = Math.abs(remaining);
           await saveState(state).catch((error) =>
             log('critical_partial_time_exit_state_persist_failed', { symbol, error: error.message }));
@@ -844,6 +881,7 @@ export async function reconcilePendingEntries(state) {
     // the outcome ambiguous.
     if (executedQty > 0) {
       record.entryExecutedQty = executedQty;
+      record.entryOriginalQty = executedQty;
       const avgPrice = Number(order.avgPrice);
       const cumQuote = Number(order.cumQuote);
       if (Number.isFinite(avgPrice) && avgPrice > 0) record.entryPrice = avgPrice;
@@ -863,10 +901,20 @@ export async function reconcilePendingEntries(state) {
         maePct: Number(record.holdingMaePct),
         hoursToPeak: Number(record.holdingHoursToPeak)
       } : null;
-      record.stopPrice = record.source === 'research-confirmed'
-        ? stopLossPriceForResearch(record.entryPrice, record.side, record.leverage, record.worstTradePct)
-        : stopLossPrice(record.entryPrice, record.side, record.leverage);
-      record.targetPrice = takeProfitPrice(record.side, record.entryPrice, record.range, holding);
+      if (record.roiPolicy || record.source === ACTIVE_LIMIT_SOURCE) {
+        const geometry = record.roiPolicy
+          ? roiExitGeometry(record.side, record.entryPrice, record.roiPolicy)
+          : activeExitGeometry(record.side, record.entryPrice, record.activePolicy);
+        if (!geometry) throw new Error('filled active-limit entry has no valid frozen exit policy');
+        record.stopPrice = geometry.stop;
+        record.targetPrice = geometry.target;
+        record.timeExitAfterMs = geometry.timeExit;
+      } else {
+        record.stopPrice = record.source === 'research-confirmed'
+          ? stopLossPriceForResearch(record.entryPrice, record.side, record.leverage, record.worstTradePct)
+          : stopLossPrice(record.entryPrice, record.side, record.leverage);
+        record.targetPrice = takeProfitPrice(record.side, record.entryPrice, record.range, holding);
+      }
       changed = true;
     }
 
@@ -972,6 +1020,9 @@ export async function reconcilePendingEntries(state) {
 async function executeOpen(decision, state, nowIso) {
   const { symbol, side, positionPct, leverage, extremeBoost, candidate } = decision;
   try {
+    if (!candidate.authorized && !activeExecutionEligible(candidate)) {
+      throw new Error('entry has neither model authorization nor an enabled active-limit policy');
+    }
     const nowMs = Date.parse(nowIso);
     const offset = entryOffsetPlan(candidate);
     const expiresMs = entryOrderExpiryMs(candidate);
@@ -985,6 +1036,12 @@ async function executeOpen(decision, state, nowIso) {
     const account = await getAccount();
     const balance = Number(account.totalMarginBalance);
     if (!(balance > 0)) throw new Error('account totalMarginBalance is unavailable or non-positive');
+    const capitalIssue = entryCapitalIssue(account, positionPct);
+    if (capitalIssue) { log('entry_skipped_capital', { symbol, reason: capitalIssue }); return; }
+    if (config.activeLimitMode) {
+      const botRisk = assessBotEntryRisk(await loadBotLossSummary(new Date().toISOString()), account, state);
+      if (!botRisk.ok) { log('entry_skipped_bot_risk', { symbol, ...botRisk }); return; }
+    }
     // Re-check the symbol immediately before any symbol-scoped mutation. The
     // cycle-wide snapshot may be seconds old and an operator can open a trade
     // during that interval. In one-way mode, adding our fill would merge the
@@ -1052,7 +1109,8 @@ async function executeOpen(decision, state, nowIso) {
       limitPrice, offsetPct: offset.offsetPct, offsetBasis: offset.basis,
       offsetAdverseBasis: offset.adverseBasis, expiresAt, edge: decision.edge,
       stop, target, timeExitAfterMs: timeExit, entryClientOrderId: entryIntentClientOrderId,
-      targetBasis: candidate.holding ? 'measured favorable excursion' : 'predicted range edge'
+      targetBasis: candidate.roiPolicy ? 'operator margin-ROI baseline; not optimized'
+        : candidate.holding ? 'measured favorable excursion' : 'predicted range edge'
     });
 
     const intent = {
@@ -1071,6 +1129,13 @@ async function executeOpen(decision, state, nowIso) {
       targetPrice: target, timeExitAfterMs: timeExit,
       horizonHours: candidate.horizonHours,
       evidence: {
+        roiPolicy: candidate.roiPolicy ?? null,
+        leverageEvidence: leveragePlan(candidate),
+        tradingRange: candidate.tradingRange ?? null,
+        activePolicy: candidate.activePolicy ?? null,
+        modelAuthorized: candidate.authorized,
+        modelWithheldReason: candidate.unauthorizedReason,
+        screenAgree: candidate.screenAgree ?? null, screenTotal: candidate.screenTotal ?? null,
         formula: 'max(policy-floor, exact-asset daily/current/adverse move) minus bounded conservative-edge reduction; capped',
         beforeConfidencePct: offset.beforeConfidencePct,
         confidenceReductionPct: offset.confidenceReductionPct,
@@ -1095,6 +1160,9 @@ async function executeOpen(decision, state, nowIso) {
     // LIMIT order, the next cycle still knows the exact client ID to query
     // and does not misclassify an unprotected leveraged position as manual.
     const pendingEntry = {
+      roiPolicy: candidate.roiPolicy ?? null,
+      leverageEvidence: { ...leveragePlan(candidate), tradingRange: candidate.tradingRange ?? null },
+      activePolicy: candidate.activePolicy ?? null,
       side, entryPrice: limitPrice, marginUsed: marginToUse, leverage,
       range: candidate.range, targetPrice: target, stopPrice: stop,
       timeExitAfterMs: timeExit, source: candidate.source, openedAt: nowIso,
@@ -1303,6 +1371,9 @@ async function executeOpen(decision, state, nowIso) {
     });
 
     state.openOrders[symbol] = {
+      roiPolicy: candidate.roiPolicy ?? null,
+      leverageEvidence: { ...leveragePlan(candidate), tradingRange: candidate.tradingRange ?? null },
+      activePolicy: candidate.activePolicy ?? null,
       side, entryPrice,
       marginUsed: Number.isFinite(actualMarginUsed) && actualMarginUsed > 0
         ? actualMarginUsed : marginToUse,
@@ -1318,7 +1389,7 @@ async function executeOpen(decision, state, nowIso) {
       holdingHoursToPeak: candidate.holding?.hoursToPeak ?? null,
       worstTradePct: candidate.worstTradePct ?? null,
       extremeBoost: !!extremeBoost, equityAtOpen: balance,
-      entryClientOrderId, entryExecutedQty: executedQty,
+      entryClientOrderId, entryExecutedQty: executedQty, entryOriginalQty: executedQty,
       entryRequestedQty: quantity, entryOrderPending: false,
       entryOrderType: 'LIMIT', entryLimitPrice: limitPrice,
       entryExpiresAt: expiresAt, entrySubmissionUnknownAt: null,
@@ -1431,7 +1502,10 @@ async function recordShadow(decision, nowIso) {
       positionPct: decision.positionPct, leverage: decision.leverage,
       requestedQty: null, stopPrice: stop, targetPrice: target,
       timeExitAfterMs: timeExit, horizonHours: candidate.horizonHours,
-      evidence: { withheldReason: decision.reason, holdingN: candidate.holding?.n ?? null }
+      evidence: { withheldReason: decision.reason, holdingN: candidate.holding?.n ?? null,
+        roiPolicy: candidate.roiPolicy ?? null, leverageEvidence: leveragePlan(candidate),
+        tradingRange: candidate.tradingRange ?? null,
+        outcomeScope: 'limit reachability only; not a staged-exit profit simulation' }
     });
     log('shadow_limit_proposed', {
       symbol, side: decision.side, source: candidate.source,
@@ -1548,6 +1622,8 @@ async function runCycle() {
   // ownership classification. Refresh the account afterward so a fill that
   // arrived during reconciliation is not mistaken for a manual position.
   if (await reconcilePendingEntries(state)) account = await getAccount();
+  await applyPolicyExits(state);
+  account = await getAccount();
   const equity = Number(account.totalMarginBalance);
   const balance = Number(account.totalMarginBalance);
   recordEquity(state, equity, nowIso);
@@ -1573,6 +1649,7 @@ async function runCycle() {
   // spoken about only when a reading suggests a large loss is imminent.
   const ownPositions = [];
   for (const p of openPositionsRaw) {
+    if (state.openOrders[p.symbol]?.managedExit) continue;
     const actualSide = Number(p.positionAmt) > 0 ? 'BUY' : 'SELL';
     const origin = positionOrigin(p.symbol, state, actualSide, Number(p.positionAmt));
     if (origin === 'bot') { ownPositions.push(p); continue; }
@@ -1660,10 +1737,11 @@ async function runCycle() {
       }
       if (!protectionCleared) continue;
       if (record.ownershipConflict) {
-        delete state.openOrders[symbol];
-        log('cleared_ownership_conflict_tombstone', {
+        openSymbolsNow.add(symbol);
+        record.ownershipVerified = false;
+        log('retained_ownership_conflict_tombstone', {
           symbol,
-          reason: 'symbol is flat and exact bot-tagged protection has been verified absent; no mixed/manual outcome attributed to the model'
+          reason: 'orders are cleared, but unresolved bot P&L must not disappear from the entry-risk gate'
         });
         continue;
       }
@@ -1712,6 +1790,7 @@ async function runCycle() {
   });
 
   const allCandidates = buildCandidates(signals, scalp);
+  await applyPolicyExits(state, allCandidates.filter(c => c.authorized));
 
   // The engine speaks in bare asset symbols; this account trades USDT pairs.
   // A candidate whose pair does not exist on Binance USDS-M futures is
@@ -1734,6 +1813,17 @@ async function runCycle() {
     });
     return false;
   });
+
+  // Four bounded workers; one low-weight public history read per candidate.
+  // No backfilled/forming daily candle may qualify for higher leverage.
+  const rangeQueue = [...candidates];
+  await Promise.all(Array.from({ length: Math.min(4, rangeQueue.length) }, async () => {
+    while (rangeQueue.length) {
+      const candidate = rangeQueue.shift();
+      try { candidate.tradingRange = await getDailyRangeStats(candidate.symbol); }
+      catch { candidate.tradingRange = null; }
+    }
+  }));
 
   // Equity-style contracts do not carry funding in the stock signal feed.
   // Read it from the exact Binance contract instead of silently treating a
@@ -1771,8 +1861,17 @@ async function runCycle() {
       source: record.source || 'confluence-v7', pendingEntry: true
     });
   }
+  let botRisk = null;
+  if (config.activeLimitMode) {
+    try {
+      botRisk = assessBotEntryRisk(await loadBotLossSummary(nowIso), await getAccount(), state);
+    } catch {
+      botRisk = { ok: false, reason: 'bot risk accounting unavailable' };
+    }
+    log('bot_entry_risk', botRisk);
+  }
   const { decisions, paused } = decideEntries(candidates, {
-    fearGreed, openSymbols: openSymbolsNow, openPositions, balance, equity, state, nowMs
+    fearGreed, openSymbols: openSymbolsNow, openPositions, balance, equity, state, nowMs, botRisk
   });
 
   if (paused) log('entries_paused', { reason: paused });

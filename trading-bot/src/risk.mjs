@@ -5,6 +5,8 @@
 // read and reason about in one place.
 import { config } from './config.mjs';
 import { ENGINE } from './contract.mjs';
+import { ACTIVE_LIMIT_SOURCE } from './active-limit.mjs';
+import { leveragePlan } from './trade-policy.mjs';
 
 // What sizing scales on. NOT a raw win rate: the engine's own audit is
 // explicit that a flat hit-rate threshold means wildly different things in
@@ -33,6 +35,29 @@ function scaleByEdge(edge, min, max) {
 // leverage" per the original spec, applied as a multiplier and then
 // re-clamped to the hard ceiling, never past it.
 export function sizePosition(candidate, extremeBoost) {
+  // Installation must not silently activate the new live risk policy.
+  // Keep the existing sizing behavior until either new mode is selected.
+  if (!config.roiExitPolicy && !config.activeLimitMode && candidate.source !== ACTIVE_LIMIT_SOURCE) {
+    if (candidate.source === 'research-confirmed') return {
+      positionPct: config.minPositionPct, leverage: config.legacyMinLeverage
+    };
+    const edge = conservativeEdge(candidate);
+    const boost = extremeBoost ? config.extremeAggressionBoost : 1;
+    return {
+      positionPct: Math.min(config.maxPositionPct, scaleByEdge(edge, config.minPositionPct, config.maxPositionPct) * boost),
+      leverage: Math.min(config.maxLeverage, Math.max(config.legacyMinLeverage,
+        Math.round(scaleByEdge(edge, config.legacyMinLeverage, config.maxLeverage)
+          * Math.max(1, config.legacyLeverageMultiplier) * boost)))
+    };
+  }
+  const plan = leveragePlan(candidate, { min: config.minLeverage, max: config.maxLeverage,
+    edgeFloor: ENGINE.minActionableEdge, fullEdge: config.edgeFullSize });
+  if (candidate.source === ACTIVE_LIMIT_SOURCE) {
+    return {
+      positionPct: config.minPositionPct,
+      leverage: plan.leverage
+    };
+  }
   // A confirmed research strategy is validated by an event study, not by a
   // calibrated per-asset forecast record. That is real evidence, but it is a
   // different and weaker kind for sizing purposes: it says the RULE has
@@ -44,15 +69,12 @@ export function sizePosition(candidate, extremeBoost) {
   }
   const edge = conservativeEdge(candidate);
   let positionPct = scaleByEdge(edge, config.minPositionPct, config.maxPositionPct);
-  let leverage = scaleByEdge(edge, config.minLeverage, config.maxLeverage);
-  leverage *= Math.max(1, Number(config.leverageAggressionMultiplier) || 1);
   if (extremeBoost) {
     positionPct *= config.extremeAggressionBoost;
-    leverage *= config.extremeAggressionBoost;
   }
   return {
     positionPct: Math.min(positionPct, config.maxPositionPct),
-    leverage: Math.min(Math.max(Math.round(leverage), config.minLeverage), config.maxLeverage)
+    leverage: plan.leverage
   };
 }
 
@@ -71,7 +93,10 @@ export function entryOffsetPlan(candidate) {
     return { ok: false, reason: 'no positive published signal price from which to calculate a limit entry' };
   }
 
-  const minPct = positiveFinite(config.entryOffsetMinPct);
+  const active = candidate?.source === ACTIVE_LIMIT_SOURCE;
+  const minPct = positiveFinite(active
+    ? Math.max(config.entryOffsetMinPct, config.activeLimitOffsetFloorPct)
+    : config.entryOffsetMinPct);
   const maxPct = positiveFinite(config.entryOffsetMaxPct);
   const confidenceFloor = positiveFinite(config.entryOffsetHighConfidenceFloorPct);
   const maxReduction = Number(config.entryOffsetMaxConfidenceReductionPct);
@@ -107,7 +132,7 @@ export function entryOffsetPlan(candidate) {
     : allCallAdversePct != null ? 'all-call mean adverse excursion' : null;
 
   const empirical = [
-    ['operator policy floor', minPct],
+    [active ? 'uncalibrated active-limit policy floor' : 'operator policy floor', minPct],
     ['historical median absolute daily move', medianDailyMovePct],
     ['current absolute 24h move', absolute24hMovePct],
     [adverseBasis, adversePct]
@@ -117,7 +142,7 @@ export function entryOffsetPlan(candidate) {
 
   // Only the engine's already-conservative edge may tighten the offset. The
   // reduction is bounded and cannot reach the signal price even at full size.
-  const edge = conservativeEdge(candidate);
+  const edge = active ? 0 : conservativeEdge(candidate);
   const edgeSpan = Math.max(1e-9, config.edgeFullSize - ENGINE.minActionableEdge);
   const confidenceProgress = Math.max(0, Math.min(1,
     (edge - ENGINE.minActionableEdge) / edgeSpan));
@@ -153,6 +178,10 @@ export function entryLimitPrice(signalPrice, side, offsetPct) {
 }
 
 export function entryOrderTtlMs(candidate) {
+  if (candidate?.source === ACTIVE_LIMIT_SOURCE) {
+    const hours = positiveFinite(candidate?.activePolicy?.holdHours);
+    return hours == null ? null : Math.min(hours, config.entryOrderMaxHours, 24) * 3_600_000;
+  }
   const minMinutes = positiveFinite(config.entryOrderMinMinutes);
   const maxHours = positiveFinite(config.entryOrderMaxHours);
   if (minMinutes == null || maxHours == null) return null;

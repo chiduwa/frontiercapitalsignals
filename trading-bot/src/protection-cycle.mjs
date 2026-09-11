@@ -12,7 +12,7 @@ import { getAccount, getPositionRiskMap } from './binance.mjs';
 import { positionOrigin } from './positions.mjs';
 import {
   reconcilePendingEntries, ensureProtection, cancelTrackedEntry,
-  cancelTrackedProtection
+  cancelTrackedProtection, applyPolicyExits
 } from './index.mjs';
 
 async function runProtectionCycle() {
@@ -24,6 +24,8 @@ async function runProtectionCycle() {
 
   let account = await getAccount();
   if (await reconcilePendingEntries(state)) account = await getAccount();
+  await applyPolicyExits(state);
+  account = await getAccount();
   const positions = (account.positions || [])
     .filter((position) => Math.abs(Number(position.positionAmt)) > 0);
   const risk = await getPositionRiskMap();
@@ -51,6 +53,7 @@ async function runProtectionCycle() {
   for (const position of positions) {
     const record = state.openOrders[position.symbol];
     if (!record) continue; // provably foreign: never create or cancel its orders
+    if (record.managedExit) continue; // exact close outcome must reconcile first
     const amount = Number(position.positionAmt);
     const side = amount > 0 ? 'BUY' : 'SELL';
     const origin = positionOrigin(position.symbol, state, side, amount);

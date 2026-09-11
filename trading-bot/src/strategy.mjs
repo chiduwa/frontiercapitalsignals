@@ -4,6 +4,7 @@
 // that can be read and reasoned about (and unit tested) without needing a
 // live Binance connection.
 import { config } from './config.mjs';
+import { activeExecutionEligible } from './active-limit.mjs';
 import {
   conservativeEdge, sizePosition, wouldExceedExposure, wouldExceedResearchExposure,
   circuitBreakerTripped, dailyLossLimitHit, inCooldown, fundingUnfavorable,
@@ -29,6 +30,9 @@ import {
 export function evaluateCandidate(candidate, ctx) {
   const { symbol, side, funding } = candidate;
   const { fearGreed, openSymbols, openPositions, balance, state, nowMs } = ctx;
+
+  if (!['BUY', 'SELL'].includes(side)) return { action: 'SKIP', reason: 'no explicit setup direction' };
+  if (candidate.source === 'conflict') return { action: 'SKIP', reason: 'conflicting setup directions' };
 
   if (openSymbols.has(symbol)) return { action: 'SKIP', reason: 'already holding a position in this symbol' };
   if (inCooldown(state, symbol, nowMs)) return { action: 'SKIP', reason: `cooldown active (closed within the last ${config.cooldownMinutes}m)` };
@@ -74,14 +78,17 @@ export function evaluateCandidate(candidate, ctx) {
   // Last gate, deliberately last: everything above is the bot's own risk
   // discipline and applies whether or not the engine has spoken. Only the
   // engine decides whether there is a call to act on at all.
-  if (!candidate.authorized) {
+  if (!candidate.authorized && !activeExecutionEligible(candidate)) {
     return {
       action: 'SHADOW', symbol, side, positionPct, leverage, extremeBoost,
       reason: candidate.unauthorizedReason || 'engine has not authorized a call on this row'
     };
   }
 
-  return { action: 'OPEN', symbol, side, positionPct, leverage, extremeBoost, edge: conservativeEdge(candidate) };
+  return {
+    action: 'OPEN', symbol, side, positionPct, leverage, extremeBoost,
+    edge: candidate.authorized ? conservativeEdge(candidate) : null
+  };
 }
 
 // Ranks and filters a full candidate list down to what this cycle should
@@ -93,7 +100,12 @@ export function evaluateCandidate(candidate, ctx) {
 export function decideEntries(candidates, ctx) {
   let paused = null;
   let pauseReason = null;
-  if (circuitBreakerTripped(ctx.state, ctx.equity)) {
+  if (config.activeLimitMode) {
+    if (ctx.botRisk?.ok !== true) {
+      paused = 'bot_risk';
+      pauseReason = ctx.botRisk?.reason || 'bot risk accounting unavailable';
+    }
+  } else if (circuitBreakerTripped(ctx.state, ctx.equity)) {
     paused = 'circuit_breaker';
     pauseReason = `circuit breaker: drawdown >= ${config.circuitBreakerDrawdownPct * 100}% from peak`;
   } else if (dailyLossLimitHit(ctx.state, ctx.equity)) {
@@ -113,7 +125,7 @@ export function decideEntries(candidates, ctx) {
     // Never turn an authorized live trade into an executable decision while
     // either account gate is active. The research path is available only to
     // candidates the engine had already withheld, with no live fallback.
-    const decision = paused && candidate.authorized
+    const decision = paused && (candidate.authorized || activeExecutionEligible(candidate))
       ? { action: 'SKIP', reason: pauseReason }
       : evaluateCandidate(candidate, { ...ctx, openPositions });
     if (paused && decision.action === 'SHADOW') {
