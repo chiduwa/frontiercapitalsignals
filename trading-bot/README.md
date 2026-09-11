@@ -111,6 +111,57 @@ lifetimes. A confirmed correlation alone cannot bypass entry offsets. A
 separate live-trigger, duration and latency-aware after-cost scalp execution
 path is still required; no microstructure orders are enabled by this patch.
 
+### Offline per-asset policy comparison
+
+`node trading-bot/policy-research.mjs /absolute/path/input.json` prints a JSON
+research report. It does not read credentials, connect to Binance/D1, change
+settings or place orders. Its input is `{ events, policies, comparison }`:
+
+- Each event requires a unique `id`, exact futures `symbol`, `assetClass`,
+  `venue: "binance-usdm"`, `priceType: "mark"`, and a nonempty `source`.
+  `side` is BUY/SELL. `regime` is bull/bear/range/unknown and its numeric
+  millisecond `contextAt` must be no later than `entryAt`. Month is UTC.
+- Numeric `entryAt`, `endAt`, `entryPrice`, and `intervalMs` describe the
+  reference trade window. `bars` are contiguous `{ at, open, high, low, close }`
+  records beginning at entry and covering the entire window. Intervals may
+  range from one second to five minutes. Do not include a candle whose range
+  began before the entry; that would leak pre-entry extremes into outcomes.
+- `costs` requires decimal `feeRate`, percentage `slippagePct`, a nonempty
+  `source`, explicit `fundingComplete: true`, and `funding` records containing
+  numeric `{ at, rate, markPrice }`. An empty funding array asserts there were
+  no funding settlements in the window; missing funding is not zero funding.
+- Each policy needs a unique `id`, leverage 5–20, stop ROI 10–30,
+  `firstTargetRoiPct: 60`, `finalTargetRoiPct: 120`, and `firstFraction` 0.5–0.75.
+  `comparison` supplies `cutoffAt`, `baselineId` and optional `asOf` in numeric
+  milliseconds. The baseline must appear in the policy list.
+
+Entry/exit slippage, two-sided fees and funding on residual quantity are
+included. Stop gaps use the opening price, not the crossed stop. Intrabar
+stop/target order and funding/exit ambiguities are refused, not guessed.
+Every policy uses the same admissible events; exclusions are reported.
+Duplicate IDs are errors; overlapping same-asset windows and windows crossing
+the chronological split are excluded. Unmatured windows are excluded too.
+
+Within each asset/side/month/regime cell, selection uses training median net
+margin ROI only. At least 30 training windows are required to select a
+candidate; 20 later windows are required for a descriptive validation report.
+The report compares the selected candidate against the baseline on those
+same later events. These sample floors do NOT establish significance or
+independence. All reports retain `liveEligible: false`, even when profitable.
+
+Budgets: 32 MiB input, 5,000 events, 250,000 total bars and 32 policies per
+run. The tool does not silently truncate a requested history. Importantly,
+mark-price candles are not executable quotes, do not prove limit fills, and
+cannot validate second-scale scalp latency. Portfolio/liquidation effects,
+survivorship and repeated-search overfitting require separate validation.
+See [Bailey et al., The Probability of Backtest Overfitting](https://www.davidhbailey.com/dhbpapers/backtest-prob.pdf)
+for why the best historical candidate is not automatically a reliable edge.
+
+Current status: the replay/comparison engine is implemented and tested on
+synthetic fixtures. A production historical-path adapter, scheduled runs,
+prospective confirmation and any live promotion remain unimplemented. No
+real-market profitability result is claimed by these software tests.
+
 In active mode, the loss gate reconstructs cumulative net P&L, its realized
 peak, and UTC daily P&L from `origin='bot'` settled outcomes. It also includes
 negative mark P&L on exactly owned open positions, without crediting open

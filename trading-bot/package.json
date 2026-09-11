@@ -7,6 +7,7 @@
   "main": "src/index.mjs",
   "scripts": {
     "start": "node src/index.mjs",
-    "test": "node test.mjs"
+    "test": "node test.mjs",
+    "research:policy": "node policy-research.mjs"
   }
 }
