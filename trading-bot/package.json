@@ -8,6 +8,7 @@
   "scripts": {
     "start": "node src/index.mjs",
     "test": "node test.mjs",
-    "research:policy": "node policy-research.mjs"
+    "research:policy": "node policy-research.mjs",
+    "research:history": "node policy-history-job.mjs"
   }
 }

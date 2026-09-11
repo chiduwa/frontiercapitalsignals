@@ -67,6 +67,10 @@ log "guardrail tests passed on staged ${TARGET:0:7}"
 # protection is never held behind a journal sync. The updated units take these
 # same locks before Node starts, preventing mixed-version imports on all later
 # automatic updates.
+exec 6>/run/lock/fcs-policy-research-runtime.lock
+chown "$RUN_USER:$RUN_USER" /run/lock/fcs-policy-research-runtime.lock
+chmod 660 /run/lock/fcs-policy-research-runtime.lock
+flock --exclusive --wait 300 6 || die "timed out waiting for policy research runtime lock"
 exec 9>/run/lock/fcs-account-journal-runtime.lock
 flock --exclusive --wait 900 9 || die "timed out waiting for account-journal runtime lock"
 exec 8>/run/lock/fcs-spot-runtime.lock

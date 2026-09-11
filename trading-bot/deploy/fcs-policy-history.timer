@@ -1,0 +1,12 @@
+[Unit]
+Description=Run bounded policy history research hourly, independently of trading
+
+[Timer]
+OnCalendar=*:43
+AccuracySec=30s
+RandomizedDelaySec=60s
+Persistent=false
+Unit=fcs-policy-history.service
+
+[Install]
+WantedBy=timers.target

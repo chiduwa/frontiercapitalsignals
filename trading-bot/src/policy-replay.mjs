@@ -127,10 +127,10 @@ export function replayPolicy(event, policy) {
 
 // Selection uses training ONLY. Held-out measurements never determine the
 // winner, authorize trading, or establish a statistical probability of edge.
-export function comparePolicies(events, policies, { cutoffAt, baselineId, asOf = Date.now(), minTrain = 30, minValidation = 20 } = {}) {
+export function comparePolicies(events, policies, { cutoffAt, baselineId, asOf = Date.now(), minTrain = 30, minValidation = 20, conditionOnMonth = true } = {}) {
   if (!Array.isArray(events) || !Array.isArray(policies) || !policies.length || policies.length > 32
       || events.length > 5000 || events.reduce((n, e) => n + (Array.isArray(e?.bars) ? e.bars.length : 0), 0) > 250_000
-      || !finite(cutoffAt) || !finite(asOf) || cutoffAt > asOf || !policies.every(validResearchPolicy)
+      || !finite(cutoffAt) || !finite(asOf) || cutoffAt > asOf || typeof conditionOnMonth !== 'boolean' || !policies.every(validResearchPolicy)
       || new Set(policies.map(p => p.id)).size !== policies.length
       || !policies.some(p => p.id === baselineId)
       || !Number.isInteger(minTrain) || minTrain < 30 || !Number.isInteger(minValidation) || minValidation < 20) {
@@ -156,8 +156,8 @@ export function comparePolicies(events, policies, { cutoffAt, baselineId, asOf =
     const instrument = `${e.venue}|${e.assetClass}|${e.symbol}`;
     if (e.entryAt < (priorEnd.get(instrument) ?? -Infinity)) { exclude('overlapping-asset-window'); continue; }
     priorEnd.set(instrument, e.endAt);
-    const month = new Date(e.entryAt).getUTCMonth() + 1;
-    const key = `${instrument}|${e.side}|${e.regime}|${month}`;
+    const month = conditionOnMonth ? new Date(e.entryAt).getUTCMonth() + 1 : null;
+    const key = `${instrument}|${e.side}|${e.regime}|${month ?? 'all-months'}`;
     if (!cells.has(key)) cells.set(key, { key, symbol: e.symbol, side: e.side, regime: e.regime, month,
       training: [], validation: [] });
     cells.get(key)[e.endAt < cutoffAt ? 'training' : 'validation'].push(replay.map(r => r.netRoiPct));

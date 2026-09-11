@@ -9,6 +9,7 @@ process.env.FCS_D1_DATABASE_ID = 'test';
 process.env.ACTIVE_LIMIT_MODE = 'false';
 process.env.ROI_EXIT_POLICY = 'true'; // exercise the opt-in policy without exchange IO
 await import('./test-policy-replay.mjs');
+await import('./test-policy-history.mjs');
 
 const { config, parseBoolean } = await import('./src/config.mjs');
 const {

@@ -157,10 +157,75 @@ survivorship and repeated-search overfitting require separate validation.
 See [Bailey et al., The Probability of Backtest Overfitting](https://www.davidhbailey.com/dhbpapers/backtest-prob.pdf)
 for why the best historical candidate is not automatically a reliable edge.
 
-Current status: the replay/comparison engine is implemented and tested on
-synthetic fixtures. A production historical-path adapter, scheduled runs,
-prospective confirmation and any live promotion remain unimplemented. No
-real-market profitability result is claimed by these software tests.
+The offline engine is tested on synthetic fixtures. The bounded production
+history adapter below adds real public-market observations, but prospective
+confirmation and live promotion remain unimplemented. No real-market
+profitability result is claimed by software tests.
+
+### Scheduled real-history research
+
+`policy-history-job.mjs` runs independently of trading through
+`fcs-policy-history.timer` (hourly at minute 43, with up to a minute of jitter).
+It never imports a private exchange client or modifies a signal, entry intent,
+bot position, journal fill, live configuration or live policy.
+
+The adapter reads retained entry intents oldest-first. For each it registers
+1h, 6h and 24h windows beginning at the next complete five-minute bar after
+the intent was recorded. Entry is explicitly a **hypothetical market-price
+reference**, not the proposed offset LIMIT and not a claim that any order
+filled. This permits study while the bot has no settled trades, without
+inventing its track record. It does NOT yet evaluate the profitability of
+the actual limit-entry strategy or validate scalping execution.
+
+Each completed window uses the exact currently verified Binance USD-M
+contract's historical five-minute mark-price candles and funding settlements.
+Incomplete/duplicated bars or incomplete funding responses stay unavailable.
+The first and last candle must cover the entire requested window; an
+unmatured window is never replayed. Historical delistings or contract changes
+may remain unverified and are excluded, not silently mapped to another asset.
+
+The regime descriptor is reconstructed from 50 completed daily mark candles:
+last close more than 2% above/below their average is labelled bull/bear;
+otherwise range. Missing evidence is unknown. This is a fixed descriptive
+price rule, not proof of a seasonal effect or a contemporaneous model label.
+Funding is observed; fee/slippage scenarios are explicitly assumed:
+0.05% per side plus 0.02% slippage, and stress at 0.10% per side plus 0.05%.
+Neither scenario claims to reproduce the account's historical fee tier.
+
+The registered comparison contains 24 policies: leverage 5/10/15/20, stop ROI
+10/20/30, and first exit fraction 50%/75%, with 60%/120% profit thresholds.
+Source, live/dry/shadow mode and holding window are separate cohorts; within
+each cohort, asset/direction/regime and optional calendar-month cells stay
+separate too. A fixed discovery cutover of **2026-12-11 00:00 UTC** separates
+training from later descriptive validation. Until then there is no validation
+claim. The fixed comparator is L5-S10-F75, not a claimed fitted optimum.
+
+Resource limits are two candidate windows and at most nine public GET calls
+per run, 240 seconds wall time, low process priority, 25% of one CPU and
+384 MiB memory. Failures retry after six hours, at most three attempts;
+malformed inputs are quarantined so they cannot starve the oldest-first queue.
+Overlapping windows in the same asset/source/mode/horizon cohort are excluded.
+Completed capsules are gzip-compressed in D1 and never automatically deleted.
+At 16 MiB of capsule storage, collection stops with an explicit budget status;
+it does not erase history to make room. Database overhead and run records
+are additional. The report compares at most 500 training capsules before
+cutover, or 250 training plus 250 later capsules afterward. Older capsules
+remain available for a separately bounded study.
+
+Migration `0032_policy_history_research.sql` adds only research tables, with
+database checks forcing `live_eligible=0`. Latest comparisons and microstructure
+readiness counts are in `policy_history_reports`; collection health is in
+`policy_history_runs`. With the existing D1 environment loaded, retrieve the
+private JSON report using:
+
+```bash
+node /opt/fcs/trading-bot/policy-history-job.mjs --report
+```
+
+Service logs are available through `journalctl -u fcs-policy-history.service`.
+No public endpoint or notification sender is added. This job can collect and
+compare evidence automatically; it cannot autonomously change leverage,
+stops, targets, model weights or scalp authorization.
 
 In active mode, the loss gate reconstructs cumulative net P&L, its realized
 peak, and UTC daily P&L from `origin='bot'` settled outcomes. It also includes

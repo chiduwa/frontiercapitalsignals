@@ -1,0 +1,32 @@
+[Unit]
+Description=FrontierCapitalSignals bounded historical policy research (no trading)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=fcsbot
+Group=fcsbot
+WorkingDirectory=/opt/fcs
+EnvironmentFile=/etc/fcs-trading-bot.env
+ExecStart=/usr/bin/flock --exclusive --nonblock /run/lock/fcs-policy-research-runtime.lock /usr/bin/node trading-bot/policy-history-job.mjs
+TimeoutStartSec=240
+Nice=10
+CPUQuota=25%
+MemoryMax=384M
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fcs-policy-history
