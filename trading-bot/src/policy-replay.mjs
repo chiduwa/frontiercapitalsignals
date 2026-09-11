@@ -63,6 +63,7 @@ export function replayPolicy(event, policy) {
   let gross = 0;
   let fees = costs.feeRate * policy.leverage * 100;
   let fundingRoi = 0;
+  let fundingIndex = 0;
   let exitAt = null;
   const exits = [];
   const close = (fraction, price, at, reason) => {
@@ -82,7 +83,8 @@ export function replayPolicy(event, policy) {
     const gapFirst = sign === 1 ? b.open >= first : b.open <= first;
     const gapFinal = sign === 1 ? b.open >= final : b.open <= final;
     // Funding exactly on a bar boundary is charged before a possible exit.
-    for (const f of funding.filter(f => f.at === b.at)) {
+    while (funding[fundingIndex]?.at === b.at) {
+      const f = funding[fundingIndex++];
       fundingRoi -= sign * f.rate * f.markPrice / entry * policy.leverage * 100 * remaining;
     }
     if (gapStop) { close(remaining, b.open, b.at, 'gap-stop'); break; }
@@ -93,7 +95,10 @@ export function replayPolicy(event, policy) {
     }
     if (adverse && favorable(firstDone ? final : first)) return unavailable('ambiguous-intrabar-order');
     const canExit = adverse || favorable(firstDone ? final : first);
-    const insideFunding = funding.filter(f => f.at > b.at && f.at < end);
+    const insideFunding = [];
+    while (fundingIndex < funding.length && funding[fundingIndex].at < end) {
+      insideFunding.push(funding[fundingIndex++]);
+    }
     if (canExit && insideFunding.length) return unavailable('ambiguous-funding-order');
     for (const f of insideFunding) {
       fundingRoi -= sign * f.rate * f.markPrice / entry * policy.leverage * 100 * remaining;
@@ -108,7 +113,8 @@ export function replayPolicy(event, policy) {
     }
   }
   if (remaining > 0) {
-    for (const f of funding.filter(f => f.at === event.endAt)) {
+    while (funding[fundingIndex]?.at === event.endAt) {
+      const f = funding[fundingIndex++];
       fundingRoi -= sign * f.rate * f.markPrice / entry * policy.leverage * 100 * remaining;
     }
     close(remaining, event.bars.at(-1).close, event.endAt, 'window-end');
