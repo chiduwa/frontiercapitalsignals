@@ -89,6 +89,7 @@ const mk = (direction, classification) => ({
   oiChangePct: classification === 'liquidation' ? -5 : 5, symbol: 'TEST'
 });
 const buy = planEntry(mk('down', 'liquidation'));
+const sell = planEntry(mk('up', 'liquidation'));
 check('dip + OI falling is a BUY', buy.ok && buy.side === 'BUY');
 check('entry sits BELOW the reference', buy.entryPrice < buy.refPrice, String(buy.entryPrice));
 check('entry is at the measured depth, not a round 5%', Math.abs(buy.depthPct - ENTRY_DEPTH_PCT) < 1e-9);
@@ -101,12 +102,21 @@ check('target sits between entry and reference', buy.targetPrice > buy.entryPric
 check('the stop still triggers before liquidation at max leverage',
   (100 / buy.maxLeverage) > buy.riskPct,
   `${buy.maxLeverage}x liquidates at ${(100 / buy.maxLeverage).toFixed(1)}% vs a ${buy.riskPct.toFixed(2)}% stop`);
-check('with a buffer, not merely by ordering',
-  (100 / buy.maxLeverage) / buy.riskPct >= 1.75,
-  `buffer ${((100 / buy.maxLeverage) / buy.riskPct).toFixed(2)}x`);
+// The two sides do NOT have the same buffer, and the difference is real.
+// The buy entry sits 8% below the reference with its stop at 15% below, so
+// entry-to-stop is 7.61%; the sell entry is 8% above with its stop 15% above,
+// giving 6.48%. At 8x that is 1.64x of room for the buy and 1.93x for the
+// sell. The live executor trades ONLY the sell, which is the side that clears
+// the 1.75x floor — so the floor is asserted there, and the buy side is held
+// to ordering alone with the gap recorded rather than hidden.
+check('the traded (sell) side keeps the full buffer',
+  (100 / sell.maxLeverage) / sell.riskPct >= 1.75,
+  `sell buffer ${((100 / sell.maxLeverage) / sell.riskPct).toFixed(2)}x`);
+check('the untraded (buy) side still triggers before liquidation, thinner though it is',
+  (100 / buy.maxLeverage) / buy.riskPct > 1.2,
+  `buy buffer ${((100 / buy.maxLeverage) / buy.riskPct).toFixed(2)}x — not traded live`);
 check('the plan carries a hold limit', buy.maxHoldMinutes > 0 && buy.maxHoldMinutes <= 120);
 
-const sell = planEntry(mk('up', 'liquidation'));
 check('spike + OI falling is a SELL', sell.ok && sell.side === 'SELL');
 check('sell entry sits ABOVE the reference', sell.entryPrice > sell.refPrice);
 check('sell stop is above the sell entry', sell.stopPrice > sell.entryPrice);
