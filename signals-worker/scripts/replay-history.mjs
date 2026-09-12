@@ -104,6 +104,37 @@ const RELIABILITY_FOLD_EVERY = 7;
 // and that noise enters the t-test at full weight.
 const TECHNIQUE_MIN_CASTS_PER_PERIOD = 8;
 
+// The conditioning panel, kept FROZEN at the four techniques that appeared to
+// survive a 70/30 split when the baseline was still period-wide.
+//
+// Those four did not survive the baseline correction — volume went from +3.29
+// to -1.68 once judged against its own firing set — so this is no longer "the
+// techniques that work". It is retained deliberately and unchanged, because its
+// only job is to be a FIXED partition of the votes for the agreement
+// conditioner, and re-deriving it from each run's own results would make the
+// conditional test circular. A conditioner does not need to be correct, it
+// needs to be exogenous.
+const SELECTED_PANEL = new Set(['volume', 'openinterest', 'obv', 'structure']);
+
+// Conditioners, deliberately two and deliberately pre-specified.
+//
+// Every extra conditioner multiplies the search space, and a conditional edge
+// found by sweeping is the easiest false positive in this project to
+// manufacture. These two are chosen because each has a mechanism stated BEFORE
+// the data is consulted:
+//
+//   volatility  The anti-signals fail through the deadband — they fire when
+//               nothing moves. If that is the whole story, restricting to
+//               assets whose volatility regime is elevated should recover the
+//               inversion, because a move is then likely to clear it. Read from
+//               m.volReg, known at cast time; conditioning on the realized move
+//               would be look-ahead.
+//   agreement   Whether the call opposes the panel that does work. A signal
+//               that is wrong INDEPENDENTLY carries no extra information; one
+//               that is wrong precisely when it contradicts a good signal is a
+//               confirmation filter, which is a different and useful object.
+const CONDITION_LABELS = ['vol-high|opposes', 'vol-high|agrees', 'vol-low|opposes', 'vol-low|agrees'];
+
 // Rows per run before stopping and checkpointing. The workflow ceiling is 120
 // minutes and D1's REST round trip is ~330ms per request at 100 rows a request,
 // so ~150k rows is roughly 8 minutes of writing plus the compute. Deliberately
@@ -362,6 +393,14 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
   // that is because every technique is dead or because a few live ones are
   // being drowned by twenty that are not.
   const techniqueEdges = {};
+  // The same measurement for the mirrored vote, to answer "these are so wrong,
+  // can we just flip them?" with evidence instead of an assertion.
+  const techniqueInverseEdges = {};
+  // P(flat) minus the technique's own flat rate, per period. This is the entire
+  // reason an inverted edge is not simply the negation of the original.
+  const techniqueFlatGap = {};
+  // "technique|condition" -> inverted edge per period.
+  const techniqueCondEdges = {};
 
   for (const horizonDays of horizonDaysList) {
     const horizonMinutes = HORIZON_DAYS_TO_MINUTES[horizonDays];
@@ -415,6 +454,8 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
       const evaluatedAt = new Date().toISOString();
       // technique -> { n, correct, up } for THIS anchor only.
       const periodTally = {};
+      // technique -> condition label -> tally, same anchor.
+      const periodCond = {};
       // This anchor's realized outcome mix, which is the null every technique
       // is judged against. Counted over the symbols actually scored here, not
       // borrowed from the class as a whole.
@@ -473,6 +514,13 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
         periodN++;
         if (actualDir === 1) periodUp++; else if (actualDir === -1) periodDown++;
 
+        // The panel's net lean for THIS asset, from the techniques that survived
+        // the split. Zero when they are absent or evenly divided, which counts
+        // as "no opinion" and is excluded rather than bucketed as agreement.
+        let panelNet = 0;
+        for (const v of c.votes) if (SELECTED_PANEL.has(v.id)) panelNet += v.dir;
+        const volHigh = Number.isFinite(m.volReg) ? m.volReg >= 1 : null;
+
         for (const v of c.votes) {
           // Per-ANCHOR tally, not a running total. A technique's casts on one
           // date move together, so pooling them is the v6 independence error;
@@ -481,10 +529,42 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
           // observation. Costs one object per technique per anchor and no D1
           // writes at all — the votes are computed either way to advance the
           // walk-forward map, so measuring them is free.
-          const cell = (periodTally[v.id] ??= { n: 0, correct: 0, up: 0 });
+          const cell = (periodTally[v.id] ??= { n: 0, correct: 0, up: 0, inverse: 0, flat: 0, actUp: 0, actDown: 0 });
           cell.n++;
           if (v.dir === actualDir) cell.correct++;
+          // The outcome mix OF THE ASSETS THIS TECHNIQUE FIRED ON, which is the
+          // null its direction has to beat. Not the period-wide mix: most
+          // techniques fire selectively, so the two populations differ, and
+          // judging a selective technique against the period at large conflates
+          // "picks the right direction" with "picks assets that move". dwell
+          // fires only on coiled names, which resolve flat far more often than
+          // average; scored against the period it reads -20 points, almost all
+          // of which is that selection rather than a directional error.
+          if (actualDir === 1) cell.actUp++; else if (actualDir === -1) cell.actDown++;
+          // What this call would have scored INVERTED. Not 1 - correct: a call
+          // is wrong two ways (the move went the other way, or it never cleared
+          // the deadband) and only the first flips into a win, so the flat ones
+          // are counted separately rather than credited to the inverse.
+          if (actualDir !== 0 && v.dir === -actualDir) cell.inverse++;
+          if (actualDir === 0) cell.flat++;
           if (v.dir === 1) cell.up++;
+          // Conditional cells for the inversion question. Skipped entirely when
+          // either conditioner is undefined, rather than bucketing an unknown,
+          // and never computed for the panel itself.
+          if (volHigh !== null && panelNet !== 0 && !SELECTED_PANEL.has(v.id)) {
+            const label = `${volHigh ? 'vol-high' : 'vol-low'}|${Math.sign(panelNet) === v.dir ? 'agrees' : 'opposes'}`;
+            const cond = ((periodCond[v.id] ??= {})[label] ??= { n: 0, inverse: 0, up: 0, actUp: 0, actDown: 0 });
+            cond.n++;
+            if (actualDir !== 0 && v.dir === -actualDir) cond.inverse++;
+            if (v.dir === 1) cond.up++;
+            // The cell's OWN realized outcome mix. A conditional cell is a
+            // subset of the period selected on volatility and on agreement with
+            // an informative panel, and both of those correlate with how the
+            // period resolved — so the period-wide mix is the wrong null for it.
+            // Using it produced 31 of 34 cells reading positive, which is the
+            // shape of a miscalibrated baseline rather than a discovery.
+            if (actualDir === 1) cond.actUp++; else if (actualDir === -1) cond.actDown++;
+          }
           techniqueCensus[v.id] = (techniqueCensus[v.id] || 0) + 1;
           const row = {
             ...base, series_kind: 'technique', series_key: v.id,
@@ -524,8 +604,26 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
         for (const [id, cell] of Object.entries(periodTally)) {
           if (cell.n < TECHNIQUE_MIN_CASTS_PER_PERIOD) continue;
           const upFrac = cell.up / cell.n;
-          const base = upFrac * pUp + (1 - upFrac) * pDown;
+          const ownUp = cell.actUp / cell.n, ownDown = cell.actDown / cell.n;
+          const base = upFrac * ownUp + (1 - upFrac) * ownDown;
           (techniqueEdges[id] ??= []).push(cell.correct / cell.n - base);
+          // The inverted vote mix is the mirror of the original, so the null it
+          // must beat is the mirror too. Judging an inverted call against the
+          // ORIGINAL baseline is the error that makes inversion look free.
+          const inverseBase = (1 - upFrac) * ownUp + upFrac * ownDown;
+          (techniqueInverseEdges[id] ??= []).push(cell.inverse / cell.n - inverseBase);
+          for (const [label, cond] of Object.entries(periodCond[id] || {})) {
+            if (cond.n < TECHNIQUE_MIN_CASTS_PER_PERIOD) continue;
+            const cUp = cond.up / cond.n;
+            const cellUp = cond.actUp / cond.n, cellDown = cond.actDown / cond.n;
+            // Mirrored vote mix against the CELL's own outcome mix.
+            (techniqueCondEdges[`${id}|${label}`] ??= []).push(cond.inverse / cond.n - ((1 - cUp) * cellUp + cUp * cellDown));
+          }
+          // Flat rate among this technique's own calls, against the period's.
+          // Edge' = -Edge + (P(flat) - flat_rate), so a technique that fires
+          // selectively into quiet conditions recovers LESS than its mirror.
+          (techniqueFlatGap[id] ??= []).push((1 - pUp - pDown) - cell.flat / cell.n);
+          void pUp; void pDown;
         }
       }
 
@@ -564,7 +662,7 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
   const census = Object.entries(techniqueCensus).sort((a, b) => b[1] - a[1]);
   console.log(`[replay] ${assetClass}: technique vote census (${census.length} of ~27 voted)`);
   for (const [id, n] of census) console.log(`           ${id.padEnd(14)} ${n}`);
-  reportTechniqueSkill(assetClass, techniqueEdges, census.length);
+  reportTechniqueSkill(assetClass, techniqueEdges, census.length, techniqueInverseEdges, techniqueFlatGap, techniqueCondEdges);
   return { rows: totalRows };
 }
 
@@ -581,7 +679,7 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
 // one is read off the top, which is textbook manufacturing of a significant
 // result out of noise; the same correction the cross-sectional lane applies to
 // its feature search applies here for the same reason.
-function reportTechniqueSkill(assetClass, edgesById, testedCount) {
+function reportTechniqueSkill(assetClass, edgesById, testedCount, inverseById = {}, flatGapById = {}, condById = {}) {
   const ids = Object.keys(edgesById);
   if (!ids.length) return;
   const tests = Math.max(1, testedCount || ids.length);
@@ -604,6 +702,34 @@ function reportTechniqueSkill(assetClass, edgesById, testedCount) {
     });
   }
   rows.sort((a, b) => (b.meanEdgePts ?? -99) - (a.meanEdgePts ?? -99));
+  // OUT-OF-SAMPLE SPLIT. Everything above is chosen and scored on the same
+  // history, which is how a selection rule flatters itself: pick the best of 18
+  // series and the winner carries whatever noise made it the best. Bonferroni
+  // bounds the chance any single one clears by luck, but it cannot tell you the
+  // SET will survive into data it did not choose from.
+  //
+  // So the series is cut chronologically — never at random, which would let a
+  // period's own neighbours leak across the boundary — and each technique is
+  // scored on both halves. A technique that earns its keep shows the same sign
+  // either side. One that flips is a regime artefact and must not be shipped.
+  const splitAt = (e) => Math.floor(e.length * 0.7);
+  const half = (e, which) => which === 'train' ? e.slice(0, splitAt(e)) : e.slice(splitAt(e));
+  const stat = (e) => {
+    if (e.length < 20) return null;
+    const m = e.reduce((a, b) => a + b, 0) / e.length;
+    const se = neweyWestSE(e);
+    return { mean: m * 100, t: se ? m / se : null };
+  };
+  console.log(`\n[replay] ${assetClass}: does the selection survive data it did not choose from?`);
+  console.log('           technique       train edge   train t    test edge    test t   sign holds');
+  for (const r of rows) {
+    if (r.underpowered) continue;
+    const e = edgesById[r.id];
+    const tr = stat(half(e, 'train')), te = stat(half(e, 'test'));
+    if (!tr || !te) { console.log(`           ${r.id.padEnd(14)} (too few periods to split)`); continue; }
+    const holds = Math.sign(tr.mean) === Math.sign(te.mean) ? 'yes' : 'NO';
+    console.log(`           ${r.id.padEnd(14)} ${String(tr.mean.toFixed(2)).padStart(11)} ${String(tr.t == null ? 'n/a' : tr.t.toFixed(2)).padStart(9)} ${String(te.mean.toFixed(2)).padStart(12)} ${String(te.t == null ? 'n/a' : te.t.toFixed(2)).padStart(9)} ${holds.padStart(12)}`);
+  }
   console.log(`\n[replay] ${assetClass}: per-technique skill, one observation per period, Newey-West`);
   console.log(`           Bonferroni bar for ${tests} techniques: |t| >= ${zBar.toFixed(2)}`);
   console.log('           technique      periods   edge pts      NW t   periods +   verdict');
@@ -619,6 +745,81 @@ function reportTechniqueSkill(assetClass, edgesById, testedCount) {
   console.log(winners.length
     ? `           ${winners.length} technique(s) clear the family bar: ${winners.map((r) => r.id).join(', ')}`
     : '           NOTHING clears the family bar — the library has no salvageable component at this horizon.');
+
+  // CAN THE ANTI-SIGNALS BE FLIPPED?
+  //
+  // Inverting a wrong call does not reliably produce a right one, because a
+  // directional call is wrong two ways — the move went the other way, or it
+  // never cleared the deadband — and only the first flips into a win. But that
+  // argument alone does not settle the EDGE, because inverting also mirrors the
+  // baseline the call is judged against. Working it through:
+  //
+  //   a'    = 1 - a - flat                 (three-way partition of the calls)
+  //   base' = 1 - P(flat) - base           (mirrored vote mix, same outcomes)
+  //   Edge' = -Edge + (P(flat) - flat)
+  //
+  // So the mirror recovers the full magnitude ONLY where a technique fires at
+  // the population's flat rate. One that selects quiet conditions carries a
+  // higher flat rate than the population and gives back the difference — which
+  // is exactly what a "coiled near its extreme" rule like dwell is built to do.
+  // The gap column below is that term, measured rather than assumed.
+  const losers = rows.filter((r) => !r.underpowered && r.t != null && r.t <= -zBar);
+  if (!losers.length) return;
+  console.log(`\n[replay] ${assetClass}: can the anti-signals be inverted?`);
+  console.log('           technique      edge pts   inverted   mirror?      NW t   flat gap   verdict');
+  for (const r of losers) {
+    const inv = inverseById[r.id] || [];
+    if (inv.length < 30) { console.log(`           ${r.id.padEnd(14)} (inverted series too short to test)`); continue; }
+    const mean = inv.reduce((a, b) => a + b, 0) / inv.length;
+    const se = neweyWestSE(inv);
+    const t = se ? mean / se : null;
+    const gaps = flatGapById[r.id] || [];
+    const gap = gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : null;
+    const mirror = -r.meanEdgePts;
+    const verdict = t != null && t >= zBar && mean > 0 ? 'INVERTIBLE' : 'no';
+    console.log(`           ${r.id.padEnd(14)} ${String(r.meanEdgePts.toFixed(2)).padStart(9)} ${String((mean * 100).toFixed(2)).padStart(10)} ${String(mirror.toFixed(2)).padStart(9)} ${String(t == null ? 'n/a' : t.toFixed(2)).padStart(9)} ${String(gap == null ? 'n/a' : (gap * 100).toFixed(2)).padStart(10)}   ${verdict}`);
+  }
+  console.log('           inverted = measured edge of the mirrored vote against the MIRRORED baseline.');
+  console.log('           mirror   = -edge, what inversion would return if the flat rates matched.');
+  console.log('           flat gap = P(flat) - this technique\'s own flat rate, in points. Negative means');
+  console.log('                      it fires into quieter-than-average conditions and gives back that much.');
+
+  // CONDITIONAL INVERSION, and why the bar moves.
+  //
+  // Two refinements on the blunt "flip it" question. First, weight: in a
+  // weighted panel "invert at weight w" IS "contribute at -w", so the real
+  // question is not binary but what signed weight is optimal — and a technique
+  // that loses in BOTH directions has an optimum at zero, which is what
+  // silencing already expresses. The magnitude below is what would set |w|.
+  //
+  // Second, conditioning. A technique can be uninformative on average and
+  // informative inside a subset. But searching for that subset is the classic
+  // way to manufacture a result, so the conditioners are fixed in advance (see
+  // CONDITION_LABELS) and the family-wise bar is widened to cover every cell
+  // tested here, not just the unconditional ones.
+  const condKeys = Object.keys(condById).filter((k) => (condById[k] || []).length >= 30);
+  if (!condKeys.length) return;
+  const totalTests = tests + condKeys.length;
+  const zCond = Math.abs(normalQuantile(0.05 / totalTests / 2));
+  console.log(`\n[replay] ${assetClass}: inversion conditioned on volatility and on agreement with the surviving panel`);
+  console.log(`           Bar widens to |t| >= ${zCond.toFixed(2)} for ${totalTests} tests (${tests} unconditional + ${condKeys.length} conditional)`);
+  console.log('           technique      condition            periods   inv edge      NW t   verdict');
+  const condRows = [];
+  for (const key of condKeys) {
+    const series = condById[key];
+    const mean = series.reduce((a, b) => a + b, 0) / series.length;
+    const se = neweyWestSE(series);
+    condRows.push({ key, periods: series.length, mean: mean * 100, t: se ? mean / se : null });
+  }
+  condRows.sort((a, b) => b.mean - a.mean);
+  for (const r of condRows) {
+    const [id, cond] = r.key.split('|', 1).concat(r.key.slice(r.key.indexOf('|') + 1));
+    const verdict = r.t != null && r.t >= zCond && r.mean > 0 ? 'INVERTIBLE HERE' : '';
+    console.log(`           ${id.padEnd(14)} ${cond.padEnd(20)} ${String(r.periods).padStart(7)} ${String(r.mean.toFixed(2)).padStart(10)} ${String(r.t == null ? 'n/a' : r.t.toFixed(2)).padStart(9)}   ${verdict}`);
+  }
+  console.log('           A cell that clears here is a CONDITIONAL rule, not a technique: it only');
+  console.log('           applies where its condition holds, and it must be carried as such or it');
+  console.log('           reverts to the unconditional edge above, which is negative.');
 }
 
 // Bartlett-kernel standard error, same rule as replay-report.mjs. Duplicated
