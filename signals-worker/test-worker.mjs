@@ -111,8 +111,17 @@ const auditOutcome = {
   label_version: OUTCOME_LABEL_VERSION, evaluated_at: '2026-09-02T00:14:00.000Z'
 };
 await insertForecastOutcomes({ CLOUDFLARE_ACCOUNT_ID: 'a', FCS_D1_DATABASE_ID: 'd', CLOUDFLARE_API_TOKEN: 't' }, [auditOutcome]);
-check('ledger insert carries all 23 audit/version values', ledgerBodies[0].params.length === 23, JSON.stringify(ledgerBodies[0]));
-check('ledger insert ignores only its declared unique conflict, not arbitrary constraint failures', !ledgerBodies[0].sql.includes('INSERT OR IGNORE') && ledgerBodies[0].sql.includes('ON CONFLICT(run_at, asset_class, symbol, horizon_minutes, series_kind, series_key) DO NOTHING'));
+// Inserts go through d1Batch now (one request carries many statements — D1's
+// REST latency is per request, not per statement), so the audited shape lives
+// one level down in `batch` rather than at the body root.
+const ledgerStatement = ledgerBodies[0].batch[0];
+check('ledger insert carries all 25 audit/version/provenance/aggregation values', ledgerStatement.params.length === 25, JSON.stringify(ledgerStatement));
+check('ledger insert defaults provenance to live for every existing caller', ledgerStatement.params[23] === 'live', JSON.stringify(ledgerStatement.params));
+// 0 = pending, so the incremental three-phase aggregator still claims every
+// live row exactly as before. Only a caller that has already folded its rows
+// into the rollups in bulk (the replay) may pass 1.
+check('ledger insert leaves a live row PENDING for the incremental aggregator', ledgerStatement.params[24] === 0, JSON.stringify(ledgerStatement.params));
+check('ledger insert ignores only its declared unique conflict, not arbitrary constraint failures', !ledgerStatement.sql.includes('INSERT OR IGNORE') && ledgerStatement.sql.includes('ON CONFLICT(run_at, asset_class, symbol, horizon_minutes, series_kind, series_key) DO NOTHING'));
 let invalidOutcomeRejected = false;
 try {
   await insertForecastOutcomes({ CLOUDFLARE_ACCOUNT_ID: 'a', FCS_D1_DATABASE_ID: 'd', CLOUDFLARE_API_TOKEN: 't' }, [{ ...auditOutcome, observed_at: '2026-09-01T23:59:00.000Z' }]);
@@ -613,10 +622,34 @@ check('internal signal candidates are logged for alerting but not leaked into th
 check('log has directional votes for both asset classes', log.votes.some(v => v.asset_class === 'crypto') && log.votes.some(v => v.asset_class === 'stock'));
 check('log votes are directional only (no 0/null dir)', log.votes.every(v => v.dir === 1 || v.dir === -1));
 check('log has a price row per universe asset, both classes', log.prices.length === built.crypto.universe + built.stocks.universe);
-check('cold-start heuristics remain research observations but cannot manufacture composite production votes', !log.votes.some(v => v.technique_id === 'composite'));
+// MEASUREMENT IS NOT PUBLICATION. Until 2026-09-12 this asserted the opposite —
+// that a cold start logs no composite vote at all — and that is precisely what
+// deadlocked the engine: the composite vote is the ONLY input to
+// detailedCalibration, which is the only input to assetClassSkill, which is the
+// gate that decides whether a class may ever publish. Refusing to record the
+// vote meant the evidence needed to lift the gate could never accumulate, and
+// on 2026-09-06T15:10:09.932Z composite votes and range logging stopped
+// together, permanently.
+//
+// The correct contract is the pair below: the vote IS recorded so the class can
+// earn its way out, and the published row is STILL withheld because nothing has
+// been proven yet. Line 592 asserts the second half on the same payload.
+check('a cold-start composite vote is recorded, so the class can accumulate the evidence its own gate demands', log.votes.some(v => v.technique_id === 'composite'), JSON.stringify(log.votes.slice(0, 4)));
+check('recording that vote does NOT publish it: every board row is still withheld during cold start', built.crypto.breakout.concat(built.crypto.breakdown, built.crypto.favorites, built.stocks.breakout, built.stocks.breakdown).every(r => r.dir === 0 && r.abstained && r.horizon === null && r.range === null), JSON.stringify(built.crypto.breakout.map(r => ({ s: r.symbol, dir: r.dir, h: r.horizon }))));
 check('composite votes carry their own 0-100 score, for the calibration curve', log.votes.filter(v => v.technique_id === 'composite').every(v => typeof v.score === 'number' && v.score >= 0 && v.score <= 100));
 check('real (non-composite) technique votes do not carry a score — only composite rows do', log.votes.filter(v => v.technique_id !== 'composite').every(v => v.score === undefined));
-check('no empirical signal horizon means no range forecast is logged', log.ranges.length === 0, JSON.stringify(log.ranges));
+// Same measurement-is-not-publication split as the composite vote above, and it
+// stopped at the same instant for the same reason: rangeLog is written inside
+// `if (cc)`, so a null composite call silenced range logging too. range_reliability
+// needs 30 DISTINCT DAYS per symbol and horizon before a band may be shown; with
+// nothing logged it was stuck at a maximum of 3 across all 271 cells.
+//
+// A cold-start band is sized off realized volatility (predictedRange's
+// 'methodology' basis) rather than the asset's own matured move statistics. That
+// is a weaker band, which is exactly why it is recorded and not displayed — the
+// board row's own `range` stays null until the containment evidence exists.
+check('a cold-start range forecast IS logged, on the methodology basis, so containment can be measured', log.ranges.length > 0 && log.ranges.every(r => r.low > 0 && r.high > r.low), JSON.stringify(log.ranges.slice(0, 2)));
+check('both logged range horizons are the fixed 24h/168h pair maturity scoring compares like with like on', new Set(log.ranges.map(r => r.horizon_hours)).size === 2 && log.ranges.every(r => r.horizon_hours === 24 || r.horizon_hours === 168));
 check('highAccuracy present as an array even with no reliability data fed in (none qualify yet)', Array.isArray(built.highAccuracy) && built.highAccuracy.length === 0);
 check('crypto entries carry a CoinGecko id (for the dashboard\'s outbound link)', built.crypto.breakout.concat(built.crypto.breakdown).every(r => typeof r.id === 'string' && r.id.length > 0));
 check('stock entries have no id field (not applicable, uses symbol for the Yahoo link instead)', built.stocks.breakout.every(r => r.id === undefined));
@@ -644,8 +677,19 @@ const nerfed = mod.confluence(btcMetrics, 'crypto', { [`${btcMetrics.symbol}|rsi
 const belowThreshold = mod.confluence(btcMetrics, 'crypto', { [`${btcMetrics.symbol}|rsi`]: { accuracy: 1.0, correct: 3, total: 3 } });
 check('reliability multiplier changes the score vs baseline (enough samples)', boosted.long !== baseline.long || boosted.short !== baseline.short || nerfed.long !== baseline.long || nerfed.short !== baseline.short);
 check('below MIN_RELIABILITY_SAMPLES, weighting stays at baseline (no overfit to small samples)', belowThreshold.long === baseline.long && belowThreshold.short === baseline.short);
-check('reliabilityMultiplier caps a proven positive record at 1.5 and silences a non-positive record', mod.reliabilityMultiplier({ 'X|y': { accuracy: 5, correct: 50, total: 50 } }, 'X', 'y') === 1.5 && mod.reliabilityMultiplier({ 'X|y': { accuracy: -5, correct: 0, total: 50 } }, 'X', 'y') === 0);
-check('reliabilityMultiplier is zero with no reliability data: unknown candidates cannot vote', mod.reliabilityMultiplier(undefined, 'X', 'y') === 0 && mod.reliabilityMultiplier({}, 'X', 'y') === 0);
+check('reliabilityMultiplier caps a proven positive record at 1.5 and silences a proven anti-informative one', mod.reliabilityMultiplier({ 'X|y': { accuracy: 5, correct: 50, total: 50 } }, 'X', 'y') === 1.5 && mod.reliabilityMultiplier({ 'X|y': { accuracy: -5, correct: 0, total: 50 } }, 'X', 'y') === 0);
+// 0-for-50 is silenced by extremity, well short of ANTI_SIGNAL_MIN_SAMPLES.
+// A mild, unproven shortfall is demoted toward 0.5 instead — graded, not binary.
+check('a record below baseline but not significantly so is demoted toward 0.5, not silenced', (() => { const w = mod.reliabilityMultiplier({ 'X|y': { accuracy: 0.45, correct: 9, total: 20 } }, 'X', 'y'); return w > 0 && w < 1; })(), mod.reliabilityMultiplier({ 'X|y': { accuracy: 0.45, correct: 9, total: 20 } }, 'X', 'y'));
+// Unknown is the PRIOR, not silence. Returning 0 here is what deadlocked the
+// engine: with almost no (symbol, technique) cell able to clear "n >= 20 AND
+// above baseline AND significant", every weight was 0, so long === short === 0,
+// so compositeCall() returned null, so no composite vote was recorded, so the
+// evidence that would lift the gate could never accumulate. Publication is
+// gated by assetClassSkill/abstainBoards/gateBoardsBySignalConfidence and never
+// by this function, so a neutral prior here costs nothing and unsticks
+// measurement.
+check('reliabilityMultiplier falls back to the static prior with no reliability data: unknown is neutral, not silent', mod.reliabilityMultiplier(undefined, 'X', 'y') === 1 && mod.reliabilityMultiplier({}, 'X', 'y') === 1);
 
 console.log('\n== isReliabilitySignificant: guards against trusting noise at small sample sizes ==');
 check('14/20 (70%): NOT significant — this is exactly the kind of small-sample noise the guardrail targets', mod.isReliabilitySignificant(14, 20) === false);
@@ -660,7 +704,12 @@ check('zero samples: false, not a division-by-zero crash', mod.isReliabilitySign
 console.log('\n== reliabilityMultiplier: enough samples is not enough on its own, still needs significance ==');
 const notSignificantRec = { 'X|y': { accuracy: 0.7, correct: 14, total: 20 } }; // clears MIN_RELIABILITY_SAMPLES, fails isReliabilitySignificant
 const significantRec = { 'X|y': { accuracy: 0.8, correct: 16, total: 20 } };
-check('14/20 clears the sample-count floor but not significance: candidate is silenced, not treated as a neutral vote', mod.reliabilityMultiplier(notSignificantRec, 'X', 'y') === 0, mod.reliabilityMultiplier(notSignificantRec, 'X', 'y'));
+// Promotion needs significance; 14/20 does not have it, so the record cannot
+// buy extra weight — but it is not evidence of harm either, so it falls back to
+// the prior rather than being silenced. ~27 techniques compete for weight on
+// every asset, and something will clear a naive ">baseline given 20 samples"
+// bar by chance alone; that is what this guards, and it still does.
+check('14/20 clears the sample-count floor but not significance: no promotion above the prior, and no silencing either', mod.reliabilityMultiplier(notSignificantRec, 'X', 'y') === 1, mod.reliabilityMultiplier(notSignificantRec, 'X', 'y'));
 check('16/20 clears both bars: multiplier actually reflects the measured accuracy', mod.reliabilityMultiplier(significantRec, 'X', 'y') === mod.clamp(0.5 + 0.8, 0.5, 1.5), mod.reliabilityMultiplier(significantRec, 'X', 'y'));
 const classPrior = { byAssetClass: { crypto: { y: { accuracy: 0.6, total: 100 } } }, overall: {} };
 check('asset-class prior shrinks a significant asset-specific record toward the broader technique baseline instead of fully trusting the raw rate', mod.reliabilityMultiplierForAssetClass(significantRec, 'X', 'y', undefined, undefined, 'crypto', classPrior) < mod.reliabilityMultiplier(significantRec, 'X', 'y'));
@@ -675,11 +724,14 @@ console.log('\n== reliabilityMultiplier: regime-specific track record preferred 
 const blendedOnly = { 'X|y': { accuracy: 0.6, correct: 12, total: 20 } }; // clears MIN_RELIABILITY_SAMPLES but not significance on its own
 const byRegimeStrong = { trending: { 'X|y': { accuracy: 0.85, correct: 17, total: 20 } }, choppy: {} };
 const byRegimeThin = { trending: { 'X|y': { accuracy: 0.9, correct: 9, total: 10 } }, choppy: {} }; // regime-specific but below MIN_RELIABILITY_SAMPLES
-check('no regime passed: a blended record without significant positive edge remains silent', mod.reliabilityMultiplier(blendedOnly, 'X', 'y') === 0);
-check('regime passed but no byRegime data: an unproven blended fallback remains silent', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', undefined, 'trending') === 0);
+check('no regime passed: a blended record without significant positive edge stays at the prior, not promoted', mod.reliabilityMultiplier(blendedOnly, 'X', 'y') === 1);
+check('regime passed but no byRegime data: an unproven blended fallback stays at the prior', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', undefined, 'trending') === 1);
 check('significant regime-specific record: overrides blended with the regime-specific accuracy', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', byRegimeStrong, 'trending') === mod.clamp(0.5 + 0.85, 0.5, 1.5));
-check('regime-specific sample too thin: neither it nor the unproven blended record can vote', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', byRegimeThin, 'trending') === 0);
-check('asset currently choppy but only trending data exists: cross-regime evidence is not borrowed', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', byRegimeStrong, 'choppy') === 0);
+check('regime-specific sample too thin: falls through to the blended record, which is itself unproven, so the prior stands', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', byRegimeThin, 'trending') === 1);
+// The borrowing rule is what matters here and it is unchanged: a strong
+// TRENDING record must not raise the weight while the asset is CHOPPY. The
+// assertion is that it does not reach 1.35, not that the technique goes silent.
+check('asset currently choppy but only trending data exists: cross-regime evidence is not borrowed', mod.reliabilityMultiplier(blendedOnly, 'X', 'y', byRegimeStrong, 'choppy') === 1 && mod.reliabilityMultiplier(blendedOnly, 'X', 'y', byRegimeStrong, 'trending') > 1.3);
 
 console.log('\n== scoreBucket: decile bucketing for the calibration curve ==');
 check('0 -> bucket 0', mod.scoreBucket(0) === 0);

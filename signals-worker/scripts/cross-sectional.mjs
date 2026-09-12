@@ -839,12 +839,20 @@ export async function loadDecileEvidence(env) {
 export async function loadFundamentalsPanel(env, assetClass, barsBySymbol) {
   if (assetClass !== 'crypto') return null;
   try {
-    const [deriv, supply, liquidity, chain, network] = await Promise.all([
+    const [deriv, supply, supplyDaily, liquidity, chain, network] = await Promise.all([
       d1(env, `SELECT symbol, date, oi_usd_close, oi_usd_mean, oi_usd_high, oi_usd_low,
                  toptrader_account_ls, toptrader_position_ls, all_account_ls, taker_buy_sell_ratio
                FROM derivatives_daily ORDER BY symbol, date`),
       d1(env, `SELECT symbol, date, circulating_supply, total_supply, max_supply
                FROM asset_supply_snapshot_daily ORDER BY symbol, date`),
+      // The DIFFERENCED float series. asset_supply_snapshot_daily above began
+      // accumulating on 2026-09-12 and held a single date, so every supply
+      // feature fitted zero betas until this second read was added; the year of
+      // history that the market_chart backfill paid a CoinGecko rate-limit
+      // penalty to collect was simply never opened. buildSupplyLookup keeps the
+      // two sources apart rather than splicing them — see its docs.
+      d1(env, `SELECT symbol, date, circulating_supply
+               FROM asset_supply_daily WHERE circulating_supply > 0 ORDER BY symbol, date`),
       d1(env, `SELECT symbol, date, depth_1pct_usd, book_imbalance_1pct, book_imbalance_5pct
                FROM asset_liquidity_daily ORDER BY symbol, date`),
       d1(env, 'SELECT chain, date, metric, value FROM chain_metrics_daily'),
@@ -857,11 +865,12 @@ export async function loadFundamentalsPanel(env, assetClass, barsBySymbol) {
     const derivLookup = buildDerivLookup(deriv, priceBySymbol);
     const panel = {
       deriv: derivLookup,
-      supply: buildSupplyLookup(supply),
+      supply: buildSupplyLookup(supply, supplyDaily),
       liquidity: buildLiquidityLookup(liquidity, derivLookup),
       context: buildContextSeries(chain, network)
     };
-    console.log(`[xs] fundamentals panel: deriv ${panel.deriv.size} symbols, supply ${panel.supply.size}, `
+    console.log(`[xs] fundamentals panel: deriv ${panel.deriv.size} symbols, supply ${panel.supply.size}`
+      + ` (snapshot ${supply.length} rows / daily ${supplyDaily.length} rows), `
       + `liquidity ${panel.liquidity.size}, context ${panel.context.size} dates`);
     return panel;
   } catch (e) {

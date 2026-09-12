@@ -506,6 +506,129 @@ into total failure with the penalty outlasting the run. Pace defaults to 9s
 with 30/60/120s backoff, and already-filled symbols are skipped so a throttled
 run resumes.
 
+## The deadlock, and the walk-forward replay (added 2026-09-12)
+
+### What was actually wrong
+
+The signals page published nothing: every row carried `score: 0, dir: 0,
+horizon: null, range: null, abstained: insufficient-evidence`, and `classSkill`
+was `null` for both classes. That was read for days as a cold start. It was not.
+It was an absorbing state, and the chain is short:
+
+`reliabilityMultiplierForAssetClass` returned **0** for any technique without 20
+matured outcomes on that exact symbol, above baseline, and significant. Almost
+nothing clears that: at n=20 against a 0.43 baseline, z=2.576 needs a hit rate of
+**0.715**, and the deepest cell in the whole 8,644-row table is n=98 (needs
+0.559). At the 168-hour horizon, **zero of 2,289 cells** reached n=20 at all.
+
+So every weight was 0 -> `bullW = bearW = 0` -> `long === short === 0` ->
+`compositeCall()` returned null. And because `rankBoards` logs the composite vote
+AND the range prediction inside `if (cc)`, both stopped being recorded. Their
+last rows share a timestamp to the millisecond: **2026-09-06T15:10:09.932Z**. The
+other 27 techniques kept voting normally throughout, which is why this looked
+like a data problem rather than a logic one.
+
+With composite votes no longer accumulating, `detailedCalibration` stopped
+growing, `assetClassSkill` fell below `CLASS_SKILL_MIN_SAMPLES` and returned
+null, the class abstained — and abstention is what produced the zero weights.
+crypto reached **10 independent periods** against a bar of 150; stocks reached 4.
+
+### The fix, and why it does not weaken publication
+
+An unproven technique now weights at its **static prior (1.0)** instead of 0.
+Demotion is unchanged and promotion still requires significance:
+
+| record | weight |
+| --- | --- |
+| none yet | 1.0, the prior |
+| below baseline, not significantly | scaled down toward 0.5 |
+| below baseline by more than `ANTI_SIGNAL_EDGE`, significantly | **0**, silenced |
+| above baseline AND significant | up to 1.5 |
+| above baseline, not significant | 1.0 — no promotion on noise |
+
+The asymmetry is deliberate. ~27 techniques compete for weight on every asset, so
+something will clear a naive ">baseline given 20 samples" bar by chance; that is
+what the significance test guards and it still does. Demotion needs no such bar
+because the errors are not symmetric — promoting noise manufactures confidence,
+while failing to demote a drifting technique keeps a known-bad vote at full
+strength.
+
+**No threshold was lowered.** `MIN_RELIABILITY_SAMPLES`, `CLASS_SKILL_MIN_SAMPLES`,
+`MIN_ACTIONABLE_EDGE` and `RANGE_CALIBRATION_MIN_SAMPLES` are untouched.
+Publication never ran through this function: it is gated by `assetClassSkill` ->
+`abstainBoards` -> `gateBoardsBySignalConfidence`, all unchanged and all still
+failing closed. This gate was belt-and-braces on top of an already-closed gate,
+and the pair deadlocked. `test-worker.mjs` asserts both halves on the same
+payload: a cold start now records a composite vote, and every board row from that
+same build is still withheld.
+
+Composite outcomes now mean something different, so `OUTCOME_MODEL_VERSION` is
+**`confluence-v8`**. Technique, combo and market series are carried across via
+`WEIGHT_INDEPENDENT_MODEL_VERSIONS`, because `dir` in `push(id, w, dir, note)` is
+derived with no reference to `w` — discarding 28,353 matured technique outcomes
+to honour a version bump that provably could not touch them would be destroying
+evidence for bookkeeping's sake.
+
+### Replaying history instead of waiting for it
+
+Even unstuck, the publication gate needs 150 independent periods, and
+`loadDetailedCalibration` counts a period as a distinct calendar day. That is
+five months of waiting to find out whether a model works.
+
+`scripts/replay-history.mjs` walks the model over `asset_daily_bars` instead.
+`scripts/replay-metrics.mjs` rebuilds the full metrics object from `bars[0..i]`
+using worker.js's own exported indicator functions, and `confluence()`,
+`evaluateTechniques()` and `compositeCall()` are imported, never reimplemented.
+
+Four rules, all load-bearing:
+
+1. **No look-ahead.** Every window closes at the anchor. The reliability map at
+   anchor D holds only outcomes whose horizon had elapsed *before* D, advanced
+   forward from the replay's own results — never rebuilt from the finished
+   ledger. The benchmark series for `m.corr` must arrive pre-sliced.
+2. **Independence.** Stride equals the horizon, and the ledger's primary key
+   enforces one forecast per symbol per anchor per horizon.
+3. **Scored by date.** The forward bar is located by date and validated with
+   `spansExpectedDays`. Index stepping across a gap is what produced a single
+   +120,933% observation during the cross-sectional lane's validation.
+4. **Separable.** Every row carries `provenance='replay'` (migration 0038). The
+   loaders read both populations; the column exists so the claim that they agree
+   stays checkable. Material divergence between replayed and live accuracy on the
+   same model version IS the alarm that the harness has drifted.
+
+Rollups are rebuilt wholesale with `GROUP BY` (`refreshRollups`) rather than
+trickled through the per-row three-phase commit — idempotent, so a retried batch
+cannot double-count, and it does not add hours to the hourly build.
+
+**What the replay cannot see.** Six techniques have no archived inputs and
+abstain throughout (valuation, attention, earnings, sentiment, impliedvol,
+positioning); several more depend on ctx-supplied derived tables whose current
+values would be look-ahead at a past anchor. The replayed panel is a strict
+*subset* of the live one, and that direction matters: a subset can only be less
+informed, so skill measured here is a lower bound, not an unrelated number. Every
+run prints a per-technique vote census so the real coverage is visible.
+
+This is not a way to make the model pass, and it should not be described as one.
+It converts "we cannot know for five months" into "we know now", and a negative
+result you can act on beats an open question you cannot.
+
+### Supply features were reading the wrong table
+
+`loadFundamentalsPanel` read `asset_supply_snapshot_daily`, which held **131 rows
+across one date**, while `asset_supply_daily` held **45,532 rows over a year**
+that the CoinGecko backfill had paid a rate-limit penalty to collect. All five
+supply features fitted zero betas for their entire lifetime and dropped out as
+`untested`.
+
+`buildSupplyLookup` now reads both and keeps them apart. The two circulating
+figures are computed differently — one reported, one derived from two rounded
+fields — so splicing them would put a step change at the join date that every
+30-day difference spanning it would read as an unlock. Differenced series come
+from `asset_supply_daily` only; the snapshot supplies the point-in-time ratios
+that are never differenced. `burn_rate_30d` and `lockup_rate_30d` difference
+`total_supply`, which exists only in the snapshot, so they stay honestly
+untested until it has 30 days of its own.
+
 ## Editing later
 
 Change the watchlist, universe size, and filters in the config constants near the top of `worker.js`; tune technique weights in `evaluateTechniques`; adjust the embedded dashboard in the `PAGE_HTML` template near the bottom. After any edit, copy the file to `src/worker.js` too (`cp worker.js src/worker.js`) and run `node test-worker.mjs` before redeploying.

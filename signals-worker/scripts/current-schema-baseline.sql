@@ -51,4 +51,5 @@ INSERT OR IGNORE INTO d1_migrations (name) VALUES
   ('0034_asset_bar_quarantine.sql'),
   ('0035_asset_supply_daily.sql'),
   ('0036_fundamentals_lanes.sql'),
-  ('0037_oi_tick_and_flush_events.sql');
+  ('0037_oi_tick_and_flush_events.sql'),
+  ('0038_outcome_provenance.sql');

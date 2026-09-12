@@ -1,0 +1,106 @@
+name: Signals Replay
+
+# Walk-forward replay of the confluence model over asset_daily_bars, writing
+# matured, no-look-ahead outcomes into forecast_outcomes with provenance='replay'.
+#
+# WHY IT IS A WORKFLOW AND NOT A ONE-OFF: the model version is part of the
+# checkpoint key, so a future change to the weighting (the thing that makes
+# composite outcomes mean something different) starts a fresh replay rather than
+# blending two models' evidence. Keeping the runner wired up means re-answering
+# "does this model have skill" is a dispatch, not an afternoon.
+#
+# Deliberately manual + weekly rather than daily. The archive only grows by one
+# bar a day, so a daily run would re-walk thousands of anchors to add a handful
+# of new ones; signals-daily.yml already tops up the live ledger at that cadence.
+on:
+  schedule:
+    # Sundays 04:11 UTC. Off signals-daily's 02:37 and the hourly :13 mark, and
+    # after D1's 00:00 write-quota reset so a long run starts with a full budget.
+    - cron: "11 4 * * 0"
+  workflow_dispatch:
+    inputs:
+      asset_class:
+        description: "crypto, stock, or blank for both"
+        required: false
+        default: ""
+      budget:
+        description: "Max outcome rows to write this run"
+        required: false
+        default: "400000"
+      reset:
+        description: "Clear checkpoints and replay from the beginning"
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: signals-replay
+  cancel-in-progress: false
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    # The replay is resumable and budgeted, so a cancellation costs only the
+    # anchors since the last checkpoint rather than the whole run. 120 matches
+    # the ceiling signals-daily.yml settled on; this repo is public so Actions
+    # minutes are free.
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      # Idempotent, same pattern as the other signals workflows: the replay
+      # needs migration 0038's provenance column and replay_checkpoints table.
+      - name: Apply pending D1 migrations
+        working-directory: signals-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@latest d1 migrations apply frontier-capital-signals-reliability --remote
+
+      - name: Guardrail tests
+        working-directory: signals-worker
+        # A replay that has drifted from the live model, or that has acquired a
+        # look-ahead, produces BETTER numbers and no error. These run first for
+        # that reason — there is no downstream check that would catch it.
+        run: node --test test-replay.mjs test-cross-sectional.mjs
+
+      - name: Clear checkpoints
+        if: ${{ inputs.reset }}
+        working-directory: signals-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ secrets.FCS_D1_DATABASE_ID }}
+        run: node scripts/replay-history.mjs --reset
+
+      - name: Replay
+        working-directory: signals-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ secrets.FCS_D1_DATABASE_ID }}
+        run: |
+          ARGS="--budget ${{ inputs.budget || '400000' }}"
+          if [ -n "${{ inputs.asset_class }}" ]; then ARGS="$ARGS --asset-class ${{ inputs.asset_class }}"; fi
+          node scripts/replay-history.mjs $ARGS
+
+      # The point of the whole exercise. Prints per-period edge over the model's
+      # own no-skill baseline with Newey-West standard errors — never a pooled
+      # per-cast figure, which reads ~8x larger and means nothing. Runs even if
+      # the replay above hit its budget, since a partial ledger is still
+      # testable and the answer usually does not move much after a few hundred
+      # periods.
+      - name: Does the model beat its own baseline?
+        if: always()
+        working-directory: signals-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ secrets.FCS_D1_DATABASE_ID }}
+        run: node scripts/replay-report.mjs

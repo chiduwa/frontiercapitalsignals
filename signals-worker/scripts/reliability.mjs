@@ -48,13 +48,52 @@ const RETENTION_HOURS = 200;
 // the universe (delisted stock, coin falls out of top-100) can't leave
 // orphaned rows growing forever.
 const HARD_CAP_HOURS = 24 * 30;
-// forecast_outcomes has 23 writable columns including exact target/observation
-// provenance, within-window extrema, and model/label versions. Four rows use
-// 92 bound values, safely
-// below D1's real 100-parameter ceiling.
-const OUTCOME_INSERT_CHUNK = 4;
-export const OUTCOME_MODEL_VERSION = 'confluence-v7';
+// forecast_outcomes has 24 writable columns including exact target/observation
+// timing, within-window extrema, model/label versions and cast provenance.
+// Four rows use 96 bound values, still below D1's real 100-parameter-per-
+// STATEMENT ceiling — note that cap is per statement, not per batch, so
+// callers batching many of these through d1Batch are unaffected by it.
+// 25 writable columns x 3 rows = 75 bound values, inside D1's 100-per-STATEMENT
+// cap with headroom. Was 4 rows while the row was 23 columns wide; adding
+// provenance and aggregated would have put 4 rows at exactly 100, which is the
+// cap rather than under it.
+const OUTCOME_INSERT_CHUNK = 3;
+// Statements per d1Batch call. 25 is the figure archive.mjs settled on after
+// measuring D1's REST latency as per-request rather than per-statement. The cap
+// above is per statement, not per batch, so these two multiply freely.
+const OUTCOME_BATCH_STATEMENTS = 25;
+// v8 (2026-09-12): reliabilityMultiplierForAssetClass stopped returning 0 for
+// an unproven technique and now falls back to its static prior weight. See its
+// docs in worker.js for the measured deadlock that forced the change. Only the
+// AGGREGATION of technique votes changed, which is why the compatibility list
+// below exists rather than a clean break.
+export const OUTCOME_MODEL_VERSION = 'confluence-v8';
 export const OUTCOME_LABEL_VERSION = 'direction-deadband-0.5pct-v1';
+
+// Model versions whose outcomes stay comparable across the v7 -> v8 weighting
+// change, for the series where that change provably cannot reach.
+//
+// In evaluateTechniques, `push(id, w, dir, note)` derives `dir` purely from the
+// technique's own branch logic over `m` — the weight `w` is carried alongside
+// it and only ever consumed when confluence() sums the panel. confluence()'s
+// returned `votes` array is `{id, dir}`; the weight is not in it. So a
+// technique's own directional record, its regime split, its pairwise combos,
+// and the market's realized direction are all bit-identical under either
+// weighting, and discarding 28,353 matured technique outcomes to honour a
+// version bump that cannot have touched them would be destroying evidence for
+// bookkeeping's sake.
+//
+// Confirmed live rather than assumed: all 27 non-composite techniques kept
+// voting normally right through the six days when every weight was 0 and the
+// composite series was dead.
+//
+// The composite series is the exception and is NOT listed here — it is a
+// weighted sum, so it changed meaning. Its loaders (loadCalibration,
+// loadDetailedCalibration, loadExcursionEvidence) and the range series it
+// sizes (loadRangeReliability) pin OUTCOME_MODEL_VERSION exactly, which
+// deliberately drops the 281 v7 composite rows. At 10 independent periods for
+// crypto and 4 for stocks they carried no weight anyway.
+export const WEIGHT_INDEPENDENT_MODEL_VERSIONS = ['confluence-v7', 'confluence-v8'];
 // A composite outcome expands to at most five statements (base reliability,
 // regime, pooled calibration, detailed calibration, ledger commit). Eight
 // outcomes therefore stay comfortably bounded while amortizing REST latency.
@@ -117,9 +156,9 @@ export async function loadReliability(env) {
            SUM(CASE WHEN dir = -1 THEN 1 ELSE 0 END) AS votes_down
     FROM forecast_outcomes
     WHERE series_kind = 'technique' AND aggregated = 1
-      AND model_version = ? AND label_version = ?
+      AND model_version IN (?, ?) AND label_version = ?
     GROUP BY asset_class, symbol, series_key, horizon_minutes
-  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
+  `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION]);
   const acc = {};
   const byHorizon = { 24: {}, 168: {} };
   for (const r of rows) {
@@ -159,9 +198,9 @@ export async function loadReliability(env) {
            COUNT(DISTINCT substr(run_at, 1, 10)) AS effective_samples
     FROM forecast_outcomes
     WHERE series_kind = 'technique' AND aggregated = 1 AND dir IN (-1, 1)
-      AND model_version = ? AND label_version = ?
+      AND model_version IN (?, ?) AND label_version = ?
     GROUP BY asset_class, symbol, series_key, dir, horizon_minutes
-  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
+  `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION]);
   for (const row of directionalRows) {
     const horizon = Number(row.horizon_hours);
     if (!byHorizon[horizon]) continue;
@@ -189,9 +228,9 @@ export async function loadDirectionBaselines(env) {
            SUM(CASE WHEN actual_dir = -1 THEN 1 ELSE 0 END) AS n_down
     FROM forecast_outcomes
     WHERE series_kind = 'market' AND aggregated = 1
-      AND model_version = ? AND label_version = ?
+      AND model_version IN (?, ?) AND label_version = ?
     GROUP BY asset_class, horizon_minutes
-  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
+  `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION]);
   const out = {};
   for (const r of rows) {
     out[`${r.asset_class}|${r.horizon_hours}`] = { n_up: r.n_up, n_flat: r.n_flat, n_down: r.n_down };
@@ -218,9 +257,9 @@ export async function loadTechniquePriors(env) {
            COUNT(DISTINCT substr(run_at, 1, 10)) AS effective_periods
     FROM forecast_outcomes
     WHERE series_kind = 'technique' AND aggregated = 1
-      AND model_version = ? AND label_version = ?
+      AND model_version IN (?, ?) AND label_version = ?
     GROUP BY asset_class, series_key, horizon_minutes
-  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
+  `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION]);
   const grouped = {};
   for (const row of rows) (grouped[`${row.asset_class}|${row.technique_id}`] ??= []).push(row);
   const byAssetClass = {};
@@ -256,9 +295,9 @@ export async function loadRegimeReliability(env) {
            SUM(correct) AS correct, COUNT(*) AS total
     FROM forecast_outcomes
     WHERE series_kind = 'technique' AND aggregated = 1 AND regime IS NOT NULL
-      AND model_version = ? AND label_version = ?
+      AND model_version IN (?, ?) AND label_version = ?
     GROUP BY symbol, series_key, regime, horizon_minutes
-  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
+  `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION]);
   // Average horizon accuracies and use only the deepest horizon as effective n.
   // Summing 24h and 168h records treats two labels on related paths as two
   // independent experiments and can push a regime across the significance bar.
@@ -290,9 +329,9 @@ export async function loadComboReliability(env) {
            SUM(correct) AS correct, COUNT(*) AS total
     FROM forecast_outcomes
     WHERE series_kind = 'combo' AND aggregated = 1
-      AND model_version = ? AND label_version = ?
+      AND model_version IN (?, ?) AND label_version = ?
     GROUP BY symbol, series_key, horizon_minutes
-  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
+  `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION]);
   const rows = [];
   for (const row of ledgerRows) {
     let pair;
@@ -520,9 +559,9 @@ export async function loadMoveStats(env) {
            SUM(return_pct) AS sum_pct, SUM(return_pct * return_pct) AS sum_pct_sq
     FROM forecast_outcomes
     WHERE series_kind = 'market' AND aggregated = 1 AND return_pct IS NOT NULL
-      AND model_version = ? AND label_version = ?
+      AND model_version IN (?, ?) AND label_version = ?
     GROUP BY symbol, horizon_minutes
-  `, [OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION]);
+  `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION]);
   const out = {};
   for (const r of rows) {
     const mean = r.sum_pct / r.n;
@@ -809,9 +848,26 @@ export async function insertForecastOutcomes(env, rows) {
       throw new Error('forecast outcome observation predates its target');
     }
   }
-  for (const batch of chunk(rows, OUTCOME_INSERT_CHUNK)) {
-    const placeholders = batch.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',');
-    const params = batch.flatMap((row) => [
+  // One statement per OUTCOME_INSERT_CHUNK rows (the 100-parameter-per-
+  // STATEMENT ceiling), then OUTCOME_BATCH_STATEMENTS of those per HTTP call.
+  // D1's REST latency is per request and essentially flat in statement count
+  // (~330ms whether the batch holds 1 or 100), so sending these one statement
+  // at a time was paying that latency every four rows. Live runs write a few
+  // hundred rows and barely noticed; replay-history.mjs writes six figures and
+  // very much does — at 4 rows/request a 200k-row replay is ~4.5 hours of pure
+  // round trips, and 100 rows/request is ~11 minutes.
+  const statements = chunk(rows, OUTCOME_INSERT_CHUNK).map((batch) => ({
+    sql: `
+      INSERT INTO forecast_outcomes
+        (run_at, asset_class, symbol, horizon_minutes, series_kind, series_key,
+         dir, actual_dir, correct, score, regime, return_pct, target_at,
+         observed_at, entry_price, exit_price, path_high_pct, path_low_pct,
+         minutes_to_high, minutes_to_low, model_version, label_version, evaluated_at,
+         provenance, aggregated)
+      VALUES ${batch.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').join(',')}
+      ON CONFLICT(run_at, asset_class, symbol, horizon_minutes, series_kind, series_key) DO NOTHING
+    `,
+    params: batch.flatMap((row) => [
       row.run_at, row.asset_class, row.symbol, row.horizon_minutes,
       row.series_kind, row.series_key, row.dir ?? null, row.actual_dir ?? null,
       row.correct ? 1 : 0, row.score ?? null, row.regime ?? null,
@@ -821,18 +877,20 @@ export async function insertForecastOutcomes(env, rows) {
       row.minutes_to_high ?? null, row.minutes_to_low ?? null,
       row.model_version || (row.series_kind === 'intraday' ? 'intraday-v1' : OUTCOME_MODEL_VERSION),
       row.label_version || (row.series_kind === 'range' ? 'range-containment-v1' : OUTCOME_LABEL_VERSION),
-      row.evaluated_at
-    ]);
-    await d1(env, `
-      INSERT INTO forecast_outcomes
-        (run_at, asset_class, symbol, horizon_minutes, series_kind, series_key,
-         dir, actual_dir, correct, score, regime, return_pct, target_at,
-         observed_at, entry_price, exit_price, path_high_pct, path_low_pct,
-         minutes_to_high, minutes_to_low, model_version, label_version, evaluated_at)
-      VALUES ${placeholders}
-      ON CONFLICT(run_at, asset_class, symbol, horizon_minutes, series_kind, series_key) DO NOTHING
-    `, params);
-  }
+      row.evaluated_at,
+      // Defaulted rather than required: every existing caller writes live
+      // outcomes and should not have to say so.
+      row.provenance || 'live',
+      // 0 = pending, and the incremental aggregator (pendingOutcomeRows ->
+      // outcomeAggregateStatements) will claim it. A caller that has already
+      // folded its rows into the rollup tables in bulk passes 1 instead; that
+      // is the replay, which writes six-figure row counts and would otherwise
+      // add hours to the hourly build by trickling them through the per-row
+      // three-phase commit.
+      row.aggregated === 1 ? 1 : 0
+    ])
+  }));
+  for (const group of chunk(statements, OUTCOME_BATCH_STATEMENTS)) await d1Batch(env, group);
 }
 
 function outcomeAggregateStatements(row, nowIso) {

@@ -149,6 +149,12 @@ CREATE TABLE IF NOT EXISTS forecast_outcomes (
   label_version TEXT NOT NULL DEFAULT 'direction-deadband-0.5pct-v1',
   evaluated_at TEXT NOT NULL,
   aggregated INTEGER NOT NULL DEFAULT 0 CHECK (aggregated IN (-1, 0, 1)),
+  -- 'live' = cast by a scheduled build against the market as it stood.
+  -- 'replay' = cast by scripts/replay-history.mjs against archive bars using
+  -- only information available at its own anchor date. Both are read by the
+  -- loaders; the column keeps the two populations separable so the claim that
+  -- they agree stays checkable (migration 0038).
+  provenance TEXT NOT NULL DEFAULT 'live',
   CHECK (horizon_minutes > 0),
   CHECK (dir IS NULL OR dir IN (-1, 0, 1)),
   CHECK (actual_dir IS NULL OR actual_dir IN (-1, 0, 1)),
@@ -158,6 +164,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_forecast_outcomes_unique
   ON forecast_outcomes(run_at, asset_class, symbol, horizon_minutes, series_kind, series_key);
 CREATE INDEX IF NOT EXISTS idx_forecast_outcomes_latest
   ON forecast_outcomes(asset_class, symbol, horizon_minutes, series_kind, series_key, run_at DESC);
+CREATE INDEX IF NOT EXISTS idx_forecast_outcomes_provenance
+  ON forecast_outcomes(provenance, model_version, series_kind, series_key, run_at DESC);
+
+-- Resume point for the walk-forward replay, one row per (class, horizon, model
+-- version). The replay walks anchors forward in time, so newest_anchor_done is
+-- the high-water mark and the next run starts strictly after it.
+CREATE TABLE IF NOT EXISTS replay_checkpoints (
+  asset_class TEXT NOT NULL,
+  horizon_days INTEGER NOT NULL,
+  oldest_anchor_done TEXT,
+  newest_anchor_done TEXT,
+  anchors_done INTEGER NOT NULL DEFAULT 0,
+  rows_written INTEGER NOT NULL DEFAULT 0,
+  model_version TEXT NOT NULL,
+  last_run_at TEXT,
+  PRIMARY KEY (asset_class, horizon_days, model_version)
+);
 CREATE INDEX IF NOT EXISTS idx_forecast_outcomes_pending
   ON forecast_outcomes(aggregated, id) WHERE aggregated = 0;
 

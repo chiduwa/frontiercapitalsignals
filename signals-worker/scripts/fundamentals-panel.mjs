@@ -63,14 +63,57 @@ export function buildDerivLookup(derivRows, priceBySymbol) {
 // metric could not: supply_change_30d is NEGATIVE when tokens are burned or
 // re-locked, and float_ratio (circulating / total) separates the two cases —
 // a burn shrinks circulating AND total, a lockup shrinks only circulating.
-export function buildSupplyLookup(supplyRows) {
+// `snapshotRows`    asset_supply_snapshot_daily — circulating, total and max as
+//                   CoinGecko reports them. Captured by every hourly build at
+//                   zero API cost, so it grows one date per day from 2026-09-12.
+// `circulatingRows` asset_supply_daily — circulating derived as market_cap /
+//                   price over a year of history, from the CoinGecko
+//                   market_chart backfill.
+//
+// TWO SOURCES, DELIBERATELY NOT MERGED INTO ONE SERIES. Until 2026-09-12 this
+// read snapshotRows alone, which on that date held 131 rows across ONE date —
+// so supply_change_30d, supply_overhang, float_ratio, burn_rate_30d and
+// lockup_rate_30d all fitted zero betas for their entire lifetime and dropped
+// out as `untested`, while 45,532 rows of real supply history sat unread in the
+// other table.
+//
+// The fix is to read both, not to concatenate them. The two circulating figures
+// are computed differently — one reported, one derived from two rounded fields —
+// so splicing them would put a step change at the join date and every 30-day
+// difference spanning that seam would read it as an unlock. Differenced series
+// therefore come from asset_supply_daily ONLY, and the snapshot is used only for
+// the ratios that are never differenced.
+//
+// The consequence is honest and worth stating: supply_change_30d/90d have a
+// year of depth available immediately, while burn_rate_30d and lockup_rate_30d
+// difference total_supply, which exists only in the snapshot, and so stay
+// untested until the snapshot has accumulated 30 days of its own.
+export function buildSupplyLookup(snapshotRows, circulatingRows = []) {
   const out = new Map();
-  for (const [symbol, rows] of groupBy(supplyRows, 'symbol')) {
-    const sorted = rows.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
-    const circ = new Map(sorted.map((r) => [r.date, r.circulating_supply]));
-    const total = new Map(sorted.map((r) => [r.date, r.total_supply]));
+  const circBySymbol = groupBy(circulatingRows, 'symbol');
+  const snapBySymbol = groupBy(snapshotRows, 'symbol');
+  const symbols = new Set([...snapBySymbol.keys(), ...circBySymbol.keys()]);
+  for (const symbol of symbols) {
+    const snapshots = (snapBySymbol.get(symbol) || [])
+      .slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+    const daily = (circBySymbol.get(symbol) || [])
+      .slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+    // The differenced float series: one source, never spliced.
+    const circ = new Map(daily.map((r) => [r.date, r.circulating_supply]));
+    // total_supply has no other source, so burn/lockup are snapshot-only and
+    // will read null until it has depth.
+    const total = new Map(snapshots.map((r) => [r.date, r.total_supply]));
+    const snapshotByDate = new Map(snapshots.map((r) => [r.date, r]));
+    // Every date either source knows about, so a symbol present in only one of
+    // them still yields the features that source can support.
+    const sorted = [...new Set([...circ.keys(), ...snapshotByDate.keys()])]
+      .sort()
+      .map((date) => ({ date, ...(snapshotByDate.get(date) || {}), circulating_daily: circ.get(date) }));
     const perDate = new Map();
     for (const r of sorted) {
+      // Point-in-time ratios use the snapshot's own reported circulating figure
+      // so numerator and denominator come from the same reading; the derived
+      // one is only ever used for differences.
       const c = r.circulating_supply, t = r.total_supply, m = r.max_supply;
       const chg30 = changeOver(circ, r.date, 30);
       const chg90 = changeOver(circ, r.date, 90);

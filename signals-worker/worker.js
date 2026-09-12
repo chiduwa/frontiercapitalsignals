@@ -882,36 +882,89 @@ export function adjustedReliabilityAccuracy(correct, total, baselineAccuracy = 0
 // line for this asset class instead of a fair coin — the single change that
 // stops the loop from reading a whole technique library as "below average"
 // purely because flat outcomes count against both directions.
+// An unproven technique weights at its STATIC PRIOR (1.0), not 0.
+//
+// This returned 0 until 2026-09-12, on the reasoning that a warm-up heuristic
+// should not influence a published direction until its own record demonstrates
+// edge. The intent was right; the mechanism closed a loop. Measured live:
+//
+//   Almost no (symbol, technique) cell clears "n >= 20 AND accuracy > baseline
+//   AND significant" — at n=20 against a 0.43 baseline, z=2.576 needs a hit
+//   rate of 0.715, and the deepest cell in the entire table is n=98 (needs
+//   0.559). So every weight was 0 -> bullW = bearW = 0 -> long === short === 0
+//   -> compositeCall() returns null -> and because rankBoards logs the
+//   composite vote and the range prediction inside `if (cc)`, BOTH stopped
+//   being recorded. composite's last vote and range_log's last row share a
+//   timestamp to the millisecond: 2026-09-06T15:10:09.932Z.
+//
+//   With composite votes no longer accumulating, detailedCalibration stopped
+//   growing, assetClassSkill fell below CLASS_SKILL_MIN_SAMPLES and returned
+//   null, so the class abstained — which is the state that produced the zero
+//   weights in the first place. crypto reached 10 independent periods against
+//   a bar of 150, stocks 4. It was an absorbing state, not a cold start: no
+//   amount of waiting could exit it.
+//
+// Publication safety never rested on this function, which is why relaxing it
+// costs nothing. A direction reaches a reader only through assetClassSkill ->
+// abstainBoards -> gateBoardsBySignalConfidence, all of which still fail
+// closed and none of which changed. This gate was belt-and-braces on top of an
+// already-closed gate, and the pair deadlocked. No threshold was lowered:
+// MIN_RELIABILITY_SAMPLES, CLASS_SKILL_MIN_SAMPLES, MIN_ACTIONABLE_EDGE and
+// RANGE_CALIBRATION_MIN_SAMPLES are all unchanged.
+//
+// The replacement is graded rather than binary, and asymmetric on purpose:
+//
+//   no record yet                    -> 1.0, the technique's static prior
+//   measured below baseline          -> scaled down toward 0.5 by
+//                                       reliabilityWeight, no significance
+//                                       test required
+//   deep record, clearly anti-signal -> 0, silenced by ANTI_SIGNAL_EDGE
+//   measured above baseline          -> up to 1.5, but ONLY if significant
+//
+// Promotion needs significance because ~27 techniques compete for weight on
+// every asset and something will clear a naive ">baseline given 20 samples"
+// bar by chance alone. Demotion does not, because the costs are not
+// symmetric: promoting noise manufactures confidence, while failing to demote
+// a technique that is genuinely drifting keeps a known-bad vote at full
+// strength. The cheaper error is to demote early.
+//
+// `baselines` (optional) is loadDirectionBaselines' map. When present, every
+// significance test and weight below is judged against the measured no-skill
+// line for this asset class instead of a fair coin.
 export function reliabilityMultiplierForAssetClass(reliability, symbol, techniqueId, byRegime, regime, assetClass, techniquePriors, baselines) {
-  // A static heuristic is still logged and evaluated while it warms up, but it
-  // is not allowed to influence a published direction until its own
-  // out-of-sample record demonstrates positive edge. This separates research
-  // candidates from production signals instead of treating "unknown" as a
-  // neutral 1.0 vote weight.
-  if (!reliability) return 0;
+  if (!reliability) return 1;
   const prior = techniquePriorRecord(techniquePriors, assetClass, techniqueId);
   const priorSamples = Math.min(RELIABILITY_PRIOR_SAMPLES, prior && Number.isFinite(prior.total) ? prior.total : 0);
+  // Promotion above the prior requires significance; demotion below it never
+  // does. Shared by both the regime-specific and blended branches so the two
+  // cannot drift apart.
+  const graded = (rec) => {
+    const base = baselineFor(baselines, assetClass, null, rec);
+    const accuracy = Number.isFinite(rec.accuracy) ? rec.accuracy : rec.correct / rec.total;
+    // Shrink toward the technique's class-level record when there is one,
+    // otherwise toward the measured baseline — never toward a 0.5 that this
+    // asset class was never going to reach.
+    const priorAcc = prior && Number.isFinite(prior.accuracy) ? prior.accuracy : base;
+    const w = reliabilityWeight(adjustedReliabilityAccuracy(rec.correct, rec.total, priorAcc, priorSamples), rec.total, base);
+    // Proven anti-informative: silenced outright, not merely halved. This is
+    // the same judgement reliabilityWeight's ANTI_SIGNAL floor makes, applied
+    // one level up so it can fire on EXTREMITY as well as depth. 0 correct in
+    // 50 is overwhelming evidence (p ~ 2^-50) but never reaches the floor's
+    // 150-sample bar, and a technique that has been reliably, measurably wrong
+    // should not keep voting at half weight while it waits to get there.
+    // Significance is required in BOTH directions here — the asymmetry above
+    // is about promoting to >1, not about this.
+    if (accuracy - base <= ANTI_SIGNAL_EDGE && isReliabilitySignificant(rec.correct, rec.total, base)) return 0;
+    if (w <= 1) return w;
+    return (accuracy > base && isReliabilitySignificant(rec.correct, rec.total, base)) ? w : 1;
+  };
   if (regime && byRegime && byRegime[regime]) {
     const rrec = byRegime[regime][`${symbol}|${techniqueId}`];
-    if (rrec && rrec.total >= MIN_RELIABILITY_SAMPLES) {
-      const base = baselineFor(baselines, assetClass, null, rrec);
-      const regimeAccuracy = Number.isFinite(rrec.accuracy) ? rrec.accuracy : rrec.correct / rrec.total;
-      if (regimeAccuracy > base && isReliabilitySignificant(rrec.correct, rrec.total, base)) {
-        // Shrink toward the technique's class-level record when there is one,
-        // otherwise toward the measured baseline — never toward a 0.5 that
-        // this asset class was never going to reach.
-        const priorAcc = prior && Number.isFinite(prior.accuracy) ? prior.accuracy : base;
-        return reliabilityWeight(adjustedReliabilityAccuracy(rrec.correct, rrec.total, priorAcc, priorSamples), rrec.total, base);
-      }
-    }
+    if (rrec && rrec.total >= MIN_RELIABILITY_SAMPLES) return graded(rrec);
   }
   const rec = reliability[`${symbol}|${techniqueId}`];
-  if (!rec || rec.total < MIN_RELIABILITY_SAMPLES) return 0;
-  const base = baselineFor(baselines, assetClass, null, rec);
-  const accuracy = Number.isFinite(rec.accuracy) ? rec.accuracy : rec.correct / rec.total;
-  if (accuracy <= base || !isReliabilitySignificant(rec.correct, rec.total, base)) return 0;
-  const priorAcc = prior && Number.isFinite(prior.accuracy) ? prior.accuracy : base;
-  return reliabilityWeight(adjustedReliabilityAccuracy(rec.correct, rec.total, priorAcc, priorSamples), rec.total, base);
+  if (!rec || rec.total < MIN_RELIABILITY_SAMPLES) return 1;
+  return graded(rec);
 }
 
 // `p0` is the measured no-skill baseline for this record (noSkillBaseline
