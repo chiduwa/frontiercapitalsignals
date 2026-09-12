@@ -1,0 +1,18 @@
+[Unit]
+Description=Collect geo-blocked Binance data a few times a day
+Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/trading-bot/README.md
+
+[Timer]
+# Four times a day, offset off the hour so it never lands on the same second as
+# the five-minute trading cycle. Funding settles every 8 hours, so there is
+# nothing to gain from a tighter cadence; the first few runs do the deep
+# backfill and every run after that is a cheap top-up.
+OnCalendar=*-*-* 02,08,14,20:07:00
+AccuracySec=30s
+# Catching up is safe and useful here, unlike the trading cycle: this only
+# appends history, and a missed window simply means more to fetch next time.
+Persistent=true
+Unit=fcs-binance-collector.service
+
+[Install]
+WantedBy=timers.target

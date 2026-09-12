@@ -1,0 +1,49 @@
+[Unit]
+Description=FrontierCapitalSignals — collect geo-blocked Binance data into D1
+Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/trading-bot/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=fcsbot
+Group=fcsbot
+WorkingDirectory=/opt/fcs/signals-worker
+EnvironmentFile=/etc/fcs-trading-bot.env
+
+# This host is the only machine in the system that is not geo-blocked from
+# fapi.binance.com (451 from the developer machine and from GitHub-hosted
+# runners). It therefore collects what nothing else can — principally the full
+# funding-rate settlement history, which has no free historical source
+# anywhere and which data.binance.vision does not export.
+#
+# It shares the flock with the trading bot deliberately. Both talk to the same
+# Binance account's rate-limit budget, and a backfill must never be in flight
+# while a decision cycle is trying to place or cancel an order.
+ExecStart=/usr/bin/flock --exclusive --wait 60 /run/lock/fcs-futures-runtime.lock /usr/bin/node scripts/binance-direct-collect.mjs
+
+# Bounded so a stuck page cannot hold the shared lock into the next decision
+# cycle. The script keeps its own, smaller time budget inside this.
+TimeoutStartSec=1500
+
+# Exit code 2 is the script's "this host is geo-blocked" signal. It is a real
+# misconfiguration worth surfacing, not a transient failure to retry.
+SuccessExitStatus=0
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fcs-binance-collector
