@@ -27,68 +27,99 @@ Open interest is measured across the same window from the portal's 5-minute
 metrics files, so "did positions close or open during the drop" is observed,
 not inferred.
 
-## Result 1 — the discriminator is open interest, and it runs OPPOSITE to intuition
+> **SUPERSEDED BELOW.** The first pass (n=189) double-counted: scanning for
+> up-spikes also matched the REBOUND out of every dip, so a V-shape was logged
+> twice and the "OI rose → 106% retrace" figure for dips was contaminated by
+> its own rebounds. `dedupeEpisodes` fixes it. The corrected study (n=248,
+> both directions, one episode per move) is the authority; the OI effect
+> survives, but the interpretation changes materially. Kept here because the
+> error is instructive.
 
-| open interest across the flush | n | median recovery |
+## Corrected result — OI direction says whether the move CONTINUES
+
+248 episodes, 30 symbols, 60 days, one record per move.
+
+| | 30-min retrace | 12h return vs pre-event | median trough |
+| --- | --- | --- | --- |
+| **dip**, OI fell (longs liquidated) | 55.4% | **−9.69%** | 8.45% |
+| **dip**, OI rose (new shorts) | **87.3%** | **−13.47%** | 7.56% |
+| **spike**, OI fell (shorts covering) | **106.2%** | +6.76% | — |
+| **spike**, OI rose (new longs) | 51.4% | **+10.82%** | — |
+
+Dips: +31.9 points between OI buckets, permutation p < 0.0001.
+Spikes: −54.8 points, p < 0.0001. The effect is real in both directions.
+
+**But the two columns disagree, and that is the whole point.** A dip with OI
+RISING retraces hardest in thirty minutes (87.3%) and is the WORST place to be
+twelve hours later (−13.47%). The bounce is a dead cat. Reading only the
+recovery column — which is what the first pass did — gets this exactly
+backwards.
+
+The unified rule that fits all four cells:
+
+> **Open interest rising through a move means new money is taking that side,
+> and the move CONTINUES. Open interest falling means positions are being
+> forced shut, and the move is mechanical — it reverses harder in the short
+> run and goes less far in the end.**
+
+So OI does not tell you "will it bounce". It tells you **whether the bounce is
+worth anything**. Dip + OI falling is a genuine flush that partly recovers and
+stabilises. Dip + OI rising is a trend beginning, whose violent bounce will
+trap anyone who mistakes it for a reversal.
+
+## Result — a pre-event predictor that works
+
+| pre-event feature | Spearman vs retrace | t | n |
+| --- | --- | --- | --- |
+| **realized vol, prior 60 min** | **+0.246** | **+3.97** | 246 |
+| prior-hour OI trend | −0.056 | −0.89 | 248 |
+| prior-hour taker-buy share | −0.057 | −0.90 | 248 |
+
+Only prior volatility carries information, and it is observable *before* the
+event: moves that erupt out of an already-volatile tape retrace more. A dip out
+of a dead-calm tape is the one that keeps going.
+
+## Result — timing: not periodic, but far from uniform
+
+**Time of day is strongly non-uniform.** χ² = 104.8 against 23 df (p < 0.001;
+35.2 would be p = 0.05):
+
+| hour (UTC) | episodes | vs expected (~10.3) |
 | --- | --- | --- |
-| **fell ≥1%** (positions being liquidated out) | 121 | **50.3%** |
-| flat (−1%…+1%) | 25 | 62.2% |
-| **rose ≥1%** (new shorts entering) | 43 | **106.2%** |
+| **05:00** | **39** | **3.8×** |
+| 12:00 | 19 | 1.8× |
+| 00:00 | 13 | 1.3× |
+| 19:00–23:00 | 3–6 each | 0.3–0.6× |
 
-Difference in medians **+55.9 points, permutation p < 0.0001**.
-Spearman(OI change, recovery) = **+0.505, t = 7.99, n = 189**.
+05:00 UTC is the thinnest book of the day — US asleep, Europe pre-open, Asia at
+lunch. Nearly four times the episode rate of an average hour, and roughly ten
+times the quietest.
 
-The hypothesis this study was built to test was the reverse: that falling OI
-means forced selling is exhausting itself and the move should therefore be
-self-limiting. **That is wrong, and it is wrong with a large effect size.**
+**They are bursty, not periodic.** Coefficient of variation of the gap between
+consecutive episodes on the same symbol = **2.77** (1.0 would be memoryless
+Poisson; below 1 would be regular). Median gap 1.1 hours, mean 33.4 hours — a
+distribution that skewed is clusters separated by long silence.
 
-The mechanism that fits the data instead:
+**79% of gaps are under 6 hours.** Once a symbol has flushed, another is likely
+within hours.
 
-* **OI falling = the leveraged longs are gone.** Liquidation does structural
-  damage. The accounts that would have bought the dip have just been closed out
-  of it and cannot come back. Median recovery ~50% — the price finds a new,
-  lower level.
-* **OI rising = new shorts are pressing into a fast drop.** Those shorts are
-  themselves leveraged and vulnerable, and the >100% median recovery is them
-  being squeezed back out. The drop retraces *completely*.
+**They are idiosyncratic, not market-wide.** Only 1 of 60 days had ≥8 of 30
+symbols flush together (2026-08-22 — the day both WLFI and DEXE flushed). 24
+days had exactly one symbol. Just 12% of episodes fall on market-wide days.
 
-So a violent dip is not one phenomenon. Whether it is an opportunity or a
-warning depends on who is on the other side, and OI direction says which.
+Base rate: **one episode per 7.3 symbol-days** (0.138/symbol/day).
 
-## Result 2 — who is absorbing matters too
+### What that means for the spot bot
 
-| taker buy share during the flush | n | median recovery |
-| --- | --- | --- |
-| <35% (heavy forced selling into bids) | 37 | 56.5% |
-| 35–50% | 139 | 62.2% |
-| **>50% (buyers lifting offers)** | 13 | **108.1%** |
-
-**+51.6 points, permutation p < 0.0001.** Same story from the trade tape rather
-than the position data, which is a useful independent confirmation.
-
-## Result 3 — a NEGATIVE result, recorded because it looked convincing
-
-On the first twelve events I eyeballed, volume surge looked like a clean
-discriminator: the 37–56× events recovered 57–96% while the 2–9× events
-recovered 30–37%. **It did not replicate.** On the full 189:
-
-| volume surge | n | median recovery |
-| --- | --- | --- |
-| >35× normal | 7 | 71.0% |
-| <5× normal | 147 | 67.2% |
-
-**+3.8 points, permutation p = 0.85.** Volume surge tells you a flush is
-happening. It tells you nothing about whether it comes back. Do not build on it.
-
-## Result 4 — where the bottom actually is
-
-The number the entry offset needs:
-
-| regime | n | median trough vs pre-flush high | 10th pct | 90th pct |
-| --- | --- | --- | --- | --- |
-| OI fell (liquidation) | 121 | **−7.80%** | −13.0% | −6.2% |
-| OI flat | 25 | −6.73% | −9.6% | −6.1% |
-| OI rose (new shorts) | 43 | −7.32% | −12.5% | −6.1% |
+* **You cannot time these on a clock.** There is no interval to schedule around.
+* **You can avoid the worst window.** 05:00 UTC carries ~4× the risk of an
+  average hour; 19:00–23:00 UTC is the calmest. Sizing down or widening stops
+  around 05:00 is defensible purely on frequency.
+* **The first flush is not the end.** 79% of repeat episodes arrive within six
+  hours. Treating a flush as "the event has passed" is wrong more often than
+  not — this is the single most actionable timing fact here.
+* **A market-wide volatility filter will not protect you.** 88% of episodes are
+  single-symbol. The risk is per-asset, not regime-level.
 
 ## What this implies for the bot
 
@@ -102,8 +133,8 @@ worst-possible fill, and it matches the reported experience.
 Two changes follow, and they are opposite in direction:
 
 1. **For entries taken during or just after a flush**, the offset should be
-   ~7.8% (median trough), not 5%, with the tail at −13% informing the stop
-   rather than the entry.
+   ~8.45% for a liquidation flush (median trough, corrected), not 5%, with the
+   p90 at 14.7% informing the stop rather than the entry.
 2. **For entries with no flush in progress**, 5% is far too wide — it is a
    flush-sized offset applied to a calm tape, which is why almost nothing fills.
 
