@@ -1282,6 +1282,74 @@ export const XS_MIN_FEATURE_COVERAGE = 0.6;
 // would sit in the ledger forever, never scored and never explained.
 export const XS_LOG_HORIZONS_DAYS = [7, 1];
 
+// The horizon whose decile is PUBLISHED on a board row. Both are still logged.
+// One, not both: two excess-return reads on the same row that can disagree is a
+// worse answer than one, and the 1-day lane is where the evidence is — 1,091
+// fitted sections against 155 at 7 days, and the only feature this project has
+// ever selected (oi_px_divergence, t=3.79) was selected there.
+export const XS_PUBLISHED_HORIZON_DAYS = 1;
+
+// Independent matured observations a decile needs before it may be shown.
+// Counted in SECTIONS, not rows: ~10 names drawn from one cross-section on one
+// day are not 10 independent trials (see foldDecileEvidence).
+export const XS_PUBLICATION_MIN_SAMPLES = 200;
+// One-sided t on mean excess return. Not a Sharpe, not a hit rate: the claim
+// being gated is "this decile beat holding the class", so that is the statistic.
+export const XS_PUBLICATION_MIN_T = 2.0;
+
+// Fail-closed, same contract as the direction model's gate: a decile is
+// publishable only with its own matured, version-matched evidence. Everything
+// else is WITHHELD, and withheld is a normal, expected state.
+export function xsDecileIsPublishable(evidence, assetClass, horizonDays, decile) {
+  if (!evidence) return false;
+  const row = evidence[`${assetClass}|${horizonDays}|${decile}`];
+  if (!row) return false;
+  if (!(row.n >= XS_PUBLICATION_MIN_SAMPLES)) return false;
+  if (!Number.isFinite(row.tStat)) return false;
+  // Only a decile that beat the universe may be published as a buy, and only
+  // one that lost to it may be published as an avoid. A significant t-stat in
+  // the wrong direction for its position is a warning that the lane is
+  // inverted, not a licence to publish it.
+  if (decile >= 5) return row.tStat >= XS_PUBLICATION_MIN_T;
+  return row.tStat <= -XS_PUBLICATION_MIN_T;
+}
+
+// Turns one asset's cross-sectional standing into what a board row may show.
+//
+// FAIL-CLOSED, and the shape is the direction model's: a withheld read still
+// says WHY, because "no opinion" and "an opinion we have not earned the right to
+// state" are different things to a reader and collapsing them is how a page
+// stops being trustworthy.
+//
+// `expectedPct` is deliberately absent unless the decile is publishable. The
+// number is a fitted linear combination of ranks; quoting it while the decile it
+// belongs to has not cleared its own evidence would be presenting the model's
+// arithmetic as a measurement.
+export function xsPublishedRead(decileEvidence, assetClass, horizonDays, decile, percentile, expectedReturnPct) {
+  const row = decileEvidence && decileEvidence[`${assetClass}|${horizonDays}|${decile}`];
+  const publishable = xsDecileIsPublishable(decileEvidence, assetClass, horizonDays, decile);
+  const base = { decile, percentile: Math.round(percentile), horizonDays };
+  if (!publishable) {
+    return {
+      ...base,
+      published: false,
+      reason: row ? 'decile-has-no-demonstrated-edge' : 'no-matured-evidence',
+      // What the gate actually saw, so a withheld read is auditable rather than
+      // just a refusal.
+      measured: row ? { sections: row.n, meanExcessPct: row.meanExcessPct, tStat: row.tStat } : null
+    };
+  }
+  return {
+    ...base,
+    published: true,
+    // Sign of the claim, not the raw rank: a top decile is "expected to beat its
+    // class", a bottom decile "expected to lag it".
+    lean: decile >= 5 ? 1 : -1,
+    expectedPct: expectedReturnPct,
+    measured: { sections: row.n, meanExcessPct: row.meanExcessPct, tStat: row.tStat }
+  };
+}
+
 // Builds the ranked panel for one asset class in one build.
 // Returns [{ symbol, ranks: { featureId: rank } }], ranks in [-0.5, 0.5].
 export function buildXsPanel(metrics) {
@@ -5430,17 +5498,29 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
   }
   const priceLog = scored.map(({ m }) => ({ asset_class: kind, symbol: m.symbol, price: m.price }));
 
-  // Cross-sectional lane, shadow only. Computed over the SAME full universe
-  // the boards were scored on (not the top 10), logged, and scored later by
-  // scripts/cross-sectional.mjs. Nothing here reaches the payload: it has no
-  // published surface until its own decile evidence clears its own gate, in
-  // exactly the way the direction model's calls do.
+  // Cross-sectional lane. Computed over the SAME full universe the boards were
+  // scored on (not the top 10), logged, and scored later by
+  // scripts/cross-sectional.mjs.
+  //
+  // It now has a PUBLISHED surface as well as a logged one, and the two are
+  // separate things. Every asset's decile is logged unconditionally, exactly as
+  // before; a decile only reaches a board row when its own matured evidence
+  // clears xsDecileIsPublishable — 200 sections and a t-stat of the right sign
+  // for its position. That gate is independent of the direction model's, so an
+  // asset can carry a published excess-return read while its direction is
+  // withheld, or the reverse. They answer different questions: direction says
+  // which way, this says whether the asset is expected to beat or lag the rest
+  // of its class, and the second is measurable in this market where the first
+  // so far is not.
   //
   // Abstains as a whole — no partial panel — when the class is too small to
   // rank or no coefficients have been fitted for it yet. A cross-sectional
   // percentile computed over a handful of names is not a weaker signal, it is
   // a different and unvalidated one.
   const xsLog = [];
+  // symbol -> the publishable read for XS_PUBLISHED_HORIZON_DAYS, or a withheld
+  // marker. Populated below and attached to board rows by entry().
+  const xsBySymbol = new Map();
   const xsCoefficients = ctx.xsCoefficients && ctx.xsCoefficients[kind];
   if (xsCoefficients) {
     const panel = buildXsPanel(scored.map(({ m }) => m));
@@ -5466,6 +5546,12 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
             features_used: f.featuresUsed,
             universe_size: panel.length
           });
+
+          if (horizonDays === XS_PUBLISHED_HORIZON_DAYS) {
+            const decile = Math.min(9, Math.floor(percentiles[i] / 10));
+            xsBySymbol.set(panel[i].symbol, xsPublishedRead(
+              ctx.decileEvidence, kind, horizonDays, decile, percentiles[i], f.expectedReturnPct));
+          }
         }
       }
     }
@@ -5516,6 +5602,14 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       // Informational only, same discipline as quality/rotation — never a
       // vote on dir/score. Not financial advice.
       longTermPotential: (longTermBottomStatus && longTermBottomStatus[x.m.symbol]) || null,
+      // Cross-sectional standing: is this asset expected to beat or lag the
+      // rest of its class over the next day? A SEPARATE question from `dir`,
+      // gated by its own matured decile evidence, and deliberately carried on
+      // the same row so a reader can see both at once — including the common
+      // case where one is published and the other withheld. Null only when the
+      // lane abstained entirely (no coefficients, or a universe too small to
+      // rank), which is different from a decile that was measured and withheld.
+      excessReturn: xsBySymbol.get(x.m.symbol) || null,
       conf: { agree: side === 'long' ? x.c.bull : x.c.bear, total: x.c.total },
       drivers: side === 'long' ? x.c.longNotes : x.c.shortNotes,
       horizon,
@@ -5583,7 +5677,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
-export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration, dailyRangeStats, todEdge, scoreCalibration, xsCoefficients) {
+export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration, dailyRangeStats, todEdge, scoreCalibration, xsCoefficients, decileEvidence) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
@@ -5651,7 +5745,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   // Shared by both rankBoards calls below (crypto and stock) — see
   // evaluateTechniques' docs for why this is one object, not positional args.
   const qualityScores = computeQualityScores(qualityData || {});
-  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityScores, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, xsCoefficients };
+  const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityScores, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, xsCoefficients, decileEvidence };
 
   let cryptoBoards = { breakout: [], breakdown: [], universe: 0 };
   let cryptoStableValue = [];

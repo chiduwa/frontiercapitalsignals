@@ -811,29 +811,10 @@ export async function foldDecileEvidence(env) {
 // Publication gate
 // ---------------------------------------------------------------------------
 
-// Independent matured observations a decile needs before it may be shown.
-export const XS_PUBLICATION_MIN_SAMPLES = 200;
-// One-sided t on mean excess return. Not a Sharpe, not a hit rate: the claim
-// being gated is "this decile beat holding the class", so that is the statistic.
-export const XS_PUBLICATION_MIN_T = 2.0;
-
-// Fail-closed, same contract as the direction model's gate: a decile is
-// publishable only with its own matured, version-matched evidence. Everything
-// else is WITHHELD, and withheld is a normal, expected state — especially in
-// the weeks after a fit, when the evidence has deliberately been reset.
-export function xsDecileIsPublishable(evidence, assetClass, horizonDays, decile) {
-  if (!evidence) return false;
-  const row = evidence[`${assetClass}|${horizonDays}|${decile}`];
-  if (!row) return false;
-  if (!(row.n >= XS_PUBLICATION_MIN_SAMPLES)) return false;
-  if (!Number.isFinite(row.tStat)) return false;
-  // Only a decile that beat the universe may be published as a buy, and only
-  // one that lost to it may be published as an avoid. A decile with a
-  // significant t-stat in the wrong direction for its position is a warning
-  // that the lane is inverted, not a licence to publish it.
-  if (decile >= 5) return row.tStat >= XS_PUBLICATION_MIN_T;
-  return row.tStat <= -XS_PUBLICATION_MIN_T;
-}
+// The decile publication gate now lives in worker.js, so the Worker can apply
+// it when assembling a board row. Re-exported here because this module was its
+// home and every existing caller and test imports it from this path.
+export { XS_PUBLICATION_MIN_SAMPLES, XS_PUBLICATION_MIN_T, xsDecileIsPublishable } from '../worker.js';
 
 export async function loadDecileEvidence(env) {
   if (!env || !env.FCS_D1_DATABASE_ID) return {};

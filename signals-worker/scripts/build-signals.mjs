@@ -17,7 +17,7 @@ import { checkAndNotifyReversals, checkAndNotifySuddenMoves, checkAndNotifyConso
 import { upsertMarketSentiment, loadRecentBars, loadTvlSeries, loadMarketReturn, loadYieldSpreadChange } from './archive.mjs';
 import { selectIntradayWatchlist } from './intraday.mjs';
 import { loadLatestMarketContext } from './market-context.mjs';
-import { loadXsCoefficients, writeXsForecasts } from './cross-sectional.mjs';
+import { loadXsCoefficients, writeXsForecasts, loadDecileEvidence, xsDecileIsPublishable } from './cross-sectional.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES, GITHUB_EVENT_NAME, FORCE_REFRESH, NTFY_TOPIC } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID })) {
@@ -121,6 +121,7 @@ let reliability, techniquePriors, comboReliability, reliabilityByHorizon, moveSt
 // Cross-sectional lane coefficients. Defaults to {} so a D1 outage makes the
 // lane abstain silently rather than throwing inside the build.
 let xsCoefficients = {};
+let decileEvidence = {};
 if (FCS_D1_DATABASE_ID) {
   try {
     const rel = await loadReliability(env);
@@ -189,6 +190,15 @@ if (FCS_D1_DATABASE_ID) {
     dailyRangeStats = await loadDailyRangeStats(env);
     console.log(`loaded median daily ranges for ${Object.keys(dailyRangeStats).length} symbols`);
     xsCoefficients = await loadXsCoefficients(env);
+    // The gate for the excess-return read on each board row. Loaded alongside
+    // the coefficients because the two are useless apart: coefficients produce a
+    // decile, evidence decides whether that decile may be shown.
+    decileEvidence = await loadDecileEvidence(env);
+    const publishable = Object.keys(decileEvidence).filter((k) => {
+      const [cls, h, d] = k.split('|');
+      return xsDecileIsPublishable(decileEvidence, cls, Number(h), Number(d));
+    });
+    console.log(`[xs] decile evidence: ${Object.keys(decileEvidence).length} cells, ${publishable.length} publishable${publishable.length ? ' — ' + publishable.join(', ') : ''}`);
     const xsSummary = Object.entries(xsCoefficients).flatMap(([cls, byHorizon]) =>
       Object.entries(byHorizon).map(([h, feats]) => {
         const sel = Object.keys(feats).filter((k) => feats[k].selected);
@@ -207,7 +217,7 @@ if (FCS_D1_DATABASE_ID) {
 }
 
 const started = Date.now();
-const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration, dailyRangeStats, todEdge, scoreCalibration, xsCoefficients);
+const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration, dailyRangeStats, todEdge, scoreCalibration, xsCoefficients, decileEvidence);
 console.log(`built payload in ${Date.now() - started}ms — crypto ${payload.crypto.universe} assets, stocks ${payload.stocks.universe} assets`);
 console.log('health:', JSON.stringify(payload.health));
 

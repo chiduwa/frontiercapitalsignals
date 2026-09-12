@@ -706,6 +706,51 @@ check('a record below baseline but not significantly so is demoted toward 0.5, n
 // measurement.
 check('reliabilityMultiplier falls back to the static prior with no reliability data: unknown is neutral, not silent', mod.reliabilityMultiplier(undefined, 'X', 'y') === 1 && mod.reliabilityMultiplier({}, 'X', 'y') === 1);
 
+console.log('\n== excess-return read: a second, independently gated answer per row ==');
+{
+  const ev = (over) => ({
+    'crypto|1|9': { n: 1013, meanExcessPct: 0.353, tStat: 4.53 },
+    'crypto|1|0': { n: 1013, meanExcessPct: -0.4, tStat: -3.1 },
+    'crypto|1|5': { n: 1013, meanExcessPct: 0.02, tStat: 0.3 },
+    'crypto|1|8': { n: 40, meanExcessPct: 2.0, tStat: 9.9 },
+    ...over
+  });
+  const read = (d, pct, exp = 0.4) => mod.xsPublishedRead(ev(), 'crypto', 1, d, pct, exp);
+  check('a top decile with matured evidence publishes, and says it expects to BEAT its class', (() => { const r = read(9, 94); return r.published === true && r.lean === 1 && r.expectedPct === 0.4; })());
+  check('a bottom decile with matured evidence publishes as an AVOID, not a buy', (() => { const r = read(0, 3); return r.published === true && r.lean === -1; })());
+  check('a middling decile with no demonstrated edge is withheld', read(5, 52).published === false);
+  // 200 SECTIONS, not 200 rows — foldDecileEvidence collapses each date to one
+  // observation precisely so this bar cannot be cleared by a wide decile.
+  check('a huge t-stat on too few sections is still withheld', (() => { const r = read(8, 85); return r.published === false && r.reason === 'decile-has-no-demonstrated-edge'; })());
+  check('a decile with no evidence at all is withheld, and says so distinctly', (() => { const r = mod.xsPublishedRead(ev(), 'crypto', 1, 3, 34, 0.1); return r.published === false && r.reason === 'no-matured-evidence' && r.measured === null; })());
+  // A withheld read has to stay auditable, or the page cannot distinguish "no
+  // opinion" from "an opinion we have not earned the right to state".
+  check('a withheld read still reports what the gate actually saw', (() => { const r = read(5, 52); return r.measured.sections === 1013 && Math.abs(r.measured.tStat - 0.3) < 1e-9; })());
+  check('a withheld read never leaks the fitted expected return', read(5, 52).expectedPct === undefined);
+  // The gate refuses a significant t-stat pointing the wrong way for its
+  // position: that is evidence the lane is inverted, not a licence to publish.
+  check('a top decile that significantly UNDERperformed is withheld, not published as an avoid', mod.xsPublishedRead(ev({ 'crypto|1|9': { n: 1013, meanExcessPct: -0.5, tStat: -4.5 } }), 'crypto', 1, 9, 94, 0.4).published === false);
+  check('with no evidence loaded at all the lane abstains rather than throwing', mod.xsPublishedRead(null, 'crypto', 1, 9, 94, 0.4).published === false);
+  check('only one horizon is published, and it is the one the evidence is in', mod.XS_PUBLISHED_HORIZON_DAYS === 1 && mod.XS_LOG_HORIZONS_DAYS.includes(7));
+}
+
+// The two gates are INDEPENDENT and must stay that way. A class whose direction
+// is unproven has said nothing about whether its assets can be ranked against
+// each other, so suppressing the excess-return read along with the direction
+// would be withholding an answer the evidence does support. Equally, the
+// direction sanitizer must not become a way to smuggle one out.
+{
+  const withRead = {
+    classSkill: { crypto: { proven: false } },
+    crypto: { breakout: [{ symbol: 'T', dir: 1, horizon: { basis: 'historical', days: 1 }, range: { basis: 'historical' }, excessReturn: { decile: 9, published: true, lean: 1, expectedPct: 0.4 } }] },
+    stocks: {}
+  };
+  const cleaned = mod.sanitizePayloadForPublication(withRead);
+  const row = cleaned.crypto.breakout[0];
+  check('an unproven DIRECTION is stripped by the publication invariant', row.dir === 0 && row.horizon === null && row.range === null);
+  check('but the independently-gated excess-return read survives it', row.excessReturn && row.excessReturn.published === true && row.excessReturn.decile === 9);
+}
+
 console.log('\n== moveext: has the asset already done its day\'s work ==');
 // The only technique in the library with a measured, out-of-sample-stable edge
 // (crypto +1.77 pts, NW t=7.55, train +1.77 / test +1.75). Its whole point is

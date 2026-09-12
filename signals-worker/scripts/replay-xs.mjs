@@ -60,12 +60,21 @@ const has = (name) => process.argv.includes(`--${name}`);
 // than refitting on every section.
 export const XS_REPLAY_REFIT_EVERY = 30;
 
-// How the replay marks its rows. Deliberately NOT XS_METHOD_VERSION: mixing
-// replayed and live observations in one decile cell would make the published
-// evidence unauditable, and foldDecileEvidence groups by method_version, so a
-// distinct version keeps the two populations in separate rows of
-// xs_decile_evidence rather than silently pooled.
-export const XS_REPLAY_METHOD_VERSION = `${XS_METHOD_VERSION}-replay`;
+// Replayed rows carry the LIVE method version and are separated by a provenance
+// column instead (migration 0039).
+//
+// They previously carried their own method_version, which kept the two
+// populations in separate rows of xs_decile_evidence. That was over-cautious
+// rather than wrong, and it had a cost: the publication gate reads only the live
+// method version, so 101,563 matured walk-forward observations sat where the
+// gate could not see them while it judged the lane on five days of live logging.
+//
+// Pooling is legitimate because the live lane is itself walk-forward — at time T
+// its coefficients were fitted on data up to T — so a replay that refits the
+// same way produces observations of the same estimator. The column keeps the
+// claim checkable: any query can split them, and a material divergence in decile
+// means between the two is the alarm that this harness has drifted.
+export const XS_REPLAY_PROVENANCE = 'replay';
 
 // Builds the matured forecast rows for one class and horizon, walk-forward.
 // Exported for test-replay-xs.mjs; does no I/O of its own.
@@ -126,6 +135,18 @@ export function replayXsSections(sections, horizonDays, { refitEvery = XS_REPLAY
   return { rows: out, fits, skippedNoFit };
 }
 
+// Idempotent on purpose. xs_forecast_log carries a unique index on
+// (asset_class, symbol, horizon_days, target_date) that does NOT include
+// method_version or provenance, so a second replay of the same window collides
+// with the first — which is exactly what happened when the method_version was
+// changed and the old rows were left behind: the 1-day horizon wrote, the
+// 7-day horizon threw, and foldDecileEvidence at the end of main() never ran,
+// leaving the gate reading stale per-row evidence.
+//
+// DO NOTHING rather than an upsert: a matured observation is a fact about a
+// (symbol, date) pair, so the first write of it is as good as the second, and
+// silently rewriting history on every re-run would make the ledger
+// unreproducible.
 async function writeRows(assetClass, horizonDays, rows, dryRun) {
   if (dryRun || !rows.length) return rows.length;
   const now = new Date().toISOString();
@@ -133,8 +154,9 @@ async function writeRows(assetClass, horizonDays, rows, dryRun) {
     sql: `INSERT INTO xs_forecast_log
             (run_at, asset_class, symbol, horizon_days, target_date, expected_return_pct,
              percentile, decile, entry_price, features_used, universe_size,
-             realised_return_pct, universe_return_pct, observed_at, method_version, aggregated)
-          VALUES ${batch.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)').join(',')}`,
+             realised_return_pct, universe_return_pct, observed_at, method_version, provenance, aggregated)
+          VALUES ${batch.map(() => '(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)').join(',')}
+          ON CONFLICT(asset_class, symbol, horizon_days, target_date) DO NOTHING`,
     // entry_price is CHECK (> 0) and carries no information for an already
     // matured row — the return is stored directly — so it is filled with 1
     // rather than dragging close prices through the whole pipeline to satisfy
@@ -142,7 +164,7 @@ async function writeRows(assetClass, horizonDays, rows, dryRun) {
     params: batch.flatMap((r) => [
       r.run_at, assetClass, r.symbol, horizonDays, r.target_date, r.expected_return_pct,
       r.percentile, r.decile, 1, r.features_used, r.universe_size,
-      r.realised_return_pct, r.universe_return_pct, now, XS_REPLAY_METHOD_VERSION
+      r.realised_return_pct, r.universe_return_pct, now, XS_METHOD_VERSION, XS_REPLAY_PROVENANCE
     ])
   }));
   for (const group of chunk(statements, 25)) await d1Batch(env, group);
@@ -206,7 +228,7 @@ async function main() {
   const classes = arg('asset-class') && arg('asset-class') !== true ? [String(arg('asset-class'))] : ['crypto'];
   const horizons = String(arg('horizons', '1,7')).split(',').map((s) => Number(s.trim())).filter(Boolean);
 
-  console.log(`[xs-replay] method=${XS_REPLAY_METHOD_VERSION} refit every ${XS_REPLAY_REFIT_EVERY} sections${dryRun ? ' DRY RUN' : ''}`);
+  console.log(`[xs-replay] method=${XS_METHOD_VERSION} provenance=${XS_REPLAY_PROVENANCE} refit every ${XS_REPLAY_REFIT_EVERY} sections${dryRun ? ' DRY RUN' : ''}`);
 
   for (const assetClass of classes) {
     const bars = await loadArchiveBars(env, assetClass, Number(arg('lookback', 2200)));
