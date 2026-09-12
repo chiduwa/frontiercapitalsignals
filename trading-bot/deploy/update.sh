@@ -54,13 +54,23 @@ STAGE_ATTACHED=true
 # them and the whole gate fails for reasons that have nothing to do with the
 # commit being tested.
 #
-# It failed silently for exactly that reason: node --test isolates each test
-# file in a CHILD PROCESS, so account-journal's suite died with
-# "EACCES: spawn /usr/bin/node" on a root-owned stage while trading-bot's and
-# spot-bot's single-process suites passed. The updater reported GUARDRAIL TESTS
-# FAILED, correctly refused to promote, and the host sat 10 commits behind main
-# with everything looking healthy.
 chown -R "$RUN_USER:$RUN_USER" "$STAGE_DIR"
+
+# ...and run them from a directory $RUN_USER can actually read.
+#
+# This is the part that was silently breaking every update. node --test
+# isolates each test file in a CHILD PROCESS, and a spawn inherits the parent's
+# working directory. The invoking shell here sits in the calling admin's home,
+# which on this image is mode 750 and owned by that admin — so fcsbot could
+# exec /usr/bin/node directly but could NOT spawn from that cwd, and
+# account-journal's suite died with "EACCES: spawn /usr/bin/node" while
+# trading-bot's and spot-bot's single-process suites passed untouched.
+#
+# The updater then reported GUARDRAIL TESTS FAILED, correctly refused to
+# promote, and the host sat 10 commits behind main with every timer green. The
+# refusal was right; the reason was spurious. Diagnosed by running the same
+# command from /tmp, where all 22 tests pass.
+cd "$STAGE_DIR"
 
 if ! sudo -u "$RUN_USER" node --check "$STAGE_DIR/trading-bot/src/index.mjs" >"$TEST_LOG" 2>&1 \
    || ! sudo -u "$RUN_USER" node --check "$STAGE_DIR/trading-bot/src/protection-cycle.mjs" >>"$TEST_LOG" 2>&1 \
