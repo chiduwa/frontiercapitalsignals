@@ -1,0 +1,16 @@
+[Unit]
+Description=Check for tradeable short-covering spikes
+Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/signals-worker/docs/FLUSH_EVIDENCE.md
+
+[Timer]
+# Every two minutes, offset off the trading bot's :00/:05 boundary so the two
+# are not routinely queued behind each other on the shared futures lock.
+# The executor only considers events from the last 30 minutes, so a missed
+# firing costs at most one setup rather than accumulating a backlog.
+OnCalendar=*:0/2:30
+AccuracySec=5s
+Persistent=false
+Unit=fcs-flush-exec.service
+
+[Install]
+WantedBy=timers.target
