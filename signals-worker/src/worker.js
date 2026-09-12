@@ -499,6 +499,29 @@ export function hasCrossClassTickerCollision(symbol) {
 
 export const OVERVIEW_SYMBOLS = ['SPY', 'QQQ', '^VIX'];
 
+// The subset of OVERVIEW_SYMBOLS that is ARCHIVED to asset_daily_bars.
+//
+// SPY's closes are the equities correlation benchmark — buildStockMetrics
+// passes them to correlationWithBenchmark for m.corr, which the dwell technique
+// reads to decide whether an asset is decoupled from the broader market. That
+// made SPY a model INPUT while it was still only ever fetched live, so it never
+// reached the permanent archive and the walk-forward replay had no benchmark to
+// reconstruct: the stock replay reported "bench SPY (absent)" and ran with
+// m.corr null for every asset and every anchor, silently measuring a slightly
+// different model than the live one.
+//
+// QQQ rides along because it is one more Yahoo call a day against a universe
+// already in the hundreds, and having it archived means the next lane that
+// wants a growth-vs-broad-market spread does not need another migration.
+//
+// ^VIX is deliberately excluded. It is displayed, not consumed as a per-asset
+// model input, and the caret is a naming hazard in a symbol column every other
+// consumer treats as a plain ticker.
+export const ARCHIVED_OVERVIEW_SYMBOLS = [
+  { symbol: 'SPY', yahoo: 'SPY', label: 'S&P 500 ETF' },
+  { symbol: 'QQQ', yahoo: 'QQQ', label: 'Nasdaq 100 ETF' }
+];
+
 // Macro benchmarks: not screened against the confluence score like crypto/
 // stocks are (nothing "trades" DXY/Gold/Oil here), fetched purely as
 // market-wide context and — via the permanent archive (see

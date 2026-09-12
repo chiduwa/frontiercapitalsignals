@@ -194,6 +194,27 @@ async function loadBars(assetClass, lookbackDays) {
   return out;
 }
 
+// One symbol's bars from any tier. Deliberately not class-filtered: a benchmark
+// is archived under asset_class 'benchmark' while the assets it benchmarks are
+// 'stock' or 'crypto', so the usual per-class load can never see it.
+//
+// Quarantine still applies. A corrupt print in the BENCHMARK is worse than one
+// in a single asset, because every correlation computed against it that day is
+// wrong rather than just one.
+async function loadBenchmarkBars(symbol) {
+  const rows = await d1(env,
+    `SELECT symbol, date, close, volume FROM asset_daily_bars
+      WHERE symbol = ?1 AND close > 0 ORDER BY date`, [symbol]);
+  if (!rows.length) {
+    console.log(`[replay] benchmark ${symbol} absent from asset_daily_bars — m.corr will be null for this class`);
+    return null;
+  }
+  const quarantine = await loadBarQuarantine(d1, env, {});
+  const clean = cleanBars(quarantine, symbol, rows);
+  console.log(`[replay] benchmark ${symbol}: ${clean.length} bars ${clean[0]?.date} -> ${clean[clean.length - 1]?.date}`);
+  return clean.length ? clean : null;
+}
+
 // Expanding percentile of each symbol's own open-interest history, which is
 // what the live `openinterest` technique reads. Expanding, not rolling: see
 // replayNonPriceMetrics for why the better statistic is the wrong one here.
@@ -370,9 +391,16 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
   const panel = { ...(extras || {}), oiExpanding, marketCap };
 
   // Benchmark for m.corr: the class's own reference asset, sliced to the anchor
-  // by the caller at every use so it can never leak forward.
+  // at every use so it can never leak forward.
+  //
+  // Loaded WITHOUT an asset_class filter, because the two benchmarks do not live
+  // in the same tier. BTC is an ordinary 'crypto' row and came back with the
+  // class load above; SPY is archived as a 'benchmark' and never would. Reading
+  // it out of barsBySymbol therefore found nothing, and the stock replay ran its
+  // entire history with m.corr null — measuring a model the live build does not
+  // run.
   const benchSymbol = assetClass === 'crypto' ? 'BTC' : 'SPY';
-  const benchBars = barsBySymbol.get(benchSymbol) || null;
+  const benchBars = barsBySymbol.get(benchSymbol) || await loadBenchmarkBars(benchSymbol);
   const benchIdx = new Map();
   if (benchBars) for (let k = 0; k < benchBars.length; k++) benchIdx.set(benchBars[k].date, k);
 
@@ -402,7 +430,19 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
   // "technique|condition" -> inverted edge per period.
   const techniqueCondEdges = {};
 
-  for (const horizonDays of horizonDaysList) {
+  // LONGEST HORIZON FIRST, and the ordering is load-bearing rather than tidy.
+  //
+  // Anchors are strided by the horizon, so the 7-day lane has roughly a seventh
+  // as many as the 1-day lane and is correspondingly cheap. Walking them in the
+  // natural 1,7 order meant the 1-day lane consumed the entire row budget and
+  // the 7-day lane got whatever was left — which after the first full crypto run
+  // was 29 periods out of 277, and after the stock run was 11. A publication
+  // gate needing 150 independent periods can never be reached by a lane that is
+  // always served last.
+  //
+  // Descending order costs the 1-day lane almost nothing (it gives up ~1/7th of
+  // the budget) and lets the sparse lane finish outright.
+  for (const horizonDays of [...horizonDaysList].sort((a, b) => b - a)) {
     const horizonMinutes = HORIZON_DAYS_TO_MINUTES[horizonDays];
     if (!horizonMinutes) throw new Error(`unsupported horizon ${horizonDays}d (live model logs 1d and 7d only)`);
 

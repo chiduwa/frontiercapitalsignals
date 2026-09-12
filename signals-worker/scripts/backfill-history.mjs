@@ -10,7 +10,7 @@
 //   account's Workers Paid D1 allowance, see the constant's own docs;
 //   raise once Workers Paid is confirmed active, see the plan),
 //   BINANCE_ROW_BUDGET (default 120000, same reasoning)
-import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, BENCHMARK_SYMBOLS, computeTimeOfDayTallies, hasCrossClassTickerCollision } from '../worker.js';
+import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, BENCHMARK_SYMBOLS, ARCHIVED_OVERVIEW_SYMBOLS, computeTimeOfDayTallies, hasCrossClassTickerCollision } from '../worker.js';
 import {
   yahooFullHistory, coingeckoDailyBars, getExistingCoverage,
   upsertDailyBars, fundingSnapshotToRows, upsertFundingDaily,
@@ -108,7 +108,12 @@ async function main() {
   // they're eligible candidate leaders for the cross-asset lead/lag engine
   // (scripts/daily-refresh.mjs), same as any other asset. Yahoo-only, no
   // CoinGecko fallback applicable (these aren't crypto).
-  const benchmarkUniverse = BENCHMARK_SYMBOLS.map((b) => ({ symbol: b.symbol, assetClass: 'benchmark', yahooTicker: b.yahoo }));
+  // SPY/QQQ join them for a different reason: SPY is not macro colour, it is a
+  // live model INPUT (m.corr, via correlationWithBenchmark) that had never been
+  // archived, so the walk-forward replay could not reconstruct it and ran the
+  // whole stock class with m.corr null. See ARCHIVED_OVERVIEW_SYMBOLS.
+  const benchmarkUniverse = [...BENCHMARK_SYMBOLS, ...ARCHIVED_OVERVIEW_SYMBOLS]
+    .map((b) => ({ symbol: b.symbol, assetClass: 'benchmark', yahooTicker: b.yahoo }));
   // Benchmarks first, not last: found live — the crypto leg alone can burn
   // an entire run's row budget on deep-history assets (see PRICE_ROW_BUDGET's
   // own docs above), so a benchmark placed at the end of the universe could
