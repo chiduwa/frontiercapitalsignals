@@ -19,6 +19,7 @@ import { forEachConcurrent } from './scripts/d1-client.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const reliabilitySource = readFileSync(join(__dirname, 'scripts', 'reliability.mjs'), 'utf8');
+const workerSource = readFileSync(join(__dirname, 'worker.js'), 'utf8');
 const independentOutcomeMigration = readFileSync(join(__dirname, 'migrations', '0009_independent_retry_safe_outcomes.sql'), 'utf8');
 const outcomeProvenanceMigration = readFileSync(join(__dirname, 'migrations', '0013_outcome_provenance_and_versions.sql'), 'utf8');
 const currentSchemaBaseline = readFileSync(join(__dirname, 'scripts', 'current-schema-baseline.sql'), 'utf8');
@@ -584,6 +585,20 @@ check('sparkline fallback has no calibrated lookback (no real daily history to b
 
 console.log('\n== engine: buildPayload() called directly, as build-signals.mjs will ==');
 const { payload: built, log } = await mod.buildPayload({ TREFIS_OVERRIDES: '{"AAPL": 999}' });
+// The payload names the model whose ledger every accuracy figure on the page is
+// keyed to. The Worker never imports reliability.mjs (it only reads KV), so
+// nothing but this assertion stops the displayed version drifting from
+// OUTCOME_MODEL_VERSION — and a payload advertising a version its evidence is
+// not filed under makes every number beside it unverifiable. Caught live: the
+// v7 -> v8 bump left both this string and the dashboard footer behind.
+check('the payload advertises the same model version its ledger is keyed to', String(built.model).startsWith(OUTCOME_MODEL_VERSION + ' '), `payload="${built.model}" ledger="${OUTCOME_MODEL_VERSION}"`);
+// PAGE_HTML is not exported, so the footer is checked against the source the
+// same way the migration baseline is.
+check('the dashboard footer names that same version', workerSource.includes(`Model: ${OUTCOME_MODEL_VERSION}<`), `expected "Model: ${OUTCOME_MODEL_VERSION}<" in PAGE_HTML`);
+// Narrow on purpose: only the two places that DISPLAY a version. A prose
+// mention of v7 in a comment is legitimate history in this file and must not
+// fail the suite.
+check('no stale version survives in either place that displays one', !/model:\s*'confluence-v(?!8)/.test(workerSource) && !/Model: confluence-v(?!8)</.test(workerSource));
 check('crypto boards populated', built.crypto.breakout.length > 0 && built.crypto.universe >= 3);
 // Five clear the liquidity/favorite universe rule, but only the three with a
 // trustworthy daily series may enter the daily signal model. Favorites bypass

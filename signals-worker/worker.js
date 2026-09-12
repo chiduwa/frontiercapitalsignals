@@ -5692,7 +5692,12 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     generated_at: log.generated_at,
     cache_seconds: CACHE_SECONDS,
     build_ms: Date.now() - started,
-    model: 'confluence-v7 (independent outcomes, calibrated abstention)',
+    // Must track OUTCOME_MODEL_VERSION in scripts/reliability.mjs. The two are
+    // not imported from one constant because the Worker never loads that module
+    // (it only reads KV), so this string is asserted against it in
+    // test-worker.mjs instead — a payload claiming a version its own ledger is
+    // not keyed to would make every accuracy figure on the page unverifiable.
+    model: 'confluence-v8 (prior-weighted panel, independent outcomes, calibrated abstention)',
     health: {
       coingecko: cryptoR.status === 'fulfilled',
       global: globalR.status === 'fulfilled' && !!globalR.value,
@@ -6558,7 +6563,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     <div class="cols">
       <span>© <span id="yr"></span> Frontier Capital Signals</span>
       <span>Data: CoinGecko · CoinMetrics · CMC · alternative.me · Yahoo Finance / Stooq</span>
-      <span>Model: confluence-v7</span>
+      <span>Model: confluence-v8</span>
     </div>
   </footer>
 
