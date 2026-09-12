@@ -98,6 +98,12 @@ const HORIZON_DAYS_TO_MINUTES = { 1: 1440, 7: 10080 };
 // have had — so it can only understate skill, never manufacture it.
 const RELIABILITY_FOLD_EVERY = 7;
 
+// A technique needs at least this many casts within a single period before that
+// period yields an edge observation. Below it the period's hit rate is quantised
+// too coarsely to mean anything — three casts can only score 0, 33, 67 or 100%,
+// and that noise enters the t-test at full weight.
+const TECHNIQUE_MIN_CASTS_PER_PERIOD = 8;
+
 // Rows per run before stopping and checkpointing. The workflow ceiling is 120
 // minutes and D1's REST round trip is ~330ms per request at 100 rows a request,
 // so ~150k rows is roughly 8 minutes of writing plus the compute. Deliberately
@@ -351,12 +357,22 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
 
   let totalRows = 0;
   const techniqueCensus = {};
+  // technique -> one edge-over-baseline per period. This is the whole point of
+  // the audit: the composite is known to have no edge, and this says whether
+  // that is because every technique is dead or because a few live ones are
+  // being drowned by twenty that are not.
+  const techniqueEdges = {};
 
   for (const horizonDays of horizonDaysList) {
     const horizonMinutes = HORIZON_DAYS_TO_MINUTES[horizonDays];
     if (!horizonMinutes) throw new Error(`unsupported horizon ${horizonDays}d (live model logs 1d and 7d only)`);
 
-    const checkpoint = await loadCheckpoint(assetClass, horizonDays);
+    // A dry run is a MEASUREMENT, not a continuation, so it ignores the
+    // checkpoint and walks the whole history. Resuming would confine the
+    // per-technique audit to whatever anchors the last writing run happened to
+    // leave over — which on a finished replay is the most recent few months,
+    // i.e. one regime, sampled by an accident of budgeting.
+    const checkpoint = dryRun ? null : await loadCheckpoint(assetClass, horizonDays);
     const anchors = replayAnchors(barsBySymbol, horizonDays, {
       after: checkpoint?.newest_anchor_done || null,
       limit: maxAnchors
@@ -397,6 +413,12 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
       };
       const runAt = `${anchor}T00:00:00.000Z`;
       const evaluatedAt = new Date().toISOString();
+      // technique -> { n, correct, up } for THIS anchor only.
+      const periodTally = {};
+      // This anchor's realized outcome mix, which is the null every technique
+      // is judged against. Counted over the symbols actually scored here, not
+      // borrowed from the class as a whole.
+      let periodUp = 0, periodDown = 0, periodN = 0;
 
       for (const [symbol, bars] of barsBySymbol) {
         const idx = idxBySymbol.get(symbol);
@@ -448,8 +470,21 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
         // in a class whose real no-skill line is nowhere near 0.5.
         pendingRows.push({ ...base, series_kind: 'market', series_key: 'market', dir: null, correct: 1 });
         baselines.observe(assetClass, horizonMinutes / 60, actualDir);
+        periodN++;
+        if (actualDir === 1) periodUp++; else if (actualDir === -1) periodDown++;
 
         for (const v of c.votes) {
+          // Per-ANCHOR tally, not a running total. A technique's casts on one
+          // date move together, so pooling them is the v6 independence error;
+          // what the audit needs is one hit rate per period, alongside that
+          // period's own outcome mix, so each period contributes a single
+          // observation. Costs one object per technique per anchor and no D1
+          // writes at all — the votes are computed either way to advance the
+          // walk-forward map, so measuring them is free.
+          const cell = (periodTally[v.id] ??= { n: 0, correct: 0, up: 0 });
+          cell.n++;
+          if (v.dir === actualDir) cell.correct++;
+          if (v.dir === 1) cell.up++;
           techniqueCensus[v.id] = (techniqueCensus[v.id] || 0) + 1;
           const row = {
             ...base, series_kind: 'technique', series_key: v.id,
@@ -477,6 +512,20 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
               correct: (exit >= r.low && exit <= r.high) ? 1 : 0
             });
           }
+        }
+      }
+
+      // Close the period: one edge observation per technique, against this
+      // anchor's own no-skill line. A technique that cast fewer than
+      // TECHNIQUE_MIN_CASTS_PER_PERIOD times here is dropped rather than
+      // contributing a hit rate computed over two assets.
+      if (periodN >= 10) {
+        const pUp = periodUp / periodN, pDown = periodDown / periodN;
+        for (const [id, cell] of Object.entries(periodTally)) {
+          if (cell.n < TECHNIQUE_MIN_CASTS_PER_PERIOD) continue;
+          const upFrac = cell.up / cell.n;
+          const base = upFrac * pUp + (1 - upFrac) * pDown;
+          (techniqueEdges[id] ??= []).push(cell.correct / cell.n - base);
         }
       }
 
@@ -515,7 +564,98 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
   const census = Object.entries(techniqueCensus).sort((a, b) => b[1] - a[1]);
   console.log(`[replay] ${assetClass}: technique vote census (${census.length} of ~27 voted)`);
   for (const [id, n] of census) console.log(`           ${id.padEnd(14)} ${n}`);
+  reportTechniqueSkill(assetClass, techniqueEdges, census.length);
   return { rows: totalRows };
+}
+
+// Per-technique Fama-MacBeth over the periods the replay just walked.
+//
+// THE QUESTION THIS ANSWERS: the composite has no edge. Is that because every
+// technique is dead, or because a few live ones are outvoted by twenty that are
+// not? Those imply opposite next steps — reweight, or delete the library and
+// rebuild from the lanes that do measure something — and nothing else in the
+// system distinguishes them, because the per-symbol reliability cells are far
+// too thin to resolve a two-point effect.
+//
+// Bonferroni across the family. ~18 techniques are tested at once and the best
+// one is read off the top, which is textbook manufacturing of a significant
+// result out of noise; the same correction the cross-sectional lane applies to
+// its feature search applies here for the same reason.
+function reportTechniqueSkill(assetClass, edgesById, testedCount) {
+  const ids = Object.keys(edgesById);
+  if (!ids.length) return;
+  const tests = Math.max(1, testedCount || ids.length);
+  // Two-sided Bonferroni at family alpha 0.05, via the same normal-quantile
+  // approximation bonferroniZ uses in cross-sectional.mjs.
+  const alpha = 0.05 / tests / 2;
+  const zBar = Math.abs(normalQuantile(alpha));
+  const rows = [];
+  for (const id of ids) {
+    const e = edgesById[id];
+    const k = e.length;
+    if (k < 30) { rows.push({ id, periods: k, underpowered: true }); continue; }
+    const mean = e.reduce((a, b) => a + b, 0) / k;
+    const se = neweyWestSE(e);
+    rows.push({
+      id, periods: k, meanEdgePts: mean * 100,
+      t: se ? mean / se : null,
+      positive: e.filter((v) => v > 0).length,
+      selected: se ? Math.abs(mean / se) >= zBar && mean > 0 : false
+    });
+  }
+  rows.sort((a, b) => (b.meanEdgePts ?? -99) - (a.meanEdgePts ?? -99));
+  console.log(`\n[replay] ${assetClass}: per-technique skill, one observation per period, Newey-West`);
+  console.log(`           Bonferroni bar for ${tests} techniques: |t| >= ${zBar.toFixed(2)}`);
+  console.log('           technique      periods   edge pts      NW t   periods +   verdict');
+  for (const r of rows) {
+    if (r.underpowered) {
+      console.log(`           ${r.id.padEnd(14)} ${String(r.periods).padStart(7)}   (under 30 periods — not tested)`);
+      continue;
+    }
+    const verdict = r.selected ? 'SELECTED' : (r.t != null && r.t <= -zBar ? 'anti-signal' : '');
+    console.log(`           ${r.id.padEnd(14)} ${String(r.periods).padStart(7)} ${String(r.meanEdgePts.toFixed(2)).padStart(10)} ${String(r.t == null ? 'n/a' : r.t.toFixed(2)).padStart(9)} ${String(r.positive + '/' + r.periods).padStart(11)}   ${verdict}`);
+  }
+  const winners = rows.filter((r) => r.selected);
+  console.log(winners.length
+    ? `           ${winners.length} technique(s) clear the family bar: ${winners.map((r) => r.id).join(', ')}`
+    : '           NOTHING clears the family bar — the library has no salvageable component at this horizon.');
+}
+
+// Bartlett-kernel standard error, same rule as replay-report.mjs. Duplicated
+// rather than imported so the replay has no dependency on the reporting script.
+function neweyWestSE(series) {
+  const n = series.length;
+  if (n < 3) return null;
+  const mean = series.reduce((a, b) => a + b, 0) / n;
+  const dev = series.map((v) => v - mean);
+  const lag = Math.max(1, Math.floor(4 * Math.pow(n / 100, 2 / 9)));
+  let s = dev.reduce((a, d) => a + d * d, 0) / n;
+  for (let L = 1; L <= lag && L < n; L++) {
+    let cov = 0;
+    for (let t = L; t < n; t++) cov += dev[t] * dev[t - L];
+    s += 2 * (1 - L / (lag + 1)) * (cov / n);
+  }
+  return s > 0 ? Math.sqrt(s / n) : null;
+}
+
+// Acklam's inverse normal CDF, accurate to ~1e-9 over the range that matters
+// here. Same approximation cross-sectional.mjs uses for its own family bar.
+function normalQuantile(p) {
+  if (!(p > 0 && p < 1)) return NaN;
+  const a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02, 1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00];
+  const b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02, 6.680131188771972e+01, -1.328068155288572e+01];
+  const c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00, -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00];
+  const d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00, 3.754408661907416e+00];
+  const pLow = 0.02425, pHigh = 1 - pLow;
+  let q, r;
+  if (p < pLow) {
+    q = Math.sqrt(-2 * Math.log(p));
+    return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+  }
+  if (p > pHigh) return -normalQuantile(1 - p);
+  q = p - 0.5; r = q * q;
+  return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q
+    / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
 }
 
 async function flush(rows, dryRun) {

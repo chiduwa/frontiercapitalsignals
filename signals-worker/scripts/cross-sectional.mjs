@@ -741,18 +741,47 @@ export async function scoreMaturedForecasts(env) {
   return { scored: statements.length };
 }
 
+// ONE OBSERVATION PER SECTION, not per asset.
+//
+// This computed its t over every logged row, which treats ~10 names drawn from
+// the same cross-section on the same day as ten independent trials. That is the
+// identical mistake this project already corrected twice — the v6 ledger
+// counting overlapping forecasts as independent, and the research harness
+// quoting sd/sqrt(n) beta errors before neweyWestSE cut oi_px_divergence from
+// 8.63 to 3.79 — and it was sitting inside the gate that decides whether this
+// lane may publish.
+//
+// Measured on the walk-forward replay: decile 9 reads t=5.01 pooled per row and
+// t=4.53 per section. The gap is smaller than sqrt(10) because the excess is
+// already demeaned against its own section's universe return, which removes
+// most of the common factor; it is still an overstatement, and XS_PUBLICATION_MIN_T
+// is only 2.0, so the difference is live for any decile sitting near the bar.
+//
+// The inner query collapses each (class, horizon, decile, date) to one mean;
+// the outer one takes the mean, sd and count OF THOSE MEANS. `n` is therefore
+// now a count of sections, which is what XS_PUBLICATION_MIN_SAMPLES should
+// always have been measuring.
 export async function foldDecileEvidence(env) {
   const rows = await d1(
     env,
     `SELECT asset_class, horizon_days, decile,
             COUNT(*) AS n,
-            AVG(realised_return_pct - universe_return_pct) AS mean_excess,
-            AVG(realised_return_pct) AS mean_raw,
-            AVG(CASE WHEN realised_return_pct > universe_return_pct THEN 1.0 ELSE 0.0 END) AS hit,
-            AVG((realised_return_pct - universe_return_pct) * (realised_return_pct - universe_return_pct)) AS mean_sq
-       FROM xs_forecast_log
-      WHERE realised_return_pct IS NOT NULL AND universe_return_pct IS NOT NULL
-        AND method_version = ?1
+            AVG(section_excess) AS mean_excess,
+            AVG(section_raw) AS mean_raw,
+            AVG(section_hit) AS hit,
+            AVG(section_excess * section_excess) AS mean_sq,
+            SUM(section_obs) AS observations
+       FROM (
+         SELECT asset_class, horizon_days, decile, substr(run_at, 1, 10) AS section_date,
+                AVG(realised_return_pct - universe_return_pct) AS section_excess,
+                AVG(realised_return_pct) AS section_raw,
+                AVG(CASE WHEN realised_return_pct > universe_return_pct THEN 1.0 ELSE 0.0 END) AS section_hit,
+                COUNT(*) AS section_obs
+           FROM xs_forecast_log
+          WHERE realised_return_pct IS NOT NULL AND universe_return_pct IS NOT NULL
+            AND method_version = ?1
+          GROUP BY asset_class, horizon_days, decile, substr(run_at, 1, 10)
+       )
       GROUP BY asset_class, horizon_days, decile`,
     [XS_METHOD_VERSION]
   );
