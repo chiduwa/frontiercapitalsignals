@@ -49,6 +49,18 @@ trap cleanup EXIT
 rmdir "$STAGE_DIR"
 git -C "$INSTALL_DIR" worktree add --quiet --detach "$STAGE_DIR" "$TARGET"
 STAGE_ATTACHED=true
+# The worktree is created by root, but every guardrail test below runs as
+# $RUN_USER. Without this the staged tree is unreadable-and-unexecutable to
+# them and the whole gate fails for reasons that have nothing to do with the
+# commit being tested.
+#
+# It failed silently for exactly that reason: node --test isolates each test
+# file in a CHILD PROCESS, so account-journal's suite died with
+# "EACCES: spawn /usr/bin/node" on a root-owned stage while trading-bot's and
+# spot-bot's single-process suites passed. The updater reported GUARDRAIL TESTS
+# FAILED, correctly refused to promote, and the host sat 10 commits behind main
+# with everything looking healthy.
+chown -R "$RUN_USER:$RUN_USER" "$STAGE_DIR"
 
 if ! sudo -u "$RUN_USER" node --check "$STAGE_DIR/trading-bot/src/index.mjs" >"$TEST_LOG" 2>&1 \
    || ! sudo -u "$RUN_USER" node --check "$STAGE_DIR/trading-bot/src/protection-cycle.mjs" >>"$TEST_LOG" 2>&1 \
