@@ -64,15 +64,30 @@ export const ENTRY_DEPTH_PCT = 8;
 // sub-five-minute wick that then rebounded.
 export const STOP_DEPTH_PCT = 15;
 
-// The corollary nobody can opt out of: a 15% adverse excursion must not be a
-// liquidation. At 10x leverage a 15% move is 150% of margin — the position is
-// closed by the exchange long before the stop is consulted, which is the
-// mechanism that produced the loss this whole study came from.
+// Leverage cap. The constraint is that the STOP must always trigger before the
+// exchange liquidates, with enough margin that a fast wick cannot jump the gap.
 //
-// 3x keeps a full 15% stop at 45% of margin, leaving room for funding and for
-// the maintenance-margin buffer. Raising this without re-running the stop
-// sensitivity above is how the edge gets given back.
-export const MAX_LEVERAGE = 3;
+// CORRECTED 2026-09-12. The first version of this cap said "a 15% adverse
+// excursion must not be a liquidation" and set 3x on that basis. That
+// conflated two different distances: 15% is measured from the pre-spike
+// REFERENCE, but the entry sits 8% along already, so the adverse move from
+// ENTRY to STOP is only (1.15/1.08 - 1) = 6.48%. Leverage multiplies the
+// latter, not the former — and riskPct below has always computed it correctly,
+// so the cap was stricter than the code's own arithmetic implied.
+//
+//   lev   stop costs      liquidation at    buffer
+//    3x   19.4% margin    33.3% adverse     5.1x
+//    5x   32.4% margin    20.0% adverse     3.1x   <- chosen
+//    6x   38.9% margin    16.7% adverse     2.6x
+//   10x   64.8% margin    10.0% adverse     1.5x   too thin for a fast wick
+//   20x  129.6% margin     5.0% adverse     0.8x   liquidates BEFORE the stop
+//
+// 5x keeps the stop at about a third of margin with liquidation three times
+// further away. Past roughly 6x the buffer stops being a buffer, and at 20x
+// the stop is unreachable — which is the mechanism that produced the losses
+// this study came from. That failure was never about 3x versus 5x; it was
+// about running leverage high enough that the exchange closes you first.
+export const MAX_LEVERAGE = 5;
 
 // Measured outcome of the plan on its own sample (76 liquidation dips, 44
 // fills), net of 13bp round-trip cost. Stored so a live track record can be

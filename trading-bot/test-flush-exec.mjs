@@ -17,8 +17,19 @@ check('"TRUE" also works (case-insensitive)', loadGates({ FLUSH_EXEC_ENABLED: 'T
 
 console.log('\n== size and leverage cannot be exceeded ==');
 check('leverage is capped at MAX_LEVERAGE', loadGates({ FLUSH_EXEC_LEVERAGE: '20' }).leverage === MAX_LEVERAGE);
-check('a 15% stop at max leverage is not a liquidation', MAX_LEVERAGE * 0.15 < 1,
-  `${MAX_LEVERAGE} x 15% = ${(MAX_LEVERAGE * 0.15 * 100).toFixed(0)}% of margin`);
+// The stop sits 6.48% from the ENTRY, not 15% — 15% is measured from the
+// pre-spike reference and the entry is already 8% along. Leverage multiplies
+// the entry-to-stop distance, and an earlier version of this test asserted
+// against the wrong one.
+const STOP_FROM_ENTRY_PCT = (1.15 / 1.08 - 1) * 100;
+check('the stop costs less than half of margin at max leverage',
+  MAX_LEVERAGE * STOP_FROM_ENTRY_PCT / 100 < 0.5,
+  `${MAX_LEVERAGE}x * ${STOP_FROM_ENTRY_PCT.toFixed(2)}% = ${(MAX_LEVERAGE * STOP_FROM_ENTRY_PCT).toFixed(1)}% of margin`);
+check('liquidation stays at least 2x further away than the stop',
+  (100 / MAX_LEVERAGE) / STOP_FROM_ENTRY_PCT >= 2,
+  `buffer ${((100 / MAX_LEVERAGE) / STOP_FROM_ENTRY_PCT).toFixed(1)}x`);
+check('leverage never reaches the level where liquidation precedes the stop',
+  MAX_LEVERAGE < 100 / STOP_FROM_ENTRY_PCT, `breaks at ${(100 / STOP_FROM_ENTRY_PCT).toFixed(1)}x`);
 check('a negative notional is refused', loadGates({ FLUSH_EXEC_NOTIONAL_USD: '-100' }).notional === null);
 check('a zero notional is refused', loadGates({ FLUSH_EXEC_NOTIONAL_USD: '0' }).notional === null);
 check('garbage notional is refused', loadGates({ FLUSH_EXEC_NOTIONAL_USD: 'lots' }).notional === null);
