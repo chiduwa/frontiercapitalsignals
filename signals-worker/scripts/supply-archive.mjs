@@ -22,14 +22,24 @@ for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUN
 }
 const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID };
 
-const DAYS = Number(process.env.SUPPLY_DAYS || 1825);
+// 365, not more. MEASURED against the Demo key on 2026-09-12: days=365 returns
+// 366 daily points, and days=730 / 1825 / max all return HTTP 401 error_code
+// 10012. One year is the Demo tier's hard historical ceiling, so asking for
+// five silently fails the whole run rather than returning what it can.
+//
+// 52 weeks is short of the XS fit's 78-week minimum, so supply features stay
+// `underpowered` for now — but combined with the daily snapshot accumulating
+// forward it crosses that bar in about six months instead of eighteen.
+const DAYS = Number(process.env.SUPPLY_DAYS || 365);
 // MEASURED, not assumed: a 2.6s pace (~23 req/min) was rate-limited into
 // total failure on the first run — every symbol 429'd and zero rows were
 // written. CoinGecko's free tier from a shared/CI IP range is far tighter than
 // its nominal 30/min, and this project has been throttled there before (see
 // getFundingMap's retry docs). 9s (~6.5/min) completes 131 symbols in ~20
 // minutes, which is a one-time cost for full history.
-const PACE_MS = Number(process.env.SUPPLY_PACE_MS || 9000);
+// With a Demo key the documented ceiling is 30/min, so 2.2s is comfortably
+// inside it. Without a key nothing is safe, hence the much slower default.
+const PACE_MS = Number(process.env.SUPPLY_PACE_MS || (process.env.COINGECKO_API_KEY ? 2200 : 9000));
 // Backoff after a 429 has to be long enough to leave the penalty window, not
 // just to re-try into it. 30s/60s/120s, then give up on this symbol so one bad
 // coin cannot stall the whole run.
@@ -37,11 +47,21 @@ const RATE_LIMIT_BACKOFF_MS = [30000, 60000, 120000];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// A CoinGecko Demo key lifts the anonymous free tier's punishing shared-IP
+// throttle to a documented 30 calls/min. Without it this backfill is not
+// merely slow, it is impossible: a 2.6s pace, a 9s pace and a 15s pace were
+// each throttled to ZERO rows, from two different source IPs, and the penalty
+// outlasted the runs. With it, one call per symbol makes a full 131-symbol
+// history a ~5 minute job. Sent as the documented demo header; the base URL is
+// unchanged (a Pro key would use pro-api.coingecko.com and x-cg-pro-api-key).
+const COINGECKO_KEY = process.env.COINGECKO_API_KEY || '';
+const cgHeaders = COINGECKO_KEY ? { 'x-cg-demo-api-key': COINGECKO_KEY } : undefined;
+
 async function fetchSupplyHistory(id, days = DAYS) {
   const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}/market_chart`
     + `?vs_currency=usd&days=${days}&interval=daily`;
   for (let attempt = 0; attempt <= RATE_LIMIT_BACKOFF_MS.length; attempt++) {
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: cgHeaders });
     if (res.status === 429) {
       if (attempt === RATE_LIMIT_BACKOFF_MS.length) break;
       await sleep(RATE_LIMIT_BACKOFF_MS[attempt]);
