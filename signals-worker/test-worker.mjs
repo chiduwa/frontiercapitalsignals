@@ -706,6 +706,32 @@ check('a record below baseline but not significantly so is demoted toward 0.5, n
 // measurement.
 check('reliabilityMultiplier falls back to the static prior with no reliability data: unknown is neutral, not silent', mod.reliabilityMultiplier(undefined, 'X', 'y') === 1 && mod.reliabilityMultiplier({}, 'X', 'y') === 1);
 
+console.log('\n== moveext: has the asset already done its day\'s work ==');
+// The only technique in the library with a measured, out-of-sample-stable edge
+// (crypto +1.77 pts, NW t=7.55, train +1.77 / test +1.75). Its whole point is
+// that the threshold is RELATIVE to the asset, so these assert the scaling
+// rather than any particular number.
+{
+  const base = { symbol: 'T', price: 100, chg24h: 0, chg7d: 1, rsi: 50, dailyMoves: { medianAbsPct: 2 } };
+  const dirOf = (m) => {
+    const v = mod.evaluateTechniques({ ...base, ...m }, 'crypto', {}, {}).find((t) => t.id === 'moveext');
+    return v ? v.dir : undefined;
+  };
+  check('a day well beyond this asset\'s own median move is faded', dirOf({ chg24h: 9 }) === -1);
+  check('and faded the other way when the stretch is downward', dirOf({ chg24h: -9 }) === 1);
+  check('a normal day for this asset produces no call', dirOf({ chg24h: 1.5 }) === 0);
+  // Same absolute move, different asset: the whole reason this is not another
+  // fixed threshold like "chg7d >= 45".
+  check('the SAME absolute move is stretched for a quiet asset and ordinary for a volatile one',
+    dirOf({ chg24h: 9, dailyMoves: { medianAbsPct: 2 } }) === -1
+    && dirOf({ chg24h: 9, dailyMoves: { medianAbsPct: 8 } }) === 0);
+  check('no median daily move measured yet means it abstains rather than guessing a threshold', dirOf({ chg24h: 9, dailyMoves: null }) === null);
+  // Equities: +0.29 with the sign flipping across the split, so it is gated off
+  // by class. A silent regression here would ship a regime artefact.
+  const stockVote = mod.evaluateTechniques({ ...base, chg24h: 9 }, 'stock', {}, {}).find((t) => t.id === 'moveext');
+  check('equities never cast this vote — it did not survive its own out-of-sample split there', stockVote === undefined);
+}
+
 console.log('\n== crypto universe admission: widened to 500, gated on who can serve it ==');
 // The 250 -> 500 widening is only sound because the added tail costs nothing to
 // fetch. These assert the gate that makes that true, because the failure mode is

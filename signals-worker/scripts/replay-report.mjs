@@ -39,6 +39,7 @@ import { OUTCOME_MODEL_VERSION } from './reliability.mjs';
 
 const env = process.env;
 
+const has = (name) => process.argv.includes(`--${name}`);
 function arg(name, fallback = null) {
   const i = process.argv.indexOf(`--${name}`);
   if (i < 0) return fallback;
@@ -98,6 +99,73 @@ function summarize(rows, label) {
   };
 }
 
+// Edge by the composite's OWN confidence bucket, one observation per period.
+//
+// The engine treats a high score as a more reliable call: MIN_ACTIONABLE_EDGE,
+// the calibration curve and currentSignalConfidence all assume the relationship
+// is increasing. This measures it instead of assuming it.
+//
+// Each bucket gets its own baseline, from the vote mix and the realized outcome
+// mix OF THE CASTS IN THAT BUCKET. A bucket is a subset selected by the model's
+// own confidence, and confidence correlates with the conditions it fires in, so
+// the class-wide mix is the wrong null for it — the same error that
+// manufactured a four-technique selection earlier today.
+async function reportByScore(provenance, assetClass, horizonHours) {
+  const rows = await d1(env, `
+    SELECT substr(run_at, 1, 10) AS d,
+           MIN(9, MAX(0, CAST(score / 10 AS INTEGER))) AS bucket,
+           COUNT(*) AS n, SUM(correct) AS corr,
+           SUM(CASE WHEN dir = 1 THEN 1 ELSE 0 END) AS up,
+           SUM(CASE WHEN actual_dir = 1 THEN 1 ELSE 0 END) AS au,
+           SUM(CASE WHEN actual_dir = -1 THEN 1 ELSE 0 END) AS ad
+      FROM forecast_outcomes
+     WHERE provenance = ? AND asset_class = ? AND horizon_minutes = ?
+       AND series_kind = 'technique' AND series_key = 'composite'
+       AND aggregated = 1 AND score IS NOT NULL AND dir IN (-1, 1)
+       AND model_version = ?
+     GROUP BY substr(run_at, 1, 10), bucket
+  `, [provenance, assetClass, horizonHours * 60, OUTCOME_MODEL_VERSION]);
+
+  const byBucket = new Map();
+  for (const r of rows) {
+    const n = Number(r.n);
+    if (n < 10) continue;
+    const upFrac = Number(r.up) / n;
+    const base = upFrac * (Number(r.au) / n) + (1 - upFrac) * (Number(r.ad) / n);
+    const b = Number(r.bucket);
+    if (!byBucket.has(b)) byBucket.set(b, { edges: [], casts: 0 });
+    const cell = byBucket.get(b);
+    cell.edges.push(Number(r.corr) / n - base);
+    cell.casts += n;
+  }
+  if (!byBucket.size) return;
+  console.log(`\n  ${assetClass} ${horizonHours}h — edge by the model's own confidence bucket`);
+  console.log('    bucket   periods    casts   edge pts      NW t');
+  const slope = [];
+  for (const b of [...byBucket.keys()].sort((x, y) => x - y)) {
+    const { edges, casts } = byBucket.get(b);
+    if (edges.length < 30) { console.log(`    ${String(b).padStart(6)} ${String(edges.length).padStart(9)} ${String(casts).padStart(8)}   (under 30 periods)`); continue; }
+    const mean = edges.reduce((a, v) => a + v, 0) / edges.length;
+    const se = neweyWestSE(edges);
+    slope.push([b, mean]);
+    console.log(`    ${String(b).padStart(6)} ${String(edges.length).padStart(9)} ${String(casts).padStart(8)} ${String((mean * 100).toFixed(2)).padStart(10)} ${String(se ? (mean / se).toFixed(2) : 'n/a').padStart(9)}`);
+  }
+  // Rank correlation between bucket and edge. The engine's whole confidence
+  // story requires this to be positive; if it is negative the score is
+  // anti-informative about its own reliability, which is worse than it being
+  // uninformative, because every downstream gate reads it as increasing.
+  if (slope.length >= 4) {
+    const n = slope.length;
+    const mb = slope.reduce((a, [b]) => a + b, 0) / n;
+    const me = slope.reduce((a, [, e]) => a + e, 0) / n;
+    let num = 0, db = 0, de = 0;
+    for (const [b, e] of slope) { num += (b - mb) * (e - me); db += (b - mb) ** 2; de += (e - me) ** 2; }
+    const r = (db && de) ? num / Math.sqrt(db * de) : 0;
+    console.log(`    correlation(bucket, edge) = ${r.toFixed(3)} over ${n} testable buckets`
+      + `${r < 0 ? '  <-- NEGATIVE: the score is anti-informative about its own reliability' : ''}`);
+  }
+}
+
 async function main() {
   if (!env.CLOUDFLARE_ACCOUNT_ID || !env.CLOUDFLARE_API_TOKEN || !env.FCS_D1_DATABASE_ID) {
     throw new Error('CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN and FCS_D1_DATABASE_ID are required');
@@ -133,6 +201,10 @@ async function main() {
   for (const s of out) {
     if (s.insufficient) { console.log(`  ${s.label.padEnd(14)}  ${pad(s.periods, 7)}   (too few periods to test)`); continue; }
     console.log(`  ${s.label.padEnd(14)}  ${pad(s.periods, 7)} ${pad(s.casts, 8)}  ${pad(s.rawAccuracy.toFixed(4), 8)}  ${pad(s.meanEdgePts.toFixed(2), 9)}  ${pad(s.naiveT.toFixed(2), 8)}  ${pad(s.neweyWestT == null ? 'n/a' : s.neweyWestT.toFixed(2), 6)}  ${pad(`${s.periodsPositive}/${s.periods}`, 10)}`);
+  }
+
+  if (has('by-score')) {
+    for (const assetClass of classes) for (const h of horizons) await reportByScore(provenance, assetClass, h);
   }
 
   console.log(`

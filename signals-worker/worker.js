@@ -148,6 +148,9 @@ export const CRYPTO_UNIVERSE = 500;
 // publishes nothing new on its own; every added asset starts with no evidence
 // in its own cells and is withheld until it earns a call.
 export const CRYPTO_CHEAP_TAIL_RANK = 250;
+// Multiples of an asset's own median absolute daily move at which the `moveext`
+// technique calls a day stretched. Two, not a swept optimum — see the technique.
+export const MOVE_EXTENSION_STRETCHED = 2;
 export const CRYPTO_MIN_MCAP = 30_000_000;
 export const CRYPTO_MIN_VOLUME = 2_000_000;
 // 365, not 210: a real 52-week window for dwellAtExtreme(), matching
@@ -1371,6 +1374,8 @@ export const TECHNIQUE_META = {
   fibonacci:   { leading: true,  horizonDays: 3 },
   timeofday:   { leading: true,  horizonDays: 0.2 },
   openinterest:{ leading: false, horizonDays: 3 },
+  oidivergence:{ leading: true,  horizonDays: 2 },
+  moveext:     { leading: true,  horizonDays: 2 },
   sentiment:   { leading: true,  horizonDays: 4 },
   leadlag:     { leading: true,  horizonDays: 3 },
   swingtime:   { leading: true,  horizonDays: 0.3 },
@@ -3704,6 +3709,82 @@ export function evaluateTechniques(m, kind, reliability, ctx = {}) {
     } else {
       push('openinterest', 0.8, null, null);
     }
+
+    // T13b oi/price divergence: leverage building while price has NOT yet moved.
+    //
+    // Distinct from `openinterest` above, which reads an OI LEVEL percentile.
+    // docs/DERIVATIVES_EVIDENCE measured that construction as carrying nothing
+    // (best |t| 2.01) and saturating at 1.00 for fourteen consecutive days
+    // through ZEC's entire run — maximally uninformative exactly when the thing
+    // it measures was most extreme. The CHANGE-based form is the one that
+    // survives a price-reversal control, and the cross-sectional lane selected
+    // it out of a 35-feature panel at t=3.79 Newey-West.
+    //
+    // That selection was on EXCESS RETURN though, and this is a DIRECTION vote,
+    // which is a different claim about the same quantity — a feature can rank
+    // the cross-section without calling either side's absolute direction. It is
+    // added here to be measured on that question, and carries the same static
+    // prior weight as any other unproven technique until its own record says
+    // otherwise.
+    //
+    // Sign: positive divergence is OI rising faster than price, i.e. positions
+    // opening into a move price has not made yet. The flush lane's rule — new
+    // money taking a side means the move continues, forced closing means it
+    // reverses — says that leans with the prevailing direction, so it is read
+    // as continuation of chg7d rather than as a standalone up/down call.
+    if (m.oiPxDivergence != null && c7 != null) {
+      const strong = 10;
+      if (m.oiPxDivergence >= strong && c7 > 0) push('oidivergence', 0.8, 1, `open interest building faster than price (${m.oiPxDivergence.toFixed(0)}pt divergence) into an advance`);
+      else if (m.oiPxDivergence >= strong && c7 < 0) push('oidivergence', 0.8, -1, `open interest building faster than price (${m.oiPxDivergence.toFixed(0)}pt divergence) into a decline`);
+      else push('oidivergence', 0.8, 0, null);
+    } else {
+      push('oidivergence', 0.8, null, null);
+    }
+  }
+
+  // T13c move extension: has this asset already done its day's work?
+  //
+  // Every other size-aware technique here measures a move against an ABSOLUTE
+  // threshold — chg7d >= 45, |chg7d| > 8, RSI 70 — which means the same number
+  // has to serve BTC and a microcap that routinely moves 15% before breakfast.
+  // This one measures the move against the asset's OWN median absolute daily
+  // move, which is already computed on every build (dailyMovementStats) and
+  // until now was only ever DISPLAYED. Same asset-teaches-the-model-its-own-
+  // behaviour idea as bestVolLookback, applied to extension rather than range.
+  //
+  // Pre-specified at 2x and read as EXHAUSTION — an asset that has done twice a
+  // normal day is voted against — because that is the textbook reading and
+  // picking the threshold or the sign from the data is how this project has
+  // twice manufactured a result. If the sign is backwards the inversion test
+  // will say so against a properly widened bar, and that is a cleaner way to
+  // find out than trying both and keeping the better one.
+  //
+  // NOTE this is deliberately NOT conditioned on open interest, even though the
+  // flush lane's rule (new money in = continues, forced closing = reverses)
+  // says participation is what decides continuation vs reversal. Conditioning
+  // it here would test two hypotheses at once and leave neither interpretable;
+  // the unconditional version is measured first, and the conditional refinement
+  // is a follow-up if it earns one.
+  // CRYPTO ONLY, on measured evidence rather than on a story about why.
+  //
+  //   crypto  +1.77 pts, NW t=7.55 over 1,336 periods, and the chronological
+  //           70/30 split gives +1.77 train / +1.75 test — the same number
+  //           either side, which is the strongest validation available here.
+  //   stocks  +0.29, t=0.97, and the sign FLIPS across the split (+0.43 train,
+  //           -0.04 test). That is a regime artefact, not a weaker version of
+  //           the same effect.
+  //
+  // The asymmetry is at least coherent: daily mean reversion is far stronger in
+  // a retail-dominated market than one where the reversal is arbitraged. But the
+  // gate is set by the split, not by that reasoning — a feature that worked
+  // identically in both classes would be MORE suspicious, not less.
+  if (kind === 'crypto') {
+    if (m.dailyMoves && m.dailyMoves.medianAbsPct > 0 && c24 != null) {
+      const extension = Math.abs(c24) / m.dailyMoves.medianAbsPct;
+      if (extension >= MOVE_EXTENSION_STRETCHED) {
+        push('moveext', 0.9, c24 > 0 ? -1 : 1, `already moved ${extension.toFixed(1)}x its own typical day`);
+      } else push('moveext', 0.9, 0, null);
+    } else push('moveext', 0.9, null, null);
   }
 
   // T14 reversal: not a static RSI level ("RSI < 30") but a genuine

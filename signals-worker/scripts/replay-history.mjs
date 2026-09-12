@@ -374,11 +374,41 @@ export function directionOf(returnPct, deadband = DEADBAND_PCT) {
   return returnPct > deadband ? 1 : returnPct < -deadband ? -1 : 0;
 }
 
+// A DEADBAND SCALED TO THE ASSET'S OWN VOLATILITY.
+//
+// The live label uses a flat 0.5% at every horizon for every asset, and that
+// single choice does more damage than any technique in the library. A 0.5% day
+// is noise in a microcap and a real move in BTC, so the flat class is not one
+// event type — it is "whatever happens to be small in absolute terms", which
+// loads it with low-volatility assets. Those assets are then structurally
+// unpredictable by construction, every technique that fires on them is punished
+// for it, and the measured ceiling on directional accuracy sits near 0.42
+// before skill enters the picture. dwell's -37.96 point flat gap is that
+// mechanism in its purest form.
+//
+// Scaling the band to each asset's own realized daily volatility makes "flat"
+// mean the same thing everywhere: a move small RELATIVE TO WHAT THIS ASSET
+// NORMALLY DOES. It is the same asset-teaches-the-model-its-own-behaviour idea
+// bestVolLookback already applies to range width.
+//
+// k = 0.25 puts the band at a quarter of a typical daily move, which reproduces
+// roughly the current flat share on a median crypto asset while removing the
+// cross-asset distortion. Horizon scales with sqrt(time), the usual diffusion
+// assumption — a 7-day band is not 7x a 1-day band.
+//
+// This is a LABEL change, so anything measured under it is a different
+// label_version and must never be pooled with the flat-band ledger.
+export const VOL_SCALED_DEADBAND_K = 0.25;
+export function volScaledDeadband(volPct, horizonDays, k = VOL_SCALED_DEADBAND_K) {
+  if (!Number.isFinite(volPct) || volPct <= 0) return null;
+  return k * volPct * Math.sqrt(Math.max(horizonDays, 1));
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
-async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTechniques, maxAnchors }) {
+async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTechniques, maxAnchors, volScaled = false }) {
   console.log(`\n[replay] ${assetClass}: loading archive...`);
   const barsBySymbol = await loadBars(assetClass, Number(arg('lookback', DEFAULT_LOOKBACK_DAYS)));
   if (!barsBySymbol.size) {
@@ -524,7 +554,11 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
         if (!c || !c.total) continue;
 
         const returnPct = (exit / entry - 1) * 100;
-        const actualDir = directionOf(returnPct);
+        // Null volPct (too little history to measure) falls back to the flat
+        // band rather than skipping the asset, so the two label modes cover the
+        // same population and their measurements stay comparable.
+        const band = volScaled ? (volScaledDeadband(m.volPct, horizonDays) ?? DEADBAND_PCT) : DEADBAND_PCT;
+        const actualDir = directionOf(returnPct, band);
         const regime = regimeOf(m.structure);
         const base = {
           run_at: runAt, asset_class: assetClass, symbol,
@@ -1056,6 +1090,10 @@ async function main() {
   const maxAnchors = arg('max-anchors') ? Number(arg('max-anchors')) : null;
   const dryRun = has('dry-run');
   const withTechniques = has('with-techniques');
+  // Label mode. Writing under it requires its own label_version, so for now it
+  // is measurement-only and the runner refuses to persist.
+  const volScaled = has('vol-deadband');
+  if (volScaled && !dryRun) throw new Error('--vol-deadband is a different LABEL; run it with --dry-run until it has its own label_version');
 
   console.log(`[replay] model=${OUTCOME_MODEL_VERSION} label=${OUTCOME_LABEL_VERSION} `
     + `classes=${classes.join(',')} horizons=${horizons.join(',')}d budget=${budget}`
@@ -1063,7 +1101,7 @@ async function main() {
 
   let total = 0;
   for (const assetClass of classes) {
-    const { rows } = await replayClass(assetClass, horizons, { budget: budget - total, dryRun, withTechniques, maxAnchors });
+    const { rows } = await replayClass(assetClass, horizons, { budget: budget - total, dryRun, withTechniques, maxAnchors, volScaled });
     total += rows;
     if (total >= budget) { console.log('[replay] global budget reached'); break; }
   }

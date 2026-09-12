@@ -210,6 +210,14 @@ export function replayNonPriceMetrics(symbol, date, extras) {
   if (d) {
     if (d.oi_usd != null) out.openInterest = d.oi_usd;
     if (d.oi_level_pct != null) out.oiLevelPctRoll = d.oi_level_pct;
+    // Leverage building while price has NOT yet moved. docs/DERIVATIVES_EVIDENCE
+    // measures this as the one derivatives construction that survives a
+    // price-reversal control, and the XS lane selected it out of a 35-feature
+    // panel at t=3.79 Newey-West. The existing `openinterest` technique reads a
+    // LEVEL percentile instead, which the same document shows carries nothing
+    // (best |t| 2.01) and saturates at 1.00 for weeks at a time.
+    if (d.oi_px_divergence != null) out.oiPxDivergence = d.oi_px_divergence;
+    if (d.oi_chg_1d != null) out.oiChg1d = d.oi_chg_1d;
   }
   const expanding = extras.oiExpanding?.get(symbol)?.get(date);
   if (expanding != null) out.oiPercentile = expanding;
