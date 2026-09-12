@@ -42,6 +42,7 @@
 // The lane publishes nothing on its own. Forecasts are logged, matured, folded
 // into decile evidence, and only then may the gate expose them.
 import { d1, d1Batch, chunk } from './d1-client.mjs';
+import { loadBarQuarantine } from './bar-quarantine.mjs';
 import {
   XS_FEATURES, crossSectionalRanks, XS_MIN_UNIVERSE,
   rsi, macd, bollinger, stochastic, obvSlope, sma, slopePct, rangePos,
@@ -191,15 +192,32 @@ export function spansExpectedDays(from, to, days, tolerance = XS_DATE_TOLERANCE_
 }
 
 // Groups flat archive rows into per-symbol, date-ascending bar arrays.
-export function groupBars(rows) {
+// `quarantine` is an optional index from loadBarQuarantine (bar-quarantine.mjs,
+// migration 0034). When supplied, corrupt bars are dropped and a symbol whose
+// ticker was remapped keeps only the history AFTER its most recent identity
+// change — otherwise every indicator here (SMA200, range position, stretch)
+// would be computed across two different tokens spliced into one series.
+//
+// Optional rather than mandatory so this function stays usable in tests and in
+// any caller that has no D1 handle; callers that fit or trade should pass it.
+export function groupBars(rows, quarantine = null) {
   const bySymbol = new Map();
   for (const r of rows) {
     const close = Number(r.close);
     if (!(close > 0)) continue;
+    if (quarantine && quarantine.bad.has(`${r.symbol}|${r.date}`)) continue;
     if (!bySymbol.has(r.symbol)) bySymbol.set(r.symbol, []);
     bySymbol.get(r.symbol).push({ date: r.date, close, volume: Number(r.volume) });
   }
   for (const bars of bySymbol.values()) bars.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  if (quarantine) {
+    for (const [symbol, bars] of bySymbol) {
+      const boundaries = quarantine.boundaries.get(symbol);
+      if (!boundaries || !boundaries.length) continue;
+      const lastBoundary = boundaries[boundaries.length - 1];
+      bySymbol.set(symbol, bars.filter((b) => b.date >= lastBoundary));
+    }
+  }
   return bySymbol;
 }
 
@@ -453,7 +471,13 @@ export async function loadArchiveBars(env, assetClass, lookbackDays = ARCHIVE_LO
     );
     for (const r of rows) all.push(r);
   }
-  return groupBars(all);
+  // Corrupt bars are excluded from every fit. asset_daily_bars carries 41 rows
+  // that are outright wrong (migration 0034) — a ticker remapped to a different
+  // token, or a print orders of magnitude off. winsorise() already hid them
+  // from the regression's tails, but they still poison the INDICATORS computed
+  // per symbol before any cross-section is formed.
+  const quarantine = await loadBarQuarantine(d1, env, { assetClass });
+  return groupBars(all, quarantine);
 }
 
 export async function persistCoefficients(env, assetClass, horizonDays, fit, fitThrough) {

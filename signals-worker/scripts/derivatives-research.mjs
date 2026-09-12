@@ -24,6 +24,7 @@
 //
 // Read-only. Writes nothing to the live model; prints a report.
 import { d1 } from './d1-client.mjs';
+import { loadBarQuarantine, cleanBars } from './bar-quarantine.mjs';
 import { bonferroniZ, winsorise, ols, XS_FAMILY_ALPHA, XS_MIN_SIGN_CONSISTENCY, XS_PUBLICATION_MIN_T } from './cross-sectional.mjs';
 import { crossSectionalRanks } from '../worker.js';
 import {
@@ -57,13 +58,25 @@ async function loadAll() {
   return { deriv, bars };
 }
 
-function buildPanel(deriv, bars) {
-  const priceBySymbol = new Map();
+function buildPanel(deriv, bars, quarantine) {
+  // Corrupt bars are removed BEFORE any feature or return is computed, and a
+  // remapped ticker keeps only its post-identity-change history (migration
+  // 0034). The +/-1000% guard in forwardReturn stays as a backstop for anything
+  // the detector missed, but this is the primary defence.
+  const barsBySymbol = new Map();
   for (const b of bars) {
     const c = Number(b.close); if (!(c > 0)) continue;
-    if (!priceBySymbol.has(b.symbol)) priceBySymbol.set(b.symbol, new Map());
-    priceBySymbol.get(b.symbol).set(b.date, c);
+    if (!barsBySymbol.has(b.symbol)) barsBySymbol.set(b.symbol, []);
+    barsBySymbol.get(b.symbol).push({ date: b.date, close: c });
   }
+  const priceBySymbol = new Map();
+  let droppedBars = 0;
+  for (const [symbol, rows] of barsBySymbol) {
+    const clean = quarantine ? cleanBars(quarantine, symbol, rows) : rows;
+    droppedBars += rows.length - clean.length;
+    priceBySymbol.set(symbol, new Map(clean.map((b) => [b.date, b.close])));
+  }
+  if (droppedBars) console.log(`quarantine: dropped ${droppedBars} bars (corrupt or pre-identity-change)`);
   const derivBySymbol = new Map();
   for (const r of deriv) {
     if (!derivBySymbol.has(r.symbol)) derivBySymbol.set(r.symbol, []);
@@ -390,7 +403,8 @@ function report(title, results, zThreshold) {
 async function main() {
   const { deriv, bars } = await loadAll();
   console.log(`derivatives rows ${deriv.length}, price bars ${bars.length}`);
-  const { byDate, priceBySymbol, symbols, skippedNoPrice } = buildPanel(deriv, bars);
+  const quarantine = await loadBarQuarantine(d1, env, { assetClass: 'crypto' });
+  const { byDate, priceBySymbol, symbols, skippedNoPrice } = buildPanel(deriv, bars, quarantine);
   const dates = [...byDate.keys()].sort();
   console.log(`panel: ${symbols} symbols (${skippedNoPrice} skipped, no price history), `
     + `${dates.length} dates ${dates[0]}..${dates[dates.length - 1]}`);
