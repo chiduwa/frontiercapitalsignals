@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAllowedScanUrl, readBoundedText, safeFetch } from "@/lib/scanner-fetch";
 
 export const dynamic = "force-dynamic";
 
-type CheckStatus = "pass" | "warn" | "fail";
+type CheckStatus = "pass" | "warn" | "fail" | "info";
 interface Check {
   id: string;
   label: string;
@@ -12,13 +13,8 @@ interface Check {
   maxPoints: number;
 }
 
-const FETCH_TIMEOUT_MS = 8000;
-const MAX_BYTES = 3_000_000;
-const USER_AGENT = "FCS-AIVisibilityScanner/1.0 (+https://frontiercapitalsignals.com/audit)";
-const AI_CRAWLERS = ["GPTBot", "Google-Extended", "PerplexityBot", "ClaudeBot", "anthropic-ai", "CCBot", "Applebot-Extended"];
-
 // Isolate-scoped rate limit: this is a public, unauthenticated endpoint that makes
-// up to 3 outbound fetches per call, so it's both a cost-abuse and an
+// up to 2 resources (at most 4 requests each with validated redirects), so it's both a cost-abuse and an
 // SSRF/fetch-relay-abuse vector without some cap. Cloudflare Workers reuse an
 // isolate across many requests from the same edge colo, so a plain in-memory
 // map (same pattern already used in api/commodities) meaningfully throttles a
@@ -32,7 +28,14 @@ const rateLimitHits = new Map<string, number[]>();
 function isRateLimited(clientId: string): boolean {
   const now = Date.now();
   const hits = (rateLimitHits.get(clientId) ?? []).filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
-  hits.push(now);
+  const limited = hits.length >= RATE_LIMIT_MAX;
+  if (!limited) hits.push(now);
+  if (rateLimitHits.size >= 5000 && !rateLimitHits.has(clientId)) {
+    for (const [key, times] of rateLimitHits) {
+      if (times.every((t) => now - t >= RATE_LIMIT_WINDOW_MS)) rateLimitHits.delete(key);
+    }
+    if (rateLimitHits.size >= 5000) return true;
+  }
   rateLimitHits.set(clientId, hits);
   // Opportunistic cleanup so the map doesn't grow unbounded within a long-lived isolate.
   if (rateLimitHits.size > 5000) {
@@ -40,7 +43,7 @@ function isRateLimited(clientId: string): boolean {
       if (times.every((t) => now - t >= RATE_LIMIT_WINDOW_MS)) rateLimitHits.delete(key);
     }
   }
-  return hits.length > RATE_LIMIT_MAX;
+  return limited;
 }
 
 function normalizeUrl(input: string): URL | null {
@@ -54,79 +57,6 @@ function normalizeUrl(input: string): URL | null {
   }
 }
 
-function isUnsafeIpv4(a: number, b: number): boolean {
-  if (a === 127 || a === 10 || a === 0) return true; // loopback / this-network
-  if (a === 172 && b >= 16 && b <= 31) return true; // private
-  if (a === 192 && b === 168) return true; // private
-  if (a === 169 && b === 254) return true; // link-local / cloud metadata
-  if (a === 100 && b >= 64 && b <= 127) return true; // carrier-grade NAT
-  return false;
-}
-
-function isSafeHostname(hostname: string): boolean {
-  // WHATWG URL keeps brackets on IPv6 literals (e.g. "[::1]") — strip them
-  // before comparing, otherwise every IPv6-literal check below silently no-ops.
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) return false;
-  if (host === "0.0.0.0") return false;
-
-  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (ipv4) {
-    return !isUnsafeIpv4(Number(ipv4[1]), Number(ipv4[2]));
-  }
-
-  if (host.includes(":")) {
-    // IPv6 literal.
-    if (host === "::1" || host === "::" || host === "0:0:0:0:0:0:0:1" || host === "0:0:0:0:0:0:0:0") {
-      return false;
-    }
-    // IPv4-mapped/compatible addresses (::ffff:127.0.0.1 or ::ffff:7f00:1) — pull
-    // out the embedded IPv4 and re-check it so mapped metadata/loopback addresses
-    // don't sneak past the IPv4 branch above.
-    const mappedDotted = host.match(/^::ffff:(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/);
-    if (mappedDotted) {
-      return !isUnsafeIpv4(Number(mappedDotted[1]), Number(mappedDotted[2]));
-    }
-    const mappedHex = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-    if (mappedHex) {
-      const a = parseInt(mappedHex[1].padStart(4, "0").slice(0, 2), 16);
-      const b = parseInt(mappedHex[1].padStart(4, "0").slice(2, 4), 16);
-      return !isUnsafeIpv4(a, b);
-    }
-    // Link-local (fe80::/10) and unique local (fc00::/7) — reject by first hextet.
-    const firstGroup = host.split(":").find((g) => g.length > 0) ?? "";
-    if (/^[0-9a-f]{1,4}$/.test(firstGroup)) {
-      const groupNum = parseInt(firstGroup.padStart(4, "0"), 16);
-      if ((groupNum & 0xffc0) === 0xfe80) return false; // fe80::/10 link-local
-      if ((groupNum & 0xfe00) === 0xfc00) return false; // fc00::/7 unique local
-    }
-    return true;
-  }
-
-  return true;
-}
-
-async function safeFetch(url: string): Promise<{ ok: boolean; text: string; status: number }> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { "User-Agent": USER_AGENT },
-      redirect: "follow",
-    });
-    const lenHeader = res.headers.get("content-length");
-    if (lenHeader && Number(lenHeader) > MAX_BYTES) {
-      return { ok: false, text: "", status: res.status };
-    }
-    const text = await res.text();
-    return { ok: res.ok, text: text.slice(0, MAX_BYTES), status: res.status };
-  } catch {
-    return { ok: false, text: "", status: 0 };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
 
 function addCheck(checks: Check[], check: Check) {
   checks.push(check);
@@ -143,7 +73,11 @@ export async function POST(req: NextRequest) {
 
   let body: { url?: string };
   try {
-    body = await req.json();
+    const parsed: unknown = JSON.parse(await readBoundedText(req.body, 4096));
+    if (!parsed || typeof parsed !== "object" || typeof (parsed as { url?: unknown }).url !== "string") {
+      return NextResponse.json({ error: "Enter a website URL." }, { status: 400 });
+    }
+    body = parsed as { url: string };
   } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
@@ -152,27 +86,26 @@ export async function POST(req: NextRequest) {
   if (!target || !["http:", "https:"].includes(target.protocol)) {
     return NextResponse.json({ error: "Enter a valid website URL." }, { status: 400 });
   }
-  if (!isSafeHostname(target.hostname)) {
+  if (!isAllowedScanUrl(target)) {
     return NextResponse.json({ error: "That host can't be scanned." }, { status: 400 });
   }
 
   const selfHost = req.headers.get("host")?.split(":")[0]?.toLowerCase();
   if (selfHost && target.hostname.toLowerCase() === selfHost) {
     return NextResponse.json(
-      { error: "This tool can't scan the site it's hosted on — Cloudflare Workers can't fetch their own domain. Try a different site." },
+      { error: "This tool can't scan the site it's hosted on. Cloudflare Workers can't fetch their own domain. Try a different site." },
       { status: 400 },
     );
   }
 
-  const origin = `${target.protocol}//${target.hostname}`;
-  const [pageRes, robotsRes, llmsRes] = await Promise.all([
+  const origin = target.origin;
+  const [pageRes, robotsRes] = await Promise.all([
     safeFetch(target.toString()),
     safeFetch(`${origin}/robots.txt`),
-    safeFetch(`${origin}/llms.txt`),
   ]);
 
   if (!pageRes.ok) {
-    return NextResponse.json({ error: `Couldn't reach that site (got a ${pageRes.status || "network error"}). Check the URL and try again.` }, { status: 422 });
+    return NextResponse.json({ error: `Couldn't reach that site (got a ${pageRes.status || "network error"}). Use the final public page URL after any redirects and try again.` }, { status: 422 });
   }
 
   const html = pageRes.text;
@@ -183,18 +116,18 @@ export async function POST(req: NextRequest) {
   const hasGa4 = /googletagmanager\.com\/gtag\/js\?id=G-|gtag\(\s*['"]config['"]\s*,\s*['"]G-/i.test(html);
   const hasLegacyUa = /UA-\d{4,}-\d+/i.test(html) && !hasGa4 && !hasGtm;
   if (hasGtm || hasGa4) {
-    addCheck(checks, { id: "analytics", label: "Analytics tracking (GA4/GTM)", status: "pass", detail: hasGtm ? "Google Tag Manager container detected." : "GA4 tag detected.", points: 20, maxPoints: 20 });
+    addCheck(checks, { id: "analytics", label: "Analytics tracking (GA4/GTM)", status: "pass", detail: hasGtm ? "Google Tag Manager container detected." : "GA4 tag detected.", points: 0, maxPoints: 0 });
   } else if (hasLegacyUa) {
-    addCheck(checks, { id: "analytics", label: "Analytics tracking (GA4/GTM)", status: "warn", detail: "Only legacy Universal Analytics (UA-) found — this stopped collecting data in 2023 and needs migrating to GA4.", points: 5, maxPoints: 20 });
+    addCheck(checks, { id: "analytics", label: "Analytics tracking (GA4/GTM)", status: "warn", detail: "Only legacy Universal Analytics (UA-) found. this stopped collecting data in 2023 and needs migrating to GA4.", points: 0, maxPoints: 0 });
   } else {
-    addCheck(checks, { id: "analytics", label: "Analytics tracking (GA4/GTM)", status: "fail", detail: "No GA4 or Google Tag Manager tag detected on the homepage.", points: 0, maxPoints: 20 });
+    addCheck(checks, { id: "analytics", label: "Analytics tracking (GA4/GTM)", status: "info", detail: "No GA4 or Google Tag Manager tag detected in the page HTML. Other analytics may be in use. Analytics tags are not a search visibility requirement.", points: 0, maxPoints: 0 });
   }
 
   // --- Structured data ---
   const hasSchema = /<script[^>]+type=["']application\/ld\+json["']/i.test(html);
   addCheck(checks, {
     id: "schema", label: "Structured data (schema.org)", status: hasSchema ? "pass" : "fail",
-    detail: hasSchema ? "Found JSON-LD structured data — this is what AI engines and Google use to understand your business." : "No JSON-LD structured data found. AI engines rely heavily on this to describe your business accurately.",
+    detail: hasSchema ? "JSON-LD detected. This check does not validate its accuracy or eligibility for rich results." : "No JSON-LD detected. Relevant, accurate structured data can clarify page content, but is not required for Google AI features.",
     points: hasSchema ? 15 : 0, maxPoints: 15,
   });
 
@@ -204,7 +137,7 @@ export async function POST(req: NextRequest) {
   const titleOk = title.length >= 10 && title.length <= 70;
   addCheck(checks, {
     id: "title", label: "Page title", status: title ? (titleOk ? "pass" : "warn") : "fail",
-    detail: title ? (titleOk ? `"${title}"` : `Title is ${title.length} characters — aim for 10-70.`) : "No <title> tag found.",
+    detail: title ? (titleOk ? `"${title}"` : `Title is ${title.length} characters. aim for 10-70.`) : "No <title> tag found.",
     points: title ? (titleOk ? 10 : 6) : 0, maxPoints: 10,
   });
 
@@ -212,7 +145,7 @@ export async function POST(req: NextRequest) {
   const hasMetaDesc = /<meta[^>]+name=["']description["'][^>]+content=["'][^"']{20,}["']/i.test(html);
   addCheck(checks, {
     id: "meta-description", label: "Meta description", status: hasMetaDesc ? "pass" : "fail",
-    detail: hasMetaDesc ? "Present with meaningful content." : "Missing or too short — this is the snippet AI engines and search results quote.",
+    detail: hasMetaDesc ? "Present with meaningful content." : "Missing or short. A useful description can inform search snippets, although search engines may select different text.",
     points: hasMetaDesc ? 10 : 0, maxPoints: 10,
   });
 
@@ -220,7 +153,7 @@ export async function POST(req: NextRequest) {
   const hasCanonical = /<link[^>]+rel=["']canonical["']/i.test(html);
   addCheck(checks, {
     id: "canonical", label: "Canonical tag", status: hasCanonical ? "pass" : "warn",
-    detail: hasCanonical ? "Present." : "No canonical tag found — can cause duplicate-content confusion.",
+    detail: hasCanonical ? "Present." : "No canonical tag found. can cause duplicate-content confusion.",
     points: hasCanonical ? 10 : 3, maxPoints: 10,
   });
 
@@ -228,39 +161,24 @@ export async function POST(req: NextRequest) {
   const hasOg = /<meta[^>]+property=["']og:title["']/i.test(html);
   addCheck(checks, {
     id: "opengraph", label: "Open Graph / social preview tags", status: hasOg ? "pass" : "warn",
-    detail: hasOg ? "Present." : "Missing — links shared on social/chat apps won't show a proper preview.",
+    detail: hasOg ? "Present." : "Missing. links shared on social/chat apps won't show a proper preview.",
     points: hasOg ? 10 : 3, maxPoints: 10,
   });
 
-  // --- robots.txt / AI crawlers ---
-  if (robotsRes.ok && robotsRes.text) {
-    const robotsTxt = robotsRes.text;
-    const blockedBots: string[] = [];
-    for (const bot of AI_CRAWLERS) {
-      const re = new RegExp(`User-agent:\\s*${bot}[\\s\\S]{0,60}?Disallow:\\s*/(?!\\S)`, "i");
-      if (re.test(robotsTxt)) blockedBots.push(bot);
-    }
-    if (blockedBots.length === 0) {
-      addCheck(checks, { id: "ai-crawlers", label: "AI crawler access (robots.txt)", status: "pass", detail: "No major AI crawlers are blocked.", points: 15, maxPoints: 15 });
-    } else {
-      addCheck(checks, { id: "ai-crawlers", label: "AI crawler access (robots.txt)", status: "warn", detail: `Blocking: ${blockedBots.join(", ")}. Intentional if you don't want AI training on your content — but it also blocks you from appearing in AI answer engines.`, points: 5, maxPoints: 15 });
-    }
-  } else {
-    addCheck(checks, { id: "ai-crawlers", label: "AI crawler access (robots.txt)", status: "warn", detail: "No robots.txt found.", points: 5, maxPoints: 15 });
-  }
-
-  // --- llms.txt ---
-  const hasLlms = llmsRes.ok && llmsRes.text.length > 0;
+  // Access policies are informational, not a ranking or training-permission score.
+  const hasRobots = robotsRes.ok && robotsRes.text.length > 0 && !/<html/i.test(robotsRes.text);
   addCheck(checks, {
-    id: "llms-txt", label: "llms.txt (AI-crawler guidance file)", status: hasLlms ? "pass" : "warn",
-    detail: hasLlms ? "Present — helps AI engines summarize your site correctly." : "Not found. This is a new, low-effort file that helps AI answer engines summarize your site.",
-    points: hasLlms ? 10 : 0, maxPoints: 10,
+    id: "robots", label: "Crawler policy", status: "info",
+    detail: hasRobots
+      ? "robots.txt is available. This check does not parse every rule or verify crawler access. Search and training controls differ: GPTBot is separate from OAI-SearchBot, and Google-Extended does not control Google Search."
+      : "robots.txt was not confirmed at this URL. Its absence alone does not prevent indexing. Review crawler policies separately from training preferences.",
+    points: 0, maxPoints: 0,
   });
 
   const score = checks.reduce((sum, c) => sum + c.points, 0);
   const maxScore = checks.reduce((sum, c) => sum + c.maxPoints, 0);
   const pct = Math.round((score / maxScore) * 100);
-  const grade = pct >= 80 ? "Strong" : pct >= 50 ? "Needs Work" : "High Risk";
+  const grade = pct >= 80 ? "Most checks passed" : pct >= 50 ? "Some checks need review" : "Several checks need review";
 
   return NextResponse.json({
     url: target.toString(),

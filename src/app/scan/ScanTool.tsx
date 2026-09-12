@@ -6,7 +6,7 @@ import { pushDataLayerEvent } from "@/lib/analytics";
 interface Check {
   id: string;
   label: string;
-  status: "pass" | "warn" | "fail";
+  status: "pass" | "warn" | "fail" | "info";
   detail: string;
   points: number;
   maxPoints: number;
@@ -19,11 +19,12 @@ interface ScanResult {
 }
 
 const statusStyle: Record<Check["status"], string> = {
+  info: "text-slate-600 bg-slate-50 border-slate-200",
   pass: "text-green-600 bg-green-50 border-green-200",
   warn: "text-amber-600 bg-amber-50 border-amber-200",
   fail: "text-red-600 bg-red-50 border-red-200",
 };
-const statusIcon: Record<Check["status"], string> = { pass: "✓", warn: "!", fail: "✕" };
+const statusIcon: Record<Check["status"], string> = { pass: "✓", warn: "!", fail: "✕", info: "i" };
 
 export default function ScanTool({ prefillUrl }: { prefillUrl?: string }) {
   const [url, setUrl] = useState(prefillUrl ?? "");
@@ -64,6 +65,7 @@ export default function ScanTool({ prefillUrl }: { prefillUrl?: string }) {
       <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3 mb-10">
         <input
           type="text"
+          aria-label="Website URL to check"
           required
           value={url}
           onChange={(e) => setUrl(e.target.value)}
@@ -91,6 +93,7 @@ export default function ScanTool({ prefillUrl }: { prefillUrl?: string }) {
               <p className="text-ink font-bold break-all">{result.url}</p>
             </div>
             <div className="text-right shrink-0">
+              <p className="text-slate-500 text-xs mb-1">Page checklist / 100</p>
               <p className={`text-5xl font-black tabular-nums ${scoreColor}`}>{result.score}</p>
               <p className="text-slate-500 text-xs font-semibold tracking-widest uppercase mt-1">{result.grade}</p>
             </div>
@@ -111,9 +114,9 @@ export default function ScanTool({ prefillUrl }: { prefillUrl?: string }) {
           </ul>
 
           <div className="mt-8 pt-8 border-t border-gray-200 bg-sand -mx-8 -mb-8 px-8 pb-8 rounded-b-2xl">
-            <p className="text-ink font-bold mb-2">This scan is automated and directional.</p>
+            <p className="text-ink font-bold mb-2">A quick page checklist, not a ranking measurement.</p>
             <p className="text-slate-500 text-sm mb-5">
-              A full audit checks Search Console indexing, consent/tag configuration, and content structure in depth, then we implement every fix — not just diagnose it.
+              This checks tags in the returned HTML. It does not measure search traffic, AI citations, schema validity, or security. A full audit adds Search Console data and a closer review of your content.
             </p>
             <Link href="/audit#pricing" className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-navy text-white font-bold text-sm hover:bg-navy-700 transition-colors">
               See the Full Audit + Fix

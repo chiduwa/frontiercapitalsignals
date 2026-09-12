@@ -29,32 +29,10 @@ jobs:
           git config --global user.name "FCS Intelligence Bot"
           git config --global user.email "bot@frontiercapitalsignals.com"
           git add public/llms.txt
-          git diff --staged --quiet || git commit -m "chore: refresh llms.txt $(date +%Y-%m-%d)"
-          git diff --staged --quiet || git push
-
-      - name: Ping Bing via IndexNow
-        run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://www.bing.com/indexnow?url=https%3A%2F%2Ffrontiercapitalsignals.com%2Fsitemap.xml&key=fcs3902425740540825")
-          echo "Bing IndexNow ping: $STATUS"
-
-      - name: Submit full site URL list to IndexNow
-        run: |
-          curl -s -X POST "https://api.indexnow.org/indexnow" \
-            -H "Content-Type: application/json; charset=utf-8" \
-            -d '{
-              "host": "frontiercapitalsignals.com",
-              "key": "fcs3902425740540825",
-              "keyLocation": "https://frontiercapitalsignals.com/fcs3902425740540825.txt",
-              "urlList": [
-                "https://frontiercapitalsignals.com",
-                "https://frontiercapitalsignals.com/intelligence",
-                "https://frontiercapitalsignals.com/services",
-                "https://frontiercapitalsignals.com/resources",
-                "https://frontiercapitalsignals.com/about",
-                "https://frontiercapitalsignals.com/contact"
-              ]
-            }' | echo "IndexNow full-site submission complete"
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: refresh llms.txt $(date +%Y-%m-%d)"
+            git push
+          fi
 
       - name: Check Core Web Vitals via PageSpeed API
         run: |

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import { pushDataLayerEvent } from "@/lib/analytics";
 
@@ -254,23 +254,46 @@ export default function MarketTicker() {
   const [amount,   setAmount]  = useState("1000");
   const [tick,     setTick]    = useState<string | null>(null);
 
+  const fetching = useRef(false);
+  const lastAttempt = useRef(0);
   const fetchAll = useCallback(async () => {
+    if (fetching.current) return;
+    fetching.current = true;
+    lastAttempt.current = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
     try {
-      const [rr, cr] = await Promise.all([fetch("/api/rates"), fetch("/api/commodities")]);
+      const [rr, cr] = await Promise.all([
+        fetch("/api/rates", { signal: controller.signal }),
+        fetch("/api/commodities", { signal: controller.signal }),
+      ]);
       const rd: RatesPayload = await rr.json();
       const cd: CommPayload  = await cr.json();
       if (!("error" in rd)) setRates(rd);
       if (!("error" in cd)) setComm(cd);
-      setTick(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      if (rr.ok && cr.ok && !("error" in rd) && !("error" in cd)) {
+        setTick(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      }
+    } catch {
+      // Keep the last displayed snapshot when the network is unavailable.
     } finally {
+      clearTimeout(timeout);
+      fetching.current = false;
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchAll();
-    const id = setInterval(fetchAll, 5 * 60 * 1000);
-    return () => clearInterval(id);
+    const refreshIfVisible = () => {
+      if (!document.hidden && Date.now() - lastAttempt.current >= 5 * 60 * 1000) void fetchAll();
+    };
+    refreshIfVisible();
+    const id = setInterval(refreshIfVisible, 5 * 60 * 1000);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
   }, [fetchAll]);
 
   useEffect(() => {
