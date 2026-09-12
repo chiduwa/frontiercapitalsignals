@@ -444,6 +444,68 @@ orders. Promotion into `XS_FEATURES` requires the cross-sectional lane's own
 out-of-sample checkpoint, and would pay a family-size cost that has to be
 earned rather than assumed.
 
+## Data integrity: corrupt-bar quarantine (added 2026-09-12)
+
+`asset_daily_bars` contains rows that are simply wrong, and every regression in
+this engine had been silently absorbing them — `winsorise()` clips each
+cross-section's tails before fitting, which hides corruption from a t-stat
+while leaving it lethal to anything that SELECTS assets (portfolios,
+backtests, the surge scanner, crash-recovery episodes, the trading bot). The
+derivatives cost model found it by booking a -4103%/period "return".
+
+`scripts/bar-quarantine.mjs` + migration 0034 detect three modes:
+
+| reason | meaning | threshold | crypto | equity |
+| --- | --- | --- | --- | --- |
+| `spike` | one/two bars off, series reverts | 4x, confirmed by the reversion | 16 | 0 |
+| `level-shift` | jumps and HOLDS — ticker remapped, or redenomination | 10x, stricter since nothing confirms it | 25 | 0 |
+| `stale` | identical close 10+ bars, dead feed | — | 4349 | 2356 |
+
+Thresholds are calibrated on two real cases, not on a gap in the data:
+**DOGE 2021-01-28** rose 4.43x in a day in the GameStop episode and is REAL (a
+4x bar would erase it — there is a regression test); **AAVE 2020-10-03** rose
+90.6x on the LEND→AAVE 100:1 redenomination and is not a return anyone earned.
+
+Advisory, never destructive — no row is deleted, so a false positive is undone
+by deleting a quarantine row. A level-shift boundary bar is NOT marked bad: its
+own print is the first valid one of the new asset, so `cleanBars` drops the
+history *before* it and keeps the boundary. `stale` is recorded but the default
+loader leaves it in, because those bars are uninformative rather than wrong and
+dropping them would change the tradeable universe rather than fix an error.
+
+Wired into the cross-sectional archive loader and the derivatives panel. Run
+`node scripts/quarantine-bars.mjs` (dry run) / `--apply`.
+
+## Supply and dilution (added 2026-09-12)
+
+Previously a total blind spot: the engine fetched no circulating, total or max
+supply anywhere. Migration 0035 adds `asset_supply_daily` and
+`asset_supply_snapshot`.
+
+DefiLlama's unlock schedules are paywalled (HTTP 402) and CoinGecko's free tier
+has no supply history — but `market_chart` returns prices AND market caps over
+full history in one call, and circulating supply is market_cap / price. So the
+realized supply curve is recoverable at one request per symbol. That is
+arguably better than a schedule: it records what actually entered circulation,
+including unscheduled mints, burns and treasury moves.
+
+Two kinds of number, kept apart on purpose. **Realized dilution**
+(`supply_growth_30d/90d/180d`, `supply_accel`) is a true time series.
+**Pending overhang** (`supply_overhang` = (total − circulating) / circulating)
+is point-in-time, because CoinGecko publishes no history for total supply — so
+it is valid cross-sectionally but carries no within-asset time variation, is
+listed in `SUPPLY_SNAPSHOT_FEATURES`, and the harness prints that caveat rather
+than reporting a t-stat that overstates confidence.
+
+The snapshot alone separates the universe sharply: MON 751% pending dilution,
+H 402%, ZAMA 353%, HYPE 330%, TRUMP 266%, against ~0% for BTC and ZEC.
+
+Backfill runs in Actions (`signals-supply-backfill.yml`), not locally:
+CoinGecko throttles hard per IP, and a local run at ~23 req/min was penalised
+into total failure with the penalty outlasting the run. Pace defaults to 9s
+with 30/60/120s backoff, and already-filled symbols are skipped so a throttled
+run resumes.
+
 ## Editing later
 
 Change the watchlist, universe size, and filters in the config constants near the top of `worker.js`; tune technique weights in `evaluateTechniques`; adjust the embedded dashboard in the `PAGE_HTML` template near the bottom. After any edit, copy the file to `src/worker.js` too (`cp worker.js src/worker.js`) and run `node test-worker.mjs` before redeploying.
