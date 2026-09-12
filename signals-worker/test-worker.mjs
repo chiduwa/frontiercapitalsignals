@@ -65,9 +65,23 @@ const baselineNames = [...currentSchemaBaseline.matchAll(/\('([^']+\.sql)'\)/g)]
   check('every table created by a migration is also in the fresh-snapshot schema', undeclared.length === 0, `missing from schema.sql: ${undeclared.join(', ')}`);
 }
 
-check('the fresh-snapshot baseline exactly covers every current Wrangler migration',
-  JSON.stringify(baselineNames) === JSON.stringify(migrationNames),
-  `baseline=${baselineNames.length}, migrations=${migrationNames.length}`);
+// This guard blocked three consecutive deploys on 2026-09-12 between 15:24 and
+// 15:38 UTC, correctly: migration 0037 had been added without being listed in
+// the baseline. It cost fourteen minutes mostly because the message said only
+// "baseline=36, migrations=37" — a count difference, with no indication of
+// WHICH file or what to do about it. Adding a migration is routine and this is
+// its standing trip hazard, so the failure now names the drift and the fix.
+{
+  const inMigrationsOnly = migrationNames.filter((n) => !baselineNames.includes(n));
+  const inBaselineOnly = baselineNames.filter((n) => !migrationNames.includes(n));
+  const detail = [
+    inMigrationsOnly.length ? `MISSING from scripts/current-schema-baseline.sql: ${inMigrationsOnly.join(', ')} — add each as ('<filename>') to its VALUES list` : '',
+    inBaselineOnly.length ? `listed in the baseline but no such migration file: ${inBaselineOnly.join(', ')}` : '',
+    (!inMigrationsOnly.length && !inBaselineOnly.length) ? `same ${migrationNames.length} names, different order — the baseline must be sorted` : ''
+  ].filter(Boolean).join('; ');
+  check('the fresh-snapshot baseline exactly covers every current Wrangler migration',
+    JSON.stringify(baselineNames) === JSON.stringify(migrationNames), detail);
+}
 
 console.log('\n== forEachConcurrent: bounded D1 bulk-write queue ==');
 const processedBatches = [];
