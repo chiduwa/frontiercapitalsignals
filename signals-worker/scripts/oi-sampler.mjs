@@ -163,6 +163,56 @@ async function watchlist() {
   return rows.map((r) => r.symbol);
 }
 
+// Scores events whose recovery window has closed, against the outcome the
+// classification PREDICTED. This is what turns the classifier from an in-sample
+// study into something with a live track record — and it is the precondition
+// for ever letting it size a real order. Without it the system would keep
+// generating confident plans and never learn whether any of them were right.
+//
+// Resolution is by price only. It does not know or care whether a trade was
+// taken; it measures what the setup did.
+export const RESOLVE_AFTER_MIN = 30;
+
+async function resolveMaturedEvents() {
+  const cutoffTs = Date.now() - RESOLVE_AFTER_MIN * 60000;
+  const pending = await d1(env,
+    `SELECT id, symbol, direction, first_ts, ref_price, extreme_price, classification, expected_recovery
+     FROM flush_event WHERE resolved_at IS NULL AND first_ts <= ? LIMIT 50`, [cutoffTs]);
+  if (!pending.length) return 0;
+
+  let n = 0;
+  for (const e of pending) {
+    // The best price reached in the window after the move, from our own ticks.
+    const after = await d1(env,
+      'SELECT mark_price FROM oi_tick WHERE symbol = ? AND ts > ? AND ts <= ? ORDER BY ts',
+      [e.symbol, e.first_ts, e.first_ts + RESOLVE_AFTER_MIN * 60000]);
+    if (after.length < 3) {
+      // Not enough of our own samples to judge — mark it resolved with a note
+      // rather than leaving it pending forever and silently inflating the
+      // "awaiting outcome" count.
+      await d1(env, 'UPDATE flush_event SET resolved_at = ?, notes = ? WHERE id = ?',
+        [new Date().toISOString(), 'insufficient tick coverage to score', e.id]);
+      n++;
+      continue;
+    }
+    const prices = after.map((r) => r.mark_price).filter((p) => p > 0);
+    const isDip = e.direction === 'down';
+    const best = isDip ? Math.max(...prices) : Math.min(...prices);
+    const span = e.ref_price - e.extreme_price;
+    const actual = span !== 0 ? (best - e.extreme_price) / span : null;
+    const last = prices[prices.length - 1];
+    const fwd1h = e.ref_price > 0 ? ((last / e.ref_price) - 1) * 100 : null;
+    await d1(env,
+      'UPDATE flush_event SET resolved_at = ?, actual_recovery = ?, fwd_1h_pct = ? WHERE id = ?',
+      [new Date().toISOString(), actual, fwd1h, e.id]);
+    n++;
+    const err = (actual != null && e.expected_recovery != null)
+      ? ` (expected ${(e.expected_recovery * 100).toFixed(0)}%, got ${(actual * 100).toFixed(0)}%)` : '';
+    console.log(`  RESOLVED ${e.symbol} ${e.classification}${err}`);
+  }
+  return n;
+}
+
 async function main() {
   requireEnv();
   try { await fapi('/fapi/v1/time'); }
@@ -254,9 +304,10 @@ async function main() {
     await sleep(Math.max(0, INTERVAL_SEC * 1000 - elapsed));
   }
 
+  const scored = await resolveMaturedEvents();
   const cutoff = Date.now() - RETENTION_DAYS * 86400000;
   await d1(env, 'DELETE FROM oi_tick WHERE ts < ?', [cutoff]);
-  console.log(`done: ${samples} samples, ${detections} events detected`);
+  console.log(`done: ${samples} samples, ${detections} events detected, ${scored} resolved`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
