@@ -77,17 +77,28 @@ export const STOP_DEPTH_PCT = 15;
 //
 //   lev   stop costs      liquidation at    buffer
 //    3x   19.4% margin    33.3% adverse     5.1x
-//    5x   32.4% margin    20.0% adverse     3.1x   <- chosen
-//    6x   38.9% margin    16.7% adverse     2.6x
-//   10x   64.8% margin    10.0% adverse     1.5x   too thin for a fast wick
+//    5x   32.4% margin    20.0% adverse     3.1x
+//    8x   51.8% margin    12.5% adverse     1.9x   <- operator's choice
+//   10x   64.8% margin    10.0% adverse     1.5x
 //   20x  129.6% margin     5.0% adverse     0.8x   liquidates BEFORE the stop
 //
-// 5x keeps the stop at about a third of margin with liquidation three times
-// further away. Past roughly 6x the buffer stops being a buffer, and at 20x
-// the stop is unreachable — which is the mechanism that produced the losses
-// this study came from. That failure was never about 3x versus 5x; it was
-// about running leverage high enough that the exchange closes you first.
-export const MAX_LEVERAGE = 5;
+// WHAT LEVERAGE DOES AND DOES NOT CHANGE HERE. Position size is set by
+// FLUSH_EXEC_NOTIONAL_USD, not by leverage, so the loss on a stopped trade is
+// 6.48% of NOTIONAL at every setting — identical at 3x and at 8x. Leverage
+// changes only two things: how much margin is tied up, and how far away
+// liquidation sits.
+//
+// So the risk 8x adds is not a bigger loss. It is that the gap between the
+// stop trigger (6.48% adverse) and liquidation (12.5%) narrows to about six
+// percentage points, and these are by construction the fastest-moving events
+// in the market. A short-covering squeeze that gaps straight through the stop
+// is exactly the shape that could cross both levels before the stop's market
+// order fills.
+//
+// Set at 8x deliberately by the operator. The cap still exists and still
+// matters: past ~15x the ordering inverts and the stop becomes unreachable,
+// which is the mechanism behind the losses this whole study came from.
+export const MAX_LEVERAGE = 8;
 
 // Measured outcome of the plan on its own sample (76 liquidation dips, 44
 // fills), net of 13bp round-trip cost. Stored so a live track record can be

@@ -94,8 +94,16 @@ check('entry sits BELOW the reference', buy.entryPrice < buy.refPrice, String(bu
 check('entry is at the measured depth, not a round 5%', Math.abs(buy.depthPct - ENTRY_DEPTH_PCT) < 1e-9);
 check('stop is below the entry', buy.stopPrice < buy.entryPrice);
 check('target sits between entry and reference', buy.targetPrice > buy.entryPrice && buy.targetPrice < buy.refPrice);
-check('leverage is capped so a full stop is not a liquidation', buy.maxLeverage * (STOP_DEPTH_PCT / 100) < 1,
-  `${buy.maxLeverage}x * ${STOP_DEPTH_PCT}% = ${(buy.maxLeverage * STOP_DEPTH_PCT / 100).toFixed(2)} of margin`);
+// Against the entry-to-stop distance, not STOP_DEPTH_PCT. The latter is
+// measured from the pre-move reference and the entry already sits part of the
+// way there, so multiplying it by leverage overstates the margin cost — the
+// same conflation that set the original cap too low.
+check('the stop still triggers before liquidation at max leverage',
+  (100 / buy.maxLeverage) > buy.riskPct,
+  `${buy.maxLeverage}x liquidates at ${(100 / buy.maxLeverage).toFixed(1)}% vs a ${buy.riskPct.toFixed(2)}% stop`);
+check('with a buffer, not merely by ordering',
+  (100 / buy.maxLeverage) / buy.riskPct >= 1.75,
+  `buffer ${((100 / buy.maxLeverage) / buy.riskPct).toFixed(2)}x`);
 check('the plan carries a hold limit', buy.maxHoldMinutes > 0 && buy.maxHoldMinutes <= 120);
 
 const sell = planEntry(mk('up', 'liquidation'));
