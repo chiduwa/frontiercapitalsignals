@@ -326,12 +326,15 @@ if (FCS_D1_DATABASE_ID) {
       const selectedIds = Object.entries(xsCoefficients).flatMap(([cls, byHorizon]) =>
         Object.entries(byHorizon).flatMap(([h, feats]) =>
           Object.keys(feats).filter((k) => feats[k].selected).map((k) => `${cls}/${h}d:${k}`)));
-      if (!xs.written && selectedIds.length) {
+      // The guard keys on whether forecasts were PRODUCED, which is what
+      // `offered` measures — zero produced while features are selected is the
+      // silent failure. Zero INSERTED is normal and says nothing.
+      if (!xs.offered && selectedIds.length) {
         console.error(`[xs] SELECTED BUT SILENT: ${selectedIds.length} feature(s) selected (${selectedIds.join(', ')}) `
           + `yet zero casts were logged. The live build almost certainly cannot compute one of them — `
           + `check that loadLatestFundamentals supplies its input.`);
       } else {
-        console.log(`cross-sectional lane: ${xs.written} cast(s) logged${xs.written ? '' : ' (no fitted coefficients yet, or universe too small to rank)'}`);
+        console.log(`cross-sectional lane: ${xs.offered} cast(s) offered${xs.offered ? ' (duplicates for a target date already cast are skipped)' : ' — no fitted coefficients yet, or universe too small to rank'}`);
       }
     } catch (e) {
       console.error('cross-sectional forecast logging failed (shadow lane only, nothing published depends on it):', e.message || e);

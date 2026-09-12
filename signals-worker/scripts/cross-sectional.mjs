@@ -692,7 +692,14 @@ export async function writeXsForecasts(env, forecasts) {
     });
   }
   for (const group of chunk(statements, 25)) await d1Batch(env, group);
-  return { written: statements.length };
+  // `offered`, not `written`: the ON CONFLICT above means a cast for a target
+  // date this symbol already has is silently skipped, so the statement count is
+  // an upper bound on rows inserted and is usually far above it. Every build
+  // after the day's first one legitimately inserts nothing — one forecast per
+  // symbol per horizon per target date is the independence contract, not a
+  // failure — and calling that number "written" made a normal rebuild read as
+  // if it had logged 18 fresh casts when it had logged none.
+  return { offered: statements.length };
 }
 
 // ---------------------------------------------------------------------------
