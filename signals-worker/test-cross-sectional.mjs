@@ -19,7 +19,9 @@ import {
 import {
   winsorise, spansExpectedDays, groupBars, archiveMetrics, buildWeeklyCrossSections,
   fitCoefficients, ols, bonferroniZ, normalInvCdf, xsDecileIsPublishable,
-  XS_WARMUP_BARS, XS_PUBLICATION_MIN_SAMPLES, XS_PUBLICATION_MIN_T, XS_WINSOR_PCT
+  XS_WARMUP_BARS, XS_PUBLICATION_MIN_SAMPLES, XS_PUBLICATION_MIN_T, XS_WINSOR_PCT,
+  neweyWestSE, anchorsForStride, minPeriodsForStride,
+  XS_ESTIMATION_DAYS, XS_ESTIMATION_WEEKS, XS_MIN_ESTIMATION_WEEKS
 } from './scripts/cross-sectional.mjs';
 
 let passed = 0;
@@ -326,6 +328,86 @@ test('a top decile that did not beat the universe cannot be published as a buy',
 test('a bottom decile publishes only when it genuinely underperformed', () => {
   assert.equal(xsDecileIsPublishable({ 'crypto|7|0': { n: 5000, tStat: -3 } }, 'crypto', 7, 0), true);
   assert.equal(xsDecileIsPublishable({ 'crypto|7|0': { n: 5000, tStat: 3 } }, 'crypto', 7, 0), false);
+});
+
+
+// --- Newey-West errors and stride scaling -----------------------------------
+// Added with the change from weekly-only sampling to stride = horizon. Weekly
+// sampling of a 1-day horizon discarded six of every seven non-overlapping
+// cross-sections; these pin the correction that makes using all of them sound.
+const seriesMean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+const plainSE = (a) => Math.sqrt(a.reduce((s, v) => s + (v - seriesMean(a)) ** 2, 0) / (a.length - 1) / a.length);
+
+test('Newey-West widens the standard error on a POSITIVELY autocorrelated series', () => {
+  // A real AR(1) with independent innovations, from the file's seeded PRNG.
+  // An earlier version of this test drove the recursion with sin(i * 7.13),
+  // which oscillates and therefore produces NEGATIVE lag-1 autocorrelation —
+  // for which a SMALLER Newey-West error is the correct answer, not a bug.
+  // Positive persistence is the case that matters here: clustered factor
+  // returns are what make the naive sd/sqrt(n) overstate a t-stat.
+  const rand = mulberry32(12345);
+  let x = 0;
+  const ar = Array.from({ length: 600 }, () => { x = 0.9 * x + (rand() - 0.5); return x; });
+  const nw = neweyWestSE(ar), plain = plainSE(ar);
+  if (!(nw > plain)) throw new Error(`NW ${nw} should exceed plain ${plain}`);
+});
+
+test('Newey-West SHRINKS the error on a negatively autocorrelated series', () => {
+  // The mirror case, pinned so the kernel is not silently one-sided.
+  const alt = Array.from({ length: 400 }, (_, i) => (i % 2 === 0 ? 1 : -1) + i * 1e-9);
+  const nw = neweyWestSE(alt), plain = plainSE(alt);
+  if (!(nw < plain)) throw new Error(`NW ${nw} should be below plain ${plain}`);
+});
+
+test('Newey-West abstains on a series too short to estimate', () => {
+  if (neweyWestSE([1]) !== null) throw new Error('expected null');
+});
+
+test('Newey-West never returns NaN on a constant series', () => {
+  const v = neweyWestSE([2, 2, 2, 2, 2]);
+  if (!(v === null || Number.isFinite(v))) throw new Error(`got ${v}`);
+});
+
+test('the 7-day stride still spans exactly the historical estimation window', () => {
+  if (anchorsForStride(7) !== XS_ESTIMATION_WEEKS) {
+    throw new Error(`${anchorsForStride(7)} anchors, expected ${XS_ESTIMATION_WEEKS}`);
+  }
+  if (minPeriodsForStride(7) !== XS_MIN_ESTIMATION_WEEKS) {
+    throw new Error(`${minPeriodsForStride(7)} minimum, expected ${XS_MIN_ESTIMATION_WEEKS}`);
+  }
+});
+
+test('a 1-day stride spans the same CALENDAR window, not the same anchor count', () => {
+  if (anchorsForStride(1) !== XS_ESTIMATION_DAYS) {
+    throw new Error(`${anchorsForStride(1)} anchors, expected ${XS_ESTIMATION_DAYS}`);
+  }
+  if (anchorsForStride(1) !== anchorsForStride(7) * 7) throw new Error('stride scaling is not proportional');
+});
+
+test('archiveMetrics reads the fundamentals panel by date, and abstains without one', () => {
+  const bars = syntheticBars(XS_WARMUP_BARS + 10, (i) => 100 + i);
+  const i = bars.length - 1;
+  const bare = archiveMetrics('T', bars, i);
+  if (bare.oiPxDivergence !== undefined) throw new Error('should carry no non-price fields without extras');
+
+  const extras = {
+    deriv: new Map([['T', new Map([[bars[i].date, { oi_px_divergence: 12.5, oi_chg_1d: 3 }]])]]),
+    supply: new Map([['T', new Map([[bars[i].date, { supply_overhang: 40, float_ratio: 0.7 }]])]]),
+    liquidity: new Map([['T', new Map([[bars[i].date, { book_imbalance_1pct: 0.25 }]])]])
+  };
+  const rich = archiveMetrics('T', bars, i, extras);
+  if (rich.oiPxDivergence !== 12.5) throw new Error(`oiPxDivergence ${rich.oiPxDivergence}`);
+  if (rich.supplyOverhang !== 40) throw new Error(`supplyOverhang ${rich.supplyOverhang}`);
+  if (rich.bookImbalance1pct !== 0.25) throw new Error(`bookImbalance1pct ${rich.bookImbalance1pct}`);
+  if (rich.rsi !== bare.rsi) throw new Error('price features must be unchanged by extras');
+});
+
+test('a date with no fundamentals row yields no non-price fields rather than stale ones', () => {
+  const bars = syntheticBars(XS_WARMUP_BARS + 10, (i) => 100 + i);
+  const i = bars.length - 1;
+  const extras = { deriv: new Map([['T', new Map([['1999-01-01', { oi_chg_1d: 99 }]])]]) };
+  const m = archiveMetrics('T', bars, i, extras);
+  if (m.oiChg1d !== undefined) throw new Error('read a value from the wrong date');
 });
 
 console.log(`\n${passed} assertions passed${process.exitCode ? ' (with failures above)' : ''}\n`);

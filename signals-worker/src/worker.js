@@ -1105,7 +1105,49 @@ export const XS_FEATURES = [
   // liquidity proxies dominate whatever else is in the model, so they are
   // measured here rather than assumed away.
   { id: 'log_mcap',    get: (m) => (m.mcap > 0 ? Math.log(m.mcap) : null) },
-  { id: 'turnover',    get: (m) => (m.mcap > 0 && m.volume > 0 ? m.volume / m.mcap : null) }
+  { id: 'turnover',    get: (m) => (m.mcap > 0 && m.volume > 0 ? m.volume / m.mcap : null) },
+
+  // ---------------------------------------------------------------------
+  // NON-PRICE FAMILIES (migrations 0033, 0035, 0036)
+  //
+  // These read fields that scripts/cross-sectional.mjs now supplies to
+  // archiveMetrics() from derivatives_daily, asset_supply_snapshot_daily and
+  // asset_liquidity_daily. Unlike the five dead features above, they are
+  // genuinely computable by the fit, so they DO enter the Bonferroni count —
+  // and that is the deliberate cost of searching them: adding ~15 features
+  // raises the family-wise bar for every feature including the price ones.
+  // Paying that is the honest price of looking; the alternative is a wider
+  // search pretending to be a narrower one.
+  //
+  // Nothing here is trusted for being economically sensible. Each is judged by
+  // the same Fama-MacBeth t-stat and sign-consistency bar as momentum.
+  // ---------------------------------------------------------------------
+
+  // Derivatives. oi_px_divergence is leverage building faster than price has
+  // moved — the strongest single feature in docs/DERIVATIVES_EVIDENCE.md, and
+  // the formal version of "open interest kept rising while price had not".
+  { id: 'oi_chg_1d',        get: (m) => m.oiChg1d },
+  { id: 'oi_chg_3d',        get: (m) => m.oiChg3d },
+  { id: 'oi_px_divergence', get: (m) => m.oiPxDivergence },
+  { id: 'oi_level_pct_roll', get: (m) => m.oiLevelPctRoll },
+  { id: 'toptrader_ls',     get: (m) => m.topTraderLs },
+  { id: 'all_account_ls',   get: (m) => m.allAccountLs },
+
+  // Supply. The sign and the total/circulating gap together separate three
+  // different events a one-directional "dilution" number conflates: unlocks
+  // (float up), burns (total down), and lockups (float down, total flat).
+  { id: 'supply_change_30d', get: (m) => m.supplyChange30d },
+  { id: 'burn_rate_30d',     get: (m) => m.burnRate30d },
+  { id: 'lockup_rate_30d',   get: (m) => m.lockupRate30d },
+  { id: 'float_ratio',       get: (m) => m.floatRatio },
+  { id: 'supply_overhang',   get: (m) => m.supplyOverhang },
+
+  // Order-book liquidity. book_imbalance is resting limit interest, which no
+  // price, volume or open-interest series in this engine expresses.
+  { id: 'book_imbalance_1pct', get: (m) => m.bookImbalance1pct },
+  { id: 'log_depth_1pct',      get: (m) => m.logDepth1pct },
+  { id: 'depth_change_7d',     get: (m) => m.depthChange7d },
+  { id: 'depth_to_oi',         get: (m) => m.depthToOi }
 ];
 
 // A cross-section needs enough members for a percentile to carry information.

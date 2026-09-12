@@ -49,4 +49,5 @@ INSERT OR IGNORE INTO d1_migrations (name) VALUES
   ('0032_policy_history_research.sql'),
   ('0033_derivatives_daily.sql'),
   ('0034_asset_bar_quarantine.sql'),
-  ('0035_asset_supply_daily.sql');
+  ('0035_asset_supply_daily.sql'),
+  ('0036_fundamentals_lanes.sql');

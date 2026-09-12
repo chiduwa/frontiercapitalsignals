@@ -44,6 +44,9 @@
 import { d1, d1Batch, chunk } from './d1-client.mjs';
 import { loadBarQuarantine } from './bar-quarantine.mjs';
 import {
+  buildDerivLookup, buildSupplyLookup, buildLiquidityLookup, buildContextSeries
+} from './fundamentals-panel.mjs';
+import {
   XS_FEATURES, crossSectionalRanks, XS_MIN_UNIVERSE,
   rsi, macd, bollinger, stochastic, obvSlope, sma, slopePct, rangePos,
   realizedVolPct
@@ -72,6 +75,19 @@ export const XS_METHOD_VERSION = 'fcs-cross-sectional-v1';
 export const XS_ESTIMATION_WEEKS = 156;
 // Below this the window is too thin for a t-stat and the whole class abstains.
 export const XS_MIN_ESTIMATION_WEEKS = 78;
+
+// The same two windows expressed in CALENDAR DAYS, which is what they always
+// meant. The lane now samples at stride = horizon (see
+// buildWeeklyCrossSections), so a fixed anchor COUNT would silently change the
+// amount of history used when the stride changed: 156 anchors is three years
+// at a 7-day stride but only five months at a 1-day stride. Anchors are
+// therefore derived as lookbackDays / stride, which holds the estimation
+// window fixed at three years for every horizon and leaves the 7-day fit
+// numerically identical to before (156 x 7 = 1092).
+export const XS_ESTIMATION_DAYS = XS_ESTIMATION_WEEKS * 7;
+export const XS_MIN_ESTIMATION_DAYS = XS_MIN_ESTIMATION_WEEKS * 7;
+export const anchorsForStride = (stride) => Math.max(1, Math.floor(XS_ESTIMATION_DAYS / stride));
+export const minPeriodsForStride = (stride) => Math.max(1, Math.floor(XS_MIN_ESTIMATION_DAYS / stride));
 // Bars of history each weekly observation needs before its features are
 // computable at all (sma200 and the 252-bar range position are the binding
 // constraints).
@@ -138,7 +154,16 @@ export function normalInvCdf(p) {
 // left undefined. Their features then evaluate to null, never get a fitted
 // coefficient, and are never selected — which is the correct outcome, not a
 // silent degradation.
-export function archiveMetrics(symbol, bars, i) {
+// `extras` is the fundamentals panel (scripts/fundamentals-panel.mjs): per
+// symbol, a Map from date to non-price features. It is looked up by the bar's
+// own DATE, so a value can never be read from a day the fit has not reached —
+// the same no-lookahead guarantee the price windows get from slicing at i.
+//
+// Every field it contributes is optional. A symbol or date with no
+// derivatives/supply/liquidity row yields undefined, whose feature then
+// evaluates to null and is simply absent from that cross-section — the
+// abstain-not-guess behaviour used everywhere else here.
+export function archiveMetrics(symbol, bars, i, extras = null) {
   if (i < XS_WARMUP_BARS - 1 || i >= bars.length) return null;
   const window = bars.slice(0, i + 1);
   const closes = window.map((b) => b.close);
@@ -170,9 +195,42 @@ export function archiveMetrics(symbol, bars, i) {
     macdHist: md && md.hist,
     bb: bollinger(closes),
     stoch: stochastic(closes),
-    obv: haveVolume ? obvSlope(closes, volumes, 15) : null
-    // mcap / volume / fundingPercentile / oiPercentile intentionally absent.
+    obv: haveVolume ? obvSlope(closes, volumes, 15) : null,
+    ...nonPriceMetrics(symbol, bars[i].date, extras)
   };
+}
+
+// Reads the fundamentals panel for one (symbol, date) and flattens it into the
+// metric field names XS_FEATURES' getters expect. Returns an empty object when
+// nothing is available, so the spread above is a no-op rather than a crash.
+function nonPriceMetrics(symbol, date, extras) {
+  if (!extras) return {};
+  const d = extras.deriv?.get(symbol)?.get(date);
+  const sup = extras.supply?.get(symbol)?.get(date);
+  const liq = extras.liquidity?.get(symbol)?.get(date);
+  const out = {};
+  if (d) {
+    out.oiChg1d = d.oi_chg_1d;
+    out.oiChg3d = d.oi_chg_3d;
+    out.oiPxDivergence = d.oi_px_divergence;
+    out.oiLevelPctRoll = d.oi_level_pct;
+    out.topTraderLs = d.toptrader_position_ls;
+    out.allAccountLs = d.all_account_ls;
+  }
+  if (sup) {
+    out.supplyChange30d = sup.supply_change_30d;
+    out.burnRate30d = sup.burn_rate_30d;
+    out.lockupRate30d = sup.lockup_rate_30d;
+    out.floatRatio = sup.float_ratio;
+    out.supplyOverhang = sup.supply_overhang;
+  }
+  if (liq) {
+    out.bookImbalance1pct = liq.book_imbalance_1pct;
+    out.logDepth1pct = liq.log_depth_1pct;
+    out.depthChange7d = liq.depth_change_7d;
+    out.depthToOi = liq.depth_to_oi;
+  }
+  return out;
 }
 
 // True when `to` is `days` calendar days after `from`, within a tolerance that
@@ -229,8 +287,26 @@ export function groupBars(rows, quarantine = null) {
 // not an optimisation here: overlapping weekly windows are the exact defect
 // that inflated the v6 ledger's sample sizes, and repeating it in a new lane
 // would reproduce the same false confidence with different arithmetic.
-export function buildWeeklyCrossSections(barsBySymbol, horizonDays, maxWeeks = XS_ESTIMATION_WEEKS) {
-  const stride = horizonDays === 1 ? 7 : horizonDays; // 1d forecasts still sampled weekly, for independence
+export function buildWeeklyCrossSections(barsBySymbol, horizonDays, maxWeeks = null, extras = null) {
+  // Sampling stride equals the horizon, so forward windows never overlap.
+  //
+  // This used to force stride 7 for the 1-day horizon "for independence". That
+  // was over-conservative to the point of being the binding constraint on the
+  // whole lane: a 1-day forward return measured today and one measured
+  // tomorrow do not overlap AT ALL, so weekly sampling discarded six of every
+  // seven usable cross-sections for no statistical gain. The cost was not
+  // theoretical — oi_px_divergence reached t = 3.00 against a 3.04 threshold on
+  // 155 weekly sections, while the same feature on the same data at daily
+  // cadence measures t = 8.6 (docs/DERIVATIVES_EVIDENCE.md). A real effect was
+  // being rejected by a sampling choice, not by the evidence.
+  //
+  // What weekly sampling was really guarding against is not overlap but SERIAL
+  // CORRELATION in the fitted beta series: factor returns cluster, so
+  // consecutive daily betas are not independent draws even when the windows are
+  // disjoint. Throwing away data is the wrong remedy for that. The right one is
+  // to keep every observation and widen the standard error to account for the
+  // dependence, which is what neweyWestSE below does.
+  const stride = horizonDays;
   const sections = new Map(); // anchorDate -> [{ symbol, metrics, forward }]
   if (!barsBySymbol || !barsBySymbol.size) return [];
 
@@ -251,8 +327,9 @@ export function buildWeeklyCrossSections(barsBySymbol, horizonDays, maxWeeks = X
   if (!maxDate) return [];
 
   const lastAnchorMs = Date.parse(`${maxDate}T00:00:00Z`) - horizonDays * 86400000;
+  const anchorCount = maxWeeks == null ? anchorsForStride(stride) : maxWeeks;
   const anchors = [];
-  for (let k = 0; k < maxWeeks; k++) {
+  for (let k = 0; k < anchorCount; k++) {
     anchors.push(new Date(lastAnchorMs - k * stride * 86400000).toISOString().slice(0, 10));
   }
 
@@ -293,7 +370,7 @@ export function buildWeeklyCrossSections(barsBySymbol, horizonDays, maxWeeks = X
       }
       if (!spansExpectedDays(bars[i].date, bars[j].date, horizonDays)) continue;
 
-      const m = archiveMetrics(symbol, bars, i);
+      const m = archiveMetrics(symbol, bars, i, extras);
       if (!m) continue;
       const entry = bars[i].close, exit = bars[j].close;
       if (!(entry > 0) || !(exit > 0)) continue;
@@ -355,6 +432,42 @@ export function ols(x, y) {
 // taken across weeks, not across assets, which is the only version that is
 // honest about cross-sectional correlation: 150 coins moving together in one
 // week is one observation of the market, not 150 independent ones.
+// Newey-West (Bartlett-kernel) standard error for the mean of a serially
+// correlated series.
+//
+// Plain Fama-MacBeth divides the beta series' standard deviation by sqrt(n),
+// which assumes each period's beta is an independent draw. Factor returns
+// cluster — a momentum crash is several consecutive bad weeks, not one — so
+// that understates the true standard error and overstates every t-stat. This
+// is the standard correction, and it is what makes daily sampling safe:
+// keeping all the data and widening the error is strictly better than
+// discarding six sevenths of it and pretending the rest is independent.
+//
+// Lag truncation follows the usual Newey-West rule of thumb,
+// L = floor(4 * (n/100)^(2/9)), which grows slowly with sample size.
+export function neweyWestSE(values, lags = null) {
+  const n = values.length;
+  if (n < 2) return null;
+  const mean = values.reduce((a, b) => a + b, 0) / n;
+  const dev = values.map((v) => v - mean);
+  const L = lags == null ? Math.max(1, Math.floor(4 * Math.pow(n / 100, 2 / 9))) : lags;
+  // gamma_0, the plain variance.
+  let variance = dev.reduce((s, d) => s + d * d, 0) / n;
+  for (let l = 1; l <= Math.min(L, n - 1); l++) {
+    let cov = 0;
+    for (let i = l; i < n; i++) cov += dev[i] * dev[i - l];
+    cov /= n;
+    variance += 2 * (1 - l / (L + 1)) * cov;
+  }
+  // A negative kernel estimate is possible in small samples; fall back to the
+  // uncorrected variance rather than returning NaN from a sqrt.
+  if (!(variance > 0)) {
+    const plain = dev.reduce((s, d) => s + d * d, 0) / Math.max(1, n - 1);
+    return plain > 0 ? Math.sqrt(plain / n) : null;
+  }
+  return Math.sqrt(variance / n);
+}
+
 export function fitCoefficients(sections, { minWeeks = XS_MIN_ESTIMATION_WEEKS, familyAlpha = XS_FAMILY_ALPHA } = {}) {
   if (!Array.isArray(sections) || sections.length < minWeeks) {
     return { ok: false, reason: `insufficient cross-sections: ${sections ? sections.length : 0} < ${minWeeks}`, coefficients: {} };
@@ -410,8 +523,9 @@ export function fitCoefficients(sections, { minWeeks = XS_MIN_ESTIMATION_WEEKS, 
     }
     const meanBeta = betas.reduce((a, b) => a + b, 0) / weeks;
     const meanAlpha = alphas.reduce((a, b) => a + b, 0) / weeks;
-    const variance = betas.reduce((acc, b) => acc + (b - meanBeta) ** 2, 0) / (weeks - 1);
-    const se = Math.sqrt(variance / weeks);
+    // Serial-correlation-robust. See neweyWestSE — this is what lets the lane
+    // use every non-overlapping cross-section instead of one in seven.
+    const se = neweyWestSE(betas);
     const tStat = se > 0 ? meanBeta / se : 0;
     const agreeing = betas.filter((b) => (b > 0) === (meanBeta > 0)).length;
     const signConsistency = agreeing / weeks;
@@ -436,7 +550,18 @@ export function fitCoefficients(sections, { minWeeks = XS_MIN_ESTIMATION_WEEKS, 
   // been evaluated when they had never once been computed. Surfaced so a
   // permanently-dead feature shows up in the refit log instead of hiding.
   const untested = XS_FEATURES.map((f) => f.id).filter((id) => perFeature[id].betas.length === 0);
-  return { ok: selected.length > 0, reason: selected.length ? null : 'no feature cleared the family-wise threshold', coefficients, sections: sections.length, zThreshold, selected, untested };
+  // A third state that used to be invisible: features with SOME weekly betas
+  // but fewer than minWeeks. They are excluded from `tested` (correctly — the
+  // correction should count only what was really searched) yet they are not
+  // `untested` either, so before this they vanished from every report and
+  // looked exactly like a feature that had been evaluated and rejected.
+  // The non-price families land here while their archives are still filling,
+  // and telling "not enough history yet" apart from "measured, no edge" is the
+  // difference between waiting and giving up.
+  const underpowered = XS_FEATURES.map((f) => f.id)
+    .filter((id) => perFeature[id].betas.length > 0 && perFeature[id].betas.length < minWeeks)
+    .map((id) => `${id}(${perFeature[id].betas.length}/${minWeeks}w)`);
+  return { ok: selected.length > 0, reason: selected.length ? null : 'no feature cleared the family-wise threshold', coefficients, sections: sections.length, zThreshold, selected, untested, underpowered };
 }
 
 // ---------------------------------------------------------------------------
@@ -703,20 +828,68 @@ export async function loadDecileEvidence(env) {
 // Entry point: refit both classes, both horizons.
 // ---------------------------------------------------------------------------
 
+// Loads the non-price panel for one asset class. Crypto only for now: every
+// source behind it (perp open interest, book depth, token supply) is a crypto
+// concept, and the equity class abstains rather than being handed nulls that
+// would silently narrow its cross-sections.
+//
+// Failures here are NON-FATAL by design. A missing or empty fundamentals table
+// must degrade the fit to price-only, not take down the refit that keeps the
+// live lane current.
+export async function loadFundamentalsPanel(env, assetClass, barsBySymbol) {
+  if (assetClass !== 'crypto') return null;
+  try {
+    const [deriv, supply, liquidity, chain, network] = await Promise.all([
+      d1(env, `SELECT symbol, date, oi_usd_close, oi_usd_mean, oi_usd_high, oi_usd_low,
+                 toptrader_account_ls, toptrader_position_ls, all_account_ls, taker_buy_sell_ratio
+               FROM derivatives_daily ORDER BY symbol, date`),
+      d1(env, `SELECT symbol, date, circulating_supply, total_supply, max_supply
+               FROM asset_supply_snapshot_daily ORDER BY symbol, date`),
+      d1(env, `SELECT symbol, date, depth_1pct_usd, book_imbalance_1pct, book_imbalance_5pct
+               FROM asset_liquidity_daily ORDER BY symbol, date`),
+      d1(env, 'SELECT chain, date, metric, value FROM chain_metrics_daily'),
+      d1(env, 'SELECT network, date, hashrate, difficulty, miners_revenue_usd, transactions FROM network_cost_daily')
+    ]);
+    const priceBySymbol = new Map();
+    for (const [symbol, bars] of barsBySymbol) {
+      priceBySymbol.set(symbol, new Map(bars.map((b) => [b.date, b.close])));
+    }
+    const derivLookup = buildDerivLookup(deriv, priceBySymbol);
+    const panel = {
+      deriv: derivLookup,
+      supply: buildSupplyLookup(supply),
+      liquidity: buildLiquidityLookup(liquidity, derivLookup),
+      context: buildContextSeries(chain, network)
+    };
+    console.log(`[xs] fundamentals panel: deriv ${panel.deriv.size} symbols, supply ${panel.supply.size}, `
+      + `liquidity ${panel.liquidity.size}, context ${panel.context.size} dates`);
+    return panel;
+  } catch (e) {
+    console.log(`[xs] fundamentals panel unavailable (${String(e && e.message).slice(0, 80)}) — fitting price-only`);
+    return null;
+  }
+}
+
 export async function refitAll(env, { classes = ['crypto', 'stock'], horizons = XS_HORIZONS_DAYS } = {}) {
   const report = [];
   for (const assetClass of classes) {
     const bars = await loadArchiveBars(env, assetClass);
     if (!bars.size) { report.push({ assetClass, ok: false, reason: 'no archive bars' }); continue; }
+    const extras = await loadFundamentalsPanel(env, assetClass, bars);
     for (const horizonDays of horizons) {
-      const sections = buildWeeklyCrossSections(bars, horizonDays);
-      const fit = fitCoefficients(sections);
+      const sections = buildWeeklyCrossSections(bars, horizonDays, null, extras);
+      // The minimum scales with the stride for the same reason the anchor count
+      // does: 78 is three quarters of a year at a weekly stride and under three
+      // months at a daily one.
+      const fit = fitCoefficients(sections, { minWeeks: minPeriodsForStride(horizonDays) });
       const fitThrough = sections.length ? sections[sections.length - 1].date : new Date().toISOString().slice(0, 10);
       if (sections.length) await persistCoefficients(env, assetClass, horizonDays, fit, fitThrough);
       report.push({
         assetClass, horizonDays, ok: fit.ok, reason: fit.reason,
         sections: sections.length, zThreshold: fit.zThreshold,
         selected: fit.selected || [],
+        untested: fit.untested || [],
+        underpowered: fit.underpowered || [],
         fitThrough
       });
     }
@@ -738,6 +911,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     // cannot keep passing for a tested-and-rejected one.
     if (r.untested && r.untested.length) {
       console.log(`[xs] ${r.assetClass} ${r.horizonDays ?? '-'}d: NOT COMPUTABLE from the archive fit, never tested: [${r.untested.join(', ')}]`);
+    }
+    if (r.underpowered && r.underpowered.length) {
+      console.log(`[xs] ${r.assetClass} ${r.horizonDays ?? '-'}d: too little history to test yet (archive still filling): [${r.underpowered.join(', ')}]`);
     }
   }
   const scored = await scoreMaturedForecasts(env);

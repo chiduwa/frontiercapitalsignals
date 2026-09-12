@@ -25,7 +25,7 @@
 // Read-only. Writes nothing to the live model; prints a report.
 import { d1 } from './d1-client.mjs';
 import { loadBarQuarantine, cleanBars } from './bar-quarantine.mjs';
-import { bonferroniZ, winsorise, ols, XS_FAMILY_ALPHA, XS_MIN_SIGN_CONSISTENCY, XS_PUBLICATION_MIN_T } from './cross-sectional.mjs';
+import { bonferroniZ, winsorise, ols, neweyWestSE, XS_FAMILY_ALPHA, XS_MIN_SIGN_CONSISTENCY, XS_PUBLICATION_MIN_T } from './cross-sectional.mjs';
 import { crossSectionalRanks } from '../worker.js';
 import {
   assetDerivFeatures, marketContextSeries, fixedMembershipOiChange,
@@ -213,8 +213,13 @@ function famaMacBeth(byDate, priceBySymbol, featureId, days, { filter = null } =
   if (betas.length < MIN_PERIODS) return { featureId, days, periods: betas.length, insufficient: true };
   const n = betas.length;
   const mean = betas.reduce((a, b) => a + b, 0) / n;
-  const variance = betas.reduce((s, b) => s + (b - mean) ** 2, 0) / (n - 1);
-  const se = Math.sqrt(variance / n);
+  // Serial-correlation-robust, matching the production lane. The plain
+  // sd/sqrt(n) this used to compute assumes each period's beta is an
+  // independent draw, which factor returns are not — they cluster. That
+  // overstated every t-stat here: oi_px_divergence at h=1 read 8.63 under the
+  // naive error and reads 3.79 under this one on the same data. The smaller
+  // number is the honest one, and it is the number the XS gate acts on.
+  const se = neweyWestSE(betas);
   const t = se > 0 ? mean / se : 0;
   const agree = betas.filter((b) => (b > 0) === (mean > 0)).length / n;
   return { featureId, days, periods: n, beta: mean, tStat: t, signConsistency: agree,
@@ -252,7 +257,7 @@ function leadLag(byDate, priceBySymbol, featureId, maxLag = 5) {
     }
     if (betas.length < MIN_PERIODS) { out.push({ lag, insufficient: true, periods: betas.length }); continue; }
     const n = betas.length, mean = betas.reduce((a, b) => a + b, 0) / n;
-    const se = Math.sqrt(betas.reduce((s, b) => s + (b - mean) ** 2, 0) / (n - 1) / n);
+    const se = neweyWestSE(betas);
     out.push({ lag, beta: mean, tStat: se > 0 ? mean / se : 0, periods: n });
   }
   return out;
@@ -301,7 +306,7 @@ function famaMacBethControlled(byDate, priceBySymbol, featureId, controlId, days
   if (betas.length < MIN_PERIODS) return { featureId, controlId, days, periods: betas.length, insufficient: true };
   const stat = (arr) => {
     const n = arr.length, m = arr.reduce((x, y2) => x + y2, 0) / n;
-    const se = Math.sqrt(arr.reduce((s, v) => s + (v - m) ** 2, 0) / (n - 1) / n);
+    const se = neweyWestSE(arr);
     return { mean: m, t: se > 0 ? m / se : 0, signConsistency: arr.filter((v) => (v > 0) === (m > 0)).length / n };
   };
   const f = stat(betas), c = stat(controlBetas);
