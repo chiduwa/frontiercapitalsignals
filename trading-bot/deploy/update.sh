@@ -89,6 +89,20 @@ log "guardrail tests passed on staged ${TARGET:0:7}"
 # protection is never held behind a journal sync. The updated units take these
 # same locks before Node starts, preventing mixed-version imports on all later
 # automatic updates.
+# Reclaim ownership of every runtime lock before opening it.
+#
+# /run/lock is drwxrwxrwt and this kernel runs fs.protected_regular=2, which
+# refuses an O_CREAT open of a file you do not own inside a sticky,
+# world-writable directory — and it refuses it for ROOT too. The policy-research
+# lock is handed to $RUN_USER a few lines down so its service can take it, which
+# meant the NEXT update could no longer open it: a works-once-then-never-again
+# failure that left the host pinned and every timer green. Reclaiming first is
+# idempotent and costs nothing when the lock is already root-owned.
+for lock in fcs-policy-research-runtime fcs-account-journal-runtime \
+            fcs-spot-runtime fcs-futures-runtime; do
+  [ -e "/run/lock/$lock.lock" ] && chown root:root "/run/lock/$lock.lock" 2>/dev/null || true
+done
+
 exec 6>/run/lock/fcs-policy-research-runtime.lock
 chown "$RUN_USER:$RUN_USER" /run/lock/fcs-policy-research-runtime.lock
 chmod 660 /run/lock/fcs-policy-research-runtime.lock
