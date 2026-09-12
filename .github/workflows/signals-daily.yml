@@ -71,6 +71,37 @@ jobs:
           BINANCE_ROW_BUDGET: ${{ vars.BINANCE_ROW_BUDGET || '120000' }}
           BINANCE_PER_SYMBOL_ROW_CAP: ${{ vars.BINANCE_PER_SYMBOL_ROW_CAP || '20000' }}
 
+      # Keeps derivatives_daily current and, with whatever budget is left,
+      # keeps deepening it. One script serves both jobs because it only ever
+      # fetches dates it does not already hold: on a caught-up archive that is
+      # ~141 requests for yesterday, and on a fresh one it walks backwards
+      # through history until the budget stops it. Nothing to switch over when
+      # the initial deep backfill finishes.
+      #
+      # The source is Binance's PUBLIC DATA PORTAL, not its trading API —
+      # fapi.binance.com is HTTP 451 from Actions and api.bybit.com is HTTP 403
+      # CloudFront country-blocked, both re-confirmed 2026-09-11. The portal is
+      # the same host family as data-api.binance.vision, already a proven
+      # dependency here.
+      #
+      # continue-on-error: this feeds a research lane that publishes nothing.
+      # A portal outage must not fail the job that keeps the live archive and
+      # sentiment current.
+      - name: Keep the derivatives archive current
+        working-directory: signals-worker
+        continue-on-error: true
+        run: node scripts/backfill-derivatives.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+          # Small daily slice. The deep backfill is run separately via
+          # signals-derivatives-backfill.yml so a multi-hour first pass never
+          # sits inside the daily job's critical path.
+          DERIV_ROW_BUDGET: ${{ vars.DERIV_ROW_BUDGET || '25000' }}
+          DERIV_TIME_BUDGET_MIN: ${{ vars.DERIV_TIME_BUDGET_MIN || '20' }}
+          DERIV_START_DATE: ${{ vars.DERIV_START_DATE || '2023-01-01' }}
+
       # Refits the cross-sectional lane's per-feature coefficients from the
       # archive that was just brought current, then scores whichever logged
       # forecasts have matured and folds them into decile evidence.

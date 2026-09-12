@@ -367,6 +367,83 @@ it is that asset and side's own history of where the move was. Promoting any of
 it into an entry rule requires the same discovery lifecycle as every other
 hypothesis here (see the quant research section above).
 
+## Derivatives: open interest and positioning (added 2026-09-11)
+
+`derivatives_daily` (migration 0033) is a deep historical archive of perpetual
+futures open interest and trader positioning, backfilled from **Binance's
+public data portal** (`data.binance.vision`) — 140 symbols, 128k rows,
+2023-01-01 onward, most majors available back to 2022 and BTC to 2020-09.
+
+The portal matters because the obvious sources are closed to this infra:
+`fapi.binance.com` returns HTTP 451 (geo-block) and `api.bybit.com` returns
+HTTP 403 (CloudFront country block), both re-confirmed 2026-09-11. The portal
+is a plain static bucket on the same host family as `data-api.binance.vision`,
+already a proven dependency for crypto daily bars, and it carries more than OI:
+top-trader long/short ratio by account and by position size, the all-account
+ratio, and taker buy/sell volume, at 5-minute resolution.
+
+* `scripts/derivatives-archive.mjs` — portal fetch, zip reader, daily rollup
+* `scripts/backfill-derivatives.mjs` — resumable, budgeted backfill. Run daily
+  by `signals-daily.yml` to stay current (it only fetches dates it lacks, so
+  the same script serves both deep backfill and daily top-up), and on demand
+  via `signals-derivatives-backfill.yml` for a fast first pass. Scope
+  simultaneous runs to disjoint `DERIV_SYMBOLS` lists to parallelise.
+* `scripts/derivatives-features.mjs` — feature construction, two families
+  (`flow`, `positioning`) plus market-context aggregates
+* `scripts/derivatives-research.mjs` — read-only evidence harness
+* `test-derivatives.mjs` — 39 assertions
+
+**Findings are in `docs/DERIVATIVES_EVIDENCE.md`. The short version:**
+
+Open interest is **coincident with price, not leading**. Measured across ~1,348
+daily cross-sections, the same-day effect (t = 55.1) is about **11×** the
+one-day-forward effect (t = 7.35), and by two days forward it is
+indistinguishable from zero. There is no window in which OI has moved and price
+has not; "predict before it happens" from open interest alone is not supported
+by this archive.
+
+What does survive a short-term price-reversal control, at **1–3 day horizons
+only**: `oi_px_divergence` (OI change minus price change over 7d — leverage
+building faster than price has moved) at t = 9.39 / 4.47, and `oi_chg_1d` at
+t = 8.02 / 4.17. The effect is strongest when alt-vs-BTC OI leverage is
+**below** its median (t = 5.00, sign consistency 63%).
+
+**Net of costs** (long-short quintile, turnover-charged at 6.5bp/side):
+`oi_px_divergence` at 1d nets 138%/yr with a **33.5bp per-side breakeven** and
+turnover of only 0.70 — it is both the strongest and the *cheapest* feature,
+because it is built from 7-day changes and so its ranking is persistent even
+when rebalanced daily. Turnover tracks the signal's speed, not the rebalance
+frequency. Read the breakeven, not the Sharpe: 3.84 is an in-sample,
+frictionless-fill upper bound, and short-leg perp funding is not modelled.
+
+The cost model also surfaced **corruption in `asset_daily_bars`** — 37
+single-step moves above 300%, worst TIA printing 0.0105 → 7149.42 in one day.
+`winsorise()` was silently absorbing these in every regression, but a portfolio
+holds them at full weight. `forwardReturn` now rejects returns beyond ±1000%
+(494 of 3.75M, 0.013%) and reports the count. **The underlying rows are still
+in `asset_daily_bars` for every other consumer** and want a separate quarantine
+pass in the spirit of migration 0012.
+
+Two design notes that matter more than the numbers:
+
+* The old `openinterest` technique ranks OI **level** against an expanding
+  history. That saturates: ZEC sat at exactly 1.00 for the fourteen straight
+  days spanning its Aug–Sep 2026 run, i.e. maximally uninformative exactly when
+  the thing it measures was most extreme. The replacement uses a rolling
+  252-day window and measures **change**, not level. OI level percentile
+  carries nothing at any horizon tested (best |t| = 2.01).
+* `XS_FEATURES` declared `oi_pct`, `funding_pct`, `vol_ratio`, `log_mcap` and
+  `turnover`, but the cross-sectional fit builds metrics from
+  `asset_daily_bars`, which has none of those inputs. All five produced **zero
+  weekly betas across their entire lifetime** and silently dropped out — the
+  list implied positioning and size had been tested when neither ever had.
+  `fitCoefficients` now returns `untested` and the refit logs it every run.
+
+Nothing in this lane is wired to published signals, learned weights, alerts or
+orders. Promotion into `XS_FEATURES` requires the cross-sectional lane's own
+out-of-sample checkpoint, and would pay a family-size cost that has to be
+earned rather than assumed.
+
 ## Editing later
 
 Change the watchlist, universe size, and filters in the config constants near the top of `worker.js`; tune technique weights in `evaluateTechniques`; adjust the embedded dashboard in the `PAGE_HTML` template near the bottom. After any edit, copy the file to `src/worker.js` too (`cp worker.js src/worker.js`) and run `node test-worker.mjs` before redeploying.

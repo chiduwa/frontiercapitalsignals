@@ -46,4 +46,5 @@ INSERT OR IGNORE INTO d1_migrations (name) VALUES
   ('0029_crash_recovery_research.sql'),
   ('0030_futures_limit_entry_intents.sql'),
   ('0031_account_journal_position_snapshots.sql'),
-  ('0032_policy_history_research.sql');
+  ('0032_policy_history_research.sql'),
+  ('0033_derivatives_daily.sql');

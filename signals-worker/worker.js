@@ -1082,6 +1082,23 @@ export const XS_FEATURES = [
   { id: 'obv_slope',   get: (m) => m.obv },
   { id: 'dist_sma50',  get: (m) => (m.sma50 > 0 && m.price > 0 ? (m.price / m.sma50 - 1) * 100 : null) },
   { id: 'dist_sma200', get: (m) => (m.sma200 > 0 && m.price > 0 ? (m.price / m.sma200 - 1) * 100 : null) },
+  // NOT COMPUTABLE BY THE ARCHIVE FIT, and deliberately left here rather than
+  // quietly deleted. scripts/cross-sectional.mjs fits from asset_daily_bars
+  // alone, whose archiveMetrics() yields no fundingPercentile, oiPercentile,
+  // mcap or volume-vs-mcap ratio — so these four (plus vol_ratio and turnover
+  // below) produce zero weekly betas, fall out of `tested` in fitCoefficients,
+  // and never enter the Bonferroni count. They cost nothing, but for a long
+  // time they made this list LOOK like positioning and size had been tested
+  // cross-sectionally when neither had ever been evaluated even once.
+  // fitCoefficients now reports them as `untested` on every refit so the gap
+  // stays visible in the daily log.
+  //
+  // Open interest and funding are now genuinely evaluated — against real
+  // multi-year history from Binance's public data portal — in the separate
+  // derivatives lane (migration 0033, scripts/derivatives-research.mjs), which
+  // carries its own family-wise correction. A feature there that clears its
+  // own gate is what justifies wiring it in here and paying the family-size
+  // cost; nothing is promoted on the strength of being plausible.
   { id: 'funding_pct', get: (m) => m.fundingPercentile },
   { id: 'oi_pct',      get: (m) => m.oiPercentile },
   // Size and turnover. The crypto factor-zoo literature keeps finding that

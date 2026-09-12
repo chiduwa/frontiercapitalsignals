@@ -410,7 +410,15 @@ export function fitCoefficients(sections, { minWeeks = XS_MIN_ESTIMATION_WEEKS, 
   }
 
   const selected = Object.keys(coefficients).filter((k) => coefficients[k].selected);
-  return { ok: selected.length > 0, reason: selected.length ? null : 'no feature cleared the family-wise threshold', coefficients, sections: sections.length, zThreshold, selected };
+  // Features that produced NO estimate at all, as opposed to one that failed
+  // the threshold. A feature the archive fit cannot compute (no mcap, no
+  // funding, no open interest in asset_daily_bars) silently yields zero betas
+  // and drops out of `tested`, which is correct for the correction but used to
+  // be invisible — it let the feature list imply that positioning and size had
+  // been evaluated when they had never once been computed. Surfaced so a
+  // permanently-dead feature shows up in the refit log instead of hiding.
+  const untested = XS_FEATURES.map((f) => f.id).filter((id) => perFeature[id].betas.length === 0);
+  return { ok: selected.length > 0, reason: selected.length ? null : 'no feature cleared the family-wise threshold', coefficients, sections: sections.length, zThreshold, selected, untested };
 }
 
 // ---------------------------------------------------------------------------
@@ -702,6 +710,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const report = await refitAll(env);
   for (const r of report) {
     console.log(`[xs] ${r.assetClass} ${r.horizonDays ?? '-'}d: ok=${r.ok} sections=${r.sections} z>=${r.zThreshold?.toFixed(2)} selected=[${(r.selected || []).join(', ')}]${r.reason ? ` reason=${r.reason}` : ''}`);
+    // Never-estimated features, printed every refit so a structurally dead one
+    // cannot keep passing for a tested-and-rejected one.
+    if (r.untested && r.untested.length) {
+      console.log(`[xs] ${r.assetClass} ${r.horizonDays ?? '-'}d: NOT COMPUTABLE from the archive fit, never tested: [${r.untested.join(', ')}]`);
+    }
   }
   const scored = await scoreMaturedForecasts(env);
   const folded = await foldDecileEvidence(env);
