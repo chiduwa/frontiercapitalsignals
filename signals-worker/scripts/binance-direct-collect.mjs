@@ -133,8 +133,17 @@ async function main() {
     const venue = `${symbol}USDT`;
     try {
       const have = existing.get(symbol);
-      // Resume from the day after what is stored; otherwise pull from listing.
-      const startTime = have?.hi ? Date.parse(`${have.hi}T00:00:00Z`) + 86400000 : null;
+      // Resume from the day after what is stored; otherwise walk forward from
+      // before any USD-M perp existed.
+      //
+      // An explicit early startTime is REQUIRED for a first fill. With no
+      // startTime Binance returns the most RECENT page, and paginating forward
+      // from the newest rows is already at the end — the first run collected
+      // only 5.5 months per symbol instead of full history, silently, because
+      // that looks identical to a young contract. Walking forward from a fixed
+      // early anchor gets everything from listing onward.
+      const FIRST_PERP_ANCHOR_MS = Date.parse('2019-09-01T00:00:00Z');
+      const startTime = have?.hi ? Date.parse(`${have.hi}T00:00:00Z`) + 86400000 : FIRST_PERP_ANCHOR_MS;
       const settlements = await fetchFundingHistory(venue, { startTime });
       if (!settlements.length) { skipped++; continue; }
       const daily = foldFundingToDaily(settlements);
