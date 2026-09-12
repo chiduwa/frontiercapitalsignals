@@ -377,6 +377,10 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
     let pendingRows = [];
     let anchorsDone = 0;
     let horizonRows = 0;
+    // Set when the budget break above has already banked and zeroed
+    // horizonRows, so the summary line reports the run instead of the counter.
+    let budgetStopped = false;
+    let bankedRows = 0;
 
     for (const anchor of anchors) {
       if (anchorsDone % RELIABILITY_FOLD_EVERY === 0) reliability.fold(anchor);
@@ -481,10 +485,18 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
         horizonRows += await flush(pendingRows, dryRun);
         pendingRows = [];
         if (totalRows + horizonRows >= budget) {
-          console.log(`[replay] ${assetClass} ${horizonDays}d: budget reached at anchor ${anchor}`);
+          console.log(`[replay] ${assetClass} ${horizonDays}d: budget reached at anchor ${anchor} (${horizonRows} rows this horizon)`);
           await saveCheckpoint(assetClass, horizonDays, anchor, anchorsDone, horizonRows, dryRun);
           totalRows += horizonRows;
+          bankedRows = horizonRows;
+          // Banked into totalRows and already checkpointed. Zeroed so the
+          // summary below cannot add it a second time — and `budgetStopped`
+          // exists because that summary previously read the zeroed counter and
+          // reported "1632 anchors, 0 rows" on a run that had just written
+          // 285,000 of them. Harmless to the data, actively misleading to
+          // anyone reading the log to see whether a run did anything.
           horizonRows = 0;
+          budgetStopped = true;
           break;
         }
       }
@@ -496,7 +508,8 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
         anchorsDone, horizonRows, dryRun);
       totalRows += horizonRows;
     }
-    console.log(`[replay] ${assetClass} ${horizonDays}d: ${anchorsDone} anchors, ${horizonRows} rows`);
+    console.log(`[replay] ${assetClass} ${horizonDays}d: ${anchorsDone} anchors, ${horizonRows + bankedRows} rows`
+      + `${budgetStopped ? ' (stopped on budget — rerun to continue from the checkpoint)' : ''}`);
   }
 
   const census = Object.entries(techniqueCensus).sort((a, b) => b[1] - a[1]);
