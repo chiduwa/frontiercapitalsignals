@@ -209,3 +209,85 @@ export const FUNDAMENTAL_FEATURE_IDS = [
   // liquidity
   'book_imbalance_1pct', 'log_depth_1pct', 'depth_change_7d', 'depth_to_oi'
 ];
+
+// The LATEST non-price feature row per symbol, for the live build.
+//
+// WHY THIS EXISTS. The cross-sectional fit runs on archiveMetrics, which reads
+// the fundamentals panel and therefore sees open interest, supply and order-book
+// depth. The live build runs on buildCryptoMetrics, which reads none of them.
+// So the fit can SELECT a feature the live path cannot compute — and when it
+// does, xsForecast finds no usable rank, returns null for every asset, and the
+// lane goes quiet without an error.
+//
+// That is not hypothetical. When oi_px_divergence became the only selected
+// feature on 2026-09-12T14:21, live forecasts stopped dead: 150 rows logged in
+// the 08:00 build, 5 at 13:00, and zero after. Nothing failed, nothing warned,
+// and the lane simply produced nothing while its coefficients looked healthy.
+//
+// Only the most recent row per symbol is needed — the live build is casting for
+// today, not reconstructing history — so this is one indexed query per table
+// rather than the full panel the archive fit loads.
+export async function loadLatestFundamentals(d1Fn, env, { maxAgeDays = 3 } = {}) {
+  const since = new Date(Date.now() - maxAgeDays * 86400000).toISOString().slice(0, 10);
+  const out = new Map();
+  const put = (symbol, fields) => {
+    const cur = out.get(symbol) || {};
+    out.set(symbol, { ...cur, ...fields });
+  };
+  try {
+    // Derivatives features need a short history per symbol (oi_px_divergence
+    // differences OI and price over 7 days), so the window is wider than one
+    // day and assetDerivFeatures is reused rather than reimplemented — the
+    // fitted coefficient belongs to ITS definition, not a second one that
+    // happens to look similar.
+    const derivSince = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const [deriv, bars] = await Promise.all([
+      d1Fn(env, `SELECT symbol, date, oi_usd_close, oi_usd_mean, oi_usd_high, oi_usd_low,
+                        toptrader_account_ls, toptrader_position_ls, all_account_ls, taker_buy_sell_ratio
+                   FROM derivatives_daily WHERE date >= ?1 ORDER BY symbol, date`, [derivSince]),
+      d1Fn(env, `SELECT symbol, date, close FROM asset_daily_bars
+                  WHERE asset_class = 'crypto' AND date >= ?1 AND close > 0 ORDER BY symbol, date`, [derivSince])
+    ]);
+    const priceBySymbol = new Map();
+    for (const r of bars) {
+      if (!priceBySymbol.has(r.symbol)) priceBySymbol.set(r.symbol, new Map());
+      priceBySymbol.get(r.symbol).set(r.date, r.close);
+    }
+    for (const [symbol, byDate] of buildDerivLookup(deriv, priceBySymbol)) {
+      const dates = [...byDate.keys()].sort();
+      const latest = dates[dates.length - 1];
+      if (!latest || latest < since) continue;
+      const f = byDate.get(latest);
+      put(symbol, {
+        oiPxDivergence: f.oi_px_divergence,
+        oiChg1d: f.oi_chg_1d,
+        oiChg3d: f.oi_chg_3d,
+        oiLevelPctRoll: f.oi_level_pct,
+        topTraderLs: f.toptrader_position_ls,
+        allAccountLs: f.all_account_ls
+      });
+    }
+  } catch (e) {
+    console.log(`[xs] latest derivatives unavailable (${String(e && e.message).slice(0, 80)})`);
+  }
+  try {
+    const liq = await d1Fn(env, `SELECT symbol, date, depth_1pct_usd, book_imbalance_1pct, book_imbalance_5pct
+                                   FROM asset_liquidity_daily WHERE date >= ?1 ORDER BY symbol, date`, [since]);
+    const derivForLiq = new Map();
+    for (const [symbol, fields] of out) derivForLiq.set(symbol, new Map([['x', { oi_usd: null }]]));
+    for (const [symbol, byDate] of buildLiquidityLookup(liq, derivForLiq)) {
+      const dates = [...byDate.keys()].sort();
+      const latest = dates[dates.length - 1];
+      if (!latest) continue;
+      const f = byDate.get(latest);
+      put(symbol, {
+        bookImbalance1pct: f.book_imbalance_1pct,
+        logDepth1pct: f.log_depth_1pct,
+        depthChange7d: f.depth_change_7d
+      });
+    }
+  } catch (e) {
+    console.log(`[xs] latest liquidity unavailable (${String(e && e.message).slice(0, 80)})`);
+  }
+  return out;
+}

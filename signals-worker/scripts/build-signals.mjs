@@ -18,6 +18,8 @@ import { upsertMarketSentiment, loadRecentBars, loadTvlSeries, loadMarketReturn,
 import { selectIntradayWatchlist } from './intraday.mjs';
 import { loadLatestMarketContext } from './market-context.mjs';
 import { loadXsCoefficients, writeXsForecasts, loadDecileEvidence, xsDecileIsPublishable } from './cross-sectional.mjs';
+import { loadLatestFundamentals } from './fundamentals-panel.mjs';
+import { d1 } from './d1-client.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES, GITHUB_EVENT_NAME, FORCE_REFRESH, NTFY_TOPIC } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID })) {
@@ -122,6 +124,7 @@ let reliability, techniquePriors, comboReliability, reliabilityByHorizon, moveSt
 // lane abstain silently rather than throwing inside the build.
 let xsCoefficients = {};
 let decileEvidence = {};
+let liveFundamentals = new Map();
 if (FCS_D1_DATABASE_ID) {
   try {
     const rel = await loadReliability(env);
@@ -198,6 +201,8 @@ if (FCS_D1_DATABASE_ID) {
       const [cls, h, d] = k.split('|');
       return xsDecileIsPublishable(decileEvidence, cls, Number(h), Number(d));
     });
+    liveFundamentals = await loadLatestFundamentals(d1, env);
+    console.log(`[xs] live fundamentals: ${liveFundamentals.size} symbols carry non-price features`);
     console.log(`[xs] decile evidence: ${Object.keys(decileEvidence).length} cells, ${publishable.length} publishable${publishable.length ? ' — ' + publishable.join(', ') : ''}`);
     const xsSummary = Object.entries(xsCoefficients).flatMap(([cls, byHorizon]) =>
       Object.entries(byHorizon).map(([h, feats]) => {
@@ -217,7 +222,7 @@ if (FCS_D1_DATABASE_ID) {
 }
 
 const started = Date.now();
-const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration, dailyRangeStats, todEdge, scoreCalibration, xsCoefficients, decileEvidence);
+const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration, dailyRangeStats, todEdge, scoreCalibration, xsCoefficients, decileEvidence, liveFundamentals);
 console.log(`built payload in ${Date.now() - started}ms — crypto ${payload.crypto.universe} assets, stocks ${payload.stocks.universe} assets`);
 console.log('health:', JSON.stringify(payload.health));
 
@@ -305,7 +310,29 @@ if (FCS_D1_DATABASE_ID) {
     // failing to record it must never cost the run its direction-model logging.
     try {
       const xs = await writeXsForecasts(env, log.xsForecasts || []);
-      console.log(`cross-sectional lane: ${xs.written} cast(s) logged${xs.written ? '' : ' (no fitted coefficients yet, or universe too small to rank)'}`);
+      // SELECTED BUT SILENT is the failure mode this line exists to name.
+      //
+      // The fit runs on archiveMetrics, which reads the fundamentals panel; the
+      // live build runs on buildCryptoMetrics, which historically read none of
+      // it. So the fit could select a feature the live path cannot compute,
+      // xsForecast would find no usable rank and return null for every asset,
+      // and the lane went quiet with healthy-looking coefficients and no error.
+      // It happened: when oi_px_divergence became the only selected feature on
+      // 2026-09-12T14:21, live casts went from 150 in one build to zero, and
+      // nothing said so for hours.
+      //
+      // Coefficients selected AND zero casts written is now always worth
+      // shouting about, because the two should never coexist.
+      const selectedIds = Object.entries(xsCoefficients).flatMap(([cls, byHorizon]) =>
+        Object.entries(byHorizon).flatMap(([h, feats]) =>
+          Object.keys(feats).filter((k) => feats[k].selected).map((k) => `${cls}/${h}d:${k}`)));
+      if (!xs.written && selectedIds.length) {
+        console.error(`[xs] SELECTED BUT SILENT: ${selectedIds.length} feature(s) selected (${selectedIds.join(', ')}) `
+          + `yet zero casts were logged. The live build almost certainly cannot compute one of them — `
+          + `check that loadLatestFundamentals supplies its input.`);
+      } else {
+        console.log(`cross-sectional lane: ${xs.written} cast(s) logged${xs.written ? '' : ' (no fitted coefficients yet, or universe too small to rank)'}`);
+      }
     } catch (e) {
       console.error('cross-sectional forecast logging failed (shadow lane only, nothing published depends on it):', e.message || e);
     }

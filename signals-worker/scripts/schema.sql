@@ -2908,3 +2908,118 @@ CREATE TABLE IF NOT EXISTS flush_event (
 );
 CREATE INDEX IF NOT EXISTS idx_flush_event_symbol ON flush_event(symbol, first_ts);
 CREATE INDEX IF NOT EXISTS idx_flush_event_unresolved ON flush_event(resolved_at) WHERE resolved_at IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- Cross-sectional expected-return lane (migration 0020, plus 0039's provenance
+-- column).
+--
+-- These four tables were created by their migration and never added here, so a
+-- database built from this snapshot came up without the entire XS lane — the
+-- one lane holding the only feature this project has ever selected on evidence
+-- (oi_px_divergence, t=3.79 Newey-West out of a 35-feature panel). The
+-- migrations applied cleanly against the live database, which is why nothing
+-- ever failed; the gap only bites a fresh rebuild. test-worker.mjs now asserts
+-- that every table any migration creates is also declared here.
+-- ---------------------------------------------------------------------------
+
+-- Every cast the lane makes, logged whether or not it may be published, then
+-- scored once its horizon elapses. `realised_return_pct` and
+-- `universe_return_pct` are NULL until then.
+CREATE TABLE IF NOT EXISTS xs_forecast_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_at TEXT NOT NULL,
+  asset_class TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  horizon_days INTEGER NOT NULL,
+  target_date TEXT NOT NULL,
+  expected_return_pct REAL NOT NULL,
+  percentile INTEGER NOT NULL,
+  decile INTEGER NOT NULL CHECK (decile BETWEEN 0 AND 9),
+  entry_price REAL NOT NULL CHECK (entry_price > 0),
+  features_used INTEGER NOT NULL,
+  universe_size INTEGER NOT NULL,
+  realised_return_pct REAL,
+  -- The equal-weighted return of the names in the SAME cross-section, which is
+  -- what "excess" is measured against. Not a fixed index: the claim being
+  -- tested is "this decile beat its own cross-section".
+  universe_return_pct REAL,
+  observed_at TEXT,
+  method_version TEXT NOT NULL,
+  aggregated INTEGER NOT NULL DEFAULT 0 CHECK (aggregated IN (0, 1)),
+  -- 'live' = cast by a scheduled build. 'replay' = cast by scripts/replay-xs.mjs
+  -- over archive sections with walk-forward coefficients. They pool (the live
+  -- lane is itself walk-forward); the column keeps them separable so the claim
+  -- that they agree stays checkable (migration 0039).
+  provenance TEXT NOT NULL DEFAULT 'live',
+  CHECK (percentile BETWEEN 0 AND 100)
+);
+-- Deliberately does NOT include method_version or provenance: one asset has one
+-- outcome per horizon per target date, whoever logged it. A replay re-run over a
+-- window that already has rows therefore collides, which is why writeRows in
+-- replay-xs.mjs uses ON CONFLICT DO NOTHING.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_xs_forecast_unique
+  ON xs_forecast_log(asset_class, symbol, horizon_days, target_date);
+CREATE INDEX IF NOT EXISTS idx_xs_forecast_pending
+  ON xs_forecast_log(aggregated, target_date) WHERE realised_return_pct IS NULL;
+CREATE INDEX IF NOT EXISTS idx_xs_forecast_log_provenance
+  ON xs_forecast_log(provenance, method_version, asset_class, horizon_days, decile);
+
+-- Current fitted coefficient per feature. `selected` is the Bonferroni-corrected
+-- family-wise decision; `weeks` is the number of periods behind the estimate and
+-- is 0 for a feature the archive cannot compute at all (see fitCoefficients'
+-- untested/underpowered reporting).
+CREATE TABLE IF NOT EXISTS xs_feature_coefficients (
+  asset_class TEXT NOT NULL,
+  horizon_days INTEGER NOT NULL,
+  feature_id TEXT NOT NULL,
+  alpha REAL NOT NULL,
+  beta REAL NOT NULL,
+  t_stat REAL NOT NULL,
+  weeks INTEGER NOT NULL,
+  sign_consistency REAL,
+  selected INTEGER NOT NULL DEFAULT 0 CHECK (selected IN (0, 1)),
+  z_threshold REAL NOT NULL,
+  features_tested INTEGER NOT NULL,
+  fit_through TEXT NOT NULL,
+  method_version TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (asset_class, horizon_days, feature_id),
+  CHECK (horizon_days > 0),
+  CHECK (weeks >= 0)
+);
+
+-- Append-only record of every refit, so a coefficient that moves can be seen
+-- moving rather than only ever read at its latest value.
+CREATE TABLE IF NOT EXISTS xs_coefficient_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  fit_at TEXT NOT NULL,
+  asset_class TEXT NOT NULL,
+  horizon_days INTEGER NOT NULL,
+  feature_id TEXT NOT NULL,
+  beta REAL NOT NULL,
+  t_stat REAL NOT NULL,
+  weeks INTEGER NOT NULL,
+  selected INTEGER NOT NULL CHECK (selected IN (0, 1)),
+  method_version TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_xs_coef_history
+  ON xs_coefficient_history(asset_class, horizon_days, feature_id, fit_at DESC);
+
+-- The publication gate's evidence. `n` counts SECTIONS, not rows: ~10 names
+-- drawn from one cross-section on one day are not 10 independent trials, and
+-- foldDecileEvidence collapses each date to a single observation before taking
+-- the statistic. xsDecileIsPublishable reads this and nothing else.
+CREATE TABLE IF NOT EXISTS xs_decile_evidence (
+  asset_class TEXT NOT NULL,
+  horizon_days INTEGER NOT NULL,
+  decile INTEGER NOT NULL CHECK (decile BETWEEN 0 AND 9),
+  n INTEGER NOT NULL,
+  mean_excess_pct REAL NOT NULL,
+  sd_excess_pct REAL,
+  t_stat REAL,
+  mean_raw_pct REAL,
+  hit_rate REAL,
+  updated_at TEXT NOT NULL,
+  method_version TEXT NOT NULL,
+  PRIMARY KEY (asset_class, horizon_days, decile)
+);

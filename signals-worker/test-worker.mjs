@@ -35,6 +35,36 @@ const migrationNames = readdirSync(join(__dirname, 'migrations'))
   .filter((name) => name.endsWith('.sql')).sort();
 const baselineNames = [...currentSchemaBaseline.matchAll(/\('([^']+\.sql)'\)/g)]
   .map((match) => match[1]).sort();
+// EVERY TABLE A MIGRATION CREATES MUST ALSO BE DECLARED IN schema.sql.
+//
+// The two files serve different masters and nothing connected them: migrations
+// run against the LIVE database and schema.sql builds a FRESH one. A table added
+// by migration and never mirrored here applies cleanly forever and only bites a
+// rebuild — which is why the entire cross-sectional lane (xs_forecast_log,
+// xs_feature_coefficients, xs_coefficient_history, xs_decile_evidence, all from
+// migration 0020) sat missing from the snapshot for weeks without a single
+// failure. That lane holds the only feature this project has ever selected on
+// evidence, so a fresh database would have come up without it.
+//
+// Deliberately one-directional: schema.sql may legitimately declare a table no
+// migration creates (an original table predating the migration series), but a
+// migration creating one the snapshot lacks is always a gap.
+{
+  // Comments stripped first: both files explain themselves at length, and the
+  // phrase "CREATE TABLE" appears in that prose. Scanning raw text reports
+  // English words as missing tables.
+  const stripSqlComments = (sql) => sql.replace(/--[^\n]*/g, '');
+  const schemaSql = stripSqlComments(readFileSync(join(__dirname, 'scripts', 'schema.sql'), 'utf8'));
+  const declared = new Set([...schemaSql.matchAll(/CREATE TABLE IF NOT EXISTS\s+([a-z_][a-z0-9_]*)/gi)].map((m) => m[1].toLowerCase()));
+  const created = new Set();
+  for (const file of migrationNames) {
+    const sql = stripSqlComments(readFileSync(join(__dirname, 'migrations', file), 'utf8'));
+    for (const m of sql.matchAll(/CREATE TABLE(?:\s+IF NOT EXISTS)?\s+([a-z_][a-z0-9_]*)/gi)) created.add(m[1].toLowerCase());
+  }
+  const undeclared = [...created].filter((t) => !declared.has(t)).sort();
+  check('every table created by a migration is also in the fresh-snapshot schema', undeclared.length === 0, `missing from schema.sql: ${undeclared.join(', ')}`);
+}
+
 check('the fresh-snapshot baseline exactly covers every current Wrangler migration',
   JSON.stringify(baselineNames) === JSON.stringify(migrationNames),
   `baseline=${baselineNames.length}, migrations=${migrationNames.length}`);
