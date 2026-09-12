@@ -93,24 +93,71 @@ function oiAcross(oiSeries, t, minutes) {
   return { pct: ((after.oiUsd / before.oiUsd) - 1) * 100, from: before.oiUsd, to: after.oiUsd };
 }
 
-// Finds every flush in one day of minute bars and describes it.
-export function findFlushes(bars, oiSeries) {
+// Realized volatility (stdev of 1-minute log returns, in %) over a slice.
+function realizedVolPctMin(slice) {
+  const r = [];
+  for (let i = 1; i < slice.length; i++) {
+    if (slice[i - 1].c > 0 && slice[i].c > 0) r.push(Math.log(slice[i].c / slice[i - 1].c));
+  }
+  if (r.length < 5) return null;
+  const m = r.reduce((a, b) => a + b, 0) / r.length;
+  return Math.sqrt(r.reduce((s, v) => s + (v - m) ** 2, 0) / (r.length - 1)) * 100;
+}
+
+// OI change over the window ENDING at t, i.e. the build-up BEFORE the event.
+function oiBefore(oiSeries, t, minutes) {
+  if (!oiSeries) return null;
+  const start = t - minutes * 60000;
+  let first = null, last = null;
+  for (const p of oiSeries) {
+    if (p.t >= start && p.t <= t) { if (first === null) first = p; last = p; }
+  }
+  if (!first || !last || !(first.oiUsd > 0) || first === last) return null;
+  return ((last.oiUsd / first.oiUsd) - 1) * 100;
+}
+
+// Finds every flush (or up-spike, when direction is 'up') in one day of minute
+// bars and describes it.
+//
+// Both directions are measured because the question is symmetric: an
+// unsustainable spike traps shorts exactly the way an unsustainable dip traps
+// longs, and a rule that only knows about dips is half a rule.
+export function findFlushes(bars, oiSeries, { direction = 'down' } = {}) {
+  const up = direction === 'up';
   const events = [];
   for (let i = FLUSH_WINDOW_MIN; i < bars.length - RECOVERY_WINDOW_MIN; i++) {
-    const ref = Math.max(...bars.slice(i - FLUSH_WINDOW_MIN, i).map((b) => b.h));
+    const pre = bars.slice(i - FLUSH_WINDOW_MIN, i);
+    const ref = up ? Math.min(...pre.map((b) => b.l)) : Math.max(...pre.map((b) => b.h));
     const window = bars.slice(i, i + FLUSH_WINDOW_MIN);
-    const trough = Math.min(...window.map((b) => b.l));
+    const trough = up ? Math.max(...window.map((b) => b.h)) : Math.min(...window.map((b) => b.l));
     if (!(ref > 0) || !(trough > 0)) continue;
     const drop = ((trough / ref) - 1) * 100;
-    if (drop > FLUSH_DROP_PCT) continue;
+    if (up ? drop < -FLUSH_DROP_PCT : drop > FLUSH_DROP_PCT) continue;
 
     const after = bars.slice(i + FLUSH_WINDOW_MIN, i + FLUSH_WINDOW_MIN + RECOVERY_WINDOW_MIN);
     if (!after.length) continue;
-    const peakAfter = Math.max(...after.map((b) => b.h));
+    const peakAfter = up ? Math.min(...after.map((b) => b.l)) : Math.max(...after.map((b) => b.h));
     const endPrice = after[after.length - 1].c;
-    // Fraction of the drop retraced. 1.0 = fully back to the pre-flush high.
+    // Fraction of the move retraced. 1.0 = fully back to the pre-event level.
     const recovered = (peakAfter - trough) / (ref - trough);
     const heldAtEnd = (endPrice - trough) / (ref - trough);
+
+    // Did this become the new direction, or was it noise? Measured well past
+    // the recovery window so a full retrace and a genuine regime change are
+    // distinguishable rather than being averaged together.
+    const fwdAt = (mins) => {
+      const j = i + FLUSH_WINDOW_MIN + mins;
+      return j < bars.length && bars[j].c > 0 && ref > 0 ? ((bars[j].c / ref) - 1) * 100 : null;
+    };
+    const fwd1h = fwdAt(60), fwd4h = fwdAt(240), fwd12h = fwdAt(720);
+
+    const preSlice = bars.slice(Math.max(0, i - BASELINE_MIN), i);
+    const preVol = realizedVolPctMin(preSlice);
+    const preBase = preSlice.reduce((s, b) => s + b.v, 0);
+    const preBuy = preSlice.reduce((s, b) => s + b.takerBuyBase, 0);
+    const preTakerBuyShare = preBase > 0 ? preBuy / preBase : null;
+    const preOiTrend = oiBefore(oiSeries, bars[i].t, BASELINE_MIN);
+    const hourUtc = new Date(bars[i].t).getUTCHours();
 
     const baseSlice = bars.slice(Math.max(0, i - BASELINE_MIN), i);
     const baseVolPerMin = baseSlice.reduce((s, b) => s + b.v, 0) / Math.max(1, baseSlice.length);
@@ -130,18 +177,42 @@ export function findFlushes(bars, oiSeries) {
 
     events.push({
       t: bars[i].t, date: isoDay(bars[i].t), time: new Date(bars[i].t).toISOString().slice(11, 16),
+      direction,
       dropPct: drop, refPrice: ref, troughPrice: trough,
       recovered, heldAtEnd,
+      fwd1h, fwd4h, fwd12h,
       volSurge, tradeSurge: baseTrades > 0 ? flushTrades / baseTrades : null,
       takerBuyShare,
-      oiChangePct: oi ? oi.pct : null
+      oiChangePct: oi ? oi.pct : null,
+      preVol, preTakerBuyShare, preOiTrend, hourUtc
     });
     i += RECOVERY_WINDOW_MIN;   // one event per episode
   }
   return events;
 }
 
-export async function scanSymbol(symbol, days, { onDay = null } = {}) {
+// Collapses overlapping detections into one episode per move.
+//
+// Scanning both directions double-counts by construction: the REBOUND out of a
+// dip is, by the up-spike definition, a genuine up move from the trough. A
+// synthetic 10% dip that recovers produced one down event AND a spurious
+// +11.1% up event, and on real data DEXE reported 277 "flushes" in 60 days —
+// obviously inflated. Those rebounds are not independent observations of
+// "unsustainable spikes"; they are the second half of the dip already counted.
+//
+// Keeping the LARGER move of any overlapping pair means a real V-shape is
+// recorded once, as whichever leg was more extreme.
+export function dedupeEpisodes(events, windowMin = RECOVERY_WINDOW_MIN) {
+  const sorted = events.slice().sort((a, b) => Math.abs(b.dropPct) - Math.abs(a.dropPct));
+  const kept = [];
+  for (const e of sorted) {
+    const clashes = kept.some((k) => Math.abs(k.t - e.t) < windowMin * 60000);
+    if (!clashes) kept.push(e);
+  }
+  return kept.sort((a, b) => a.t - b.t);
+}
+
+export async function scanSymbol(symbol, days, { onDay = null, directions = ['down', 'up'] } = {}) {
   const venue = venueSymbol(symbol);
   const events = [];
   let fetched = 0;
@@ -152,11 +223,12 @@ export async function scanSymbol(symbol, days, { onDay = null } = {}) {
     if (!bars || bars.length < 200) continue;
     fetched++;
     // Only pay for the OI file on days that actually contain a flush.
-    const rough = findFlushes(bars, null);
+    const rough = directions.flatMap((d) => findFlushes(bars, null, { direction: d }));
     if (!rough.length) { if (onDay) onDay(date, 0); continue; }
     let oi = null;
     try { oi = await fetchMinuteOi(venue, date); } catch { /* OI is optional */ }
-    for (const e of findFlushes(bars, oi)) events.push({ symbol, ...e });
+    const found = directions.flatMap((d) => findFlushes(bars, oi, { direction: d }));
+    for (const e of dedupeEpisodes(found)) events.push({ symbol, ...e });
     if (onDay) onDay(date, rough.length);
   }
   return { symbol, fetched, events };

@@ -203,6 +203,7 @@ Installed. NOT started — the env file is still empty.
                                   sudo systemctl enable --now fcs-account-journal.timer
                                   sudo systemctl enable --now fcs-trading-bot-update.timer
                                   sudo systemctl enable --now fcs-binance-collector.timer
+                                  sudo systemctl enable --now fcs-oi-sampler.timer
 
 Expect zero opens: the signals engine withholds every call during its
 cold start, so the bot records shadow entries instead. That is correct.

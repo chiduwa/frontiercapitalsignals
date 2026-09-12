@@ -1,0 +1,46 @@
+[Unit]
+Description=FrontierCapitalSignals — live open-interest sampler and flush classifier
+Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/signals-worker/docs/FLUSH_EVIDENCE.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=fcsbot
+Group=fcsbot
+WorkingDirectory=/opt/fcs/signals-worker
+EnvironmentFile=/etc/fcs-trading-bot.env
+
+# Samples /fapi/v1/openInterest, which is stamped ~8 seconds old here and is
+# the ONLY reading fast enough to classify a move that is over in five minutes
+# (the live 5m aggregates lag 6-16 minutes and the portal files land after the
+# day closes). It is a snapshot with no delta, so the history has to be kept
+# locally — that is what this writes.
+#
+# NOT under the futures runtime lock, unlike the collector. This is a read-only
+# market-data poll that must keep running THROUGH a flush; blocking it behind a
+# decision cycle would blind it at exactly the moment it exists for. The weight
+# cost is a handful of cheap requests per symbol per minute.
+ExecStart=/usr/bin/node scripts/oi-sampler.mjs
+
+# One firing samples for OI_SAMPLE_DURATION_MIN and exits; the timer restarts
+# it. Bounded above that so a wedged socket cannot run forever.
+TimeoutStartSec=600
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fcs-oi-sampler

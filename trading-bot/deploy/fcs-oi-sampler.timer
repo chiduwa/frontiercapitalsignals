@@ -1,0 +1,18 @@
+[Unit]
+Description=Keep the live open-interest sampler running continuously
+Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/signals-worker/docs/FLUSH_EVIDENCE.md
+
+[Timer]
+# Every five minutes, matching the service's own five-minute sampling window,
+# so coverage is effectively continuous. The sampler seeds itself from the
+# ticks the previous firing stored, so a move that began in the last window is
+# still visible in this one rather than each restart being blind.
+OnCalendar=*:0/5
+AccuracySec=1s
+# Never catch up. A backlog of samplers firing together would multiply the
+# request rate against a shared weight budget for data that is already stale.
+Persistent=false
+Unit=fcs-oi-sampler.service
+
+[Install]
+WantedBy=timers.target
