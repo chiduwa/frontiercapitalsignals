@@ -1,0 +1,66 @@
+name: Signals Supply Backfill
+
+# Backfills asset_supply_daily / asset_supply_snapshot (migration 0035).
+#
+# RUNS HERE RATHER THAN LOCALLY ON PURPOSE. Circulating supply is derived from
+# CoinGecko's market_chart endpoint, and CoinGecko's free tier throttles hard
+# per source IP: a local run at ~23 req/min was penalised into total failure
+# (every symbol 429, zero rows) and the penalty then persisted for far longer
+# than the run itself — a single fresh request still returned 429 well after
+# the run was killed. An Actions runner starts from a different address, and
+# this workflow is the supported way to do the one-time fill.
+#
+# Resumable: symbols that already have history are skipped, so re-running after
+# a throttle picks up where it stopped rather than starting over.
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Days of history to request per symbol (1825 = 5y)"
+        required: false
+        default: "1825"
+      pace_ms:
+        description: "Milliseconds between CoinGecko calls. Below ~9000 risks a throttle."
+        required: false
+        default: "9000"
+      symbols:
+        description: "Optional comma-separated symbol list. Blank = whole tracked perp universe."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    # 131 symbols at 9s is ~20 minutes; the ceiling allows for backoffs.
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Backfill supply history
+        working-directory: signals-worker
+        run: node scripts/supply-archive.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+          SUPPLY_DAYS: ${{ inputs.days }}
+          SUPPLY_PACE_MS: ${{ inputs.pace_ms }}
+          SUPPLY_SYMBOLS: ${{ inputs.symbols }}
+
+      - name: Evidence report
+        working-directory: signals-worker
+        continue-on-error: true
+        run: node scripts/derivatives-research.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}

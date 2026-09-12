@@ -31,6 +31,9 @@ import {
   assetDerivFeatures, marketContextSeries, fixedMembershipOiChange,
   DERIV_FEATURE_FAMILIES, DERIV_FEATURE_IDS, lookback
 } from './derivatives-features.mjs';
+import {
+  assetSupplyFeatures, SUPPLY_FEATURE_FAMILY, SUPPLY_SNAPSHOT_FEATURES
+} from './supply-features.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
@@ -55,10 +58,21 @@ async function loadAll() {
   console.log('loading asset_daily_bars...');
   const bars = await d1(env, `SELECT symbol, date, close FROM asset_daily_bars
     WHERE asset_class = 'crypto' AND date >= '2022-12-01' ORDER BY symbol, date`);
-  return { deriv, bars };
+  console.log('loading asset_supply_daily...');
+  // Supply is optional: the lane must still run before migration 0035 has been
+  // backfilled, reporting the supply family as unavailable rather than failing.
+  let supply = [], supplySnapshot = [];
+  try {
+    supply = await d1(env, `SELECT symbol, date, circulating_supply FROM asset_supply_daily
+      WHERE date >= '2022-12-01' ORDER BY symbol, date`);
+    supplySnapshot = await d1(env, 'SELECT symbol, circulating_supply, total_supply, max_supply FROM asset_supply_snapshot');
+  } catch (e) {
+    console.log(`  supply tables unavailable (${String(e && e.message).slice(0, 60)}) — supply family will abstain`);
+  }
+  return { deriv, bars, supply, supplySnapshot };
 }
 
-function buildPanel(deriv, bars, quarantine) {
+function buildPanel(deriv, bars, quarantine, supply = [], supplySnapshot = []) {
   // Corrupt bars are removed BEFORE any feature or return is computed, and a
   // remapped ticker keeps only its post-identity-change history (migration
   // 0034). The +/-1000% guard in forwardReturn stays as a backstop for anything
@@ -92,7 +106,28 @@ function buildPanel(deriv, bars, quarantine) {
       byDate.get(f.date).push(f);
     }
   }
-  return { byDate, priceBySymbol, symbols: derivBySymbol.size, skippedNoPrice: skipped };
+  // Merge supply features onto the same (symbol, date) cells. Left join: a
+  // symbol with no supply history keeps its derivatives features and simply
+  // has nulls for the supply ones, which the coverage filter then skips.
+  const snapBySymbol = new Map(supplySnapshot.map((r) => [r.symbol, r]));
+  const supplyBySymbol = new Map();
+  for (const r of supply) {
+    if (!supplyBySymbol.has(r.symbol)) supplyBySymbol.set(r.symbol, []);
+    supplyBySymbol.get(r.symbol).push(r);
+  }
+  let supplyMerged = 0;
+  for (const [symbol, rows] of supplyBySymbol) {
+    const feats = new Map(assetSupplyFeatures(rows, snapBySymbol.get(symbol) || null).map((f) => [f.date, f]));
+    for (const [date, cells] of byDate) {
+      const cell = cells.find((c) => c.symbol === symbol);
+      const f = feats.get(date);
+      if (!cell || !f) continue;
+      for (const id of SUPPLY_FEATURE_FAMILY) cell[id] = f[id];
+      supplyMerged++;
+    }
+  }
+  if (supplyMerged) console.log(`supply: merged ${supplyMerged} cells from ${supplyBySymbol.size} symbols`);
+  return { byDate, priceBySymbol, symbols: derivBySymbol.size, skippedNoPrice: skipped, supplySymbols: supplyBySymbol.size };
 }
 
 // A return this large over a research horizon is a broken bar, not a trade.
@@ -401,10 +436,11 @@ function report(title, results, zThreshold) {
 }
 
 async function main() {
-  const { deriv, bars } = await loadAll();
-  console.log(`derivatives rows ${deriv.length}, price bars ${bars.length}`);
+  const { deriv, bars, supply, supplySnapshot } = await loadAll();
+  console.log(`derivatives rows ${deriv.length}, price bars ${bars.length}, supply rows ${supply.length}`);
   const quarantine = await loadBarQuarantine(d1, env, { assetClass: 'crypto' });
-  const { byDate, priceBySymbol, symbols, skippedNoPrice } = buildPanel(deriv, bars, quarantine);
+  const { byDate, priceBySymbol, symbols, skippedNoPrice, supplySymbols } =
+    buildPanel(deriv, bars, quarantine, supply, supplySnapshot);
   const dates = [...byDate.keys()].sort();
   console.log(`panel: ${symbols} symbols (${skippedNoPrice} skipped, no price history), `
     + `${dates.length} dates ${dates[0]}..${dates[dates.length - 1]}`);
@@ -417,16 +453,28 @@ async function main() {
 
   // The whole family is every feature at every horizon: that is the real size
   // of the search, and the correction has to reflect it.
-  const tests = DERIV_FEATURE_IDS.length * RESEARCH_HORIZONS.length;
+  // The supply family joins the SAME correction. Testing it under its own
+  // separate alpha would be the multiple-comparison error this harness exists
+  // to avoid: it is one search over one panel, however many sources feed it.
+  const allIds = supplySymbols ? DERIV_FEATURE_IDS.concat(SUPPLY_FEATURE_FAMILY) : DERIV_FEATURE_IDS;
+  const tests = allIds.length * RESEARCH_HORIZONS.length;
   const zThreshold = bonferroniZ(tests, XS_FAMILY_ALPHA);
-  console.log(`\nfamily: ${DERIV_FEATURE_IDS.length} features x ${RESEARCH_HORIZONS.length} horizons = ${tests} tests`);
+  console.log(`\nfamily: ${allIds.length} features x ${RESEARCH_HORIZONS.length} horizons = ${tests} tests`);
   console.log(`Bonferroni |t| threshold = ${zThreshold.toFixed(3)} (family alpha ${XS_FAMILY_ALPHA}), `
     + `sign consistency >= ${XS_MIN_SIGN_CONSISTENCY}`);
 
-  for (const [family, ids] of Object.entries(DERIV_FEATURE_FAMILIES)) {
+  const families = { ...DERIV_FEATURE_FAMILIES };
+  if (supplySymbols) families.supply = SUPPLY_FEATURE_FAMILY;
+  for (const [family, ids] of Object.entries(families)) {
     const results = [];
     for (const id of ids) for (const h of RESEARCH_HORIZONS) results.push(famaMacBeth(byDate, priceBySymbol, id, h));
     report(`=== family: ${family} — forward EXCESS return ===`, results, zThreshold);
+    if (family === 'supply') {
+      console.log(`  note: ${[...SUPPLY_SNAPSHOT_FEATURES].join(', ')} are point-in-time snapshots, not series.`);
+      console.log('        They are valid CROSS-SECTIONALLY (rank assets against each other today)');
+      console.log('        but carry no within-asset time variation, so their periods are not independent');
+      console.log('        draws of a changing quantity and their t-stats overstate confidence.');
+    }
   }
 
   // ---- controls ----
