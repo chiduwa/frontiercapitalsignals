@@ -1,0 +1,72 @@
+name: Signals Fundamentals Backfill
+
+# On-demand deep fill for the four fundamentals lanes (migration 0036).
+# signals-daily.yml runs the same script with a small budget to stay current;
+# this is how the history gets there in the first place.
+#
+# The liquidity lane is the expensive one: bookDepth files are ~530KB each
+# against ~11KB for the derivatives metrics files, so it is bounded by
+# breadth x depth in a way the derivatives backfill was not. It is capped to
+# the liquid head of the universe by default, which is also the only place the
+# feature is meaningful — depth on an asset nobody quotes says nothing.
+#
+# Resumable: dates already stored are skipped, so re-running deepens rather
+# than restarting.
+on:
+  workflow_dispatch:
+    inputs:
+      lanes:
+        description: "Comma list: supply,chain,network,liquidity"
+        required: false
+        default: "supply,chain,network,liquidity"
+      liquidity_symbols:
+        description: "How many top-open-interest symbols to cover"
+        required: false
+        default: "50"
+      liquidity_days:
+        description: "Days of book history. bookDepth begins 2023-01-01; ~1000 clears the fit's minimum-history bar."
+        required: false
+        default: "1000"
+      time_budget_min:
+        description: "Stop cleanly after this many minutes"
+        required: false
+        default: "300"
+
+permissions:
+  contents: read
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Backfill fundamentals
+        working-directory: signals-worker
+        run: node scripts/backfill-fundamentals.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+          FUND_LANES: ${{ inputs.lanes }}
+          FUND_LIQUIDITY_SYMBOLS: ${{ inputs.liquidity_symbols }}
+          FUND_LIQUIDITY_DAYS: ${{ inputs.liquidity_days }}
+          FUND_TIME_BUDGET_MIN: ${{ inputs.time_budget_min }}
+
+      # Refit immediately so the new depth is reflected in the selected
+      # coefficients rather than waiting for the next daily run.
+      - name: Refit cross-sectional lane
+        working-directory: signals-worker
+        continue-on-error: true
+        run: node scripts/cross-sectional.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}

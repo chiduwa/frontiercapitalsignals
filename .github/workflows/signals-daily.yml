@@ -102,6 +102,32 @@ jobs:
           DERIV_TIME_BUDGET_MIN: ${{ vars.DERIV_TIME_BUDGET_MIN || '20' }}
           DERIV_START_DATE: ${{ vars.DERIV_START_DATE || '2023-01-01' }}
 
+      # Keeps the fundamentals lanes current: order-book liquidity, the daily
+      # supply snapshot, chain TVL / stablecoin supply, and Bitcoin network
+      # cost. All four feed archiveMetrics() through the fundamentals panel, so
+      # the refit step below learns from whatever this has brought current.
+      #
+      # The supply lane costs NOTHING extra: getCryptoMarkets() is already
+      # called by every hourly build and already returns circulating, total and
+      # max supply for all 250 coins in one request.
+      #
+      # continue-on-error: these feed a research lane that publishes nothing. A
+      # supplier outage must not fail the job keeping the live archive current.
+      - name: Keep the fundamentals lanes current
+        working-directory: signals-worker
+        continue-on-error: true
+        run: node scripts/backfill-fundamentals.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+          # A small daily slice. The deep first fill runs separately via
+          # signals-fundamentals-backfill.yml so a multi-hour pass never sits
+          # in the daily job's critical path.
+          FUND_LIQUIDITY_SYMBOLS: ${{ vars.FUND_LIQUIDITY_SYMBOLS || '50' }}
+          FUND_LIQUIDITY_DAYS: ${{ vars.FUND_LIQUIDITY_DAYS || '7' }}
+          FUND_TIME_BUDGET_MIN: ${{ vars.FUND_TIME_BUDGET_MIN || '25' }}
+
       # Refits the cross-sectional lane's per-feature coefficients from the
       # archive that was just brought current, then scores whichever logged
       # forecasts have matured and folds them into decile evidence.
