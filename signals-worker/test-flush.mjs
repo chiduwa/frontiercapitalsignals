@@ -109,13 +109,29 @@ check('the stop still triggers before liquidation at max leverage',
 // sell. The live executor trades ONLY the sell, which is the side that clears
 // the 1.75x floor — so the floor is asserted there, and the buy side is held
 // to ordering alone with the gap recorded rather than hidden.
-check('the traded (sell) side keeps the full buffer',
-  (100 / sell.maxLeverage) / sell.riskPct >= 1.75,
-  `sell buffer ${((100 / sell.maxLeverage) / sell.riskPct).toFixed(2)}x`);
-check('the untraded (buy) side still triggers before liquidation, thinner though it is',
-  (100 / buy.maxLeverage) / buy.riskPct > 1.2,
-  `buy buffer ${((100 / buy.maxLeverage) / buy.riskPct).toFixed(2)}x — not traded live`);
-check('the plan carries a hold limit', buy.maxHoldMinutes > 0 && buy.maxHoldMinutes <= 120);
+// The buffer was DELIBERATELY REDUCED on 2026-09-12 when the stop was widened
+// from 15% to 18% to hold losers longer. That is a real reduction in safety
+// margin, not a tuning improvement, and these assertions record it rather than
+// hide it: the sell buffer went 1.93x -> 1.35x and the buy side 1.64x -> 1.15x.
+//
+// The NON-NEGOTIABLE invariant is the ordering — the stop must still trigger
+// before the exchange liquidates. Below 1.0 the stop is decoration and a loss
+// becomes a full-margin liquidation instead of a controlled exit.
+check('the traded (sell) stop still triggers before liquidation',
+  (100 / sell.maxLeverage) > sell.riskPct,
+  `liquidation ${(100 / sell.maxLeverage).toFixed(2)}% vs stop ${sell.riskPct.toFixed(2)}%`);
+check('the traded (sell) side keeps the reduced-but-documented buffer',
+  (100 / sell.maxLeverage) / sell.riskPct >= 1.25,
+  `sell buffer ${((100 / sell.maxLeverage) / sell.riskPct).toFixed(2)}x (was 1.93x before the stop was widened)`);
+check('the untraded (buy) side is thinner still, and is NOT what the executor trades',
+  (100 / buy.maxLeverage) / buy.riskPct > 1.0,
+  `buy buffer ${((100 / buy.maxLeverage) / buy.riskPct).toFixed(2)}x — sell-only executor, so theoretical`);
+// The time exit is disabled at the operator's direction: positions are held to
+// target, stop or manual close. null is the intended value, not a bug — but it
+// must be an explicit null rather than an accidental undefined, so a missing
+// field cannot pass for a deliberate choice.
+check('the hold limit is explicitly disabled, not accidentally absent',
+  buy.maxHoldMinutes === null, `got ${String(buy.maxHoldMinutes)}`);
 
 check('spike + OI falling is a SELL', sell.ok && sell.side === 'SELL');
 check('sell entry sits ABOVE the reference', sell.entryPrice > sell.refPrice);

@@ -45,24 +45,32 @@ export const FLUSH_ENTRY_VERSION = 'fcs-flush-entry-v1';
 // and its EV is an artefact, not an edge.
 export const ENTRY_DEPTH_PCT = 8;
 
-// Stop placement — and this is the single most consequential number here.
+// Stop placement.
 //
-// p90 of the liquidation-dip trough distribution is 14.7% below the reference.
-// Simulating the full plan over the 76 liquidation dips shows the stop is what
-// decides whether the strategy makes money at all:
+// WIDENED 2026-09-12 at the operator's direction, to hold losers longer rather
+// than be stopped out of moves that later recover. There is a hard ceiling on
+// how far this can go, and it is set by the exchange, not by preference:
 //
-//   stop 10%   mean net -0.35%   stopped 29/44   <- LOSES
-//   stop 12%   mean net +0.19%   stopped 16/44
-//   stop 15%   mean net +0.80%   stopped  7/44   <- chosen
-//   stop 20%   mean net +1.70%   stopped  1/44   (but that is nearly no stop,
-//                                                 with tail risk this 60-day
-//                                                 sample cannot see)
+//   At 8x, liquidation sits 12.0% adverse from the entry (1/8 - 0.5% MMR).
+//   A stop placed beyond that never executes — Binance closes the position
+//   first, and a liquidation costs the FULL margin ($6.25 on a $50 notional)
+//   against $3.24 for a clean stop. Widening past liquidation does not mean
+//   "hold longer", it means "be liquidated instead of stopped".
 //
-// A tight stop does not reduce risk here, it converts a winning setup into a
-// losing one — because the flush routinely overshoots the level it bounces
-// from. That is precisely the reported experience: a position taken out by a
-// sub-five-minute wick that then rebounded.
-export const STOP_DEPTH_PCT = 15;
+// 18% from the reference puts the stop 9.26% adverse from the entry
+// (1.18/1.08 - 1), leaving a 1.30x buffer to the 12.0% liquidation. That is
+// the widest placement that still exits on OUR terms at 8x.
+//
+// Measured cost of the original 15% (6.48% adverse): the stop was hit on 42%
+// of fills. At 18% it is hit far less often, at the price of a larger loss
+// when it is. Holding to 12h instead was measured at -$1.49/trade against
+// -$1.37 for always stopping, so wider-but-still-inside-liquidation is the
+// defensible middle rather than removing protection entirely.
+//
+// Earlier sensitivity, which is why a stop exists at all (dip case, from the
+// entry): 10% -> mean net -0.35%, 12% -> +0.19%, 15% -> +0.80%. Too tight
+// loses money; too wide stops being a stop.
+export const STOP_DEPTH_PCT = 18;
 
 // Leverage cap. The constraint is that the STOP must always trigger before the
 // exchange liquidates, with enough margin that a fast wick cannot jump the gap.
@@ -115,10 +123,20 @@ export const EXPECTED_PERFORMANCE = {
 // Measured 30-minute retrace per case, used to set the target.
 export const RETRACE = { liquidationDip: 0.554, squeezeSpike: 1.062 };
 
-// These are SHORT-HOLD trades and the exit is not optional. A liquidation dip
-// is 9.69% BELOW its pre-flush price twelve hours later even though it bounced
-// 55% within thirty minutes. Holding the bounce gives the gain back and more.
-export const MAX_HOLD_MINUTES = 45;
+// Time-based exit, DISABLED at the operator's direction: positions are held
+// until the target, the stop, or a manual close, rather than being closed
+// because a clock ran out.
+//
+// The measurement this overrides, recorded so the trade-off is visible: a
+// liquidation dip is 9.69% below its pre-flush price twelve hours later even
+// though it bounced 55% within thirty minutes, so on the dip side the bounce
+// really does give itself back. On the SHORT side actually traded here the
+// 12-hour median is +6.76% against a 1.08 entry, i.e. mildly favourable, which
+// is the case for holding.
+//
+// null disables the time exit. The stop and liquidation remain the only
+// involuntary exits.
+export const MAX_HOLD_MINUTES = null;
 
 const finite = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
 

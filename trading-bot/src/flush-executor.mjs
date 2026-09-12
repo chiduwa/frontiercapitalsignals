@@ -25,6 +25,21 @@ import { planEntry } from '../../signals-worker/scripts/flush-entry.mjs';
 import { loadGates, isTradeableSetup, quantityFor, FLUSH_EXEC_VERSION } from './flush-gates.mjs';
 import { d1 } from '../../signals-worker/scripts/d1-client.mjs';
 
+// True when this executor has already placed protection for a symbol at some
+// point. Used to decide whether a MISSING protective order means "never placed"
+// or "the operator cancelled it".
+//
+// The distinction matters and has no safe default: re-placing a stop the owner
+// deliberately removed overrides a human decision with a stale one. Instructed
+// explicitly — if the operator cancels the stop or take-profit, nothing
+// re-creates it, and the position is theirs to manage.
+export async function protectionAlreadyPlaced(env, symbol) {
+  const rows = await d1(env,
+    `SELECT id FROM flush_event
+     WHERE symbol = ? AND notes LIKE '%"protected":true%' LIMIT 1`, [symbol]);
+  return rows.length > 0;
+}
+
 export async function findCandidates(env, { limit = 5 } = {}) {
   return d1(env,
     `SELECT id, symbol, direction, classification, ref_price, extreme_price, move_pct,
@@ -82,6 +97,19 @@ export async function runOnce(env, { log = console.log, dryRun = false } = {}) {
     const open = await getOpenOrders(venue).catch(() => []);
     if (open && open.length) { log(`  skip ${ev.symbol}: ${open.length} order(s) already resting`); continue; }
 
+    // If this executor has protected this symbol before and there is no
+    // protective order now, the operator cancelled it. Respect that: do not
+    // open a fresh position on a symbol whose protection was deliberately
+    // removed, because the new entry would re-create the very stop that was
+    // just cancelled.
+    if (await protectionAlreadyPlaced(env, ev.symbol)) {
+      const algosNow = await getOpenAlgoOrders(venue).catch(() => []);
+      if (!algosNow || !algosNow.length) {
+        log(`  skip ${ev.symbol}: protection was placed before and is gone — treating as a manual override, not re-arming`);
+        continue;
+      }
+    }
+
     const qty = quantityFor(gates.notional, plan.entryPrice, null);
     if (!qty) { log(`  skip ${ev.symbol}: could not size`); continue; }
 
@@ -102,6 +130,11 @@ export async function runOnce(env, { log = console.log, dryRun = false } = {}) {
       // Protection is placed immediately, not after a fill is confirmed: a
       // reduceOnly stop against a not-yet-existing position is rejected
       // harmlessly, whereas an unprotected fill is the failure that matters.
+      //
+      // It is placed EXACTLY ONCE. If the operator later cancels it by hand,
+      // that cancellation is a decision and this code does not overrule it —
+      // see protectionAlreadyPlaced(). An automated system that silently
+      // re-places an order a human just removed is fighting its owner.
       try {
         const algos = await getOpenAlgoOrders(venue).catch(() => []);
         if (!algos || !algos.length) {
@@ -118,7 +151,8 @@ export async function runOnce(env, { log = console.log, dryRun = false } = {}) {
 
       await markActed(env, ev.id, {
         outcome: 'submitted', side: 'SELL', qty, entry: plan.entryPrice,
-        stop: plan.stopPrice, target: plan.targetPrice, clientOrderId
+        stop: plan.stopPrice, target: plan.targetPrice, clientOrderId,
+        protected: true
       });
       acted++;
     } catch (e) {
