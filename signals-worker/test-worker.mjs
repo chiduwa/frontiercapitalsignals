@@ -706,6 +706,64 @@ check('a record below baseline but not significantly so is demoted toward 0.5, n
 // measurement.
 check('reliabilityMultiplier falls back to the static prior with no reliability data: unknown is neutral, not silent', mod.reliabilityMultiplier(undefined, 'X', 'y') === 1 && mod.reliabilityMultiplier({}, 'X', 'y') === 1);
 
+console.log('\n== crypto universe admission: widened to 500, gated on who can serve it ==');
+// The 250 -> 500 widening is only sound because the added tail costs nothing to
+// fetch. These assert the gate that makes that true, because the failure mode is
+// invisible: admitting 45 CoinGecko-only names would not error, it would just
+// add ~135s to every hourly build and eventually get the project throttled.
+const cheapPairs = new Set(['GLM', 'IMX', 'SAND']);
+const mid = { symbol: 'GLM', market_cap: 4e8, total_volume: 2e7, market_cap_rank: 251 };
+check('a liquid tail coin a free venue serves IS admitted', mod.admitsCryptoCandidate(mid, { binancePairs: cheapPairs }) === true);
+check('the same coin is REFUSED when no ticker-keyed venue has it — that one would join the paced CoinGecko queue', mod.admitsCryptoCandidate({ ...mid, symbol: 'NOCK' }, { binancePairs: cheapPairs }) === false);
+check('inside the original 250 the rule is unchanged: floors only, venue irrelevant', mod.admitsCryptoCandidate({ ...mid, symbol: 'NOCK', market_cap_rank: 120 }, { binancePairs: cheapPairs }) === true);
+check('the floors still bind in the tail — a venue listing is not a substitute for liquidity', mod.admitsCryptoCandidate({ ...mid, market_cap: 1e6, total_volume: 1e3 }, { binancePairs: cheapPairs }) === false);
+check('a favorite bypasses both the floors and the tail gate, as it already bypassed the floors', mod.admitsCryptoCandidate({ symbol: 'HYPE', market_cap: 0, total_volume: 0, market_cap_rank: 480 }, { favorite: true, binancePairs: new Set() }) === true);
+check('an unranked coin is judged on its floors, not silently dropped by a field it never had', mod.admitsCryptoCandidate({ symbol: 'X', market_cap: 4e8, total_volume: 2e7 }, { binancePairs: new Set() }) === true);
+// Degrading to the pre-widening universe is the CORRECT response to a failed
+// venue-discovery call: the tail is admitted because it is cheap, and it is only
+// cheap if that venue answered.
+check('venue discovery failing degrades to exactly the old 250 universe rather than admitting an expensive tail', mod.admitsCryptoCandidate(mid, { binancePairs: null }) === false && mod.admitsCryptoCandidate({ ...mid, market_cap_rank: 200 }, { binancePairs: null }) === true);
+check('the widened universe and its boundary are the measured values', mod.CRYPTO_UNIVERSE === 500 && mod.CRYPTO_CHEAP_TAIL_RANK === 250);
+
+console.log('\n== getCryptoMarkets: pages, because CoinGecko caps per_page at 250 ==');
+{
+  const priorFetch = globalThis.fetch;
+  const seen = [];
+  const page = (n, count) => Array.from({ length: count }, (_, i) => ({ id: `c${n}-${i}`, symbol: `S${n}${i}`, market_cap_rank: (n - 1) * 250 + i + 1 }));
+  globalThis.fetch = async (url) => {
+    seen.push(String(url));
+    const n = Number(new URL(String(url)).searchParams.get('page'));
+    return new Response(JSON.stringify(page(n, 250)), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const rows = await mod.getCryptoMarkets();
+  check('two pages are requested for a 500-coin universe', seen.length === 2, seen.join(' | '));
+  check('never asks for more than CoinGecko will return in one page', seen.every((u) => u.includes(`per_page=${mod.CRYPTO_MARKETS_PAGE_SIZE}`)));
+  check('pages are concatenated into one ranked list', rows.length === 500 && rows[0].market_cap_rank === 1 && rows[499].market_cap_rank === 500);
+
+  // A short page means the list ran out; asking for the next one is a wasted
+  // call against a rate-limited host.
+  seen.length = 0;
+  globalThis.fetch = async (url) => { seen.push(String(url)); return new Response(JSON.stringify(page(1, 120)), { status: 200, headers: { 'content-type': 'application/json' } }); };
+  check('a short page ends the walk instead of spending another request', (await mod.getCryptoMarkets()).length === 120 && seen.length === 1);
+
+  // Page 1 carries every large-cap and every favorite. Throwing the whole build
+  // away because page 2 was rate-limited would be strictly worse than running
+  // on the universe we had before this change.
+  seen.length = 0;
+  globalThis.fetch = async (url) => {
+    const n = Number(new URL(String(url)).searchParams.get('page'));
+    if (n > 1) return new Response('rate limited', { status: 429 });
+    return new Response(JSON.stringify(page(1, 250)), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  check('a failed later page degrades coverage for that run instead of failing the build', (await mod.getCryptoMarkets()).length === 250);
+
+  globalThis.fetch = async () => new Response('rate limited', { status: 429 });
+  let firstPageThrew = false;
+  try { await mod.getCryptoMarkets(); } catch { firstPageThrew = true; }
+  check('losing page 1 IS fatal — that is a real outage, not degraded coverage', firstPageThrew);
+  globalThis.fetch = priorFetch;
+}
+
 console.log('\n== isReliabilitySignificant: guards against trusting noise at small sample sizes ==');
 check('14/20 (70%): NOT significant — this is exactly the kind of small-sample noise the guardrail targets', mod.isReliabilitySignificant(14, 20) === false);
 check('15/20 (75%): still not significant', mod.isReliabilitySignificant(15, 20) === false);

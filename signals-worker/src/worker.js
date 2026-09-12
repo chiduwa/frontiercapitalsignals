@@ -106,7 +106,48 @@ const GITHUB_REFRESH_DISPATCH_URL = 'https://api.github.com/repos/chiduwa/fronti
 // asset starts with no evidence in its own (asset, side, horizon, score,
 // range) cells and is therefore WITHHELD until it earns a call, exactly like
 // any other cold asset. See the publication gates below.
-export const CRYPTO_UNIVERSE = 250;
+// 500 as of 2026-09-12, from 250. CoinGecko caps per_page at 250, so
+// getCryptoMarkets now pages; the constant is the total, not a page size.
+//
+// The screened set was NOT the binding constraint on coverage, and raising it
+// alone would not have helped. Measured on the live pipeline that day:
+//
+//   250 fetched -> ~190 clear the floors -> 165 survive stablecoin/collision
+//   removal -> 146 obtain trustworthy daily bars and are actually scored.
+//
+// The retrospective labels every one of the other 104 "out-of-universe", which
+// reads as a universe-size problem and is not one: of 88 such episodes, 86
+// would have cleared the floors. They were lost at the DAILY BAR step, not at
+// the list. Symbols like APEPE, STONK, TIBBIR and LAPTOP have zero rows in
+// asset_daily_bars — no supplier serves them — while AI (49 bars) and MARSCOIN
+// (42 bars) are simply too young for indicators that need 200.
+//
+// So the widening is gated on supply, not on rank. See CRYPTO_CHEAP_TAIL_RANK.
+export const CRYPTO_UNIVERSE = 500;
+// Beyond this rank a coin is admitted ONLY if a ticker-keyed venue can serve
+// its daily bars for free. This is the whole economics of the widening.
+//
+// Measured over ranks 251-500: 113 of 250 clear the floors, and 68 of those
+// trade as a USDT pair on Binance — whose daily bars come from
+// data-api.binance.vision, a static unmetered bucket already supplying 104 of
+// the current 146. Those 68 cost ~68 requests to a host with no rate limit and
+// are real, liquid mid-caps the boards have simply never been able to see:
+// GLM, BAT, IMX, SAND, ZK, QTUM, ZRX, RSR, ORDI, ORCA, DGB.
+//
+// The other 45 would fall to the per-coin CoinGecko queue, which is paced at
+// one request every 3 seconds precisely because bursting it gets this project
+// throttled to zero rows (see CRYPTO_HISTORY_BATCH, and the supply backfill's
+// own note about a penalty that outlasted the run). Adding 45 there costs ~135
+// seconds of wall clock on a build already at ~254s, to cover the least liquid
+// names in the set. That is the trade this gate declines.
+//
+// Reliability is unaffected either way: a thin-history coin does not get a
+// worse signal, it gets FEWER signals — every indicator that needs more bars
+// than exist returns null and its technique abstains, which is the same
+// graceful degradation any cold asset already gets. And a widened screen still
+// publishes nothing new on its own; every added asset starts with no evidence
+// in its own cells and is withheld until it earns a call.
+export const CRYPTO_CHEAP_TAIL_RANK = 250;
 export const CRYPTO_MIN_MCAP = 30_000_000;
 export const CRYPTO_MIN_VOLUME = 2_000_000;
 // 365, not 210: a real 52-week window for dwellAtExtreme(), matching
@@ -4290,11 +4331,64 @@ export async function fetchJsonRetrying429(url, backoffsMs = COINGECKO_BACKOFFS_
   throw lastErr;
 }
 
+// CoinGecko caps per_page at 250, so a CRYPTO_UNIVERSE above that has to page.
+// Pages are fetched SEQUENTIALLY, not in parallel: two simultaneous calls from
+// a shared CI IP is exactly the burst shape that gets this project throttled
+// (see CRYPTO_HISTORY_BATCH's note), and one extra second on an hourly build is
+// not worth the risk.
+//
+// A page that fails does NOT fail the build. The first page is the one that
+// matters — it carries every large-cap and every favorite — so a later page
+// returning nothing degrades coverage for that run and leaves the rest intact,
+// rather than throwing away a good page 1 because page 2 was rate-limited.
+export const CRYPTO_MARKETS_PAGE_SIZE = 250;
+// Whether a coin enters the scored universe at all. Extracted from buildPayload
+// so the rule can be tested directly rather than only through a full build.
+//
+// Three tiers, in order:
+//   favorite            always, bypassing both the floors and the tail gate
+//   rank <= CRYPTO_CHEAP_TAIL_RANK   floors only, unchanged behaviour
+//   rank >  that rank   floors AND a ticker-keyed venue that serves it free
+//
+// The last tier is the economics of the 250 -> 500 widening; see
+// CRYPTO_CHEAP_TAIL_RANK for the measurements behind it. An unknown or missing
+// rank is treated as in-range rather than tail, so a coin CoinGecko failed to
+// rank is judged on its floors like it always was instead of being silently
+// dropped by a field it never had.
+//
+// An empty `binancePairs` (its discovery call failed this run) makes the tail
+// gate reject everything past the boundary, which degrades to exactly the
+// pre-widening universe. That is the right failure: the tail is only admitted
+// because it is cheap, and it is only cheap if that venue answered.
+export function admitsCryptoCandidate(coin, { favorite = false, binancePairs = null } = {}) {
+  if (!coin) return false;
+  if (favorite) return true;
+  if (!((coin.market_cap || 0) >= CRYPTO_MIN_MCAP && (coin.total_volume || 0) >= CRYPTO_MIN_VOLUME)) return false;
+  const rank = Number(coin.market_cap_rank);
+  if (!Number.isFinite(rank) || rank <= CRYPTO_CHEAP_TAIL_RANK) return true;
+  const pairs = binancePairs instanceof Set ? binancePairs : new Set();
+  return pairs.has(String(coin.symbol || '').toUpperCase());
+}
+
 export async function getCryptoMarkets() {
-  const url = 'https://api.coingecko.com/api/v3/coins/markets'
-    + `?vs_currency=usd&order=market_cap_desc&per_page=${CRYPTO_UNIVERSE}&page=1`
-    + '&sparkline=true&price_change_percentage=1h,24h,7d,30d';
-  return fetchJsonRetrying429(url);
+  const pages = Math.max(1, Math.ceil(CRYPTO_UNIVERSE / CRYPTO_MARKETS_PAGE_SIZE));
+  const out = [];
+  for (let page = 1; page <= pages; page++) {
+    const url = 'https://api.coingecko.com/api/v3/coins/markets'
+      + `?vs_currency=usd&order=market_cap_desc&per_page=${CRYPTO_MARKETS_PAGE_SIZE}&page=${page}`
+      + '&sparkline=true&price_change_percentage=1h,24h,7d,30d';
+    try {
+      const rows = await fetchJsonRetrying429(url);
+      if (!Array.isArray(rows) || !rows.length) break;
+      out.push(...rows);
+      if (rows.length < CRYPTO_MARKETS_PAGE_SIZE) break;
+    } catch (e) {
+      if (page === 1) throw e;
+      console.warn(`crypto markets page ${page} unavailable (${(e && e.message) || e}) — continuing with ${out.length} coins`);
+      break;
+    }
+  }
+  return out.slice(0, CRYPTO_UNIVERSE);
 }
 
 // Real daily bars (close + volume) per coin, so crypto's indicators mean the
@@ -5516,9 +5610,23 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     }
     cryptoStableValue = stableValueRows;
     const isFavorite = (c) => FAVORITE_SYMBOLS.has((c.symbol || '').toUpperCase());
+    // Beyond CRYPTO_CHEAP_TAIL_RANK, clearing the floors is necessary but not
+    // sufficient: the coin also has to be servable by a ticker-keyed venue.
+    // The whole point of widening to 500 was to pick up the ~68 liquid mid-caps
+    // Binance already serves for free, NOT to lengthen the paced per-coin
+    // CoinGecko queue by 45 of the thinnest names in the set — that queue is
+    // the build's wall-clock bottleneck and the thing that gets this project
+    // rate-limited. See CRYPTO_CHEAP_TAIL_RANK for the measurements.
+    //
+    // Rank is read from CoinGecko's own market_cap_rank rather than array
+    // position, so a coin missing from a page (or a page that failed) cannot
+    // silently shift everything after it across the boundary.
+    //
+    // Favorites bypass this exactly as they bypass the floors: "always tracked"
+    // has to mean always, and the rescue pass below exists for precisely the
+    // favorite whose venue lookup fails.
     const qualifying = directional
-      .filter(c => isFavorite(c)
-        || ((c.market_cap || 0) >= CRYPTO_MIN_MCAP && (c.total_volume || 0) >= CRYPTO_MIN_VOLUME));
+      .filter(c => admitsCryptoCandidate(c, { favorite: isFavorite(c), binancePairs: binanceGlobalPairs }));
     // Favorites first, before anything else spends the per-IP rate-limit
     // budget. "Always tracked" has to mean always, and until now the pinned
     // assets queued in whatever order CoinGecko's market-cap page returned and
