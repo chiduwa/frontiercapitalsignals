@@ -6,6 +6,7 @@
 // much as the code. If someone ever inverts the mapping, this fails loudly.
 import { classifyMove, detectMove, EXPECTED_RECOVERY, MOVE_PCT_TRIGGER } from './scripts/oi-sampler.mjs';
 import { findFlushes, dedupeEpisodes } from './scripts/flush-research.mjs';
+import { planEntry, continuationCall, ENTRY_DEPTH_PCT, STOP_DEPTH_PCT } from './scripts/flush-entry.mjs';
 
 let pass = 0, fail = 0;
 const check = (name, cond, detail) => {
@@ -79,6 +80,50 @@ check('dedupe leaves genuinely separate episodes alone', dedupeEpisodes([
   { t: now, dropPct: -8, direction: 'down' },
   { t: now + 90 * 60000, dropPct: -9, direction: 'down' }
 ]).length === 2);
+
+console.log('\n== entry planner: two trades, two refusals ==');
+const mk = (direction, classification) => ({
+  direction, classification, refPrice: 100,
+  extremePrice: direction === 'down' ? 91.5 : 109,
+  movePct: direction === 'down' ? -8.5 : 9,
+  oiChangePct: classification === 'liquidation' ? -5 : 5, symbol: 'TEST'
+});
+const buy = planEntry(mk('down', 'liquidation'));
+check('dip + OI falling is a BUY', buy.ok && buy.side === 'BUY');
+check('entry sits BELOW the reference', buy.entryPrice < buy.refPrice, String(buy.entryPrice));
+check('entry is at the measured depth, not a round 5%', Math.abs(buy.depthPct - ENTRY_DEPTH_PCT) < 1e-9);
+check('stop is below the entry', buy.stopPrice < buy.entryPrice);
+check('target sits between entry and reference', buy.targetPrice > buy.entryPrice && buy.targetPrice < buy.refPrice);
+check('leverage is capped so a full stop is not a liquidation', buy.maxLeverage * (STOP_DEPTH_PCT / 100) < 1,
+  `${buy.maxLeverage}x * ${STOP_DEPTH_PCT}% = ${(buy.maxLeverage * STOP_DEPTH_PCT / 100).toFixed(2)} of margin`);
+check('the plan carries a hold limit', buy.maxHoldMinutes > 0 && buy.maxHoldMinutes <= 120);
+
+const sell = planEntry(mk('up', 'liquidation'));
+check('spike + OI falling is a SELL', sell.ok && sell.side === 'SELL');
+check('sell entry sits ABOVE the reference', sell.entryPrice > sell.refPrice);
+check('sell stop is above the sell entry', sell.stopPrice > sell.entryPrice);
+
+const refusedBuy = planEntry(mk('down', 'new-position'));
+check('dip + OI RISING is refused for longs', refusedBuy.ok === false);
+check('...and names the trend risk, not a generic reason', /new shorts/i.test(refusedBuy.reason));
+check('...and flags the opposite side instead', refusedBuy.contraSignal === 'SELL');
+const refusedSell = planEntry(mk('up', 'new-position'));
+check('spike + OI RISING is refused for shorts', refusedSell.ok === false && refusedSell.contraSignal === 'BUY');
+
+check('ambiguous OI abstains rather than guessing', planEntry(mk('down', 'ambiguous')).ok === false);
+check('a missing move abstains', planEntry(null).ok === false);
+check('a move with no reference price abstains',
+  planEntry({ direction: 'down', classification: 'liquidation', refPrice: 0 }).ok === false);
+
+console.log('\n== continuation alerts fire only on rising open interest ==');
+check('dip + OI rising -> "keeps falling"', continuationCall(mk('down', 'new-position')).expectation === 'keeps falling');
+check('spike + OI rising -> "keeps rising"', continuationCall(mk('up', 'new-position')).expectation === 'keeps rising');
+check('liquidation moves raise NO continuation alert',
+  continuationCall(mk('down', 'liquidation')) === null && continuationCall(mk('up', 'liquidation')) === null);
+check('the alert carries the measured 12h number',
+  continuationCall(mk('up', 'new-position')).median12hPct === 10.82);
+check('the falling alert warns that the bounce is bait',
+  /bait/i.test(continuationCall(mk('down', 'new-position')).caution));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

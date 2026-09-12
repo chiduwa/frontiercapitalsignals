@@ -20,6 +20,7 @@
 // Optional env: OI_SAMPLE_SYMBOLS, OI_SAMPLE_INTERVAL_SEC (default 20),
 //   OI_SAMPLE_DURATION_MIN (default 5), OI_TICK_RETENTION_DAYS (default 7)
 import { d1, d1Batch, chunk } from './d1-client.mjs';
+import { planEntry, continuationCall } from './flush-entry.mjs';
 
 // Credentials are resolved when the loop actually runs, NOT at import. The
 // classifier below is the load-bearing logic and it is pure — a test suite
@@ -55,6 +56,35 @@ export const OI_DECISIVE_PCT = 1;
 export const EXPECTED_RECOVERY = { liquidation: 0.503, 'new-position': 1.062, ambiguous: 0.622 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Push via ntfy.sh, the same free topic-based transport scripts/notify.mjs
+// already uses. Silently inert when NTFY_TOPIC is unset, so an unconfigured
+// host samples and records normally instead of failing.
+async function notifyContinuation(call, move) {
+  const line = `${call.symbol} ${call.expectation} — ${call.basis}`;
+  console.log(`    ALERT ${line} (median 12h ${call.median12hPct > 0 ? '+' : ''}${call.median12hPct}%)`);
+  const topic = process.env.NTFY_TOPIC;
+  if (!topic) return;
+  const up = move.direction === 'up';
+  const body = `${call.basis}\n\n`
+    + `Median 12h move after this signature: ${call.median12hPct > 0 ? '+' : ''}${call.median12hPct}%\n`
+    + `Caution: ${call.caution}\n\n`
+    + `Measured over 248 episodes / 30 symbols / 60 days. Not a recommendation.`;
+  try {
+    await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
+      method: 'POST',
+      headers: {
+        Title: `${call.symbol} ${call.expectation}`,
+        Priority: 'default',
+        Tags: up ? 'chart_with_upwards_trend' : 'chart_with_downwards_trend'
+      },
+      body,
+      signal: AbortSignal.timeout(10000)
+    });
+  } catch (e) {
+    console.log(`    (alert delivery failed: ${String(e && e.message).slice(0, 60)})`);
+  }
+}
 
 async function fapi(path, params = {}) {
   const qs = new URLSearchParams(params).toString();
@@ -200,9 +230,24 @@ async function main() {
         [id, symbol, move.direction, new Date().toISOString(), move.firstTs,
          move.refPrice, move.extremePrice, move.movePct, move.oiChangePct,
          move.classification, EXPECTED_RECOVERY[move.classification] ?? null]);
+      const plan = planEntry({ ...move, symbol });
       console.log(`  FLUSH ${symbol} ${move.direction} ${move.movePct.toFixed(2)}% `
         + `OI ${move.oiChangePct == null ? 'n/a' : move.oiChangePct.toFixed(2) + '%'} `
-        + `-> ${move.classification} (expect ~${((EXPECTED_RECOVERY[move.classification] ?? 0) * 100).toFixed(0)}% retrace)`);
+        + `-> ${move.classification}`);
+      if (plan.ok) {
+        console.log(`    PLAN ${plan.side} entry ${plan.entryPrice.toPrecision(6)} `
+          + `stop ${plan.stopPrice.toPrecision(6)} target ${plan.targetPrice.toPrecision(6)} `
+          + `max ${plan.maxLeverage}x, hold <=${plan.maxHoldMinutes}m`);
+      } else {
+        console.log(`    NO TRADE: ${plan.reason}`);
+      }
+
+      // A continuation call is the alert the operator asked for: not "a flush
+      // happened" but "this one is likely to keep going". It fires only on
+      // rising open interest, which is the case the 12-hour numbers say
+      // persists (+10.82% for spikes, -13.47% for dips).
+      const cont = continuationCall({ ...move, symbol });
+      if (cont) await notifyContinuation(cont, move);
     }
 
     const elapsed = Date.now() - started;
