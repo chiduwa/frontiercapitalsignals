@@ -82,10 +82,24 @@ type GseCache = {
   rows: { name: string; price: number; change: number; volume: number }[];
 };
 
+/**
+ * How stale the cached Ghana board may be before it is withheld. Two trading
+ * days plus a margin: enough to ride out a weekend or a failed refresh, short
+ * enough that nobody is shown a week-old price as though it were current.
+ */
+const GSE_MAX_AGE_MS = 4 * 24 * 60 * 60 * 1000;
+
 async function fetchGse(): Promise<QuoteMap> {
   const { env } = getCloudflareContext();
   const cached = await env.FCS_QUOTES?.get<GseCache>("gse:live", "json");
   if (!cached?.rows?.length) throw new Error("GSE: no cached board in KV");
+
+  // Serving a stale board unlabelled is worse than serving none: withhold it and
+  // let Ghana fall back to reference-only, which the client renders explicitly.
+  const age = Date.now() - Date.parse(cached.fetchedAt);
+  if (!Number.isFinite(age) || age > GSE_MAX_AGE_MS) {
+    throw new Error(`GSE: cached board is stale (${Math.round(age / 3600000)}h old)`);
+  }
 
   const out: QuoteMap = {};
   for (const r of cached.rows) {
