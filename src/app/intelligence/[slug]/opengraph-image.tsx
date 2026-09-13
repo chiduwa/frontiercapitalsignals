@@ -7,7 +7,17 @@
 // preview always carries the actual story and the brand.
 
 import { ImageResponse } from "next/og";
-import { getPostBySlug } from "@/lib/posts";
+import { getPostBySlug, getAllPosts } from "@/lib/posts";
+
+// Without this the route is server-rendered on demand, and at request time in
+// the Workers runtime the post lookup returns null — the card then renders its
+// fallback ("Frontier Capital Signals" / Africa / Intelligence) instead of the
+// article, which is most of the point of having it. Prerendering it alongside
+// the page means the lookup happens at build time, where the content files are
+// actually readable.
+export async function generateStaticParams() {
+  return getAllPosts().map((p) => ({ slug: p.slug }));
+}
 
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
