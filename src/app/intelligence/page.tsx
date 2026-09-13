@@ -7,7 +7,9 @@ export const metadata: Metadata = {
   description: "Daily AI-curated investment intelligence for Ghana, Nigeria, Kenya, Malawi, and Uganda. Government projects, infrastructure tenders, energy deals, regulatory changes.",
   alternates: { canonical: "https://frontiercapitalsignals.com/intelligence" },
   keywords: ["Africa investment news", "Ghana investment opportunities 2025", "Nigeria business intelligence", "Kenya infrastructure deals", "Malawi mining", "Uganda oil investment", "Africa emerging market signals", "frontier market intelligence daily"],
-  openGraph: { url: "https://frontiercapitalsignals.com/intelligence", type: "website" },
+  // Declaring openGraph here replaces the root layout's block entirely,
+  // including its image, so the site card has to be named again.
+  openGraph: { url: "https://frontiercapitalsignals.com/intelligence", type: "website", images: [{ url: "/opengraph-image", width: 1200, height: 630 }] },
 };
 
 export default function IntelligencePage() {

@@ -6,7 +6,9 @@ export const metadata: Metadata = {
   description: "Get in touch with Frontier Capital Signals. Request a market briefing, discuss your investment mandate, or book an Africa market consultation.",
   alternates: { canonical: "https://frontiercapitalsignals.com/contact" },
   keywords: ["Africa market briefing", "invest in Africa consultation", "Africa investment advisor contact", "frontier market research request"],
-  openGraph: { url: "https://frontiercapitalsignals.com/contact", type: "website" },
+  // Declaring openGraph here replaces the root layout's block entirely,
+  // including its image, so the site card has to be named again.
+  openGraph: { url: "https://frontiercapitalsignals.com/contact", type: "website", images: [{ url: "/opengraph-image", width: 1200, height: 630 }] },
 };
 
 const inquiryTypes = [

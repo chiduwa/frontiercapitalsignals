@@ -6,7 +6,7 @@ import { exchanges, listingCount, allListings, DATA_AS_OF } from "@/lib/exchange
 export const metadata: Metadata = {
   title: "African Stock Exchanges",
   description:
-    "Stock exchanges of Ghana, Nigeria, Kenya, Malawi and Uganda — GSE, NGX, NSE, MSE and USE. Share prices in local currency and US dollars, market capitalisation, regulators, depositories, settlement cycles, trading hours, indices, foreign investor access, and the full register of listed companies by sector.",
+    "Stock exchanges of Ghana, Nigeria, Kenya, Malawi and Uganda — GSE, NGX, NSE, MSE and USE. Share prices in local currency and US dollars, market data and listed companies.",
   alternates: { canonical: "https://frontiercapitalsignals.com/exchanges" },
   keywords: [
     "African stock exchanges",
@@ -22,7 +22,9 @@ export const metadata: Metadata = {
     "frontier market equities Africa",
     "African stock tickers",
   ],
-  openGraph: { url: "https://frontiercapitalsignals.com/exchanges", type: "website" },
+  // Declaring openGraph here replaces the root layout's block entirely,
+  // including its image, so the site card has to be named again.
+  openGraph: { url: "https://frontiercapitalsignals.com/exchanges", type: "website", images: [{ url: "/opengraph-image", width: 1200, height: 630 }] },
 };
 
 const totalListings = allListings().length;

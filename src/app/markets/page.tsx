@@ -4,7 +4,7 @@ import MarketsHub from "@/components/MarketsHub";
 export const metadata: Metadata = {
   title: "Live Market Rates",
   description:
-    "Live exchange rates for African and global currencies, plus commodity prices for gold, oil, cocoa, coffee and more. Currency converter for GHS, NGN, KES, MWK, UGX and major world currencies.",
+    "Live exchange rates for African and global currencies, plus gold, oil, cocoa and coffee prices. Currency converter for GHS, NGN, KES, MWK, UGX and world currencies.",
   alternates: { canonical: "https://frontiercapitalsignals.com/markets" },
   keywords: [
     "Ghana cedi exchange rate",
@@ -20,7 +20,9 @@ export const metadata: Metadata = {
     "Africa commodity prices",
     "GHS NGN KES MWK UGX exchange rate",
   ],
-  openGraph: { url: "https://frontiercapitalsignals.com/markets", type: "website" },
+  // Declaring openGraph here replaces the root layout's block entirely,
+  // including its image, so the site card has to be named again.
+  openGraph: { url: "https://frontiercapitalsignals.com/markets", type: "website", images: [{ url: "/opengraph-image", width: 1200, height: 630 }] },
 };
 
 export default function MarketsPage() {

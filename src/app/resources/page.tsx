@@ -9,7 +9,9 @@ export const metadata: Metadata = {
   description: "Investor guides for Ghana, Nigeria, Kenya, Malawi and Uganda: government portals, investment agencies, regulators, stock exchanges and market data.",
   alternates: { canonical: "https://frontiercapitalsignals.com/resources" },
   keywords: ["how to invest in Ghana", "how to invest in Nigeria", "how to invest in Kenya", "how to invest in Malawi", "how to invest in Uganda", "Africa business registration", "GIPC Ghana", "NIPC Nigeria", "KenInvest Kenya", "MITC Malawi", "Uganda Investment Authority", "Africa GDP data", "Africa FDI statistics", "Ghana Stock Exchange", "Nigerian Exchange NGX", "Nairobi Securities Exchange", "Malawi Stock Exchange", "Uganda Securities Exchange"],
-  openGraph: { url: "https://frontiercapitalsignals.com/resources", type: "website" },
+  // Declaring openGraph here replaces the root layout's block entirely,
+  // including its image, so the site card has to be named again.
+  openGraph: { url: "https://frontiercapitalsignals.com/resources", type: "website", images: [{ url: "/opengraph-image", width: 1200, height: 630 }] },
 };
 
 const countries = [

@@ -5,10 +5,12 @@ import AuditRequestForm from "@/components/AuditRequestForm";
 
 export const metadata: Metadata = {
   title: "AI Visibility Audit",
-  description: "A fixed-price audit and fix for small business websites: broken Google Analytics, missing structured data, and invisibility to AI search engines like ChatGPT and Google AI Overviews.",
+  description: "A fixed-price audit and fix for small business websites: broken Google Analytics, missing structured data, and invisibility to ChatGPT and AI Overviews.",
   alternates: { canonical: "https://frontiercapitalsignals.com/audit" },
   keywords: ["AI visibility audit", "GA4 audit", "Google Tag Manager fix", "generative engine optimization", "GEO audit small business", "AI search optimization"],
-  openGraph: { url: "https://frontiercapitalsignals.com/audit", type: "website" },
+  // Declaring openGraph here replaces the root layout's block entirely,
+  // including its image, so the site card has to be named again.
+  openGraph: { url: "https://frontiercapitalsignals.com/audit", type: "website", images: [{ url: "/opengraph-image", width: 1200, height: 630 }] },
 };
 
 const serviceSchema = {

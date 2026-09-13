@@ -12,7 +12,9 @@ export const organizationSchema = {
   "@type": "Organization",
   name: "Frontier Capital Signals",
   url: "https://frontiercapitalsignals.com",
-  logo: "https://frontiercapitalsignals.com/logo.png",
+  // /logo.png does not exist and returned 404 to validators; /apple-icon is a
+  // real rendered PNG on this origin.
+  logo: "https://frontiercapitalsignals.com/apple-icon",
   description:
     "AI-powered investment intelligence for Ghana, Nigeria, Kenya, Malawi, and Uganda. Daily market insights, due diligence support, and on-ground intelligence for emerging market investors.",
   sameAs: [],
@@ -53,6 +55,7 @@ export function articleSchema({
   slug,
   country,
   category,
+  image,
 }: {
   title: string;
   summary: string;
@@ -60,6 +63,7 @@ export function articleSchema({
   slug: string;
   country: string;
   category: string;
+  image?: string;
 }) {
   return {
     "@context": "https://schema.org",
@@ -69,6 +73,9 @@ export function articleSchema({
     datePublished: date,
     dateModified: date,
     url: `https://frontiercapitalsignals.com/intelligence/${slug}`,
+    // Article rich results require an image. Posts without one fall back to
+    // this route's generated social card, which renders the headline.
+    image: [image ?? `https://frontiercapitalsignals.com/intelligence/${slug}/opengraph-image`],
     author: {
       "@type": "Organization",
       name: "Frontier Capital Signals",
@@ -79,7 +86,7 @@ export function articleSchema({
       name: "Frontier Capital Signals",
       logo: {
         "@type": "ImageObject",
-        url: "https://frontiercapitalsignals.com/logo.png",
+        url: "https://frontiercapitalsignals.com/apple-icon",
       },
     },
     about: [

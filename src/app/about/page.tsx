@@ -3,10 +3,12 @@ import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "About Us",
-  description: "Frontier Capital Signals provides AI-powered investment intelligence for Ghana, Nigeria, Kenya, Malawi, and Uganda. On-ground networks meet cutting-edge AI for frontier market investors.",
+  description: "Frontier Capital Signals delivers investment intelligence for Ghana, Nigeria, Kenya, Malawi and Uganda, pairing on-ground networks with AI analysis.",
   alternates: { canonical: "https://frontiercapitalsignals.com/about" },
   keywords: ["Africa investment firm", "frontier market intelligence company", "Africa research firm", "emerging market advisory Africa", "invest in Africa company"],
-  openGraph: { url: "https://frontiercapitalsignals.com/about", type: "website" },
+  // Declaring openGraph here replaces the root layout's block entirely,
+  // including its image, so the site card has to be named again.
+  openGraph: { url: "https://frontiercapitalsignals.com/about", type: "website", images: [{ url: "/opengraph-image", width: 1200, height: 630 }] },
 };
 
 const values = [

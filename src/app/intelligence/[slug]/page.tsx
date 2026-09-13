@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { getPostBySlug, getAllPosts } from "@/lib/posts";
 import JsonLd, { articleSchema } from "@/components/JsonLd";
+import { seoTitle, seoDescription } from "@/lib/seo";
 
 export async function generateStaticParams() {
   return getAllPosts().map((p) => ({ slug: p.slug }));
@@ -14,10 +15,18 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const post = await getPostBySlug(slug);
   if (!post) return {};
   const canonical = `https://frontiercapitalsignals.com/intelligence/${slug}`;
-  const ogImage = post.image ?? `https://picsum.photos/seed/${encodeURIComponent(slug)}/1200/630`;
+  // When the post carries a real image, use it. Otherwise omit `images`
+  // entirely so Next falls back to this route's opengraph-image.tsx, which
+  // renders the headline on the site's own card — the previous fallback was a
+  // random picsum.photos stock photo with no relation to the story.
+  const ogImages = post.image ? [{ url: post.image, width: 1200, height: 630 }] : undefined;
   return {
-    title: post.title,
-    description: post.summary,
+    // `absolute` opts out of the root layout's "%s | Frontier Capital Signals"
+    // template: at 27 characters it pushed these headlines past what Google
+    // renders. seoTitle adds the brand back whenever it fits. og:title below
+    // keeps the untruncated headline, since social cards have a wider budget.
+    title: { absolute: seoTitle(post.title) },
+    description: seoDescription(post.summary),
     keywords: [
       post.country,
       post.category,
@@ -34,14 +43,14 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
       type: "article",
       publishedTime: post.date,
       url: canonical,
-      images: [{ url: ogImage, width: 1200, height: 630 }],
+      ...(ogImages ? { images: ogImages } : {}),
       siteName: "Frontier Capital Signals",
     },
     twitter: {
       card: "summary_large_image",
       title: post.title,
       description: post.summary,
-      images: [ogImage],
+      ...(ogImages ? { images: ogImages.map((i) => i.url) } : {}),
     },
   };
 }
@@ -72,7 +81,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
 
   return (
     <article className="bg-white min-h-screen">
-      <JsonLd data={articleSchema({ title: post.title, summary: post.summary, date: post.date, slug, country: post.country, category: post.category })} />
+      <JsonLd data={articleSchema({ title: post.title, summary: post.summary, date: post.date, slug, country: post.country, category: post.category, image: post.image })} />
       {/* Hero image */}
       <div className="relative h-64 sm:h-80 w-full overflow-hidden bg-gray-100">
         <Image src={imageUrl} alt={post.title} fill className="object-cover" unoptimized priority />
