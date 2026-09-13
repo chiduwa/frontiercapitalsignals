@@ -76,7 +76,9 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
   const post = await getPostBySlug(slug);
   if (!post) notFound();
 
-  const imageUrl = post.image ?? `https://picsum.photos/seed/${encodeURIComponent(slug)}/1200/500`;
+  // Same reasoning as the og:image: the site's own generated card, which
+  // renders this headline, beats a random stock photo as the hero.
+  const imageUrl = post.image ?? `/intelligence/${slug}/opengraph-image`;
   const catStyle = categoryColor[post.category] ?? categoryColor.General;
 
   return (

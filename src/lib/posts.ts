@@ -14,7 +14,7 @@ export interface Post {
   country: string;
   category: string;
   imageQuery: string;
-  image?: string;   // stored URL from generation; components fall back to Picsum if absent
+  image?: string;   // real stored image; placeholder URLs are stripped by realImage()
   content?: string;
 }
 
@@ -43,10 +43,22 @@ export function getAllPosts(): Post[] {
       country: data.country || "Africa",
       category: data.category || "General",
       imageQuery: data.imageQuery || "Africa business",
-      image: data.image || undefined,
+      image: realImage(data.image),
     } as Post;
   });
   return posts.sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
+// 378 of the existing posts have `image: "https://picsum.photos/seed/<slug>/..."`
+// baked into their frontmatter, written by the generator whenever the Unsplash
+// lookup was unavailable. A random stock photo is not an illustration of a
+// financial intelligence report, and a stored one is worse than none: it feeds
+// og:image and the Article schema image, so it is what shows on every social
+// card, chat citation and rich result. Treating it as absent lets the
+// per-article opengraph-image route render the headline instead.
+function realImage(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  return /(^|\/\/)([a-z0-9-]+\.)*picsum\.photos\//i.test(value) ? undefined : value;
 }
 
 export async function getPostBySlug(slug: string): Promise<Post | null> {
@@ -64,7 +76,7 @@ export async function getPostBySlug(slug: string): Promise<Post | null> {
     country: data.country || "Africa",
     category: data.category || "General",
     imageQuery: data.imageQuery || "Africa business",
-    image: data.image || undefined,
+    image: realImage(data.image),
     content: processed.toString(),
   };
 }

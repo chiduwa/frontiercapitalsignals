@@ -19,8 +19,9 @@ const categoryColor: Record<string, string> = {
 };
 
 function cardImageUrl(post: Post) {
-  // Use the stored URL from generation; fall back to Picsum seeded by slug (free, consistent)
-  return post.image ?? `https://picsum.photos/seed/${encodeURIComponent(post.slug)}/600/340`;
+  // Stored image when the post has a real one; otherwise the site's own
+  // generated card, which renders the headline, rather than a stock photo.
+  return post.image ?? `/intelligence/${post.slug}/opengraph-image`;
 }
 
 export default function PostCard({ post }: { post: Post }) {

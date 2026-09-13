@@ -191,9 +191,14 @@ async function fetchImageUrl(query, slug) {
       // fall through to Picsum
     }
   }
-  const picsum = `https://picsum.photos/seed/${encodeURIComponent(slug)}/1200/630`;
-  console.log(`  Image: Picsum (${key ? "Unsplash failed" : "no UNSPLASH_ACCESS_KEY"})`);
-  return picsum;
+  // Deliberately no placeholder: a random picsum.photos shot bears no relation
+  // to the report, and once written into frontmatter it becomes the article's
+  // og:image and its Article schema image — a stock photo standing in as the
+  // illustration of a financial intelligence report on every social card, chat
+  // citation and search result. Returning null lets the per-article
+  // opengraph-image route render the headline on the site's own card instead.
+  console.log(`  Image: none (${key ? "Unsplash failed" : "no UNSPLASH_ACCESS_KEY"}); generated card will be used`);
+  return null;
 }
 
 async function savePost(data) {
@@ -209,8 +214,7 @@ date: "${today()}"
 summary: "${data.summary.replace(/"/g, "'")}"
 country: "${data.country}"
 category: "${data.category}"
-imageQuery: "${data.imageQuery}"
-image: "${imageUrl}"
+imageQuery: "${data.imageQuery}"${imageUrl ? `\nimage: "${imageUrl}"` : ""}
 ---
 
 ${data.body}
