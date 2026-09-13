@@ -2,12 +2,13 @@ import MarketGlobe from "@/components/globe/MarketGlobe";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { GDPChart, FDIChart, BusinessEnvironmentChart, SectorRadarChart } from "@/components/MarketCharts";
+import { exchanges, listingCount } from "@/lib/exchanges";
 
 export const metadata: Metadata = {
   title: "Investor Resources",
-  description: "Country-by-country investor resource guides for Ghana, Nigeria, Kenya, Malawi, and Uganda. Official government portals, investment agencies, regulatory bodies, and market data charts.",
+  description: "Investor guides for Ghana, Nigeria, Kenya, Malawi and Uganda: government portals, investment agencies, regulators, stock exchanges and market data.",
   alternates: { canonical: "https://frontiercapitalsignals.com/resources" },
-  keywords: ["how to invest in Ghana", "how to invest in Nigeria", "how to invest in Kenya", "how to invest in Malawi", "how to invest in Uganda", "Africa business registration", "GIPC Ghana", "NIPC Nigeria", "KenInvest Kenya", "MITC Malawi", "Uganda Investment Authority", "Africa GDP data", "Africa FDI statistics"],
+  keywords: ["how to invest in Ghana", "how to invest in Nigeria", "how to invest in Kenya", "how to invest in Malawi", "how to invest in Uganda", "Africa business registration", "GIPC Ghana", "NIPC Nigeria", "KenInvest Kenya", "MITC Malawi", "Uganda Investment Authority", "Africa GDP data", "Africa FDI statistics", "Ghana Stock Exchange", "Nigerian Exchange NGX", "Nairobi Securities Exchange", "Malawi Stock Exchange", "Uganda Securities Exchange"],
   openGraph: { url: "https://frontiercapitalsignals.com/resources", type: "website" },
 };
 
@@ -78,6 +79,81 @@ const countries = [
   },
 ];
 
+/**
+ * Capital-markets resources for one country, derived from the shared exchange
+ * data so the exchange, its regulator and its venues can never drift out of
+ * step with /exchanges.
+ */
+function CapitalMarkets({
+  countryId,
+  existing,
+}: {
+  countryId: string;
+  existing: { url: string }[];
+}) {
+  const exchange = exchanges.find((e) => e.countryId === countryId);
+  if (!exchange) return null;
+
+  // Several countries already list their securities regulator among the
+  // government portals above (Nigeria's SEC, Kenya's CMA, Malawi's RBM).
+  // Drop those here rather than printing the same card twice.
+  const normalise = (u: string) => u.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "");
+  const alreadyListed = new Set(existing.map((r) => normalise(r.url)));
+
+  const links = [
+    {
+      label: exchange.name,
+      url: exchange.website,
+      desc: `${exchange.city}. ${listingCount(exchange)} listed securities, quoted in ${exchange.currencyCode}. Benchmark index: ${exchange.indices[0].abbr}. Settlement ${exchange.depository.settlement.split(";")[0]}.`,
+    },
+    {
+      label: exchange.regulator.name,
+      url: exchange.regulator.url,
+      desc: "Securities market regulator — licenses brokers and dealers, approves public offers, and publishes the register of licensed intermediaries.",
+    },
+    ...exchange.otherVenues,
+  ].filter((l) => !alreadyListed.has(normalise(l.url)));
+
+  return (
+    <>
+      <p className="text-slate-500 text-[11px] font-semibold tracking-widest uppercase mt-8 mb-3">
+        Capital Markets &amp; Stock Exchange
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {links.map(({ label, url, desc }) => (
+          <a
+            key={`${countryId}-${label}`}
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-white border border-gray-200 rounded-xl p-4 hover:border-gold/50 hover:shadow-md transition-all group"
+          >
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <h3 className="text-ink text-sm font-semibold group-hover:text-gold-dim transition-colors leading-snug">
+                {label}
+              </h3>
+              <svg className="w-4 h-4 text-gray-300 group-hover:text-gold shrink-0 mt-0.5 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </div>
+            <p className="text-slate-600 text-xs leading-relaxed">{desc}</p>
+          </a>
+        ))}
+      </div>
+
+      <Link
+        href={`/exchanges#${exchange.id}`}
+        className="inline-flex items-center gap-2 mt-4 text-gold-dim text-xs font-semibold hover:text-gold transition-colors"
+      >
+        Full {exchange.abbr} profile and every listed company
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </Link>
+    </>
+  );
+}
+
 export default function ResourcesPage() {
   return (
     <>
@@ -88,8 +164,17 @@ export default function ResourcesPage() {
             <p className="text-gold-light text-xs font-semibold tracking-widest uppercase mb-3">Investor Resources</p>
             <h1 className="text-4xl sm:text-5xl font-black text-white mb-5 tracking-tight">Your African Market Toolkit</h1>
             <p className="text-white/70 text-lg leading-relaxed">
-              Official government portals, investment agencies, and key contacts for each of our five focus markets. Verified and curated for international investors.
+              Official government portals, investment agencies, stock exchanges and key contacts for each of our five focus markets. Verified and curated for international investors.
             </p>
+            <Link
+              href="/exchanges"
+              className="inline-flex items-center gap-2 mt-6 px-4 py-2.5 rounded-lg border border-white/25 text-sm font-semibold text-white hover:bg-white/10 hover:border-gold transition-colors"
+            >
+              Browse all five stock exchanges and their listed companies
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </Link>
           </div>
           <MarketGlobe />
         </div>
@@ -147,6 +232,10 @@ export default function ResourcesPage() {
                   </div>
                 </div>
                 <p className="text-slate-500 text-sm mb-6 max-w-3xl leading-relaxed">{highlight}</p>
+
+                <p className="text-slate-500 text-[11px] font-semibold tracking-widest uppercase mb-3">
+                  Government &amp; Regulatory
+                </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {resources.map(({ label, url, desc }) => (
                     <a key={url} href={url} target="_blank" rel="noopener noreferrer"
@@ -161,6 +250,8 @@ export default function ResourcesPage() {
                     </a>
                   ))}
                 </div>
+
+                <CapitalMarkets countryId={id} existing={resources} />
               </div>
             ))}
           </div>

@@ -14,6 +14,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${BASE}/signals/`, changeFrequency: "hourly", priority: 0.9 },
     { url: `${BASE}/services`, changeFrequency: "weekly", priority: 0.8 },
     { url: `${BASE}/resources`, changeFrequency: "weekly", priority: 0.8 },
+    { url: `${BASE}/exchanges`, changeFrequency: "weekly", priority: 0.8 },
     { url: `${BASE}/about`, changeFrequency: "monthly", priority: 0.6 },
     { url: `${BASE}/contact`, changeFrequency: "monthly", priority: 0.6 },
   ];

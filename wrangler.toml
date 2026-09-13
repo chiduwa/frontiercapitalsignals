@@ -9,3 +9,10 @@ enabled = true
 [assets]
 directory = ".open-next/assets"
 binding = "ASSETS"
+
+# Ghana's price API (dev.kwayisi.org) refuses connections from Cloudflare's
+# egress, so GSE quotes are fetched by a GitHub Action and cached here for the
+# Worker to read. See .github/workflows/gse-quotes.yml.
+[[kv_namespaces]]
+binding = "FCS_QUOTES"
+id = "7c1d54e367ce4e53abd96370cb0203be"

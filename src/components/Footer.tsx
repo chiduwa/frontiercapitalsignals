@@ -70,6 +70,7 @@ export default function Footer() {
                 { label: "About Us", href: "/about" },
                 { label: "Intelligence Feed", href: "/intelligence" },
                 { label: "Investor Resources", href: "/resources" },
+                { label: "Stock Exchanges", href: "/exchanges" },
                 { label: "Contact", href: "/contact" },
               ].map(({ label, href }) => (
                 <li key={label}>
