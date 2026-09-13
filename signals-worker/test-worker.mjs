@@ -504,12 +504,26 @@ check('dashboard served', page.headers.get('content-type').includes('text/html')
 // renders). `new Function(...)` throws SyntaxError immediately on a bad
 // script without ever executing it, the same fast, side-effect-free check
 // used to find and confirm the fix for the real incident.
-const embeddedScripts = [...pageText.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]).filter((s) => s.trim());
+// A <script> carrying a data type (application/ld+json) holds JSON, not
+// JavaScript, so `new Function` on it always throws Unexpected token ':'.
+// Split the two and check each against the language it is actually written
+// in -- a malformed JSON-LD block is still worth failing on, because it
+// silently costs the page its rich results.
+const allScripts = [...pageText.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)]
+  .map((m) => ({ attrs: m[1], body: m[2] }))
+  .filter((s) => s.body.trim());
+const dataScripts = allScripts.filter((s) => /type\s*=\s*["']application\/(ld\+)?json["']/i.test(s.attrs));
+const embeddedScripts = allScripts.filter((s) => !dataScripts.includes(s)).map((s) => s.body);
 check('at least one inline <script> block found to check', embeddedScripts.length > 0, `found ${embeddedScripts.length}`);
 for (const [i, scriptSrc] of embeddedScripts.entries()) {
   let syntaxError = null;
   try { new Function(scriptSrc); } catch (e) { syntaxError = e.message; }
   check(`inline <script> block ${i} parses with no syntax error (a broken one takes down the ENTIRE dashboard, silently)`, syntaxError === null, syntaxError);
+}
+for (const [i, dataScript] of dataScripts.entries()) {
+  let jsonError = null;
+  try { JSON.parse(dataScript.body); } catch (e) { jsonError = e.message; }
+  check(`structured-data block ${i} is valid JSON (a broken one costs the page its rich results)`, jsonError === null, jsonError);
 }
 check('dashboard sends CSP + hardening headers', !!page.headers.get('content-security-policy') && page.headers.get('x-content-type-options') === 'nosniff' && page.headers.get('x-frame-options') === 'DENY');
 check('CSP allows GTM/GA4 domains (script-src + connect-src)', page.headers.get('content-security-policy').includes('googletagmanager.com') && page.headers.get('content-security-policy').includes('google-analytics.com'));

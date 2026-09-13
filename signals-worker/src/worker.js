@@ -6456,6 +6456,13 @@ const PAGE_HTML = `<!DOCTYPE html>
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Crypto &amp; US Equity Confluence Screens">
 <meta name="twitter:description" content="Hourly quant confluence screens across 150+ cryptocurrencies and 290 US equities. Direction is published only when the setup beats its measured no-skill baseline.">
+<!-- Social/AI preview image: the main site's generated card. This page had no
+     og:image at all, so link previews and chat citations rendered untitled. -->
+<meta property="og:image" content="https://frontiercapitalsignals.com/opengraph-image">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:image" content="https://frontiercapitalsignals.com/opengraph-image">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Crypto & US Equity Confluence Screens","url":"https://frontiercapitalsignals.com/signals/","description":"Hourly quant confluence screens across 150+ cryptocurrencies and 290 US equities. Direction is published only when the setup beats its measured no-skill baseline.","applicationCategory":"FinanceApplication","operatingSystem":"Any","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"provider":{"@type":"Organization","name":"Frontier Capital Signals","url":"https://frontiercapitalsignals.com"},"isPartOf":{"@type":"WebSite","name":"Frontier Capital Signals","url":"https://frontiercapitalsignals.com"}}</script>
 <!-- Consent Mode v2 defaults, same scheme as the main site (fcs_consent_v1 in
      localStorage, shared across the whole origin since localStorage is
      origin- not path-scoped): respects a prior choice made on the main site,
