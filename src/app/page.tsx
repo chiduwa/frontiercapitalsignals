@@ -1,25 +1,28 @@
+import MarketGlobe from "@/components/globe/MarketGlobe";
+import { focusMarkets } from "@/components/globe/geometry";
+import ServiceIcon from "@/components/ServiceIcon";
 import Link from "next/link";
 import PostCard from "@/components/PostCard";
 import { getLatestPosts } from "@/lib/posts";
 
-const focusMarkets = ["Ghana", "Nigeria", "Kenya", "Malawi", "Uganda"];
+
 
 const services = [
-  { icon: "🧠", title: "Daily Investment Intelligence", desc: "AI-assisted summaries of public reporting, with links to the original sources." },
-  { icon: "🔍", title: "Due Diligence Support", desc: "On-ground verification, risk assessments, and local intelligence that remote analysts cannot access." },
-  { icon: "🤝", title: "Deal Origination", desc: "Access off-market opportunities through our established networks across five high-growth African economies." },
-  { icon: "🗺️", title: "Market Entry Strategy", desc: "Country-specific roadmaps covering regulatory requirements, tax structures, local partner matching, and land access." },
-  { icon: "📊", title: "Market Surveys & Field Research", desc: "Primary research with real respondents in-market. Consumer sentiment, sector mapping, competitive intelligence." },
-  { icon: "⚙️", title: "Process Optimization", desc: "Operational consulting to help businesses in African markets reduce costs and delays." },
+  { icon: "intelligence", title: "Daily Investment Intelligence", desc: "AI-assisted summaries of public reporting, with links to the original sources." },
+  { icon: "due-diligence", title: "Due Diligence Support", desc: "On-ground verification, risk assessments, and local intelligence that remote analysts cannot access." },
+  { icon: "deal-origination", title: "Deal Origination", desc: "Access off-market opportunities through our established networks across five high-growth African economies." },
+  { icon: "market-entry", title: "Market Entry Strategy", desc: "Country-specific roadmaps covering regulatory requirements, tax structures, local partner matching, and land access." },
+  { icon: "field-research", title: "Market Surveys & Field Research", desc: "Primary research with real respondents in-market. Consumer sentiment, sector mapping, competitive intelligence." },
+  { icon: "optimization", title: "Process Optimization", desc: "Operational consulting to help businesses in African markets reduce costs and delays." },
 ];
 
 const sectors = [
-  { name: "Infrastructure & PPP", countries: "GH · NG · KE · UG" },
-  { name: "Energy & Renewables", countries: "GH · KE · MWI" },
-  { name: "Fintech & Digital Finance", countries: "NG · KE · GH" },
-  { name: "Agribusiness & Export", countries: "GH · UG · MWI" },
-  { name: "Mining & Extractives", countries: "GH · MWI · UG" },
-  { name: "Real Estate", countries: "NG · KE · GH" },
+  { icon: "infrastructure", name: "Infrastructure & PPP", countries: "GH · NG · KE · UG" },
+  { icon: "energy", name: "Energy & Renewables", countries: "GH · KE · MWI" },
+  { icon: "finance", name: "Fintech & Digital Finance", countries: "NG · KE · GH" },
+  { icon: "agriculture", name: "Agribusiness & Export", countries: "GH · UG · MWI" },
+  { icon: "mining", name: "Mining & Extractives", countries: "GH · MWI · UG" },
+  { icon: "property", name: "Real Estate", countries: "NG · KE · GH" },
 ];
 
 export default function HomePage() {
@@ -37,7 +40,7 @@ export default function HomePage() {
         {/* Gold glow */}
         <div className="absolute top-1/4 right-1/4 w-96 h-96 bg-gold/10 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 w-full">
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 lg:py-20 w-full grid grid-cols-1 lg:grid-cols-[1.05fr_1fr] gap-6 lg:gap-4 items-center">
           <div className="max-w-3xl">
             {/* Live badge */}
             <div className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-white/10 border border-white/20 mb-8">
@@ -45,7 +48,7 @@ export default function HomePage() {
               <span className="text-white/80 text-xs font-semibold tracking-widest uppercase">Live Market Intelligence</span>
             </div>
 
-            <h1 className="text-5xl sm:text-6xl lg:text-7xl font-black text-white leading-[1.05] mb-6 tracking-tight">
+            <h1 className="text-5xl sm:text-6xl xl:text-7xl font-black text-white leading-[1.05] mb-6 tracking-tight">
               African Markets.<br />
               <span className="text-gradient-gold">Clearer Context.</span>
             </h1>
@@ -72,13 +75,14 @@ export default function HomePage() {
               </Link>
             </div>
           </div>
+          <MarketGlobe />
         </div>
       </section>
 
       <nav className="bg-sand border-b border-gray-200" aria-label="Explore our focus markets">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-wrap items-center gap-x-8 gap-y-4">
           <p className="text-slate-600 text-xs uppercase tracking-widest font-semibold">Five focus markets</p>
-          {focusMarkets.map((market) => (
+          {focusMarkets.map(({ name: market }) => (
             <Link key={market} href={`/resources#${market.toLowerCase()}`} className="text-ink font-semibold underline underline-offset-4 decoration-gold/50 hover:decoration-gold">
               {market}
             </Link>
@@ -99,7 +103,7 @@ export default function HomePage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {services.map(({ icon, title, desc }) => (
               <div key={title} className="bg-white border border-gray-200 rounded-xl p-6 hover:border-gold/50 hover:shadow-md transition-all group">
-                <div className="text-3xl mb-4">{icon}</div>
+                <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl border border-gold/20 bg-gold/5 text-gold-dim"><ServiceIcon name={icon} /></div>
                 <h3 className="text-ink font-bold mb-2 group-hover:text-gold-dim transition-colors">{title}</h3>
                 <p className="text-slate-500 text-sm leading-relaxed">{desc}</p>
               </div>
@@ -175,9 +179,10 @@ export default function HomePage() {
               </Link>
             </div>
             <div className="tilt-stage space-y-3">
-              {sectors.map(({ name, countries }) => (
+              {sectors.map(({ icon, name, countries }) => (
                 <div key={name} className="tilt-card bg-white border border-gray-200 rounded-xl p-4">
-                  <div className="flex items-center justify-between mb-2.5">
+                  <div className="flex items-center gap-4">
+                    <span className="text-gold-dim shrink-0"><ServiceIcon name={icon} className="h-6 w-6" /></span>
                     <div>
                       <span className="text-ink font-semibold text-sm">{name}</span>
                       <span className="ml-2 text-slate-600 text-xs">{countries}</span>

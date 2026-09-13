@@ -1,0 +1,22 @@
+.figure { width:100%; max-width:640px; margin:0 auto; color:#fff; }
+.globe { position:relative; width:100%; aspect-ratio:600/560; isolation:isolate; }
+.art { position:absolute; inset:0; pointer-events:none; }
+.art::before { content:""; position:absolute; inset:15% 10%; background:radial-gradient(ellipse,#b8860b12,transparent 70%); border-radius:50%; }
+.canvas,.fallback { position:absolute; inset:0; width:100%; height:100%; }
+.canvas { opacity:0; }
+.globe[data-ready="true"] .canvas { opacity:1; }
+.globe[data-ready="true"] .fallback { opacity:0; }
+.overline { position:absolute; top:3%; left:0; right:0; text-align:center; font:500 10px/1.5 ui-monospace,monospace; letter-spacing:.13em; text-transform:uppercase; color:#9aacc5; }
+.market { position:absolute; min-width:18%; min-height:44px; display:flex; align-items:flex-start; flex-direction:column; justify-content:center; gap:2px; padding:7px 10px; background:#0c1a35eF; border:1px solid #d4a01740; border-radius:7px; text-decoration:none; box-shadow:0 4px 20px #0002; transition:border-color .2s,background .2s; }
+.market span { font-size:clamp(11px,1.2vw,13px); font-weight:650; line-height:1.2; color:#f3dfae; }
+.market small { color:#a8b7cb; font:10px/1.2 ui-monospace,monospace; letter-spacing:.08em; }
+.market:hover,.market:focus-visible { border-color:#f5d58b; background:#20324c; outline:2px solid #f5d58b; outline-offset:3px; }
+.motion { position:absolute; left:50%; bottom:0; transform:translateX(-50%); display:flex; align-items:center; gap:7px; min-height:44px; padding:8px 12px; color:#aebdd1; font-size:11px; cursor:pointer; border:1px solid transparent; border-radius:6px; }
+.motion:hover,.motion:focus-visible { color:#f3dfae; border-color:#b8860b80; outline-offset:3px; }
+.globe:not([data-ready="true"]) .motion { visibility:hidden; }
+.globe[data-motion="off"] .motion { display:none; }
+.caption { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:8px; padding:12px 4px 0; color:#d5dfec; font-size:11px; }
+.caption > span:last-child { color:#8fa3be; margin-left:8px; }
+.key { width:5px; height:5px; border-radius:50%; background:#f5d58b; }
+@media(max-width:420px) { .market { padding:5px 7px; } .market small { font-size:9px; } .overline { font-size:9px; letter-spacing:.08em; } .caption > span:last-child { margin:0; } }
+@media(prefers-reduced-motion:reduce) { .market { transition:none; } .motion { display:none; } }

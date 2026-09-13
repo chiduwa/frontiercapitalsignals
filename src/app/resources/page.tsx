@@ -1,3 +1,4 @@
+import MarketGlobe from "@/components/globe/MarketGlobe";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { GDPChart, FDIChart, BusinessEnvironmentChart, SectorRadarChart } from "@/components/MarketCharts";
@@ -81,15 +82,16 @@ export default function ResourcesPage() {
   return (
     <>
       {/* Header */}
-      <section className="bg-sand border-b border-gray-200 py-16">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section className="bg-navy py-12 lg:py-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
           <div className="max-w-2xl">
-            <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-3">Investor Resources</p>
-            <h1 className="text-5xl font-black text-ink mb-4 tracking-tight">Your African Market Toolkit</h1>
-            <p className="text-slate-500 text-lg">
+            <p className="text-gold-light text-xs font-semibold tracking-widest uppercase mb-3">Investor Resources</p>
+            <h1 className="text-4xl sm:text-5xl font-black text-white mb-5 tracking-tight">Your African Market Toolkit</h1>
+            <p className="text-white/70 text-lg leading-relaxed">
               Official government portals, investment agencies, and key contacts for each of our five focus markets. Verified and curated for international investors.
             </p>
           </div>
+          <MarketGlobe />
         </div>
       </section>
 

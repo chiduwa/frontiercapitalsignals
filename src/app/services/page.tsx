@@ -1,3 +1,4 @@
+import ServiceIcon from "@/components/ServiceIcon";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -11,28 +12,28 @@ export const metadata: Metadata = {
 
 const services = [
   {
-    id: "intelligence", icon: "🧠", title: "Daily Investment Intelligence", tagline: "Never miss an opportunity",
+    id: "intelligence", icon: "intelligence", title: "Daily Investment Intelligence", tagline: "Never miss an opportunity",
     desc: "Our AI continuously monitors government procurement portals, tender notices, energy project filings, mining concession databases, startup registrations, and regulatory announcements across all five markets. Every morning you receive a curated digest of actionable signals ranked by sector relevance and opportunity score.",
     deliverables: ["Daily intelligence brief (email or dashboard)", "Opportunity scoring (1-100 by sector and country)", "Investment memo templates for top-ranked opportunities", "Weekly sector deep-dives", "Regulatory change alerts"],
     badge: "Most Popular",
   },
   {
-    id: "due-diligence", icon: "🔍", title: "Due Diligence & Risk Assessment", tagline: "Verify before you commit",
+    id: "due-diligence", icon: "due-diligence", title: "Due Diligence & Risk Assessment", tagline: "Verify before you commit",
     desc: "We deploy on-ground researchers to verify what remote analysts cannot: land title integrity, counterparty reputation, local community dynamics, infrastructure access, and regulatory standing. Our risk assessments combine AI-powered data analysis with direct field intelligence.",
     deliverables: ["Full counterparty background check", "Land and property title verification", "Regulatory compliance review", "Local community and stakeholder mapping", "Structured risk matrix with mitigation recommendations"],
   },
   {
-    id: "market-entry", icon: "🗺️", title: "Market Entry Strategy", tagline: "Enter with confidence",
+    id: "market-entry", icon: "market-entry", title: "Market Entry Strategy", tagline: "Enter with confidence",
     desc: "Every African market has its own legal framework, regulatory culture, informal norms, and relationship networks. We build you a country-specific playbook covering everything from business registration and tax structuring to sector-specific licensing and optimal operating structures.",
     deliverables: ["Country-specific legal and tax structure analysis", "Sector licensing requirements and timelines", "Operating cost benchmarks", "Competitor and incumbent mapping", "Recommended local partners and advisors"],
   },
   {
-    id: "deal-origination", icon: "🤝", title: "Deal Origination & Pipeline", tagline: "Access deals before they go public",
+    id: "deal-origination", icon: "deal-origination", title: "Deal Origination & Pipeline", tagline: "Access deals before they go public",
     desc: "Our network of government contacts, sectoral associations, and local business leaders gives us access to off-market deals that never appear on international databases. We match investor mandates with real opportunities across infrastructure, energy, agriculture, real estate, and technology.",
     deliverables: ["Curated deal pipeline matched to your mandate", "Direct introductions to opportunity owners", "Pre-screened for regulatory feasibility", "Preliminary financial and operational assessment", "Ongoing pipeline refresh as new deals emerge"],
   },
   {
-    id: "field-research", icon: "📊", title: "Market Surveys & Field Research", tagline: "Real data from real people",
+    id: "field-research", icon: "field-research", title: "Market Surveys & Field Research", tagline: "Real data from real people",
     desc: "We conduct primary research using in-country research teams who understand local context, language, and dynamics. Whether you need consumer sentiment surveys, sector feasibility studies, price discovery research, or competitive intelligence, our teams can reach respondents that external firms can't.",
     deliverables: ["Custom survey design and questionnaire development", "In-country data collection (urban and rural)", "Focus groups and key informant interviews", "Competitive pricing and market share analysis", "Full research report with executive summary"],
   },
@@ -52,7 +53,7 @@ const services = [
     deliverables: ["Live infrastructure tender tracker", "PPP opportunity scoring", "Pre-qualification support and documentation", "Project finance structure analysis", "Government relationship support for bid preparation"],
   },
   {
-    id: "process-optimization", icon: "⚙️", title: "Process Optimization", tagline: "Extract more from what you have",
+    id: "process-optimization", icon: "optimization", title: "Process Optimization", tagline: "Extract more from what you have",
     desc: "For businesses already operating in our focus markets, we provide operational consulting to improve efficiency, reduce friction costs, and optimize supply chains. Our on-ground teams identify process bottlenecks that corporate headquarters rarely see from the outside.",
     deliverables: ["Operational audit and bottleneck identification", "Supply chain mapping and optimization", "Cost benchmarking against local comparables", "Staff productivity and HR structure review", "Implementation roadmap with measurable KPIs"],
   },
@@ -82,7 +83,7 @@ export default function ServicesPage() {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-2">
                   <div className="flex items-start gap-4 mb-4">
-                    <span className="text-4xl">{icon}</span>
+                    <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-gold/20 bg-gold/5 text-gold-dim"><ServiceIcon name={icon} className="h-8 w-8" /></span>
                     <div>
                       <div className="flex items-center gap-3 mb-1">
                         <h2 className="text-xl font-black text-ink">{title}</h2>
