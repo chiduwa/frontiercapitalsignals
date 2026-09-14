@@ -116,7 +116,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // from, and says out loud when the horizons disagree. See price-change.mjs.
 export function buildAlert(symbol, move, ticks, nowMs) {
   const summary = summarise(ticks, { nowTs: nowMs, horizonsMin: [5, 15, 60], rangeWindowMin: 60 });
-  const oi = move.oiChangePct == null ? 'not measurable' : `${formatPct(move.oiChangePct, 2)} (contracts)`;
+
   const title = summary
     ? formatHeadline(summary, { symbol })
     : `${symbol}: ${formatPct(move.movePct)} ${move.direction === 'up' ? 'spike' : 'drop'}`;
@@ -126,11 +126,11 @@ export function buildAlert(symbol, move, ticks, nowMs) {
   lines.push(`Detected: a ${formatPct(move.movePct)} ${move.direction === 'up' ? 'spike' : 'drop'} `
     + `off the ${move.direction === 'up' ? 'low' : 'high'} of the last ${MOVE_LOOKBACK_MIN} minutes. `
     + 'That is an excursion from an extreme, not a change since a fixed time, so it will not match the ladder above.');
-  lines.push(`Open interest across the same span: ${oi}. Position count, not dollar value.`);
+  lines.push(formatOiVsPrice(move));
   lines.push('');
-  lines.push('This is an observation, not a recommendation. The open-interest classification '
-    + 'behind older versions of this alert was measured on dollar value, which is mostly just '
-    + 'the price move again, so no continuation claim is made here.');
+  lines.push('This is an observation, not a recommendation. No continuation claim is made from '
+    + 'the open-interest reading either way: measured properly it did not predict what came '
+    + 'next in testing, and measured in dollars it was mostly the price move again.');
   return { title, body: lines.join('\n') };
 }
 
@@ -195,6 +195,62 @@ export function classifyMove(oiChangePct, { decisive = OI_DECISIVE_CONTRACTS_PCT
   return 'ambiguous';
 }
 
+// Open interest in dollars is contracts multiplied by mark price, exactly, so
+// over any window
+//
+//     1 + notional = (1 + contracts) x (1 + price)
+//
+// and a dollar-denominated "open interest rose 4.4%" splits cleanly into the
+// part that is real positioning and the part that is the price move restated.
+// Keeping both and showing them side by side is the point: the dollar figure
+// is still what most venues quote, and it is only misleading when it arrives
+// without the price move next to it.
+export function decomposeOi({ contractsPct, pricePct }) {
+  if (!Number.isFinite(contractsPct) || !Number.isFinite(pricePct)) return null;
+  const c = contractsPct / 100, p = pricePct / 100;
+  const notionalPct = ((1 + c) * (1 + p) - 1) * 100;
+  const magnitude = Math.abs(pricePct) + Math.abs(contractsPct);
+  return {
+    notionalPct,
+    fromPrice: pricePct,
+    fromContracts: contractsPct,
+    // (1+c)(1+p) is not c+p; the remainder is small but it is not zero and
+    // pretending otherwise is how the two stop reconciling on big moves.
+    cross: notionalPct - pricePct - contractsPct,
+    priceShare: magnitude > 0 ? Math.abs(pricePct) / magnitude : null
+  };
+}
+
+// The comparison, in words, for anything a person reads.
+export function formatOiVsPrice(move, { decisive = OI_DECISIVE_CONTRACTS_PCT } = {}) {
+  const d = decomposeOi({ contractsPct: move.oiChangePct, pricePct: move.priceChangePct });
+  if (!d) {
+    return move.oiChangePct == null
+      ? 'Open interest over the same span: not measurable.'
+      : `Open interest over the same span: ${formatPct(move.oiChangePct, 2)} in contracts. `
+        + 'Price over that same span was not measurable, so the two cannot be compared here.';
+  }
+  const lines = [
+    `Open interest over the same span: ${formatPct(d.fromContracts, 2)} in contracts (positions), `
+      + `against a price move of ${formatPct(d.fromPrice, 2)} over that same span.`,
+    // Phrased as a contribution rather than "X of that is price", which goes
+    // wrong whenever contracts move against price: the price part can then
+    // exceed the dollar total, and "but +4.23% of +4.07%" reads as nonsense.
+    `In dollars open interest reads ${formatPct(d.notionalPct, 2)}. Dollar open interest is `
+      + 'contracts times price, so that figure is the two of them combined: price contributed '
+      + `${formatPct(d.fromPrice, 2)} and positions contributed ${formatPct(d.fromContracts, 2)}. `
+      + 'It moves when price moves even if nobody opens or closes anything.'
+  ];
+  if (Math.abs(d.fromContracts) < decisive) {
+    lines.push(`Position count barely changed (${formatPct(d.fromContracts, 2)}, under the `
+      + `${decisive}% the classifier needs), so this move is price, not positioning.`);
+  } else {
+    lines.push(`Position count moved ${formatPct(d.fromContracts, 2)} on its own, which is a real `
+      + `change in how much is open, not a restatement of the price.`);
+  }
+  return lines.join('\n');
+}
+
 // Given a symbol's recent ticks, is a move in progress, and what is its shape?
 export function detectMove(ticks, { triggerPct = MOVE_PCT_TRIGGER, lookbackMin = MOVE_LOOKBACK_MIN } = {}) {
   if (!ticks || ticks.length < 3) return null;
@@ -240,13 +296,20 @@ export function detectMove(ticks, { triggerPct = MOVE_PCT_TRIGGER, lookbackMin =
   const refTick = window[refIdx];
   const oiChangePct = (refTick.oi_contracts > 0 && now.oi_contracts > 0)
     ? ((now.oi_contracts / refTick.oi_contracts) - 1) * 100 : null;
-  // Kept only so the two can be compared in the archive, never to classify on.
+  // Kept so the two can be compared wherever open interest is reported, and
+  // never to classify on.
   const oiNotionalChangePct = (refTick.oi_usd > 0 && now.oi_usd > 0)
     ? ((now.oi_usd / refTick.oi_usd) - 1) * 100 : null;
+  // Price over the SAME span the open interest was measured across. This is
+  // deliberately not movePct: that is the excursion from the reference extreme
+  // to the furthest point reached, which is a different quantity over a
+  // different window and will not reconcile against the OI figures.
+  const priceChangePct = (refTick.mark_price > 0 && now.mark_price > 0)
+    ? ((now.mark_price / refTick.mark_price) - 1) * 100 : null;
 
   return {
     direction, refPrice, extremePrice, movePct,
-    oiChangePct, oiNotionalChangePct,
+    oiChangePct, oiNotionalChangePct, priceChangePct,
     refTs: refTick.ts, firstTs: first.ts, lastTs: now.ts,
     // Identity of the MOVE, stable while the same reference extreme stands,
     // rather than of the sample window that happened to observe it.
@@ -404,16 +467,21 @@ async function main() {
         await d1(env,
           `INSERT OR IGNORE INTO flush_event
            (id, symbol, direction, detected_at, first_ts, ref_price, extreme_price, move_pct,
-            oi_change_pct, classification, expected_recovery, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            oi_change_pct, oi_notional_change_pct, price_change_pct,
+            classification, expected_recovery, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [id, symbol, move.direction, new Date(nowMs).toISOString(), move.refTs,
-           move.refPrice, move.extremePrice, move.movePct, move.oiChangePct,
-           move.classification, EXPECTED_RECOVERY[move.classification] ?? null,
-           `oi_notional_change_pct=${move.oiNotionalChangePct == null ? 'null' : move.oiNotionalChangePct.toFixed(4)}`]);
+           move.refPrice, move.extremePrice, move.movePct,
+           // All three over the identical span, so the row reconciles by
+           // 1 + notional = (1 + contracts)(1 + price) and the dollar figure
+           // can never again be read without the price move beside it.
+           move.oiChangePct, move.oiNotionalChangePct, move.priceChangePct,
+           move.classification, EXPECTED_RECOVERY[move.classification] ?? null, null]);
         const plan = planEntry({ ...move, symbol });
+        const n2 = (v) => (v == null ? 'n/a' : `${v.toFixed(2)}%`);
         console.log(`  FLUSH ${symbol} ${move.direction} ${move.movePct.toFixed(2)}% `
-          + `OI ${move.oiChangePct == null ? 'n/a' : move.oiChangePct.toFixed(2) + '%'} contracts `
-          + `(notional would have read ${move.oiNotionalChangePct == null ? 'n/a' : move.oiNotionalChangePct.toFixed(2) + '%'}) `
+          + `OI ${n2(move.oiChangePct)} contracts vs price ${n2(move.priceChangePct)} `
+          + `over the same span (in dollars OI reads ${n2(move.oiNotionalChangePct)}) `
           + `-> ${move.classification}`);
         console.log(plan.ok ? `    PLAN ${plan.side} entry ${plan.entryPrice.toPrecision(6)} `
           + `stop ${plan.stopPrice.toPrecision(6)} target ${plan.targetPrice.toPrecision(6)} `

@@ -3763,16 +3763,30 @@ export function evaluateTechniques(m, kind, reliability, ctx = {}) {
     // T-open interest: OI relative to this asset's OWN recent history
     // (learned the same way, not an absolute dollar figure that means
     // wildly different things for BTC vs. a small-cap alt), combined with
-    // price direction. Elevated OI backing a rally is trend confirmation —
-    // real new participation, not price just drifting on thin books;
+    // price direction. Elevated OI backing a rally reads as participation;
     // elevated OI during a selloff is a crowded, liquidation-prone setup.
     // Thin OI on a big move either way is left neutral, not fabricated
     // into a direction — a big move on thin participation is genuinely
     // ambiguous, not a hidden bullish or bearish tell.
+    //
+    // WHAT THIS PERCENTILE IS MEASURED ON, and why the copy now says so:
+    // funding_rate_daily.open_interest is USD NOTIONAL (BTC reads ~8.3e9, not
+    // ~80k contracts), and notional is contracts x mark price. So a high
+    // percentile is partly just a high price, and "elevated OI backing a
+    // rally" is partly the rally restated — the same coupling measured at
+    // r = 0.998 over 274 live rows in docs/PREDICTION_WEIGHTS_EVIDENCE.md.
+    // The firing rule is deliberately UNCHANGED here, because this technique
+    // carries fitted reliability that a redefinition would silently
+    // invalidate. What changed is that the reader is now told the unit and
+    // shown the price move next to it, which is the comparison that makes the
+    // reading interpretable either way.
     if (m.openInterest != null && m.oiPercentile != null) {
       const oiBigMove = 8;
-      if (m.oiPercentile >= 0.8 && (c7 ?? 0) > oiBigMove) push('openinterest', 0.8, 1, `rally backed by elevated open interest (its own ${(m.oiPercentile * 100).toFixed(0)}th pct)`);
-      else if (m.oiPercentile >= 0.8 && (c7 ?? 0) < -oiBigMove) push('openinterest', 0.8, -1, 'selloff with crowded open interest, liquidation risk');
+      const oiPct = (m.oiPercentile * 100).toFixed(0);
+      const px7 = c7 == null ? 'n/a' : `${c7 > 0 ? '+' : ''}${c7.toFixed(1)}%`;
+      const carries = 'dollar open interest is contracts x price, so part of that percentile is the price';
+      if (m.oiPercentile >= 0.8 && (c7 ?? 0) > oiBigMove) push('openinterest', 0.8, 1, `rally backed by elevated open interest (${oiPct}th pct in dollars, price ${px7} over 7d; ${carries})`);
+      else if (m.oiPercentile >= 0.8 && (c7 ?? 0) < -oiBigMove) push('openinterest', 0.8, -1, `selloff with crowded open interest, liquidation risk (${oiPct}th pct in dollars, price ${px7} over 7d; ${carries})`);
       else push('openinterest', 0.8, 0, null);
     } else {
       push('openinterest', 0.8, null, null);

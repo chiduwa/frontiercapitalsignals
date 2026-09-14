@@ -11,7 +11,7 @@
 // both columns, and several set them in OPPOSITE directions on purpose: that is
 // the case the old code got wrong in production.
 import { classifyMove, detectMove, shouldAlert, buildAlert, EXPECTED_RECOVERY, MOVE_PCT_TRIGGER,
-  OI_DECISIVE_CONTRACTS_PCT, ALERT_COOLDOWN_MIN } from './scripts/oi-sampler.mjs';
+  OI_DECISIVE_CONTRACTS_PCT, ALERT_COOLDOWN_MIN, decomposeOi, formatOiVsPrice } from './scripts/oi-sampler.mjs';
 import { findFlushes, dedupeEpisodes } from './scripts/flush-research.mjs';
 import { planEntry, continuationCall, ENTRY_DEPTH_PCT, STOP_DEPTH_PCT } from './scripts/flush-entry.mjs';
 
@@ -249,6 +249,43 @@ check('the body says open interest is counted in contracts', /contracts/.test(al
 check('the body makes no continuation claim', !/keeps (rising|falling)/.test(alert.body));
 check('the alert copy carries no em dashes', !alert.body.includes('—') && !alert.title.includes('—'));
 console.log('\n--- rendered ---\n' + alert.title + '\n' + alert.body + '\n');
+
+console.log('\n-- open interest shown against the price move --');
+// The real BTW numbers from oi_tick over the five minutes ending 10:03:24 UTC
+// on 2026-09-13, the detection the live executor placed an order on:
+// contracts 162,210,487 -> 162,312,456, dollars 94,241,048.74 -> 98,394,955.13,
+// mark 0.58098 -> 0.60620705.
+const REAL = { contractsPct: (162312456 / 162210487 - 1) * 100, pricePct: (0.60620705 / 0.58098 - 1) * 100 };
+const dec = decomposeOi(REAL);
+check('the decomposition reproduces the dollar figure Binance reported',
+  Math.abs(dec.notionalPct - (98394955.13 / 94241048.74 - 1) * 100) < 0.01,
+  `${dec.notionalPct.toFixed(3)}% vs 4.408%`);
+check('almost all of the dollar move is the price move', dec.priceShare > 0.98,
+  `${(dec.priceShare * 100).toFixed(1)}%`);
+check('the cross term is carried, not dropped', Math.abs(dec.cross) > 0 && Math.abs(dec.cross) < 0.1,
+  `${dec.cross.toFixed(5)}`);
+check('contracts and dollars are not the same number', Math.abs(dec.notionalPct - dec.fromContracts) > 4);
+check('a missing price leaves the decomposition undefined rather than guessed',
+  decomposeOi({ contractsPct: 1, pricePct: null }) === null);
+check('identity holds for a pure contracts change with price flat',
+  Math.abs(decomposeOi({ contractsPct: 3, pricePct: 0 }).notionalPct - 3) < 1e-9);
+check('identity holds for a pure price change with contracts flat',
+  Math.abs(decomposeOi({ contractsPct: 0, pricePct: 5 }).notionalPct - 5) < 1e-9);
+
+const words = formatOiVsPrice({ oiChangePct: REAL.contractsPct, priceChangePct: REAL.pricePct });
+check('the copy reports contracts', /in contracts/.test(words));
+check('the copy reports the price move over the same span', /same span/.test(words));
+check('the copy still reports the dollar figure', /In dollars/.test(words));
+check('the copy attributes the dollar figure to both parts',
+  /price contributed/.test(words) && /positions contributed/.test(words));
+check('the copy calls this one price rather than positioning', /price, not positioning/.test(words));
+check('the comparison copy carries no em dashes', !words.includes('\u2014'));
+const positioning = formatOiVsPrice({ oiChangePct: 2.5, priceChangePct: 0.1 });
+check('a real positioning change is described as one', /a real \nchange|a real change/.test(positioning)
+  || /real/.test(positioning));
+check('unmeasurable price degrades to contracts only, saying so',
+  /cannot be compared/.test(formatOiVsPrice({ oiChangePct: 1, priceChangePct: null })));
+console.log('\n--- the comparison, rendered ---\n' + words + '\n');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

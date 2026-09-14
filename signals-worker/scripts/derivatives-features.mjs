@@ -117,6 +117,30 @@ export function assetDerivFeatures(rows, prices) {
     // The case that motivated all of this: leverage piling in while price has
     // NOT yet moved. Raw OI change cannot express it and a level percentile
     // cannot either — it needs both series in the same number.
+    //
+    // Worth recording what this subtraction actually does, because it is the
+    // reason this feature survived a measurement bug that invalidated others.
+    // oiChg7 is computed on oi_usd, which is contracts x mark price, so
+    //
+    //     1 + notional = (1 + contracts) x (1 + price)
+    //     notional - price = contracts x (1 + price)
+    //
+    // Subtracting the price change is therefore very nearly the correct
+    // price-neutralisation: this feature is the CONTRACTS change, scaled by
+    // (1 + price change). Elsewhere in this project the same oi_usd column was
+    // used WITHOUT that subtraction and turned out to be the price move
+    // restated at r = 0.998 (docs/PREDICTION_WEIGHTS_EVIDENCE.md). Here the
+    // subtraction removes it, which is why oi_px_divergence is the one
+    // derivatives feature the cross-sectional lane ever selected.
+    //
+    // The residual scaling is not zero: over a 7-day window with a 30% price
+    // move the feature is ~30% larger than the true contracts change, and that
+    // error is correlated with price. The exact form is
+    // ((1 + n/100) / (1 + p/100) - 1) * 100, computable from these same two
+    // series with no new data. It is deliberately NOT swapped in here: this
+    // feature carries a fitted coefficient (t = 3.79, Newey-West, 1,091
+    // sections) and redefining it silently invalidates that fit. Any change
+    // belongs in a fresh fit, as a separate candidate feature.
     const oiPxDivergence = (oiChg7 != null && pxChg7 != null) ? oiChg7 - pxChg7 : null;
 
     // Top traders vs everyone else. >1 means the size-weighted book is longer

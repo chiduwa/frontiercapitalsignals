@@ -2896,7 +2896,13 @@ CREATE TABLE IF NOT EXISTS flush_event (
   ref_price REAL NOT NULL,          -- pre-event extreme the move is measured from
   extreme_price REAL NOT NULL,      -- furthest price reached during the move
   move_pct REAL NOT NULL,
-  oi_change_pct REAL,               -- across the move; the classifying variable
+  oi_change_pct REAL,               -- across the move, in CONTRACTS; the classifying variable
+  -- The same change in dollars, and the price move over the identical span.
+  -- Dollar open interest is contracts x price, so it carries the price move
+  -- inside it; keeping all three lets any row be reconciled and compared
+  -- rather than taken on trust. See migration 0040.
+  oi_notional_change_pct REAL,
+  price_change_pct REAL,
   classification TEXT NOT NULL CHECK (classification IN ('liquidation', 'new-position', 'ambiguous')),
   expected_recovery REAL,           -- from the measured medians, not a forecast
   -- Outcome, filled in later by whatever scores these. Left NULL on write so a

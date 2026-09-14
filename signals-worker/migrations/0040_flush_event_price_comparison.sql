@@ -1,0 +1,32 @@
+-- Store the price move next to the open-interest move, so the two can always
+-- be compared on a row that was never re-derived.
+--
+-- Open interest in dollars is contracts multiplied by mark price, exactly:
+--
+--     1 + notional = (1 + contracts) x (1 + price)
+--
+-- so a dollar-denominated open-interest change carries the price move inside
+-- it. Over 274 live rows of this table joined to oi_tick, the dollar figure
+-- correlated r = 0.998 with the price move over the same window and matched
+-- its sign 97.8% of the time; contracts correlated 0.354. The two columns
+-- disagreed on the sign of the change 33.9% of the time, against 33.8% on
+-- 804,082 historical bars from an entirely separate source. See
+-- docs/OI_MEASUREMENT_EVIDENCE.md and docs/PREDICTION_WEIGHTS_EVIDENCE.md.
+--
+-- The dollar figure is not being dropped. It is what most venues quote and it
+-- is genuinely what a dollar-denominated book is exposed to. It was only ever
+-- misleading when it arrived WITHOUT the price move beside it, which is what
+-- these two columns fix: every row now carries all three of contracts, dollars
+-- and price over the identical span, and they reconcile by the identity above.
+--
+-- oi_notional_change_pct was previously stuffed into `notes` as a bare string,
+-- which also collided with the JSON that scripts/flush-audit.mjs writes there.
+-- Promoting it to a real column ends both problems. Existing rows keep their
+-- string in notes and read NULL here; the audit script parses around it.
+ALTER TABLE flush_event ADD COLUMN oi_notional_change_pct REAL;
+
+-- Price over the SAME span the open interest was measured across. Deliberately
+-- not move_pct, which is the excursion from the reference extreme to the
+-- furthest point reached -- a different quantity over a different window that
+-- will not reconcile against the open-interest figures.
+ALTER TABLE flush_event ADD COLUMN price_change_pct REAL;
