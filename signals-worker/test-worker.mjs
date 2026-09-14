@@ -537,7 +537,12 @@ check('dashboard polls the fresh measured scalp route, never the deprecated intr
 const scalpRendererSource = pageText.slice(pageText.indexOf('function renderScalp(d)'), pageText.indexOf('function meter(score)'));
 check('scalp renderer consumes the measurement-only assets contract, not the old directional watchlist', scalpRendererSource.includes('d.assets.map') && !scalpRendererSource.includes('d.watchlist') && !scalpRendererSource.includes('a.dir'));
 check('scalp renderer never turns the unvalidated range entry candidate into a displayed trade call', !scalpRendererSource.includes('a.range.entry') && !scalpRendererSource.includes('r.entry'));
-const dayRangeRendererSource = pageText.slice(pageText.indexOf('var dr = d.dayRange'), pageText.indexOf("classWithheldBanner('stock'"));
+// Bounded by the day-range panel's own terminator rather than by whichever
+// section happened to be emitted next: the renderer is assembled into zones
+// now, so keying this slice to an unrelated section's position silently
+// inverted it (start > end) and made the check pass an empty string.
+const dayRangeStart = pageText.indexOf('var dr = d.dayRange');
+const dayRangeRendererSource = pageText.slice(dayRangeStart, pageText.indexOf('+PANEL_END;', dayRangeStart));
 check('the duplicate day-range panel also withholds its unvalidated fade direction', !dayRangeRendererSource.includes('x.entry.side') && dayRangeRendererSource.includes('direction intentionally withheld until independently validated'));
 check('scalp feed fails closed on missing, stale, or errored live prices', pageText.includes('scalpPricesAreFresh') && pageText.includes('SCALP_MAX_PRICE_AGE_MS') && pageText.includes('renderScalpUnavailable') && pageText.includes('No live scalp context shown'));
 check('abstained rows have an explicit neutral/withheld branch instead of falling through to long', pageText.includes("r.dir===1)?'long'") && pageText.includes("r.dir===-1)?'short':'withheld'") && pageText.includes('— WITHHELD') && pageText.includes('timeframe withheld'));

@@ -6538,6 +6538,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .quicknav{display:flex;flex-wrap:wrap;gap:10px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:14px 0 0;margin:0 0 26px}
   .qnav-link{display:inline-flex;align-items:center;justify-content:center;padding:7px 10px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;background:rgba(16,24,40,.7)}
   .qnav-link:hover{color:var(--paper);border-color:rgba(255,178,36,.35);text-decoration:none}
+  .qnav-spacer{flex:1;min-width:0}
+  .qnav-btn{cursor:pointer;font-family:var(--mono);line-height:1}
+  @media(max-width:760px){.qnav-spacer{display:none}}
 
   .xp-banner{background:rgba(255,178,36,.07);border:1px solid rgba(255,178,36,.35);border-left:3px solid var(--amber);padding:12px 16px;margin:22px 0;font-family:var(--mono);font-size:11.5px;line-height:1.7;color:var(--muted)}
   .xp-banner b{color:var(--amber);text-transform:uppercase;letter-spacing:.03em}
@@ -6549,7 +6552,56 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .tile .sub{font-family:var(--mono);font-size:11px;margin-top:4px}
   .up{color:var(--up)} .down{color:var(--down)} .flat{color:var(--muted)} .amber-t{color:var(--amber)}
 
-  .boards{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-bottom:44px}
+  .boards{display:flex;flex-direction:column;margin-bottom:44px}
+  /* ---- Zones and the collapsible panel primitive ------------------------
+     The page had grown to a dozen always-open sections stacked in one
+     column. Related sections are now grouped under a labelled zone rule,
+     and every heavy table is a collapsible panel whose open/closed state
+     is remembered per visitor. Panels are rebuilt from scratch on each hourly
+     re-render, so the state lives in localStorage, not in the DOM. */
+  .zone{display:flex;flex-direction:column;gap:16px;margin:0 0 34px}
+  .zone-head{display:flex;align-items:center;gap:14px;margin:30px 0 4px}
+  .zone-head:first-child{margin-top:0}
+  .zone-head h2{font-family:var(--mono);font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--paper);font-weight:600;white-space:nowrap}
+  .zone-head .zl{flex:1;height:1px;background:var(--line);min-width:20px}
+  .zone-head .zn{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);white-space:nowrap}
+
+  .panel{border:1px solid var(--line);background:var(--ink-1)}
+  .panel>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:16px;padding:14px 18px}
+  .panel>summary::-webkit-details-marker{display:none}
+  .panel>summary:hover{background:var(--ink-2)}
+  .panel>summary:hover .ps-chev{border-color:var(--amber)}
+  .ps-main{flex:1;min-width:0}
+  .ps-main .eyebrow{display:block}
+  .ps-title{display:block;font-family:var(--disp);font-weight:800;font-size:17px;letter-spacing:-.01em;margin-top:3px;color:var(--paper)}
+  .ps-right{display:flex;align-items:center;gap:14px;flex:0 0 auto}
+  .ps-meta{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);text-align:right;white-space:nowrap}
+  .ps-meta b{color:var(--paper);font-weight:600}
+  .ps-meta .amber-t{color:var(--amber)}
+  .ps-chev{width:8px;height:8px;flex:0 0 auto;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);transform:translateY(-2px) rotate(45deg);transition:transform .18s ease,border-color .18s ease}
+  .panel[open]>summary .ps-chev{transform:translateY(2px) rotate(-135deg)}
+  .panel-body{padding:0 0 2px}
+  .panel-body>.dr-note,.panel-body>.rt-sub{padding:0 18px}
+  .panel.long{border-top:2px solid var(--amber)}
+  .panel.short{border-top:2px solid var(--down)}
+  .panel.favorites{border-top:2px solid var(--up)}
+  .panel.withheld{border-top:2px solid var(--muted)}
+  .panel.learn{border-top:2px solid var(--muted)}
+  .panel.timing{border-top:2px solid var(--up)}
+  .board-pair{display:flex;flex-direction:column;gap:16px}
+  .panel,.panel-body,.board-pair>.panel{min-width:0}
+  /* The zone note is nowrap context, so on a narrow screen it cannot shrink
+     and pushes the whole page into a horizontal scroll. It is decorative --
+     drop it and let the heading and rule carry the zone. */
+  @media(max-width:760px){
+    .zone-head{flex-wrap:wrap;margin-top:24px}
+    .zone-head .zn{display:none}
+    .ps-title{font-size:15px}
+    .panel>summary{gap:10px;padding:12px 14px}
+    .ps-meta{font-size:9px;letter-spacing:.1em;white-space:normal;max-width:130px}
+  }
+  @media (prefers-reduced-motion:reduce){.ps-chev{transition:none}}
+
   .board{background:var(--ink-1);border:1px solid var(--line)}
   .board.long{border-top:2px solid var(--amber)}
   .board.short{border-top:2px solid var(--down)}
@@ -6667,7 +6719,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .flip-note{display:block;color:var(--amber);font-size:10px;letter-spacing:.04em;margin-top:3px;font-family:var(--disp);cursor:help;font-weight:600}
   .ltp-note{display:block;color:var(--muted);font-size:10px;letter-spacing:.04em;margin-top:3px;font-family:var(--disp);cursor:help}
 
-  .track-record{background:var(--ink-1);border:1px solid var(--line);border-top:2px solid var(--amber);margin-bottom:44px;padding:18px 18px 6px}
+  .track-record{padding:2px 18px 14px}
   .tr-title{font-weight:800;font-size:17px;letter-spacing:-.01em;margin-top:3px}
   .tr-empty{color:var(--muted);font-size:12.5px;line-height:1.75;max-width:760px;font-family:var(--mono);padding:2px 0 16px}
   .tr-list{display:flex;flex-direction:column;gap:1px;background:var(--line);margin-top:14px}
@@ -6706,11 +6758,11 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .notice b{color:var(--paper)}
   .notice code{color:var(--amber)}
 
-  details{border:1px solid var(--line);background:var(--ink-1);margin-bottom:44px}
-  summary{cursor:pointer;padding:15px 18px;font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);list-style:none;display:flex;justify-content:space-between}
-  summary::-webkit-details-marker{display:none}
-  summary::after{content:'+';color:var(--amber);font-size:14px}
-  details[open] summary::after{content:'–'}
+  #methodology{border:1px solid var(--line);background:var(--ink-1);margin-bottom:44px}
+  #methodology>summary{cursor:pointer;padding:15px 18px;font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);list-style:none;display:flex;justify-content:space-between}
+  #methodology>summary::-webkit-details-marker{display:none}
+  #methodology>summary::after{content:'+';color:var(--amber);font-size:14px}
+  #methodology[open]>summary::after{content:'–'}
   .method{padding:4px 18px 22px;color:var(--muted);font-size:13px;line-height:1.75;max-width:880px}
   .method p{margin-bottom:12px}
   .method b{color:var(--paper);font-weight:600}
@@ -6726,7 +6778,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     .mast-links{gap:8px 10px}
     .quicknav{gap:8px;padding-top:12px}
     .qnav-link{flex:1 1 calc(50% - 8px)}
-    .board-head,.track-record,.intraday,.notice,summary,.method{padding-left:14px;padding-right:14px}
+    .board-head,.track-record,.intraday,.notice,summary,.method,.panel>summary,.panel-body>.dr-note,.panel-body>.rt-sub,.rt-head,.rt-table,.rt-eps{padding-left:14px;padding-right:14px}
     .tr-row{align-items:flex-start}
     .tr-asset,.tr-range-wrap{min-width:0}
     table{font-size:12px}
@@ -6760,37 +6812,57 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     .id-card{padding:10px}
     .tr-row{gap:8px}
     .tr-price,.tr-score,.tr-samples,.tr-class{min-width:0;text-align:left}
-    .day-range{margin:18px 0 8px;padding:14px 16px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
-    .dr-title{font-weight:700;margin:2px 0 6px}
-    .dr-note{font-size:12px;line-height:1.5;color:var(--muted);margin-bottom:10px}
-    .dr-list{display:flex;flex-direction:column;gap:4px}
-    .dr-row{display:grid;grid-template-columns:minmax(56px,.6fr) minmax(64px,.7fr) minmax(56px,.6fr) minmax(120px,1.2fr) minmax(84px,.9fr) minmax(104px,1fr) minmax(150px,1.6fr);gap:8px;align-items:baseline;padding:6px 8px;border-radius:6px;font-size:13px;overflow-x:auto}
-    .dr-row.dr-up{background:color-mix(in srgb,var(--down) 12%,transparent)}
-    .dr-row.dr-down{background:color-mix(in srgb,var(--up) 12%,transparent)}
-    .dr-row.dr-quiet{opacity:.6}
-    .best-hours{margin:18px 0 8px;padding:14px 16px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
-    .bh-head,.bh-row{display:grid;grid-template-columns:minmax(70px,.7fr) minmax(200px,1.4fr) minmax(200px,1.4fr);gap:10px;align-items:baseline}
-    .bh-head{font-size:10px;letter-spacing:.06em;color:var(--muted);margin-bottom:6px}
-    .bh-row{padding:6px 8px;border-radius:6px;font-size:13px}
-    .bh-row:nth-child(odd){background:color-mix(in srgb,var(--line) 22%,transparent)}
-    .bh-sym{font-weight:700}
-    .bh-cell{display:flex;gap:8px;flex-wrap:wrap;align-items:baseline}
-    .bh-buy{font-weight:700;color:var(--up)}
-    .bh-sell{font-weight:700;color:var(--down)}
-    .bh-when{font-size:11px;color:var(--muted)}
-    .bh-stat{font-variant-numeric:tabular-nums;font-size:12px}
-    .bh-cost{font-size:10px;color:var(--amber);border:1px solid var(--amber);border-radius:3px;padding:0 4px}
-    @media(max-width:720px){.bh-head{display:none}.bh-row{grid-template-columns:1fr;row-gap:2px}}
-    .dr-row.dr-dislocated{background:color-mix(in srgb,var(--amber) 14%,transparent)}
-    .dr-cls{font-size:9px;font-weight:600;color:var(--muted);margin-left:4px;vertical-align:super}
-    .dr-sym{font-weight:700}
-    .dr-mult{font-variant-numeric:tabular-nums;font-weight:600}
-    .dr-move,.dr-med,.dr-used,.dr-pos{font-variant-numeric:tabular-nums;color:var(--muted)}
-    .dr-entry{font-weight:700;margin-right:6px}
-    .dr-entry.dr-short{color:var(--down)}
-    .dr-entry.dr-long{color:var(--up)}
-    .dr-why{color:var(--muted);font-size:12px}
-    @media(max-width:720px){.dr-row{grid-template-columns:1fr 1fr;row-gap:2px}}
+  }
+
+  /* ---- Day range + best hours ------------------------------------------
+     These rules were previously nested inside the 620px media query above,
+     so they applied only on phones: on every wider screen both sections
+     rendered as unstyled inline text inside a two-column grid. Lifted to
+     the top level, with their genuinely responsive parts kept below. The
+     old background:var(--panel) also referenced a variable this page never
+     defined, so it resolved to nothing. */
+  .dr-title{font-family:var(--disp);font-size:19px;font-weight:600;margin:6px 0 0;color:var(--paper)}
+  .dr-note{font-family:var(--mono);font-size:11px;line-height:1.8;color:var(--dim);margin:8px 0 14px;max-width:78ch}
+  .dr-note b{color:var(--paper);font-weight:600}
+  .dr-list{display:flex;flex-direction:column;gap:1px;background:var(--line);border:1px solid var(--line)}
+  .dr-head,.dr-row{display:grid;grid-template-columns:minmax(88px,.8fr) minmax(72px,.7fr) minmax(60px,.6fr) minmax(140px,1.2fr) minmax(92px,.9fr) minmax(112px,1fr) minmax(170px,1.7fr);gap:12px;align-items:baseline;padding:8px 12px;font-family:var(--mono);font-size:11.5px;background:var(--ink-1)}
+  .dr-head{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+  .dr-row.dr-up{background:color-mix(in srgb,var(--down) 12%,var(--ink-1))}
+  .dr-row.dr-down{background:color-mix(in srgb,var(--up) 12%,var(--ink-1))}
+  .dr-row.dr-dislocated{background:color-mix(in srgb,var(--amber) 14%,var(--ink-1))}
+  .dr-row.dr-quiet{opacity:.55}
+  .dr-cls{font-size:9px;font-weight:600;color:var(--muted);margin-left:4px;vertical-align:super}
+  .dr-sym{font-weight:700;color:var(--paper)}
+  .dr-mult{font-variant-numeric:tabular-nums;font-weight:600;color:var(--paper)}
+  .dr-move,.dr-med,.dr-used,.dr-pos{font-variant-numeric:tabular-nums;color:var(--muted)}
+  .dr-entry{font-weight:700;margin-right:6px}
+  .dr-entry.dr-short{color:var(--down)}
+  .dr-entry.dr-long{color:var(--up)}
+  .dr-why{color:var(--dim);font-size:10.5px;font-family:var(--disp);line-height:1.45}
+
+  .bh-list{display:flex;flex-direction:column;gap:1px;background:var(--line);border:1px solid var(--line)}
+  .bh-head,.bh-row{display:grid;grid-template-columns:minmax(90px,.7fr) minmax(200px,1.4fr) minmax(200px,1.4fr);gap:12px;align-items:baseline;padding:8px 12px;font-family:var(--mono);font-size:11.5px;background:var(--ink-1)}
+  .bh-head{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+  .bh-sym{font-weight:700;color:var(--paper)}
+  .bh-cell{display:flex;gap:8px;flex-wrap:wrap;align-items:baseline}
+  .bh-buy{font-weight:700;color:var(--up)}
+  .bh-sell{font-weight:700;color:var(--down)}
+  .bh-when{font-size:10.5px;color:var(--muted)}
+  .bh-stat{font-variant-numeric:tabular-nums;font-size:11px;color:var(--paper);cursor:help}
+  .bh-cost{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--amber);border:1px solid rgba(255,178,36,.4);border-radius:3px;padding:1px 5px;cursor:help}
+  /* Below these breakpoints the grid header is dropped, so each cell names
+     itself instead -- the same trick the board tables use for their thead. */
+  .dr-row>span[data-l]::before,.bh-cell[data-l]::before{display:none}
+  @media(max-width:980px){
+    .dr-head{display:none}
+    .dr-row{grid-template-columns:1fr 1fr;row-gap:4px}
+    .dr-row .dr-act{grid-column:1/-1}
+    .dr-row>span[data-l]::before{display:inline;content:attr(data-l) ' ';color:var(--dim);font-size:9px;letter-spacing:.1em;text-transform:uppercase;margin-right:4px}
+  }
+  @media(max-width:720px){
+    .bh-head{display:none}
+    .bh-row{grid-template-columns:1fr;row-gap:6px}
+    .bh-cell[data-l]::before{display:block;content:attr(data-l);color:var(--dim);font-size:9px;letter-spacing:.1em;text-transform:uppercase;flex:1 0 100%;margin-bottom:1px}
   }
 </style>
 </head>
@@ -6833,11 +6905,15 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   <nav class="quicknav" aria-label="Quick navigation">
     <a class="qnav-link" href="#overview">Overview</a>
     <a class="qnav-link" href="#intraday">Intraday</a>
-    <a class="qnav-link" href="#boards">Boards</a>
-    <a class="qnav-link" href="#trackRecord">Track record</a>
-    <a class="qnav-link" href="#marketContext">Cycle context</a>
-    <a class="qnav-link" href="#quantResearch">Quant research</a>
+    <a class="qnav-link" href="#screens">Live screens</a>
+    <a class="qnav-link" href="#learning">Retrospective</a>
+    <a class="qnav-link" href="#watchlists">Watchlists</a>
+    <a class="qnav-link" href="#timing">Timing &amp; range</a>
+    <a class="qnav-link" href="#research">Research</a>
     <a class="qnav-link" href="#methodology">Methodology</a>
+    <span class="qnav-spacer"></span>
+    <button class="qnav-link qnav-btn" type="button" id="expandAll">Expand all</button>
+    <button class="qnav-link qnav-btn" type="button" id="collapseAll">Collapse all</button>
   </nav>
 
   <div class="xp-banner" role="note">
@@ -6854,11 +6930,12 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   <main class="boards" id="boards">
   </main>
 
-  <section class="track-record" id="trackRecord" aria-label="Prediction track record"></section>
-
-  <section class="track-record" id="marketContext" aria-label="Market cycle context"></section>
-
-  <section class="track-record" id="quantResearch" aria-label="Automatic quant research"></section>
+  <div class="zone-head" id="research"><h2>Research and track record</h2><span class="zl"></span><span class="zn">Evidence behind the calls</span></div>
+  <div class="zone">
+    <div id="trackRecord"></div>
+    <div id="marketContext"></div>
+    <div id="quantResearch"></div>
+  </div>
 
   <details id="methodology">
     <summary>Methodology and data</summary>
@@ -6897,6 +6974,49 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   var REFETCH_MS = 10*60*1000;
   var nextCheckAt = Date.now() + REFETCH_MS;
   var state = { data:null, error:null, sort:{} };
+
+  // Collapsible panels. renderBoards() replaces its whole subtree on every
+  // hourly refresh AND on every sort click, so the DOM cannot hold this
+  // state -- it lives in localStorage and is re-applied while the markup is
+  // built. Blocked or unavailable storage simply falls back to the defaults.
+  var PANEL_KEY='fcs_signals_panels_v1';
+  var panelState={};
+  try{ panelState=JSON.parse(localStorage.getItem(PANEL_KEY))||{}; }catch(e){ panelState={}; }
+  function savePanelState(){ try{ localStorage.setItem(PANEL_KEY,JSON.stringify(panelState)); }catch(e){} }
+  function panelIsOpen(id,dflt){
+    return Object.prototype.hasOwnProperty.call(panelState,id) ? panelState[id]===true : dflt!==false;
+  }
+  // Whatever a collapsed panel is hiding, its summary still has to carry the
+  // headline -- a count, a share, the dominant failure cause. A panel that
+  // reads as empty when shut is a panel that hides the number that mattered.
+  function panelStart(o){
+    return '<details class="panel '+(o.tone||'')+'" id="panel-'+o.id+'" data-panel="'+o.id+'"'
+      +(panelIsOpen(o.id,o.open)?' open':'')+'>'
+      +'<summary class="panel-sum">'
+        +'<span class="ps-main"><span class="eyebrow">'+(o.eyebrow||'')+'</span>'
+        +'<span class="ps-title">'+esc(o.title)+'</span></span>'
+        +'<span class="ps-right">'+(o.meta?'<span class="ps-meta">'+o.meta+'</span>':'')
+        +'<span class="ps-chev"></span></span>'
+      +'</summary><div class="panel-body">';
+  }
+  var PANEL_END='</div></details>';
+  function wirePanels(root){
+    if(!root||!root.querySelectorAll) return;
+    var list=root.querySelectorAll('details[data-panel]');
+    for(var i=0;i<list.length;i++){
+      (function(el){
+        el.addEventListener('toggle',function(){
+          panelState[el.getAttribute('data-panel')]=el.open;
+          savePanelState();
+          if(el.open) pushEvent('signals_panel_open',{panel:el.getAttribute('data-panel')});
+        });
+      })(list[i]);
+    }
+  }
+  function zoneHead(id,title,note){
+    return '<div class="zone-head" id="'+id+'"><h2>'+esc(title)+'</h2><span class="zl"></span>'
+      +(note?'<span class="zn">'+esc(note)+'</span>':'')+'</div>';
+  }
 
   // Base-path aware so the page works at / on the origin and at /signals/
   // when mounted behind the Cloudflare proxy worker.
@@ -6963,9 +7083,15 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     var el=$('marketContext');
     if(!el) return;
     var ctx=d&&d.marketContext;
-    var head='<div><div class="eyebrow">MARKET CYCLE · SHADOW RESEARCH</div><div class="tr-title">Context being tested, not assumed</div></div>';
+    function ctxPanel(meta,body){
+      return panelStart({id:'marketContext', tone:'learn', open:false,
+        eyebrow:'MARKET CYCLE &middot; <b>SHADOW RESEARCH</b>',
+        title:'Context being tested, not assumed', meta:meta})
+        +'<div class="track-record">'+body+'</div>'+PANEL_END;
+    }
     if(!ctx||!ctx.metrics||!Object.keys(ctx.metrics).length){
-      el.innerHTML=head+'<div class="tr-empty">No point-in-time cycle context has been archived yet. No cycle value is inferred or substituted while the daily history warms up.</div>';
+      el.innerHTML=ctxPanel('WARMING UP','<div class="tr-empty">No point-in-time cycle context has been archived yet. No cycle value is inferred or substituted while the daily history warms up.</div>');
+      wirePanels(el);
       return;
     }
     var labels={btc_mvrv:'BTC MVRV',btc_mayer_multiple:'Mayer / 200DMA',altcoin_season_index:'Altcoin breadth',btc_dominance_pct:'BTC dominance'};
@@ -6983,16 +7109,26 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         +'<span class="tr-samples">as of '+esc(x.date)+'</span>'
         +'</div>';
     }).join('');
-    el.innerHTML=head+'<div class="tr-empty">MVRV is the distinct on-chain valuation candidate; Mayer is its transparent moving-average control. Altcoin breadth and dominance are rotation context only. These values have <b>no live vote</b> unless a family-corrected, non-overlapping, after-cost test later confirms them on data recorded after discovery.</div><div class="tr-list">'+rows+'</div>';
+    var fresh=order.filter(function(k){return ctx.metrics[k]&&ctx.metrics[k].fresh;}).length;
+    var tracked=order.filter(function(k){return ctx.metrics[k];}).length;
+    el.innerHTML=ctxPanel('<b>'+fresh+'</b> / '+tracked+' FRESH &middot; NO LIVE VOTE',
+      '<div class="tr-empty">MVRV is the distinct on-chain valuation candidate; Mayer is its transparent moving-average control. Altcoin breadth and dominance are rotation context only. These values have <b>no live vote</b> unless a family-corrected, non-overlapping, after-cost test later confirms them on data recorded after discovery.</div><div class="tr-list">'+rows+'</div>');
+    wirePanels(el);
   }
 
   function renderQuantResearch(d){
     var el=$('quantResearch');
     if(!el) return;
     var q=d&&d.quantResearch;
-    var head='<div><div class="eyebrow">AUTOMATIC LEARNING · QUANT RESEARCH</div><div class="tr-title">Strategies must earn promotion</div></div>';
+    function qPanel(meta,body){
+      return panelStart({id:'quantResearch', tone:'learn', open:false,
+        eyebrow:'AUTOMATIC LEARNING &middot; <b>QUANT RESEARCH</b>',
+        title:'Strategies must earn promotion', meta:meta})
+        +'<div class="track-record">'+body+'</div>'+PANEL_END;
+    }
     if(!q){
-      el.innerHTML=head+'<div class="tr-empty">The research registry is unavailable. No strategy is promoted while its evidence cannot be loaded.</div>';
+      el.innerHTML=qPanel('<span class="amber-t">REGISTRY UNAVAILABLE</span>','<div class="tr-empty">The research registry is unavailable. No strategy is promoted while its evidence cannot be loaded.</div>');
+      wirePanels(el);
       return;
     }
     var confirmed=(q.decisions&&q.decisions.confirmed)||0;
@@ -7013,7 +7149,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         +'<span class="tr-samples" title="'+esc(r.reason)+'">'+esc(r.walkForward)+'</span>'
         +'</div>';
     }).join('');
-    el.innerHTML=head+summary+(rows?'<div class="tr-list">'+rows+'</div>':'');
+    el.innerHTML=qPanel('<b>'+confirmed+'</b> CONFIRMED &middot; '+provisional+' PROVISIONAL',
+      summary+(rows?'<div class="tr-list">'+rows+'</div>':''));
+    wirePanels(el);
   }
 
   // A separate, higher-frequency measurement layer. This deliberately has no
@@ -7180,9 +7318,14 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     var rows = spec ? sortRows(rowsIn, spec) : rowsIn;
     var visualSide=cfg.callsWithheld?'withheld':cfg.side;
     var eyebrow=cfg.callsWithheld?(cfg.assetClass==='crypto'?'CRYPTO':'US EQUITIES')+' · <b>SCREEN ONLY</b>':cfg.eyebrow;
-    var h='<section class="board '+visualSide+'" id="'+cfg.boardId+'" aria-label="'+cfg.title+'">';
-    h+='<div class="board-head"><div><div class="eyebrow">'+eyebrow+'</div><div class="board-title">'+cfg.title+'</div></div>';
-    h+='<div class="board-count">TOP '+(rows?rows.length:0)+' / '+(universe||0)+' SCREENED</div></div>';
+    var h=panelStart({
+      id:cfg.boardId, tone:'board '+visualSide, open:cfg.open,
+      eyebrow:eyebrow, title:cfg.title,
+      meta:'TOP <b>'+(rows?rows.length:0)+'</b> / '+(universe||0)+' SCREENED'
+    });
+    // Any disclaimer specific to this board rides inside the panel, so it is
+    // on screen exactly when the rows it qualifies are.
+    if(cfg.note) h+=cfg.note;
     h+='<div class="tbl-wrap"><table><thead><tr>';
     h+='<th>#</th>';
     SORT_COLS_LEFT.forEach(function(c){ h+=sortableTh(c, spec, cfg.boardId); });
@@ -7262,10 +7405,14 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     } else {
       h+='<tr><td colspan="8" style="text-align:left;padding:16px 10px;color:var(--dim)">No qualifying setups this hour.</td></tr>';
     }
-    h+='</tbody></table></div></section>';
+    h+='</tbody></table></div>'+PANEL_END;
     return h;
   }
 
+  // Assembled as four labelled zones rather than one long column: what the
+  // engine got wrong, what it is screening now, what it always watches, and
+  // the backward-looking timing measurements. Every heavy table is a panel
+  // that remembers whether this visitor had it open.
   function renderBoards(d){
     var b='';
     var cs=d.classSkill||{};
@@ -7276,22 +7423,14 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     var stockCallsWithheld=!(cs.stock&&cs.stock.proven===true);
     var cryptoWithheldReason=cryptoCallsWithheld&&cs.crypto?'no-demonstrated-edge':'insufficient-evidence';
     var stockWithheldReason=stockCallsWithheld&&cs.stock?'no-demonstrated-edge':'insufficient-evidence';
-    if(d.crypto.favorites && d.crypto.favorites.length){
-      b+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-favorites', eyebrow:'CRYPTO · <b>FAVORITES</b>', title:'Always tracked', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.favorites, d.crypto.favorites.length);
-    }
-    if(d.crypto.longTermPotential && d.crypto.longTermPotential.length){
-      b+='<div class="xp-banner" role="note"><b>Not a recommendation, not guaranteed, not financial advice.</b> Long-term candidates are descriptive historical lows only; no tested signal reliably predicts which specific asset will recover.</div>';
-      b+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-ltp', eyebrow:'CRYPTO · <b>LONG-TERM POTENTIAL</b>', title:'Possible multi-month/year lows', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.longTermPotential, d.crypto.longTermPotential.length);
-    }
-    if(d.stocks.longTermPotential && d.stocks.longTermPotential.length){
-      b+='<div class="xp-banner" role="note"><b>Historical context only.</b> These equities are near a fresh long-term low; the list is not a recovery forecast or recommendation.</div>';
-      b+=boardHtml({side:'favorites', assetClass:'stock', boardId:'stock-ltp', eyebrow:'EQUITIES · <b>LONG-TERM POTENTIAL</b>', title:'Possible multi-month/year lows', callsWithheld:stockCallsWithheld, withheldReason:stockWithheldReason}, d.stocks.longTermPotential, d.stocks.longTermPotential.length);
-    }
-    // Retrospective — user-requested 2026-08-31. Deliberately placed ABOVE
-    // the boards, not tucked away at the bottom: this section is the
-    // engine's own record of what it got wrong, and burying that under
-    // the calls it is currently making would invert the honesty it exists
-    // to provide. Renders nothing at all until the daily job has run.
+
+    // ---- Zone 1: retrospective ---------------------------------------------
+    // Deliberately still ABOVE the boards, not tucked away at the bottom: this
+    // section is the engine's own record of what it got wrong, and burying
+    // that under the calls it is currently making would invert the honesty it
+    // exists to provide. It is collapsible like everything else, but it opens
+    // by default and its summary carries the miss rate, so shutting it cannot
+    // make the bad news disappear. Renders nothing until the daily job runs.
     if(d.retrospective && d.retrospective.patterns && d.retrospective.patterns.length){
       var rt = d.retrospective;
       var causeLabel = {
@@ -7305,6 +7444,11 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         'caught':'Called before the move'
       };
       var totalN = rt.patterns.reduce(function(a,p){return a+p.n;},0) || 1;
+      var caughtN = rt.patterns.reduce(function(a,p){return a+(p.cause==='caught'?p.n:0);},0);
+      var worst = rt.patterns.filter(function(p){return p.cause!=='caught';})
+        .sort(function(x,y){return y.n-x.n;})[0];
+      var rtMeta = '<b>'+(totalN-caughtN)+'</b> / '+totalN+' MISSED'
+        + (worst ? ' &middot; <span class="amber-t">'+esc(String(worst.cause))+'</span>' : '');
       var pRows = rt.patterns.map(function(p){
         var pct = p.share!=null ? p.share*100 : (p.n/totalN*100);
         var isGood = p.cause==='caught';
@@ -7321,7 +7465,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       var eRows = (rt.recent||[]).slice(0,8).map(function(r){
         var tell = r.detected
           ? '<span class="rt-tell" title="Quote volume and trade count both lifted clear of their 48-hour trailing medians into a rising bar, at this time.">vol '+(r.surgeRatio!=null?r.surgeRatio.toFixed(1):'?')+'x'
-            +(r.tradeRatio!=null?' · '+r.tradeRatio.toFixed(1)+'x trades':'')+'</span>'
+            +(r.tradeRatio!=null?' &middot; '+r.tradeRatio.toFixed(1)+'x trades':'')+'</span>'
             +(r.leadHours!=null?'<span class="rt-lead-inline">'+Math.round(r.leadHours)+'h before peak</span>':'')
           : '<span class="dim">no advance volume tell</span>';
         return '<div class="rt-ep">'
@@ -7332,63 +7476,62 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           +(r.gainToPeakPct!=null && r.detected ? '<span class="rt-avail-inline" title="Available from the first tell to the peak.">+'+r.gainToPeakPct.toFixed(1)+'% available</span>' : '')
         +'</div>';
       }).join('');
-      b+='<section class="rt-wrap" aria-label="Retrospective">'
-        +'<div class="rt-head"><span class="rt-eyebrow">LEARNING · <b>RETROSPECTIVE</b></span>'
-        +'<h2 class="rt-title">What moved, and why it was missed</h2>'
-        +'<p class="rt-sub">Every large move is checked back against what the engine believed at the time, and against Binance global hourly bars to find the earliest hour the move was detectable. Failure causes are counted so the dominant one can be fixed, rather than argued about. This is the engine marking its own homework.</p></div>'
+      b+=zoneHead('learning','Engine retrospective','Failures counted, not argued')
+        +'<div class="zone">'
+        +panelStart({id:'retrospective', tone:'learn', open:true,
+          eyebrow:'LEARNING &middot; <b>RETROSPECTIVE</b>',
+          title:'What moved, and why it was missed', meta:rtMeta})
+        +'<p class="rt-sub">Every large move is checked back against what the engine believed at the time, and against Binance global hourly bars to find the earliest hour the move was detectable. Failure causes are counted so the dominant one can be fixed, rather than argued about. This is the engine marking its own homework.</p>'
         +'<div class="rt-table">'
           +'<div class="rt-row rt-hdr"><span class="rt-cause">Cause</span><span class="rt-bar"></span><span class="rt-n">Episodes</span><span class="rt-avail">Avg available</span><span class="rt-lead">Avg lead</span></div>'
           +pRows
         +'</div>'
         +(eRows?'<div class="rt-eps"><div class="rt-eps-h">Most recent episodes</div>'+eRows+'</div>':'')
-      +'</section>';
-    }
-    // Path shape of matured calls — added 2026-09-04. The boards above answer
-    // "which way"; this answers the two questions that actually decide the
-    // trade: how much better an entry the signal price usually left on the
-    // table, and how long after the call the best exit historically arrived.
-    // Backward-looking and measurement-only: every row is a track record of
-    // independent, matured, non-overlapping forecasts for that exact asset,
-    // side and horizon, and nothing here is a statement about today's setup.
-    if(d.holdingEvidence && d.holdingEvidence.rows && d.holdingEvidence.rows.length){
-      var hx = d.holdingEvidence;
-      var hRows = hx.rows.map(function(r){
-        var sideLabel = r.dir===1?'LONG':'SHORT';
-        var hLabel = r.horizonHours>=168?'7d':(Math.round(r.horizonHours)+'h');
-        var peakPct = (r.peakShare*100);
-        var adverseFirst = r.adverseFirstRate*100;
-        var lowerPct = r.adverseFirstLower!=null ? r.adverseFirstLower*100 : null;
-        return '<div class="px-row">'
-          +'<span class="px-a"><b>'+esc(r.symbol)+'</b> <span class="px-side '+(r.dir===1?'up':'down')+'">'+sideLabel+'</span> '
-            +'<span class="dim">'+hLabel+' · n='+r.n+'</span></span>'
-          +'<span class="px-bar" title="Where inside the declared horizon the best available price landed, on average."><span class="px-mark" style="left:'+peakPct.toFixed(1)+'%"></span></span>'
-          +'<span class="px-peak" title="Average time from the call to its best available price.">'+r.hoursToPeak.toFixed(1)+'h</span>'
-          +'<span class="px-best" title="Average best unrealized move in the called direction during the window.">'+(r.mfePct>=0?'+':'')+r.mfePct.toFixed(1)+'%</span>'
-          +'<span class="px-give" title="Average difference between that best price and the price at the declared horizon. This is what holding to maturity cost.">-'+r.giveBackPct.toFixed(1)+'%</span>'
-          +'<span class="px-heat" title="Average worst move against the call, and how often that worst move arrived BEFORE the best one. A high share means the signal price was usually not the best entry available.">'
-            +r.maePct.toFixed(1)+'% <span class="dim">'+Math.round(adverseFirst)+'% first'
-            +(lowerPct!=null?' ≥'+Math.round(lowerPct)+'%':'')+'</span></span>'
+        +PANEL_END
         +'</div>';
-      }).join('');
-      b+='<section class="rt-wrap" aria-label="Entry and exit timing">'
-        +'<div class="rt-head"><span class="rt-eyebrow">LEARNING · <b>ENTRY &amp; EXIT TIMING</b></span>'
-        +'<h2 class="rt-title">Where the move actually was</h2>'
-        +'<p class="rt-sub">A direction call is only half a trade. For every matured, non-overlapping forecast the engine records the best and worst prices reached inside the declared window and when each first occurred, so entry and exit can be judged on measurement instead of assumption. Sorted by how much the declared horizon gave back against its own best price — the largest numbers are the assets this engine is holding too long. Needs '+hx.minSamples+' independent matured paths before an asset, side and horizon appears at all; a thin record is shown as nothing, not as a hint.</p></div>'
-        +'<div class="rt-table">'
-          +'<div class="px-row rt-hdr"><span class="px-a">Asset / side</span><span class="px-bar">Best price landed here in the window</span><span class="px-peak">Peak at</span><span class="px-best">Best offered</span><span class="px-give">Gave back</span><span class="px-heat">Worst against / arrived first</span></div>'
-          +hRows
-        +'</div>'
-      +'</section>';
     }
+
+    // ---- Zone 2: the live screens ------------------------------------------
+    // The four directional boards, paired long/short per asset class, are the
+    // reason the page exists, so they lead and they open by default.
+    b+=zoneHead('screens','Live screens','Rebuilt hourly · crypto and US equities')+'<div class="zone">';
     b+=classWithheldBanner('crypto',cs.crypto);
-    b+=boardHtml({side:'long', assetClass:'crypto', boardId:'crypto-long', eyebrow:'CRYPTO · <b>LONG SIDE</b>', title:'Breakout watch', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.breakout, d.crypto.universe);
-    b+=boardHtml({side:'short', assetClass:'crypto', boardId:'crypto-short', eyebrow:'CRYPTO · <b>RISK SIDE</b>', title:'Breakdown risk', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.breakdown, d.crypto.universe);
-    // A class whose measured record does not clear its own no-skill baseline
-    // has its directional calls withheld (see assetClassSkill/abstainBoards).
-    // Say so plainly rather than letting a board of dir-less rows read as a
-    // rendering bug — and show the numbers behind the decision, since "we are
-    // not showing you calls" needs more justification than showing them did.
-    // Best trading hours, above the day-range read.
+    b+='<div class="board-pair">'
+      +boardHtml({side:'long', assetClass:'crypto', boardId:'crypto-long', eyebrow:'CRYPTO &middot; <b>LONG SIDE</b>', title:'Breakout watch', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.breakout, d.crypto.universe)
+      +boardHtml({side:'short', assetClass:'crypto', boardId:'crypto-short', eyebrow:'CRYPTO &middot; <b>RISK SIDE</b>', title:'Breakdown risk', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.breakdown, d.crypto.universe)
+      +'</div>';
+    b+=classWithheldBanner('stock',cs.stock);
+    b+='<div class="board-pair">'
+      +boardHtml({side:'long', assetClass:'stock', boardId:'stock-long', eyebrow:'US EQUITIES &middot; <b>LONG SIDE</b>', title:'Breakout watch', callsWithheld:stockCallsWithheld, withheldReason:stockWithheldReason}, d.stocks.breakout, d.stocks.universe)
+      +boardHtml({side:'short', assetClass:'stock', boardId:'stock-short', eyebrow:'US EQUITIES &middot; <b>RISK SIDE</b>', title:'Breakdown risk', callsWithheld:stockCallsWithheld, withheldReason:stockWithheldReason}, d.stocks.breakdown, d.stocks.universe)
+      +'</div>';
+    b+='</div>';
+
+    // ---- Zone 3: standing watchlists ---------------------------------------
+    // Not this hour's output: lists that are tracked regardless of score. The
+    // long-term-potential boards are descriptive history, so they start shut
+    // and carry their disclaimer inside, where the rows are.
+    var watch='';
+    if(d.crypto.favorites && d.crypto.favorites.length){
+      watch+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-favorites', eyebrow:'CRYPTO &middot; <b>FAVORITES</b>', title:'Always tracked', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.favorites, d.crypto.favorites.length);
+    }
+    var ltpNoteCrypto='<div class="xp-banner" role="note"><b>Not a recommendation, not guaranteed, not financial advice.</b> Long-term candidates are descriptive historical lows only; no tested signal reliably predicts which specific asset will recover.</div>';
+    var ltpNoteStock='<div class="xp-banner" role="note"><b>Historical context only.</b> These equities are near a fresh long-term low; the list is not a recovery forecast or recommendation.</div>';
+    if(d.crypto.longTermPotential && d.crypto.longTermPotential.length){
+      watch+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-ltp', open:false, note:ltpNoteCrypto, eyebrow:'CRYPTO &middot; <b>LONG-TERM POTENTIAL</b>', title:'Possible multi-month/year lows', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.longTermPotential, d.crypto.longTermPotential.length);
+    }
+    if(d.stocks.longTermPotential && d.stocks.longTermPotential.length){
+      watch+=boardHtml({side:'favorites', assetClass:'stock', boardId:'stock-ltp', open:false, note:ltpNoteStock, eyebrow:'EQUITIES &middot; <b>LONG-TERM POTENTIAL</b>', title:'Possible multi-month/year lows', callsWithheld:stockCallsWithheld, withheldReason:stockWithheldReason}, d.stocks.longTermPotential, d.stocks.longTermPotential.length);
+    }
+    if(watch) b+=zoneHead('watchlists','Watchlists','Tracked regardless of this hour’s score')+'<div class="zone">'+watch+'</div>';
+
+    // ---- Zone 4: timing and range ------------------------------------------
+    // All three are backward-looking measurement, none of them is a call, and
+    // none is what a first-time visitor came for -- so they group together at
+    // the foot of the page and start collapsed behind summaries that state
+    // their own headline.
+    var timing='';
+
     var bh = d.bestHours || {};
     var bhKeys = Object.keys(bh);
     if(bhKeys.length){
@@ -7397,6 +7540,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var bm = bh[b].buy ? bh[b].buy.minutesUntil : 9999;
         return am - bm;
       });
+      var bhSoon = bhKeys.filter(function(k){ return bh[k].buy && bh[k].buy.minutesUntil<=60; }).length;
       var bhRows = bhKeys.map(function(k){
         var x = bh[k];
         var fmtWin = function(w, kind){
@@ -7410,24 +7554,26 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         };
         return '<div class="bh-row">'
           +'<span class="bh-sym">'+esc(x.symbol)+(x.asset_class==='stock'?'<span class="dr-cls">EQ</span>':'')+'</span>'
-          +'<span class="bh-cell">'+fmtWin(x.buy,'buy')+'</span>'
-          +'<span class="bh-cell">'+fmtWin(x.sell,'sell')+'</span>'
+          +'<span class="bh-cell" data-l="Strongest up hour">'+fmtWin(x.buy,'buy')+'</span>'
+          +'<span class="bh-cell" data-l="Strongest down hour">'+fmtWin(x.sell,'sell')+'</span>'
           +'</div>';
       }).join('');
-      b+='<section class="best-hours" id="bestHours" aria-label="Best trading hours">'
-        +'<div class="eyebrow">BEST HOURS</div>'
-        +'<div class="dr-title">When this asset has actually tended to move</div>'
+      timing+=panelStart({id:'bestHours', tone:'timing', open:false,
+          eyebrow:'TIMING &middot; <b>BEST HOURS</b>',
+          title:'When this asset has actually tended to move',
+          meta:'<b>'+bhKeys.length+'</b> ASSETS'+(bhSoon?' &middot; <span class="amber-t">'+bhSoon+' WITHIN THE HOUR</span>':'')})
         +'<div class="dr-note">Mean 1-hour-forward return by UTC hour, measured on this engine&#39;s own hourly archive. '
         +'An hour is only listed if it clears a significance bar set for the number of hours &times; assets tested <b>and</b> holds the same sign across both halves of its history. '
         +'The strongest hour across the tracked coins is <b>20:00 UTC (16:00 ET)</b> &mdash; the US equity close &mdash; which matches the documented overnight effect in equities. '
         +'<b>Read the size, not just the sign:</b> these edges are around 0.05%/hour while a retail round trip costs roughly 0.12%, so on their own most do not survive fees. '
         +'They are better used to time an entry you were already going to make than as a strategy.</div>'
-        +'<div class="bh-head"><span>ASSET</span><span>STRONGEST UP HOUR</span><span>STRONGEST DOWN HOUR</span></div>'
-        +'<div class="bh-list">'+bhRows+'</div></section>';
+        +'<div class="bh-list">'
+          +'<div class="bh-head"><span>Asset</span><span>Strongest up hour</span><span>Strongest down hour</span></div>'
+          +bhRows
+        +'</div>'
+        +PANEL_END;
     }
 
-    // Day-trading range read, above the boards: the "has it moved enough
-    // today?" answer the boards themselves don't give.
     var dr = d.dayRange || {};
     var drSyms = Object.keys(dr);
     if(drSyms.length){
@@ -7438,53 +7584,107 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         if(oa !== ob) return oa - ob;
         return Math.abs(dr[b].moveInMedians||0) - Math.abs(dr[a].moveInMedians||0);
       });
+      var drExtended = drSyms.filter(function(k){
+        return dr[k].state==='extended-up'||dr[k].state==='extended-down';
+      }).length;
       var drRows = drSyms.map(function(sym){
         var x = dr[sym];
         var cls = x.state === 'extended-up' ? 'dr-up' : x.state === 'extended-down' ? 'dr-down' : x.state === 'quiet' ? 'dr-quiet' : x.state === 'dislocated' ? 'dr-dislocated' : '';
         var entry = x.watch
           ? '<span class="dr-entry">watch only</span>'
-            +'<span class="dr-why">'+esc(x.watch.reasons.join(' · '))+' · direction intentionally withheld until independently validated</span>'
+            +'<span class="dr-why">'+esc(x.watch.reasons.join(' · '))+' &middot; direction intentionally withheld until independently validated</span>'
           : x.state === 'dislocated'
             ? '<span class="dr-why">move too large to fade &mdash; treated as a dislocation or bad data, not an entry</span>'
-            : '<span class="dim">—</span>';
+            : '<span class="dim">&mdash;</span>';
         var moveTxt = (x.movePct>=0?'+':'')+x.movePct.toFixed(2)+'%';
         var medTxt = x.medianPct.toFixed(2)+'%';
         return '<div class="dr-row '+cls+'">'
           +'<span class="dr-sym">'+esc(x.symbol||sym)+(x.asset_class==='stock'?'<span class="dr-cls">EQ</span>':'')+'</span>'
-          +'<span class="dr-move" title="Move from this session&#39;s first observed price">'+moveTxt+'</span>'
-          +'<span class="dr-mult" title="Today&#39;s directional move divided by this asset&#39;s median daily high&minus;low range">'
-            +(x.moveInMedians!=null?(x.moveInMedians>=0?'+':'')+x.moveInMedians.toFixed(2)+'x':'—')+'</span>'
-          +'<span class="dr-med" title="Median daily high&minus;low over '+x.samples+' days, and what that is worth at the current price">'
+          +'<span class="dr-move" data-l="Move" title="Move from this session&#39;s first observed price">'+moveTxt+'</span>'
+          +'<span class="dr-mult" data-l="&times; median" title="Today&#39;s directional move divided by this asset&#39;s median daily high&minus;low range">'
+            +(x.moveInMedians!=null?(x.moveInMedians>=0?'+':'')+x.moveInMedians.toFixed(2)+'x':'&mdash;')+'</span>'
+          +'<span class="dr-med" data-l="Median range" title="Median daily high&minus;low over '+x.samples+' days, and what that is worth at the current price">'
             +medTxt+' ('+fmtPrice(x.medianAbs)+')</span>'
-          +'<span class="dr-used" title="How much of a normal day&#39;s full range today has already travelled">'
-            +(x.usedPct!=null?Math.round(x.usedPct)+'% used':'—')+'</span>'
-          +'<span class="dr-pos" title="Where the price sits inside today&#39;s own range">'
+          +'<span class="dr-used" data-l="Used" title="How much of a normal day&#39;s full range today has already travelled">'
+            +(x.usedPct!=null?Math.round(x.usedPct)+'% used':'&mdash;')+'</span>'
+          +'<span class="dr-pos" data-l="Position" title="Where the price sits inside today&#39;s own range">'
             +Math.round(x.posInDayRange*100)+'% of day range</span>'
           +'<span class="dr-act">'+entry+'</span>'
           +'</div>';
       }).join('');
-      b+='<section class="day-range" id="dayRange" aria-label="Daily range exhaustion">'
-        +'<div class="eyebrow">DAY RANGE</div>'
-        +'<div class="dr-title">How much of a normal day has already moved</div>'
+      timing+=panelStart({id:'dayRange', tone:'timing', open:false,
+          eyebrow:'TIMING &middot; <b>DAY RANGE</b>',
+          title:'How much of a normal day has already moved',
+          meta:(drExtended?'<span class="amber-t"><b>'+drExtended+'</b> EXTENDED</span> &middot; ':'')+drSyms.length+' TRACKED'})
         +'<div class="dr-note">Median daily range is this asset&#39;s own median high&minus;low over the last 90 days. '
         +'&ldquo;Extended&rdquo; means today&#39;s one-way move already exceeds 80% of its complete daily ranges, and the price is sitting near the day&#39;s extreme. '
         +'Session extremes are tracked from this page&#39;s own 5-minute price ticks, so they start at the first tick after 00:00 UTC. '
         +'<b>These are unvalidated range observations, not long/short calls</b> &mdash; they are shown with their evidence while the proposed fade direction stays withheld until it earns an independent track record.</div>'
-        +'<div class="dr-list">'+drRows+'</div></section>';
+        +'<div class="dr-list">'
+          +'<div class="dr-head"><span>Asset</span><span>Move</span><span>&times; median</span><span>Median range</span><span>Range used</span><span>Position</span><span>Read</span></div>'
+          +drRows
+        +'</div>'
+        +PANEL_END;
     }
 
-    b+=classWithheldBanner('stock',cs.stock);
-    b+=boardHtml({side:'long', assetClass:'stock', boardId:'stock-long', eyebrow:'US EQUITIES · <b>LONG SIDE</b>', title:'Breakout watch', callsWithheld:stockCallsWithheld, withheldReason:stockWithheldReason}, d.stocks.breakout, d.stocks.universe);
-    b+=boardHtml({side:'short', assetClass:'stock', boardId:'stock-short', eyebrow:'US EQUITIES · <b>RISK SIDE</b>', title:'Breakdown risk', callsWithheld:stockCallsWithheld, withheldReason:stockWithheldReason}, d.stocks.breakdown, d.stocks.universe);
+    // Path shape of matured calls. The boards above answer "which way"; this
+    // answers the two questions that actually decide the trade: how much
+    // better an entry the signal price usually left on the table, and how
+    // long after the call the best exit historically arrived. Backward-looking
+    // and measurement-only: every row is a track record of independent,
+    // matured, non-overlapping forecasts for that exact asset, side and
+    // horizon, and nothing here is a statement about today's setup.
+    if(d.holdingEvidence && d.holdingEvidence.rows && d.holdingEvidence.rows.length){
+      var hx = d.holdingEvidence;
+      var hWorst = hx.rows.reduce(function(a,r){ return Math.max(a, r.giveBackPct||0); }, 0);
+      var hRows = hx.rows.map(function(r){
+        var sideLabel = r.dir===1?'LONG':'SHORT';
+        var hLabel = r.horizonHours>=168?'7d':(Math.round(r.horizonHours)+'h');
+        var peakPct = (r.peakShare*100);
+        var adverseFirst = r.adverseFirstRate*100;
+        var lowerPct = r.adverseFirstLower!=null ? r.adverseFirstLower*100 : null;
+        return '<div class="px-row">'
+          +'<span class="px-a"><b>'+esc(r.symbol)+'</b> <span class="px-side '+(r.dir===1?'up':'down')+'">'+sideLabel+'</span> '
+            +'<span class="dim">'+hLabel+' &middot; n='+r.n+'</span></span>'
+          +'<span class="px-bar" title="Where inside the declared horizon the best available price landed, on average."><span class="px-mark" style="left:'+peakPct.toFixed(1)+'%"></span></span>'
+          +'<span class="px-peak" title="Average time from the call to its best available price.">'+r.hoursToPeak.toFixed(1)+'h</span>'
+          +'<span class="px-best" title="Average best unrealized move in the called direction during the window.">'+(r.mfePct>=0?'+':'')+r.mfePct.toFixed(1)+'%</span>'
+          +'<span class="px-give" title="Average difference between that best price and the price at the declared horizon. This is what holding to maturity cost.">-'+r.giveBackPct.toFixed(1)+'%</span>'
+          +'<span class="px-heat" title="Average worst move against the call, and how often that worst move arrived BEFORE the best one. A high share means the signal price was usually not the best entry available.">'
+            +r.maePct.toFixed(1)+'% <span class="dim">'+Math.round(adverseFirst)+'% first'
+            +(lowerPct!=null?' &ge;'+Math.round(lowerPct)+'%':'')+'</span></span>'
+        +'</div>';
+      }).join('');
+      timing+=panelStart({id:'pathShape', tone:'timing', open:false,
+          eyebrow:'TIMING &middot; <b>ENTRY &amp; EXIT</b>',
+          title:'Where the move actually was',
+          meta:'<b>'+hx.rows.length+'</b> SETUPS &middot; <span class="amber-t">WORST GIVE-BACK '+hWorst.toFixed(1)+'%</span>'})
+        +'<div class="dr-note">A direction call is only half a trade. For every matured, non-overlapping forecast the engine records the best and worst prices reached inside the declared window and when each first occurred, so entry and exit can be judged on measurement instead of assumption. Sorted by how much the declared horizon gave back against its own best price &mdash; the largest numbers are the assets this engine is holding too long. Needs '+hx.minSamples+' independent matured paths before an asset, side and horizon appears at all; a thin record is shown as nothing, not as a hint.</div>'
+        +'<div class="rt-table">'
+          +'<div class="px-row rt-hdr"><span class="px-a">Asset / side</span><span class="px-bar">Best price landed here in the window</span><span class="px-peak">Peak at</span><span class="px-best">Best offered</span><span class="px-give">Gave back</span><span class="px-heat">Worst against / arrived first</span></div>'
+          +hRows
+        +'</div>'
+        +PANEL_END;
+    }
+
+    if(timing) b+=zoneHead('timing','Timing and range','Backward-looking measurement, never a call')+'<div class="zone">'+timing+'</div>';
+
     $('boards').innerHTML=b;
+    wirePanels($('boards'));
   }
 
   function renderTrackRecord(d){
     var list = d.highAccuracy||[];
-    var head = '<div><div class="eyebrow">TRACK RECORD</div><div class="tr-title">Proven edge over guessing</div></div>';
     var el = $('trackRecord');
+    function trPanel(meta,body){
+      return panelStart({id:'trackRecord', tone:'long', open:false,
+        eyebrow:'EVIDENCE &middot; <b>TRACK RECORD</b>',
+        title:'Proven edge over guessing', meta:meta})
+        +'<div class="track-record">'+body+'</div>'+PANEL_END;
+    }
     if(!list.length){
-      el.innerHTML = head + '<div class="tr-empty">No asset has yet demonstrated a directional edge over its own baseline. This list used to rank by a raw hit rate that pooled price-range containment in with directional calls — but a range band is built to contain the price, so containment carried the average and assets appeared here on the strength of it. An asset now qualifies only when the lower bound on its directional accuracy clears what constant guessing would have scored in its asset class, which is a much harder and more honest bar. Empty because not enough has matured to prove it, not because nothing works.</div>';
+      el.innerHTML = trPanel('NONE PROVEN YET', '<div class="tr-empty">No asset has yet demonstrated a directional edge over its own baseline. This list used to rank by a raw hit rate that pooled price-range containment in with directional calls — but a range band is built to contain the price, so containment carried the average and assets appeared here on the strength of it. An asset now qualifies only when the lower bound on its directional accuracy clears what constant guessing would have scored in its asset class, which is a much harder and more honest bar. Empty because not enough has matured to prove it, not because nothing works.</div>');
+      wirePanels(el);
       return;
     }
     var rows = list.map(function(r){
@@ -7501,7 +7701,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         +'<span class="tr-samples">'+r.samples+' calls</span>'
         +'</div>';
     }).join('');
-    el.innerHTML = head + '<div class="tr-list">'+rows+'</div>';
+    el.innerHTML = trPanel('<b>'+list.length+'</b> WITH PROVEN EDGE', '<div class="tr-list">'+rows+'</div>');
+    wirePanels(el);
   }
 
   // Delegated so re-renders (refresh, sort change) never need re-binding.
@@ -7652,9 +7853,33 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   load();
   loadScalp();
   setTimeout(updateLivePrices, 2000); // small delay so the boards exist to patch into
-  var methodologyEl=document.querySelector('details');
+  var methodologyEl=document.getElementById('methodology');
   if(methodologyEl) methodologyEl.addEventListener('toggle',function(){
     if(methodologyEl.open) pushEvent('signals_methodology_open',{});
+  });
+
+  // Bulk controls. Setting .open fires each panel's own toggle handler, so
+  // the localStorage state stays correct without a second write path here.
+  function setAllPanels(open){
+    var list=document.querySelectorAll('details[data-panel], details#methodology');
+    for(var i=0;i<list.length;i++) list[i].open=open;
+    pushEvent('signals_panels_bulk',{action:open?'expand_all':'collapse_all'});
+  }
+  var expandBtn=document.getElementById('expandAll');
+  var collapseBtn=document.getElementById('collapseAll');
+  if(expandBtn) expandBtn.addEventListener('click',function(){ setAllPanels(true); });
+  if(collapseBtn) collapseBtn.addEventListener('click',function(){ setAllPanels(false); });
+
+  // A jump link that lands on a shut panel would show the visitor a closed
+  // summary and nothing else, so open the target on the way there.
+  var quicknavEl=document.querySelector('.quicknav');
+  if(quicknavEl) quicknavEl.addEventListener('click',function(e){
+    var a=e.target.closest&&e.target.closest('a.qnav-link');
+    if(!a) return;
+    var href=a.getAttribute('href')||'';
+    if(href.charAt(0)!=='#') return;
+    var target=document.getElementById(href.slice(1));
+    if(target&&target.tagName==='DETAILS'&&!target.open) target.open=true;
   });
   setInterval(load, REFETCH_MS);
   setInterval(updateLivePrices, LIVE_MS);
