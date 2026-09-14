@@ -1,0 +1,55 @@
+name: Signals Adaptive Research
+
+on:
+  workflow_run:
+    workflows: [Signals Daily]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signals-adaptive
+  cancel-in-progress: false
+
+jobs:
+  research:
+    # Run even after a failed archive job so stale inputs are diagnosed.
+    # Always check out trusted main, never the workflow_run event's code.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Test the causal learning and archive contracts
+        working-directory: signals-worker
+        run: node --test test-adaptive-model.mjs
+      - name: Apply additive schema
+        working-directory: signals-worker
+        run: npx --yes wrangler@4 d1 migrations apply frontier-capital-signals-reliability --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Learn and evaluate from the archive
+        working-directory: signals-worker
+        run: node scripts/adaptive-research.mjs --output reports/adaptive
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+      - name: Preserve the research report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adaptive-research-${{ github.run_id }}
+          path: signals-worker/reports/adaptive/
+          retention-days: 90
+          if-no-files-found: warn

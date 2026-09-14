@@ -59,10 +59,10 @@
 // (leadlag, timeofday, seasonal cross-asset, mktoutlier) whose CURRENT values
 // would be look-ahead at a past anchor and whose walk-forward reconstruction is
 // its own project; they are left out rather than faked. The replayed composite
-// is therefore a strict SUBSET of the live panel. That direction matters: a
-// subset can only be less informed, so skill measured here is a lower bound on
-// the live model, not an unrelated number. The per-technique vote census this
-// prints on every run makes the actual coverage visible rather than assumed.
+// uses a different input panel from live. More inputs can improve OR worsen
+// a weighted ensemble; replay skill is not a lower bound on live skill. Keep
+// the provenance and vote census visible, and compare both populations before
+// transferring conclusions.
 //
 // Usage:
 //   node scripts/replay-history.mjs --asset-class crypto --horizons 1,7
@@ -93,9 +93,9 @@ const HORIZON_DAYS_TO_MINUTES = { 1: 1440, 7: 10080 };
 // How many anchors between reliability-map folds. The map is advanced forward
 // in time from the replay's own matured outcomes, so folding on every anchor
 // would be exact but doubles the bookkeeping; folding every 7 anchors means the
-// weights at a given anchor reflect evidence up to at most 7 days stale. Stale
-// in the CONSERVATIVE direction — less information than the live model would
-// have had — so it can only understate skill, never manufacture it.
+// weights at a given anchor reflect evidence up to at most 7 days stale.
+// This cannot leak future outcomes, but stale weights can improve or worsen
+// performance. It is a replay/live difference, not a conservative guarantee.
 const RELIABILITY_FOLD_EVERY = 7;
 
 // A technique needs at least this many casts within a single period before that
@@ -547,7 +547,8 @@ async function replayClass(assetClass, horizonDaysList, { budget, dryRun, withTe
           if (bi !== undefined) benchCloses = benchBars.slice(0, bi + 1).map((b) => b.close);
         }
 
-        const m = replayMetrics(symbol, bars, i, { kind: assetClass, extras: panel, benchCloses });
+        const m = replayMetrics(symbol, bars, i, { kind: assetClass, extras: panel, benchCloses,
+          benchBars: benchBars ? benchBars.filter(b => b.date <= anchor) : null });
         if (!m) continue;
 
         const c = confluence(m, assetClass, reliability.map, ctx);

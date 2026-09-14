@@ -1697,6 +1697,25 @@ export function correlationWithBenchmark(closes, benchCloses, lookback = 30) {
   return pearsonCorr(retsA.slice(-n), retsB.slice(-n));
 }
 
+// Provider arrays can end on different days or skip a missing observation.
+// Align BOTH endpoints of each return, never just trailing array positions.
+// Keep correlationWithBenchmark for seasonal analogs, whose windows are
+// deliberately relative to different years and have no common calendar dates.
+export function datedBenchmarkCorrelation(bars, benchmarkBars, lookback = 30) {
+  if (!bars?.length || !benchmarkBars?.length) return null;
+  const benchmark = new Map(benchmarkBars.filter(b => b.date && Number.isFinite(b.close) && b.close > 0).map(b => [b.date, b.close]));
+  const ordered = [...new Map(bars.filter(b => b.date && Number.isFinite(b.close) && b.close > 0)
+    .map(b => [b.date, b])).values()].sort((a, b) => a.date.localeCompare(b.date));
+  const a = [], b = [];
+  for (let i = Math.max(1, ordered.length - lookback); i < ordered.length; i++) {
+    const from = ordered[i - 1], to = ordered[i];
+    if (!(benchmark.get(from.date) > 0 && benchmark.get(to.date) > 0)) continue;
+    a.push(to.close / from.close - 1);
+    b.push(benchmark.get(to.date) / benchmark.get(from.date) - 1);
+  }
+  return a.length >= 10 ? pearsonCorr(a, b) : null;
+}
+
 // Correlation between leader's return at day T and follower's return at
 // day T+lag, both DATE-aligned first (unlike correlationWithBenchmark,
 // which assumes its two inputs are already same-index trailing windows —
@@ -5076,17 +5095,17 @@ async function yahooDaily(symbol, range = '1y') {
   const r = j && j.chart && j.chart.result && j.chart.result[0];
   if (!r || !r.timestamp) throw new Error(`empty chart for ${symbol}`);
   const q = r.indicators.quote[0];
-  const closes = [], volumes = [], highs = [], lows = [];
+  const closes = [], volumes = [], highs = [], lows = [], dates = [];
   for (let i = 0; i < r.timestamp.length; i++) {
     if (q.close[i] != null) {
       closes.push(q.close[i]);
       volumes.push(q.volume[i] || 0);
       highs.push(q.high[i] != null ? q.high[i] : q.close[i]);
       lows.push(q.low[i] != null ? q.low[i] : q.close[i]);
+      dates.push(new Date(r.timestamp[i] * 1000).toISOString().slice(0, 10));
     }
   }
   const price = (r.meta && r.meta.regularMarketPrice) || closes[closes.length - 1];
-  const dates = r.timestamp.map((t) => new Date(t * 1000).toISOString().slice(0, 10));
   return { symbol, price, closes, volumes, highs, lows, dates, source: 'yahoo' };
 }
 
@@ -5262,7 +5281,9 @@ export function buildCryptoMetrics(item, extras = {}) {
   // 365, not stocks' 252: crypto trades every calendar day, not just
   // weekdays, so a "1-year cycle" in daily bars is 365 bars here.
   const dwell = haveDaily ? dwellAtExtreme(closes, 365) : null;
-  const corr = haveDaily && extras.benchCloses ? correlationWithBenchmark(closes, extras.benchCloses, 30) : null;
+  const corr = haveDaily && extras.benchBars
+    ? datedBenchmarkCorrelation(daily.bars, extras.benchBars, 30)
+    : haveDaily && extras.benchCloses ? correlationWithBenchmark(closes, extras.benchCloses, 30) : null;
   const seasonal = haveDaily ? seasonalAnalog(closes, 365) : null;
   const fib = haveDaily ? fibonacciLevels(closes) : null;
   const dailyMoves = haveDaily ? dailyMovementStats(extras.daily.bars || []) : null;
@@ -5331,7 +5352,7 @@ export function buildCryptoMetrics(item, extras = {}) {
   };
 }
 
-export function buildStockMetrics(row, valuation, override, benchCloses, ivHist) {
+export function buildStockMetrics(row, valuation, override, benchCloses, ivHist, benchDates) {
   const { symbol, price, closes, volumes, highs, lows } = row;
   if (!closes || closes.length < 60) return null;
 
@@ -5351,7 +5372,10 @@ export function buildStockMetrics(row, valuation, override, benchCloses, ivHist)
   const volLookback = bestVolLookback(closes);
   const volPct = realizedVolPct(closes, volLookback ? volLookback.lookback : undefined);
   const dwell = dwellAtExtreme(closes, 252);
-  const corr = benchCloses ? correlationWithBenchmark(closes, benchCloses, 30) : null;
+  const corr = row.dates && benchDates && benchCloses
+    ? datedBenchmarkCorrelation(closes.map((close, i) => ({ date: row.dates[i], close })),
+      benchCloses.map((close, i) => ({ date: benchDates[i], close })), 30)
+    : benchCloses ? correlationWithBenchmark(closes, benchCloses, 30) : null;
   const seasonal = seasonalAnalog(closes, 252);
   const fib = fibonacciLevels(closes);
   const dailyMoves = dailyMovementStats(closes.map((close, i) => ({ date: row.dates?.[i] || null, close })));
@@ -5901,13 +5925,14 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
 
     const btcIdx = qualifying.findIndex(c => c.id === 'bitcoin');
     const btcCloses = btcIdx >= 0 && histories[btcIdx] && !histories[btcIdx]._error ? histories[btcIdx].closes : null;
+    const btcBars = btcIdx >= 0 && histories[btcIdx] && !histories[btcIdx]._error ? histories[btcIdx].bars : null;
 
     const metrics = qualifying
       .map((c, i) => {
         const sym = (c.symbol || '').toUpperCase();
         const h = histories[i];
         const daily = h && !h._error ? h : null;
-        const built = buildCryptoMetrics(c, { funding: funding[sym], fundingHistory: fundingHistory && fundingHistory[sym], ivHistory: ivHistory && ivHistory[sym], sentimentScore: sentimentMap && sentimentMap[sym], trending: trending.has(sym), daily, benchCloses: btcCloses });
+        const built = buildCryptoMetrics(c, { funding: funding[sym], fundingHistory: fundingHistory && fundingHistory[sym], ivHistory: ivHistory && ivHistory[sym], sentimentScore: sentimentMap && sentimentMap[sym], trending: trending.has(sym), daily, benchCloses: btcCloses, benchBars: btcBars });
         // Non-price features (open interest change, book depth) that the
         // cross-sectional fit computes from the archive but the live builders
         // never had. Without them a feature the fit SELECTED can be
@@ -5935,7 +5960,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     const metrics = [];
     for (const r of stocksR.value) {
       if (r && !r._error) {
-        const m = buildStockMetrics(r, valMap[r.symbol], overrides[r.symbol], spyCloses, ivHistory && ivHistory[r.symbol]);
+        const m = buildStockMetrics(r, valMap[r.symbol], overrides[r.symbol], spyCloses, ivHistory && ivHistory[r.symbol], spyRow?.dates);
         if (m) metrics.push(m);
       } else stockFailures.push(r && r._item);
     }

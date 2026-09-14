@@ -54,4 +54,5 @@ INSERT OR IGNORE INTO d1_migrations (name) VALUES
   ('0037_oi_tick_and_flush_events.sql'),
   ('0038_outcome_provenance.sql'),
   ('0039_xs_forecast_provenance.sql'),
-  ('0040_flush_event_price_comparison.sql');
+  ('0040_flush_event_price_comparison.sql'),
+  ('0041_adaptive_research.sql');

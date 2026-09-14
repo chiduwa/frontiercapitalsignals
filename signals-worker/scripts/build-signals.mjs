@@ -20,6 +20,7 @@ import { loadLatestMarketContext } from './market-context.mjs';
 import { loadXsCoefficients, writeXsForecasts, loadDecileEvidence, xsDecileIsPublishable } from './cross-sectional.mjs';
 import { loadLatestFundamentals } from './fundamentals-panel.mjs';
 import { d1 } from './d1-client.mjs';
+import { loadAdaptiveHealth } from './adaptive-research.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES, GITHUB_EVENT_NAME, FORCE_REFRESH, NTFY_TOPIC } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID })) {
@@ -225,6 +226,14 @@ const started = Date.now();
 const { payload, log } = await buildPayload({ TREFIS_OVERRIDES }, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration, dailyRangeStats, todEdge, scoreCalibration, xsCoefficients, decileEvidence, liveFundamentals);
 console.log(`built payload in ${Date.now() - started}ms — crypto ${payload.crypto.universe} assets, stocks ${payload.stocks.universe} assets`);
 console.log('health:', JSON.stringify(payload.health));
+if (FCS_D1_DATABASE_ID) {
+  try {
+    payload.adaptiveResearch = await loadAdaptiveHealth(env);
+  } catch (error) {
+    payload.adaptiveResearch = { status: 'unavailable', actionable: false };
+    console.error('adaptive research health unavailable:', error.message);
+  }
+}
 
 // Display-only, so attached here rather than threaded through
 // buildPayload as a 29th positional argument: nothing in the engine

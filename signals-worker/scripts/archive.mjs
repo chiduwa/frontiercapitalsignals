@@ -15,6 +15,7 @@
 // two are genuinely the same need either way: "what's in the universe" and
 // "what's each coin's live funding right now."
 import { d1, d1Batch, chunk } from './d1-client.mjs';
+import { completedDailyBars } from './archive-policy.mjs';
 import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, computeSpreadSeries, levelChangeBefore, detectOutperformanceRotation, detectPossibleLongTermBottom, isNonDirectionalAsset } from '../worker.js';
 
 const UA = 'Mozilla/5.0 (compatible; FrontierCapitalSignals/2.0)';
@@ -35,14 +36,13 @@ const FETCH_TIMEOUT_MS = 9000;
 async function fetchJson(url) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
-  let res;
   try {
-    res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json,text/plain,*/*' }, signal: ctrl.signal });
+    const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json,text/plain,*/*' }, signal: ctrl.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
   } finally {
     clearTimeout(t);
   }
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
 }
 
 // Full available daily history for one Yahoo ticker (crypto: `${SYM}-USD`,
@@ -79,7 +79,7 @@ export async function yahooFullHistory(ticker) {
     }
   }
   if (bars.length < 30) throw new Error(`thin history (${bars.length} bars)`);
-  return bars;
+  return completedDailyBars(bars);
 }
 
 // Yahoo's {SYMBOL}-USD ticker construction (backfill-history.mjs's universe
@@ -138,7 +138,7 @@ export async function coingeckoDailyBars(id, days = 365) {
   }
   const bars = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
   if (bars.length < 30) throw new Error(`thin history (${bars.length} bars)`);
-  return bars;
+  return completedDailyBars(bars);
 }
 
 // Funding/OI history has no dedicated function here anymore: Bybit's

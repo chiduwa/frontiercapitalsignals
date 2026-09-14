@@ -22,6 +22,7 @@ import {
 } from './archive.mjs';
 import { selectIntradayWatchlist } from './intraday.mjs';
 import { d1 } from './d1-client.mjs';
+import { needsDailyRefresh, selectArchiveUpdates } from './archive-policy.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
 
@@ -145,17 +146,17 @@ async function main() {
 
   let yahooOk = 0, cgFallback = 0;
   const priceFailed = [];
+  const deferredHistory = [];
   for (const a of universe) {
     if (priceBudgetLeft() <= 0) { console.log('price budget exhausted — stopping price backfill early, resume next run'); break; }
     const existing = coverage[a.symbol];
-    const daysSinceMax = existing ? (Date.now() - new Date(existing.maxDate).getTime()) / 86400000 : Infinity;
     // Already caught up (a recent bar + a real amount of depth) — skip
     // re-fetching entirely. This is what makes repeat runs of this same
     // script cheap once the real backfill has landed, not just the D1-write
     // side: no point re-downloading a multi-year Yahoo response just to
     // discard nearly all of it as already-stored.
     const needsOpen = backfillOpen && !(openCoverage[a.symbol] > 0);
-    if (existing && daysSinceMax < 3 && existing.count >= 300 && !needsOpen) continue;
+    if (!needsDailyRefresh(existing, Date.now(), needsOpen)) continue;
 
     let bars = null, source = null;
     try {
@@ -180,25 +181,22 @@ async function main() {
       }
     }
     if (bars && bars.length) {
+      if (existing) {
+        const stored = await d1(env, 'SELECT date FROM asset_daily_bars WHERE symbol = ?', [a.symbol]);
+        existing.existingDates = stored.map(r => r.date);
+      }
       const minExisting = existing ? existing.minDate : null;
       const maxExisting = existing ? existing.maxDate : null;
-      // Normally only dates OUTSIDE the stored range are written — re-writing
-      // bars we already hold would be pure cost. But that is also why the first
-      // open backfill wrote 32 rows in total: every historical date is already
-      // covered, so only one genuinely new bar per symbol got through, and the
-      // open column stayed NULL on everything behind it.
-      //
-      // When a symbol needs its opens, re-write its recent history instead.
-      // upsertDailyBars only COALESCEs open into rows that lack it and touches
-      // nothing else, so this fills the gap without rewriting prices.
-      //
-      // Bounded to the most recent OPEN_BACKFILL_MAX_BARS rather than full
-      // depth: Yahoo carries AAPL back to 1980, and re-writing all ~694k rows
-      // would cost far more than the research needs. Six years is many times
-      // the sample the split-half test requires.
-      const fresh = needsOpen
-        ? bars.slice(-OPEN_BACKFILL_MAX_BARS)
-        : bars.filter((b) => (!minExisting || b.date < minExisting) || (!maxExisting || b.date > maxExisting));
+      // Check actual stored dates, including holes inside MIN/MAX. A sparse
+      // recent append must not permanently hide older missing sessions.
+      // Open backfills retain the existing COALESCE-only, bounded behavior.
+      const selected = selectArchiveUpdates(bars, existing, Number.MAX_SAFE_INTEGER, {
+        needsOpen, openBars: OPEN_BACKFILL_MAX_BARS
+      });
+      // Give every asset its current edge before spending the shared budget on
+      // decades of one symbol's history. The second pass keeps deepening it.
+      const fresh = selected.slice(0, 32);
+      deferredHistory.push({ asset: a, source, bars: selected.slice(32) });
       if (fresh.length) {
         const toWrite = fresh.slice(0, Math.max(priceBudgetLeft(), 0)).map((b) => ({ symbol: a.symbol, assetClass: a.assetClass, ...b, source }));
         const written = await upsertDailyBars(env, toWrite);
@@ -213,6 +211,14 @@ async function main() {
       }
     }
     await new Promise((r) => setTimeout(r, 250));
+  }
+  for (const { asset: a, source, bars } of deferredHistory) {
+    if (priceBudgetLeft() <= 0) break;
+    const toWrite = bars.slice(0, Math.min(3000, priceBudgetLeft()))
+      .map(b => ({ symbol: a.symbol, assetClass: a.assetClass, ...b, source }));
+    const written = await upsertDailyBars(env, toWrite);
+    priceRowsWritten += written;
+    rowsWrittenThisRun += written;
   }
   console.log(`price backfill: yahoo ${yahooOk}, coingecko fallback ${cgFallback}, failed ${priceFailed.length}`);
   if (priceFailed.length) console.log(`  failures: ${priceFailed.join('; ')}`);

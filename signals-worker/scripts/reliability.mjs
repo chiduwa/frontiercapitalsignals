@@ -157,8 +157,9 @@ export async function loadReliability(env) {
     FROM forecast_outcomes
     WHERE series_kind = 'technique' AND aggregated = 1
       AND model_version IN (?, ?) AND label_version = ?
+      AND (series_key != 'composite' OR model_version = ?)
     GROUP BY asset_class, symbol, series_key, horizon_minutes
-  `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION]);
+  `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION, OUTCOME_MODEL_VERSION]);
   const acc = {};
   const byHorizon = { 24: {}, 168: {} };
   for (const r of rows) {
@@ -199,8 +200,9 @@ export async function loadReliability(env) {
     FROM forecast_outcomes
     WHERE series_kind = 'technique' AND aggregated = 1 AND dir IN (-1, 1)
       AND model_version IN (?, ?) AND label_version = ?
+      AND (series_key != 'composite' OR model_version = ?)
     GROUP BY asset_class, symbol, series_key, dir, horizon_minutes
-  `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION]);
+  `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION, OUTCOME_MODEL_VERSION]);
   for (const row of directionalRows) {
     const horizon = Number(row.horizon_hours);
     if (!byHorizon[horizon]) continue;

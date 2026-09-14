@@ -46,17 +46,15 @@
 //
 // That is 6 techniques dark out of ~27, and the replayed composite is honest
 // about it: those votes are absent rather than imputed, exactly as they are for
-// any live asset whose supplier did not answer. It also means a replayed
-// composite is a STRICT SUBSET of the live panel, never a different one — the
-// direction of that difference matters, because a subset can only be less
-// informed than the live model, so a replayed record that shows skill is a
-// lower bound on the live one rather than an unrelated number.
+// any live asset whose supplier did not answer. This is a different input
+// panel: adding features can help or harm an ensemble. Replay performance is
+// not a lower bound on live performance; provenance must remain visible.
 
 import {
   rsi, rsiRecentRange, macd, sma, slopePct, rangePos, rangeBounds,
   bollinger, stochastic, obvSlope, swingStructure, divergenceProxy,
   volRegime, dwellAtExtreme, fibonacciLevels, realizedVolPct,
-  correlationWithBenchmark, seasonalAnalog, dailyMovementStats
+  correlationWithBenchmark, datedBenchmarkCorrelation, seasonalAnalog, dailyMovementStats
 } from '../worker.js';
 
 // Bars needed before any metric is emitted. 260 matches XS_WARMUP_BARS: SMA200
@@ -80,7 +78,7 @@ const SEASONAL_CYCLE = { crypto: 365, stock: 252 };
 // `benchCloses` benchmark closes ALREADY SLICED to the same anchor date by the
 //             caller, for m.corr. Passing an unsliced benchmark here would be a
 //             look-ahead leak through the back door.
-export function replayMetrics(symbol, bars, i, { kind = 'crypto', extras = null, benchCloses = null } = {}) {
+export function replayMetrics(symbol, bars, i, { kind = 'crypto', extras = null, benchCloses = null, benchBars = null } = {}) {
   if (i < REPLAY_WARMUP_BARS - 1 || i >= bars.length) return null;
   const window = bars.slice(0, i + 1);
   const closes = window.map((b) => b.close);
@@ -172,7 +170,7 @@ export function replayMetrics(symbol, bars, i, { kind = 'crypto', extras = null,
     volReg: volRegime(closes, 20, 100),
     dwell: dwellAtExtreme(closes),
     fib: fibonacciLevels(closes),
-    corr: benchCloses && benchCloses.length > 10
+    corr: benchBars ? datedBenchmarkCorrelation(window, benchBars, 30) : benchCloses && benchCloses.length > 10
       ? correlationWithBenchmark(closes, benchCloses, 30)
       : null,
     seasonal: seasonalAnalog(closes, SEASONAL_CYCLE[kind] || 365),

@@ -46,3 +46,6 @@ next-env.d.ts
 # Cloudflare / OpenNext build output
 .open-next/
 .wrangler/
+
+# Reproducible, potentially large local research artifacts (CI uploads these).
+/signals-worker/reports/adaptive/

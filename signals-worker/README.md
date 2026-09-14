@@ -603,9 +603,9 @@ cannot double-count, and it does not add hours to the hourly build.
 **What the replay cannot see.** Six techniques have no archived inputs and
 abstain throughout (valuation, attention, earnings, sentiment, impliedvol,
 positioning); several more depend on ctx-supplied derived tables whose current
-values would be look-ahead at a past anchor. The replayed panel is a strict
-*subset* of the live one, and that direction matters: a subset can only be less
-informed, so skill measured here is a lower bound, not an unrelated number. Every
+values would be look-ahead at a past anchor. The replayed panel is a *subset* of the live one. Adding inputs can improve
+or worsen an ensemble, so replay skill is **not a lower bound on live skill**.
+The two populations must be compared separately before transferring results. Every
 run prints a per-technique vote census so the real coverage is visible.
 
 This is not a way to make the model pass, and it should not be described as one.
@@ -630,6 +630,26 @@ that are never differenced. `burn_rate_30d` and `lockup_rate_30d` difference
 untested until it has 30 days of its own.
 
 ## Editing later
+
+### Adaptive research and archive reliability (2026-09-14)
+
+The existing confluence engine now has date-aligned benchmark correlations,
+correct Yahoo date/quote alignment, and active-version-only composite
+reliability. Daily archival admits completed UTC days, fills internal gaps,
+prioritizes recent data across assets, and audits deeper history weekly.
+Existing bars, indicators and research remain intact.
+
+An additive `adaptive-ridge-v1` challenger learns joint per-asset/horizon
+coefficients from matured, non-overlapping outcomes, tracks recent performance,
+and estimates empirical uncertainty bands. `signals-adaptive.yml` schedules
+archive-backed evaluation and preserves reports in D1 plus workflow artifacts;
+the hourly payload exposes its research health. It is shadow-only: the first
+468-asset run did not establish a general after-cost trading edge.
+
+See [the research, implementation and validation record](docs/MODEL_IMPROVEMENT_2026_09_14.md)
+for measured results, sources, reproduction commands and unresolved data issues.
+Run `node --test test-adaptive-model.mjs` as well as `node test-worker.mjs` when
+editing these paths.
 
 Change the watchlist, universe size, and filters in the config constants near the top of `worker.js`; tune technique weights in `evaluateTechniques`; adjust the embedded dashboard in the `PAGE_HTML` template near the bottom. After any edit, copy the file to `src/worker.js` too (`cp worker.js src/worker.js`) and run `node test-worker.mjs` before redeploying.
 
