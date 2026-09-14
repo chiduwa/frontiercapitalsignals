@@ -10,6 +10,7 @@
 // matching this project's established pattern for an optional,
 // user-provided credential (CMC_API_KEY, CRYPTOPANIC_API_TOKEN).
 import { d1, chunk } from './d1-client.mjs';
+import { summarise, formatSummary, formatPct } from './price-change.mjs';
 import { MIN_RELIABILITY_SAMPLES, currentSignalConfidence, noSkillBaseline, skillOverBaseline } from '../worker.js';
 
 const NTFY_TIMEOUT_MS = 10000;
@@ -354,7 +355,7 @@ export async function checkAndNotifySuddenMoves(env, nowIso, windowHours = 6, cr
       const dir = medianPct > 0 ? 1 : -1;
       const notified = await notifyOnChange(env, 'marketmove', 'CRYPTO_MARKET', `${dir}@${dateBucket}`, {
         title: dir === 1 ? 'Post-move crypto surge detected' : 'Post-move crypto drop detected',
-        message: `Observed after the move: the tracked crypto market's median changed ${medianPct > 0 ? '+' : ''}${medianPct.toFixed(1)}% over the prior ~${windowHours}h (${cryptoMoves.length} assets). This is an anomaly notice, not an advance prediction or entry/exit signal.`,
+        message: `Observed after the move: the tracked crypto market's median changed ${formatPct(medianPct)} measured against the price ~${windowHours}h ago (${cryptoMoves.length} assets). This is an anomaly notice, not an advance prediction or entry/exit signal.`,
         priority: 'high',
         tags: [dir === 1 ? 'rocket' : 'chart_with_downwards_trend'],
         click: 'https://frontiercapitalsignals.com/signals/'
@@ -363,13 +364,42 @@ export async function checkAndNotifySuddenMoves(env, nowIso, windowHours = 6, cr
     }
   }
 
-  for (const m of moves) {
-    const threshold = m.assetClass === 'crypto' ? cryptoThresholdPct : stockThresholdPct;
-    if (Math.abs(m.pct) < threshold) continue;
+  const triggered = moves.filter((m) => Math.abs(m.pct) >= (m.assetClass === 'crypto' ? cryptoThresholdPct : stockThresholdPct));
+
+  // A ladder needs more history than the detection window, but only for the
+  // handful of symbols that actually fired. Fetching 24h for the whole universe
+  // to serve two alerts would be the expensive way to do this.
+  const ladderRows = triggered.length
+    ? await d1(env,
+        `SELECT symbol, run_at, price FROM asset_price_log
+         WHERE run_at >= ? AND symbol IN (${triggered.map(() => '?').join(',')}) ORDER BY symbol, run_at`,
+        [new Date(new Date(nowIso).getTime() - 25 * 3600 * 1000).toISOString(), ...triggered.map((m) => m.symbol)])
+    : [];
+  const seriesBySymbol = {};
+  for (const r of ladderRows) (seriesBySymbol[r.symbol] ??= []).push({ ts: Date.parse(r.run_at), price: r.price });
+
+  for (const m of triggered) {
     const dir = m.pct > 0 ? 1 : -1;
+    // The move that triggered the alert is measured over `windowHours`. What a
+    // reader needs alongside it is every other horizon, each with its own
+    // anchor stated, because a 6-hour number can be strongly positive while the
+    // last hour was strongly negative and the old single-number alert could not
+    // say so. See scripts/price-change.mjs.
+    const summary = summarise(seriesBySymbol[m.symbol] || [], {
+      nowTs: new Date(nowIso).getTime(),
+      horizonsMin: [60, 180, windowHours * 60, 1440],
+      rangeWindowMin: windowHours * 60
+    });
+    const detail = summary ? `\n\n${formatSummary(summary, { symbol: m.symbol })}` : '';
+    const reversing = summary && summary.agreement === 'mixed';
     const notified = await notifyOnChange(env, 'suddenmove', m.symbol, `${dir}@${dateBucket}`, {
-      title: `${m.symbol}: post-move ${dir === 1 ? 'spike' : 'drop'} detected`,
-      message: `Observed after the move: ${m.symbol} (${m.assetClass}) changed ${m.pct > 0 ? '+' : ''}${m.pct.toFixed(1)}% over the prior ~${windowHours}h. This does not predict continuation or reversal and is not an entry/exit signal; check verified news, liquidity, spread, and volume before acting.`,
+      title: reversing
+        ? `${m.symbol}: ${formatPct(m.pct)} over ${windowHours}h, now reversing`
+        : `${m.symbol}: post-move ${dir === 1 ? 'spike' : 'drop'} detected`,
+      message: `Observed after the move: ${m.symbol} (${m.assetClass}) changed ${formatPct(m.pct)} `
+        + `measured against its price ~${windowHours}h ago.${detail}\n\n`
+        + 'This does not predict continuation or reversal and is not an entry/exit signal; '
+        + 'check verified news, liquidity, spread, and volume before acting.',
       priority: dir === 1 ? 'high' : 'urgent',
       tags: [dir === 1 ? 'rocket' : 'warning'],
       click: 'https://frontiercapitalsignals.com/signals/'

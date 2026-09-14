@@ -22,7 +22,7 @@ import {
   getPositionAmount, getOpenOrders, cancelOrder
 } from './binance.mjs';
 import { planEntry } from '../../signals-worker/scripts/flush-entry.mjs';
-import { loadGates, isTradeableSetup, quantityFor, FLUSH_EXEC_VERSION } from './flush-gates.mjs';
+import { loadGates, isTradeableSetup, quantityFor, allowsUnproven, UNPROVEN_REASON, FLUSH_EXEC_VERSION } from './flush-gates.mjs';
 import { d1 } from '../../signals-worker/scripts/d1-client.mjs';
 
 // True when this executor has already placed protection for a symbol at some
@@ -66,6 +66,11 @@ export async function runOnce(env, { log = console.log, dryRun = false } = {}) {
   if (!gates.notional) {
     log('flush-exec: FLUSH_EXEC_NOTIONAL_USD is unset. Position size has no safe default; refusing.');
     return { acted: 0, reason: 'no notional configured' };
+  }
+
+  if (!allowsUnproven()) {
+    log(`flush-exec: HOLDING. ${UNPROVEN_REASON}`);
+    return { acted: 0, reason: 'setup unproven' };
   }
 
   const candidates = await findCandidates(env);

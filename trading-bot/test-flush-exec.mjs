@@ -1,6 +1,6 @@
 // Tests for the live flush executor's gates. These decide whether real money
 // moves, so they are tested independently of the credentialed order path.
-import { loadGates, isTradeableSetup, quantityFor } from './src/flush-gates.mjs';
+import { loadGates, isTradeableSetup, quantityFor, allowsUnproven } from './src/flush-gates.mjs';
 import { MAX_LEVERAGE } from '../signals-worker/scripts/flush-entry.mjs';
 
 let pass = 0, fail = 0;
@@ -42,14 +42,26 @@ check('concurrency defaults to one position', bare.maxConcurrent === 1);
 check('fractional concurrency floors, never rounds up', loadGates({ FLUSH_EXEC_MAX_CONCURRENT: '2.9' }).maxConcurrent === 2);
 
 console.log('\n== only the chosen setup trades ==');
-check('spike + OI fell is tradeable', isTradeableSetup({ direction: 'up', classification: 'liquidation' }).ok);
-check('spike + OI rose is refused', !isTradeableSetup({ direction: 'up', classification: 'new-position' }).ok);
-check('spike + ambiguous is refused', !isTradeableSetup({ direction: 'up', classification: 'ambiguous' }).ok);
+// 2026-09-14: the setup is refused by default because the measurement behind it
+// was withdrawn. ARMED is what the operator gets after opting in explicitly.
+const ARMED = { FLUSH_EXEC_ALLOW_UNPROVEN: 'true' };
+check('spike + OI fell is refused by default now',
+  !isTradeableSetup({ direction: 'up', classification: 'liquidation' }, {}).ok);
+check('the default refusal names the reason and the override',
+  /unproven/.test(isTradeableSetup({ direction: 'up', classification: 'liquidation' }, {}).reason)
+  && /FLUSH_EXEC_ALLOW_UNPROVEN/.test(isTradeableSetup({ direction: 'up', classification: 'liquidation' }, {}).reason));
+check('only the literal "true" arms it',
+  allowsUnproven({ FLUSH_EXEC_ALLOW_UNPROVEN: 'yes' }) === false
+  && allowsUnproven({ FLUSH_EXEC_ALLOW_UNPROVEN: '1' }) === false
+  && allowsUnproven({ FLUSH_EXEC_ALLOW_UNPROVEN: 'true' }) === true);
+check('spike + OI fell is tradeable once armed', isTradeableSetup({ direction: 'up', classification: 'liquidation' }, ARMED).ok);
+check('spike + OI rose is refused', !isTradeableSetup({ direction: 'up', classification: 'new-position' }, ARMED).ok);
+check('spike + ambiguous is refused', !isTradeableSetup({ direction: 'up', classification: 'ambiguous' }, ARMED).ok);
 check('dip + OI fell is refused — excluded in CODE, not config',
-  !isTradeableSetup({ direction: 'down', classification: 'liquidation' }).ok);
-check('dip + OI rose is refused', !isTradeableSetup({ direction: 'down', classification: 'new-position' }).ok);
-check('a null event is refused', !isTradeableSetup(null).ok);
-check('the refusal explains itself', /payoff grounds/.test(isTradeableSetup({ direction: 'down', classification: 'liquidation' }).reason));
+  !isTradeableSetup({ direction: 'down', classification: 'liquidation' }, ARMED).ok);
+check('dip + OI rose is refused', !isTradeableSetup({ direction: 'down', classification: 'new-position' }, ARMED).ok);
+check('a null event is refused', !isTradeableSetup(null, ARMED).ok);
+check('the refusal explains itself', /payoff grounds/.test(isTradeableSetup({ direction: 'down', classification: 'liquidation' }, ARMED).reason));
 
 console.log('\n== sizing rounds down, never up ==');
 check('exact division is exact', quantityFor(500, 2.5, null) === 200);

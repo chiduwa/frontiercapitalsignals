@@ -7,6 +7,38 @@
 // EVERY NUMBER HERE IS MEASURED (docs/FLUSH_EVIDENCE.md, 248 episodes / 30
 // symbols / 60 days). Nothing is a round number someone liked.
 //
+// !! THE MEASUREMENT BEHIND THE FOUR CASES IS SUPERSEDED. 2026-09-14. !!
+//
+// The study classified each episode on `sum_open_interest_value`, which is
+// contracts x mark price. Over 804k 5-minute bars / 38 symbols / 74 days that
+// column correlates r = 0.910 with the price move over the same bar, so "open
+// interest fell through the dip" is very nearly a restatement of "the price was
+// still down when we measured". Replicating the study's own 2x2 on an
+// independent 74-day window:
+//
+//                          separation in 30-min retrace
+//   dips,   notional OI        +35.8 points   t =  8.02   (study reported +31.9)
+//   dips,   CONTRACTS          + 6.1 points   t =  1.37
+//   spikes, notional OI        -38.6 points   t = -7.75   (study reported -54.8)
+//   spikes, CONTRACTS          - 4.9 points   t = -1.22
+//
+// And the mechanism is visible: episodes the notional column calls "OI rose"
+// had already retraced a median 47.1% of the move before the 30-minute window
+// even opened, against 17.5% for "OI fell". It was sorting on the early part of
+// the outcome and then predicting the outcome.
+//
+// planEntry has TWO callers, not one. The observer in oi-sampler.mjs records
+// and does not trade, but trading-bot/src/flush-executor.mjs places REAL
+// Binance futures orders from it, and it is enabled: it attempted a live SELL
+// on BTW at 2026-09-13 10:03 UTC and was rejected by Binance for quantity
+// precision (HTTP 400 -1111), not by any safety gate. So money was on this.
+// flush-gates.mjs now refuses the setup unless FLUSH_EXEC_ALLOW_UNPROVEN=true.
+//
+// The constants are left in place rather than deleted, because deleting them
+// would lose the record of what was tried, but the four cases below should be
+// treated as UNPROVEN until the study is re-run on contracts. See
+// docs/OI_MEASUREMENT_EVIDENCE.md.
+//
 // The four cases, and why only two of them are trades:
 //
 //   dip + OI FELL      Longs were liquidated out. Genuine flush. Bottoms at a
@@ -220,21 +252,30 @@ export function planEntry(move, { depthPct = ENTRY_DEPTH_PCT, priorVolPct = null
   };
 }
 
-// The continuation call the alerting path uses. Rising open interest through a
-// move is new money taking that side, and the 12-hour numbers say the move
-// keeps going: +10.82% for spikes, -13.47% for dips.
+// The continuation call the alerting path used to send.
+//
+// It asserted a median 12-hour move of +10.82% for spikes and -13.47% for dips
+// on the strength of a rising open interest reading, and that reading was the
+// price move. So the alert was, in effect, "the price went up, therefore the
+// price will go up", stated with a measured-sounding number attached. This is
+// what reached the operator as "BTW keeps rising" on 2026-09-14 while BTW was
+// 7% below its price an hour earlier.
+//
+// The figures are removed rather than re-fitted, and `proven` is false so a
+// caller cannot use this without noticing. oi-sampler.mjs no longer calls it at
+// all; its alert now reports the move against stated anchors and makes no
+// continuation claim. Restore a claim here only from a study run on contracts.
 export function continuationCall(move) {
   if (!move || move.classification !== 'new-position') return null;
   const up = move.direction === 'up';
   return {
     symbol: move.symbol ?? null,
-    expectation: up ? 'keeps rising' : 'keeps falling',
-    median12hPct: up ? 10.82 : -13.47,
-    basis: `open interest ${move.oiChangePct == null ? '' : move.oiChangePct.toFixed(1) + '% '}`
-      + `ROSE through a ${Math.abs(move.movePct ?? 0).toFixed(1)}% ${up ? 'spike' : 'dip'} — `
-      + 'new positioning, not forced closing',
-    caution: up
-      ? 'retraces only ~51% of the move short-term, so chasing the top is still costly'
-      : 'bounces ~87% within 30 minutes first; that bounce is bait, not a bottom'
+    proven: false,
+    expectation: up ? 'open interest rose through a spike' : 'open interest rose through a dip',
+    median12hPct: null,
+    basis: `open interest ${move.oiChangePct == null ? '' : move.oiChangePct.toFixed(2) + '% '}`
+      + `rose in CONTRACTS through a ${Math.abs(move.movePct ?? 0).toFixed(1)}% ${up ? 'spike' : 'dip'}`,
+    caution: 'no continuation claim: the study behind the old one measured open interest '
+      + 'in dollar value, which is mostly the price move again. Treat as an observation only.'
   };
 }

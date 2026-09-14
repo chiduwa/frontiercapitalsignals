@@ -4,7 +4,14 @@
 // The classifier encodes one empirical finding — OI direction during a violent
 // move predicts whether it retraces — so these tests pin the finding's SIGN as
 // much as the code. If someone ever inverts the mapping, this fails loudly.
-import { classifyMove, detectMove, EXPECTED_RECOVERY, MOVE_PCT_TRIGGER } from './scripts/oi-sampler.mjs';
+//
+// 2026-09-14: the unit of open interest changed from dollar value to CONTRACTS,
+// because dollar value is contracts x mark price and therefore carries the
+// price move inside it (r = 0.910 over 804k bars). The fixtures below now set
+// both columns, and several set them in OPPOSITE directions on purpose: that is
+// the case the old code got wrong in production.
+import { classifyMove, detectMove, shouldAlert, buildAlert, EXPECTED_RECOVERY, MOVE_PCT_TRIGGER,
+  OI_DECISIVE_CONTRACTS_PCT, ALERT_COOLDOWN_MIN } from './scripts/oi-sampler.mjs';
 import { findFlushes, dedupeEpisodes } from './scripts/flush-research.mjs';
 import { planEntry, continuationCall, ENTRY_DEPTH_PCT, STOP_DEPTH_PCT } from './scripts/flush-entry.mjs';
 
@@ -14,12 +21,18 @@ const check = (name, cond, detail) => {
   else { fail++; console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ''}`); }
 };
 const now = Date.now();
-const tick = (minsAgo, oiUsd, price) => ({ ts: now - minsAgo * 60000, oi_usd: oiUsd, mark_price: price });
+// oiContracts defaults to tracking oiUsd so the pre-existing fixtures keep
+// meaning what they meant; tests that need the two to disagree pass both.
+const tick = (minsAgo, oiUsd, price, oiContracts = oiUsd) =>
+  ({ ts: now - minsAgo * 60000, oi_usd: oiUsd, oi_contracts: oiContracts, mark_price: price });
 
 console.log('\n== classification maps OI direction to the MEASURED outcome ==');
 check('OI falling through a move is liquidation', classifyMove(-3) === 'liquidation');
 check('OI rising through a move is new positioning', classifyMove(3) === 'new-position');
 check('a small OI change decides nothing', classifyMove(0.2) === 'ambiguous');
+check('the decisive cut is on the contracts scale, not the notional one',
+  OI_DECISIVE_CONTRACTS_PCT < 1 && classifyMove(0.3) === 'new-position',
+  `cut=${OI_DECISIVE_CONTRACTS_PCT}`);
 check('missing OI decides nothing', classifyMove(null) === 'ambiguous' && classifyMove(NaN) === 'ambiguous');
 // The sign of the finding, pinned. Liquidation recovers LESS, which is the
 // opposite of the intuition the study was built to test.
@@ -149,15 +162,93 @@ check('a missing move abstains', planEntry(null).ok === false);
 check('a move with no reference price abstains',
   planEntry({ direction: 'down', classification: 'liquidation', refPrice: 0 }).ok === false);
 
-console.log('\n== continuation alerts fire only on rising open interest ==');
-check('dip + OI rising -> "keeps falling"', continuationCall(mk('down', 'new-position')).expectation === 'keeps falling');
-check('spike + OI rising -> "keeps rising"', continuationCall(mk('up', 'new-position')).expectation === 'keeps rising');
-check('liquidation moves raise NO continuation alert',
+console.log('\n== the continuation claim is withdrawn, not re-fitted ==');
+check('liquidation moves still raise no continuation record',
   continuationCall(mk('down', 'liquidation')) === null && continuationCall(mk('up', 'liquidation')) === null);
-check('the alert carries the measured 12h number',
-  continuationCall(mk('up', 'new-position')).median12hPct === 10.82);
-check('the falling alert warns that the bounce is bait',
-  /bait/i.test(continuationCall(mk('down', 'new-position')).caution));
+check('it no longer asserts a 12h median',
+  continuationCall(mk('up', 'new-position')).median12hPct === null);
+check('it marks itself unproven',
+  continuationCall(mk('up', 'new-position')).proven === false);
+check('it no longer promises the move keeps going',
+  !/keeps (rising|falling)/.test(continuationCall(mk('up', 'new-position')).expectation));
+check('it says why the old claim is gone',
+  /dollar value/i.test(continuationCall(mk('down', 'new-position')).caution));
+
+console.log('\n== open interest is read in contracts, not dollar value ==');
+// BTW, 2026-09-14 01:31:44 to 01:36:44 UTC, the real numbers. Price +4.2%,
+// notional +4.07%, contracts -0.16%. The old code called this "new-position"
+// and sent "BTW keeps rising" while BTW was 7% below its price an hour before.
+const btw = detectMove([
+  tick(5, 105581000, 0.65745, 160591513),
+  tick(3, 106246000, 0.66238, 160399670),
+  tick(0, 109875000, 0.68527, 160337695)
+]);
+check('the BTW window is detected as an up move', btw && btw.direction === 'up');
+check('its notional OI reading is strongly positive', btw.oiNotionalChangePct > 3.5,
+  String(btw.oiNotionalChangePct));
+check('its contracts OI reading is NEGATIVE', btw.oiChangePct < 0, String(btw.oiChangePct));
+check('so it is no longer called new positioning', btw.classification !== 'new-position',
+  btw.classification);
+check('and it raises no continuation record at all',
+  continuationCall({ ...btw, symbol: 'BTW' }) === null);
+check('the notional reading is kept for the archive', Number.isFinite(btw.oiNotionalChangePct));
+
+console.log('\n== the OI change is anchored to the move, not to the sample window ==');
+// Six ticks where the first two predate the move's reference low. Anchoring to
+// the window's first tick would measure OI across a span the move did not
+// cover.
+const anchored = detectMove([
+  tick(6, 100e6, 100, 100e6), tick(5, 120e6, 99, 120e6),
+  tick(4, 100e6, 94, 100e6),                                  // the reference low
+  tick(2, 101e6, 97, 101e6), tick(0, 102e6, 100, 102e6)
+]);
+check('the reference is the low the move started from', anchored.refPrice === 94);
+check('refTs points at that low', anchored.refTs === now - 4 * 60000);
+check('OI is measured from the reference, not the window start',
+  Math.abs(anchored.oiChangePct - 2) < 0.001, String(anchored.oiChangePct));
+
+console.log('\n== one move does not become hundreds of alerts ==');
+const ep = (id, pct) => ({ episodeId: id, movePct: pct, direction: 'up' });
+check('the first sighting alerts', shouldAlert(null, ep('up|1', 5), now).alert === true);
+check('the same move seen again does not re-alert',
+  shouldAlert({ episodeId: 'up|1', movePct: 5, alertedAtMs: now }, ep('up|1', 5.5), now + 20000).alert === false);
+check('the same move extending materially does re-alert',
+  shouldAlert({ episodeId: 'up|1', movePct: 5, alertedAtMs: now }, ep('up|1', 10), now + 20000).alert === true);
+check('a different move inside the cooldown stays quiet',
+  shouldAlert({ episodeId: 'up|1', movePct: 5, alertedAtMs: now }, ep('up|2', 5), now + 60000).alert === false);
+check('a different move after the cooldown alerts',
+  shouldAlert({ episodeId: 'up|1', movePct: 5, alertedAtMs: now }, ep('up|2', 5),
+    now + (ALERT_COOLDOWN_MIN + 1) * 60000).alert === true);
+check('episode identity is stable while the reference stands',
+  detectMove([tick(5, 1e9, 94), tick(2.5, 1.03e9, 97), tick(0, 1.06e9, 100)]).episodeId
+  === detectMove([tick(5, 1e9, 94), tick(2.5, 1.03e9, 97), tick(1, 1.05e9, 99), tick(0, 1.06e9, 100)]).episodeId);
+// The actual production failure: 20 seconds later, one more tick, brand new id.
+check('a sliding window does not mint a new episode every tick',
+  new Set([
+    detectMove([tick(5, 1e9, 94), tick(2.5, 1.03e9, 97), tick(0, 1.06e9, 100)]).episodeId,
+    detectMove([tick(5.3, 1e9, 94.1), tick(5, 1e9, 94), tick(2.5, 1.03e9, 97), tick(0, 1.06e9, 100)]).episodeId
+  ]).size === 1);
+
+console.log('\n== the alert a reader actually receives ==');
+// Same BTW window, plus an hour of the collapse that preceded it, so the alert
+// has the context the old one-number version could not carry.
+const btwTicks = [
+  tick(65, 118e6, 0.73629, 160981400), tick(60, 118e6, 0.73775, 161092100),
+  tick(45, 110e6, 0.68730, 160973300), tick(30, 107e6, 0.66895, 160758900),
+  tick(5, 105.58e6, 0.65745, 160591513), tick(3, 106.2e6, 0.66238, 160399670),
+  tick(0, 109.88e6, 0.68527, 160337695)
+];
+const alert = buildAlert('BTW', detectMove(btwTicks), btwTicks, now);
+check('the title does not claim the asset is rising', !/keeps rising/i.test(alert.title), alert.title);
+check('the title flags the reversal', /reversing/.test(alert.title), alert.title);
+check('the body states the 1h anchor explicitly', /vs 1h ago/.test(alert.body));
+check('the body shows the 1h change as negative', /vs 1h ago: -/.test(alert.body));
+check('the body separates excursion from point-to-point',
+  /excursion from an extreme/.test(alert.body));
+check('the body says open interest is counted in contracts', /contracts/.test(alert.body));
+check('the body makes no continuation claim', !/keeps (rising|falling)/.test(alert.body));
+check('the alert copy carries no em dashes', !alert.body.includes('—') && !alert.title.includes('—'));
+console.log('\n--- rendered ---\n' + alert.title + '\n' + alert.body + '\n');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

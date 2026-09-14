@@ -27,12 +27,40 @@ export function loadGates(envVars = process.env) {
   };
 }
 
-// The setup restriction the operator chose: only the short-covering spike,
-// which carries a 1.22 reward:risk and a measured 106% retrace. The dip case
-// (0.60 R:R, dependent on a 15% stop holding) is excluded in CODE rather than
-// in configuration so it cannot be re-enabled by editing an env file.
-export function isTradeableSetup(event) {
+// The evidence this executor's one setup rests on was withdrawn on 2026-09-14.
+//
+// It trades "spike + open interest FELL" as a short-covering squeeze, on a
+// measured 106% retrace. That measurement classified open interest by
+// `sum_open_interest_value`, which is contracts x mark price and therefore
+// carries the price move inside it (r = 0.910 with the same bar's return over
+// 804k bars). Re-run on contracts over an independent 74-day window, the
+// spike separation falls from -38.6 points of retrace (t = -7.75) to -4.9
+// (t = -1.22). See signals-worker/docs/OI_MEASUREMENT_EVIDENCE.md.
+//
+// This file's stated rule is that every gate defaults to a refusal, so a setup
+// whose evidence has been withdrawn defaults to a refusal too. It is one env
+// var to override, deliberately, because the decision is the operator's:
+//
+//   FLUSH_EXEC_ALLOW_UNPROVEN=true
+//
+// This is NOT a claim that the setup loses money. It is that the number it was
+// sized and justified on does not survive being measured correctly, so there is
+// currently nothing behind it either way.
+export const UNPROVEN_REASON =
+  'the short-covering setup is unproven: its 106% retrace was measured on open interest in dollar '
+  + 'value, which is mostly the price move again, and does not replicate on contracts '
+  + '(t = -1.22). Set FLUSH_EXEC_ALLOW_UNPROVEN=true to trade it anyway.';
+
+export function allowsUnproven(envVars = process.env) {
+  return String(envVars.FLUSH_EXEC_ALLOW_UNPROVEN || '').toLowerCase() === 'true';
+}
+
+// The setup restriction the operator chose: only the short-covering spike.
+// The dip case is excluded in CODE rather than in configuration so it cannot be
+// re-enabled by editing an env file.
+export function isTradeableSetup(event, envVars = process.env) {
   if (!event) return { ok: false, reason: 'no event' };
+  if (!allowsUnproven(envVars)) return { ok: false, reason: UNPROVEN_REASON };
   if (event.direction !== 'up') {
     return { ok: false, reason: 'only up-spikes are traded by this executor; the dip case was excluded on payoff grounds' };
   }
