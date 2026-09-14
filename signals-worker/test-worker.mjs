@@ -413,6 +413,7 @@ const dispatchBody = dispatchRequest && JSON.parse(dispatchRequest.init.body);
 check('stale cache dispatches the existing refresh workflow once', staleDispatchResult === true && dispatchCalls.length === 1 && dispatchRequest.url.endsWith('/actions/workflows/signals-refresh.yml/dispatches'));
 check('recovery dispatch preserves the freshness gate with force=false', dispatchBody && dispatchBody.ref === 'main' && dispatchBody.inputs.force === 'false');
 check('recovery dispatch authenticates with the Worker secret', dispatchRequest && dispatchRequest.init.headers.Authorization === 'Bearer test-dispatch-token');
+check('recovery dispatch supplies the caller identity required by GitHub', dispatchRequest && dispatchRequest.init.headers['User-Agent'] === 'frontier-capital-signals');
 const duplicateDispatchResult = await mod.dispatchRefreshIfStale(staleDispatchEnv);
 check('dispatcher lock prevents a duplicate dispatch while active', duplicateDispatchResult === false && dispatchCalls.length === 1);
 const dispatchedStatusResponse = await worker.fetch(new Request('https://x.com/signals/api/refresh-status'), staleDispatchEnv, ctx);

@@ -6243,6 +6243,9 @@ export async function dispatchRefreshIfStale(env) {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${env.GITHUB_ACTIONS_TOKEN}`,
+        // GitHub requires an explicit caller identity. Unlike curl/Node, a
+        // Worker subrequest must not rely on a client-supplied default.
+        'User-Agent': 'frontier-capital-signals',
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
         'Content-Type': 'application/json'
