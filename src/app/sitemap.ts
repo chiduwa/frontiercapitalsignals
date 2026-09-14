@@ -13,6 +13,10 @@ export default function sitemap(): MetadataRoute.Sitemap {
     // never comes from getAllPosts() — list it explicitly or it stays uncrawled.
     { url: `${BASE}/signals/`, changeFrequency: "hourly", priority: 0.9 },
     { url: `${BASE}/services`, changeFrequency: "weekly", priority: 0.8 },
+    { url: `${BASE}/analytics`, changeFrequency: "weekly", priority: 0.8 },
+    // Productized offerings that were live but absent from the sitemap.
+    { url: `${BASE}/audit`, changeFrequency: "monthly", priority: 0.7 },
+    { url: `${BASE}/scan`, changeFrequency: "monthly", priority: 0.6 },
     { url: `${BASE}/resources`, changeFrequency: "weekly", priority: 0.8 },
     { url: `${BASE}/exchanges`, changeFrequency: "weekly", priority: 0.8 },
     { url: `${BASE}/about`, changeFrequency: "monthly", priority: 0.6 },

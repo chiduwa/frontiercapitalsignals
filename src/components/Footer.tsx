@@ -8,6 +8,7 @@ const services = [
   { label: "Market Entry Strategy", href: "/services#market-entry" },
   { label: "Deal Origination", href: "/services#deal-origination" },
   { label: "Field Research", href: "/services#field-research" },
+  { label: "Data & Business Analytics", href: "/analytics" },
 ];
 
 export default function Footer() {
@@ -71,6 +72,7 @@ export default function Footer() {
                 { label: "Intelligence Feed", href: "/intelligence" },
                 { label: "Investor Resources", href: "/resources" },
                 { label: "Stock Exchanges", href: "/exchanges" },
+                { label: "Free Site Scan", href: "/scan" },
                 { label: "Contact", href: "/contact" },
               ].map(({ label, href }) => (
                 <li key={label}>

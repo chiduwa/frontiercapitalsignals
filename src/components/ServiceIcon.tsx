@@ -13,6 +13,12 @@ const paths: Record<string, ReactNode> = {
   agriculture: <><path d="M5 20C6 11 12 5 20 4c1 9-3 15-10 15H5zM5 20L16 9M10 15v-5M10 15h5"/></>,
   mining: <><path d="M3 16l5-8 8-3 5 11-8 5zM8 8l5 13M8 8l13 8M16 5l-3 16"/></>,
   property: <><path d="M3 11l9-8 9 8M5 10v11h14V10M9 21v-7h6v7"/></>,
+  analytics: <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7.5 16v2M12 11v7M16.5 8v10"/></>,
+  "data-pipeline": <><ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/></>,
+  forecasting: <><path d="M22 7l-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/></>,
+  measurement: <><path d="M12 14l4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></>,
+  automation: <><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9L7 7M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></>,
+  insight: <><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5.6 5.6 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.8.8 1.3 1.5 1.5 2.5"/><path d="M9 18h6M10 22h4"/></>,
 };
 
 export default function ServiceIcon({ name, className = "h-7 w-7" }: { name: string; className?: string }) {

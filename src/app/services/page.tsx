@@ -4,9 +4,9 @@ import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Services",
-  description: "Investment intelligence, due diligence, market entry strategy and field research for investors in Ghana, Nigeria, Kenya, Malawi and Uganda.",
+  description: "Investment intelligence, due diligence, market entry strategy, field research and data and business analytics for investors and companies in Ghana, Nigeria, Kenya, Malawi and Uganda.",
   alternates: { canonical: "https://frontiercapitalsignals.com/services" },
-  keywords: ["Africa investment services", "Africa due diligence", "market entry Africa", "Africa deal origination", "frontier market consulting", "Africa field research", "Ghana Nigeria Kenya investment advisory"],
+  keywords: ["Africa investment services", "Africa due diligence", "market entry Africa", "Africa deal origination", "frontier market consulting", "Africa field research", "Ghana Nigeria Kenya investment advisory", "business analytics services Africa", "data analytics consulting"],
   // Declaring openGraph here replaces the root layout's block entirely,
   // including its image, so the site card has to be named again.
   openGraph: { url: "https://frontiercapitalsignals.com/services", type: "website", images: [{ url: "/opengraph-image", width: 1200, height: 630 }] },
@@ -59,6 +59,12 @@ const services = [
     desc: "For businesses already operating in our focus markets, we provide operational consulting to improve efficiency, reduce friction costs, and optimize supply chains. Our on-ground teams identify process bottlenecks that corporate headquarters rarely see from the outside.",
     deliverables: ["Operational audit and bottleneck identification", "Supply chain mapping and optimization", "Cost benchmarking against local comparables", "Staff productivity and HR structure review", "Implementation roadmap with measurable KPIs"],
   },
+  {
+    id: "data-analytics", icon: "analytics", title: "Data & Business Analytics", tagline: "Run the business on numbers you trust",
+    desc: "The systems behind this site, the market data, the daily research pipeline, the hourly signal screens, were all built in-house. We build the same kind of thing for clients: dashboards that refresh on their own, pipelines that pull scattered data into one place, forecasting models you can test a decision against, and analytics that tell you which marketing spend is actually working.",
+    deliverables: ["Dashboards and automated reporting", "Data pipelines and system integration", "Forecasting and scenario models", "Web and marketing analytics setup", "Analytics automation and AI tooling"],
+    href: "/analytics", hrefLabel: "See the full analytics breakdown",
+  },
 ];
 
 export default function ServicesPage() {
@@ -71,7 +77,7 @@ export default function ServicesPage() {
             <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-3">Our Services</p>
             <h1 className="text-5xl font-black text-ink mb-5 tracking-tight">The Full Intelligence Stack for African Markets</h1>
             <p className="text-slate-500 text-lg">
-              Whether you&apos;re scanning for opportunities, entering a new market, deploying capital, or already operational, we have a service designed for your stage.
+              Whether you&apos;re scanning for opportunities, entering a new market, deploying capital, or already operational, we have a service designed for your stage. We also build the <Link href="/analytics" className="text-gold-dim font-semibold underline underline-offset-4 decoration-gold/50 hover:decoration-gold">data and business analytics</Link> that sit underneath those decisions.
             </p>
           </div>
         </div>
@@ -80,7 +86,7 @@ export default function ServicesPage() {
       {/* Services */}
       <section className="py-20 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
-          {services.map(({ id, icon, title, tagline, desc, deliverables, badge }) => (
+          {services.map(({ id, icon, title, tagline, desc, deliverables, badge, href, hrefLabel }) => (
             <div key={id} id={id} className="bg-white border border-gray-200 rounded-2xl p-8 scroll-mt-20 hover:border-gold/40 hover:shadow-md transition-all">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-2">
@@ -97,6 +103,14 @@ export default function ServicesPage() {
                     </div>
                   </div>
                   <p className="text-slate-500 leading-relaxed text-sm">{desc}</p>
+                  {href && (
+                    <Link href={href} className="mt-4 inline-flex items-center gap-1.5 text-gold-dim font-semibold text-sm hover:text-gold-light transition-colors">
+                      {hrefLabel}
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </Link>
+                  )}
                 </div>
                 <div>
                   <p className="text-slate-600 text-xs font-semibold tracking-widest uppercase mb-3">Deliverables</p>

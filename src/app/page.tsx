@@ -97,7 +97,7 @@ export default function HomePage() {
             <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-3">What We Do</p>
             <h2 className="text-4xl font-black text-ink mb-4 tracking-tight">Intelligence You Can Act On</h2>
             <p className="text-slate-500 text-lg leading-relaxed">
-              From daily AI-curated signals to full-scale market entry support, we provide the intelligence layer that turns African markets from opaque to legible.
+              From daily AI-curated signals to full-scale market entry support, we provide the intelligence layer that turns African markets from opaque to legible. And for businesses that need their own numbers in order, we build the data and analytics behind that too.
             </p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -108,6 +108,31 @@ export default function HomePage() {
                 <p className="text-slate-500 text-sm leading-relaxed">{desc}</p>
               </div>
             ))}
+            {/* Featured, full-width: the analytics offering is a different buyer
+                from the investor services above, so it gets its own row. */}
+            <Link
+              href="/analytics"
+              className="sm:col-span-2 lg:col-span-3 bg-sand border border-gold/30 rounded-xl p-6 sm:p-8 hover:border-gold hover:shadow-md transition-all group flex flex-col sm:flex-row sm:items-center gap-6"
+            >
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-gold/20 bg-white text-gold-dim">
+                <ServiceIcon name="analytics" className="h-8 w-8" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-3 mb-1.5">
+                  <h3 className="text-ink font-bold group-hover:text-gold-dim transition-colors">Data &amp; Business Analytics</h3>
+                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full gradient-gold text-white">Also Available</span>
+                </div>
+                <p className="text-slate-500 text-sm leading-relaxed">
+                  Dashboards, data pipelines, forecasting models, and marketing analytics. The market data, research pipeline and signal engine on this site were built in-house, and we build the same kind of thing for clients.
+                </p>
+              </div>
+              <span className="inline-flex items-center gap-1.5 text-gold-dim font-semibold text-sm shrink-0">
+                See what we build
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </span>
+            </Link>
           </div>
           <div className="mt-10">
             <Link href="/services" className="inline-flex items-center gap-2 text-gold-dim font-semibold hover:text-gold-light transition-colors text-sm">

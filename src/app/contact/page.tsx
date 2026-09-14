@@ -17,6 +17,8 @@ const inquiryTypes = [
   "Due diligence engagement",
   "Market entry strategy",
   "Field research project",
+  "Data and business analytics project",
+  "Dashboard or reporting build",
   "Partnership inquiry",
   "Media / press",
   "Other",
