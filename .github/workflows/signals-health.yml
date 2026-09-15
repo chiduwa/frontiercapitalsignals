@@ -1,0 +1,71 @@
+name: Signals Health
+
+# Asks the LIVE site whether it is actually working, which no pre-deploy test
+# can do. Every incident this repo has had recently happened to code that was
+# already correct and already deployed:
+#
+#   - Signals Discovery died for five days on a D1 size ceiling. The tell was
+#     public the whole time (research_registry frozen at 2026-09-10T10:00:08)
+#     and nothing was looking at it.
+#   - daily-refresh hit the same ceiling inside a try/catch, so the job stayed
+#     GREEN while two model inputs silently disappeared.
+#   - sub-daily GitHub crons deliver 7-26% of what they request, so a job that
+#     simply never runs produces no failure anywhere.
+#
+# So this is weighted towards staleness and missing-ness, not exceptions.
+#
+# TRIGGERING, and the one honest gap in it. The primary trigger is the
+# Cloudflare Worker cron (CADENCE_DISPATCHES in signals-worker/worker.js),
+# because GitHub's own sub-daily scheduler is the thing that cannot be relied
+# on. That leaves one hole: if the WORKER is down, nothing dispatches this and
+# nothing alerts. The hourly schedule below is the backstop for exactly that —
+# it delivers ~26% of its requests, which is poor as a primary and perfectly
+# adequate as a second pair of eyes that GitHub owns rather than Cloudflare.
+on:
+  schedule:
+    - cron: "43 * * * *"
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "page (what a deploy can break), data (what time can break), or all"
+        required: false
+        default: "all"
+        type: choice
+        options: [all, page, data]
+
+concurrency:
+  group: signals-health
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    # Pure outbound HTTP plus one headless render. Nothing here touches D1, KV
+    # or any credential beyond the alert topic.
+    timeout-minutes: 8
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      # jsdom only — the probe renders the live page to prove it actually
+      # draws, rather than trusting that the HTML contains the right strings.
+      - name: Install probe dependencies
+        working-directory: signals-worker
+        run: npm install --no-audit --no-fund
+
+      # The checker's own logic is tested first. A monitor that cannot detect
+      # is worse than no monitor: it converts an outage into a false all-clear.
+      - name: Verify the health checker can still detect
+        working-directory: signals-worker
+        run: node test-health-check.mjs
+
+      - name: Probe the live site
+        working-directory: signals-worker
+        run: node scripts/health-check.mjs --scope=${{ inputs.scope || 'all' }}
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}

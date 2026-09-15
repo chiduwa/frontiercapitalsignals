@@ -122,6 +122,16 @@ export const CADENCE_DISPATCHES = Object.freeze([
     intervalSeconds: 15 * 60
   }),
   Object.freeze({
+    workflow: 'signals-health.yml',
+    // Asks the live site whether it is working. Half-hourly because the two
+    // failure modes it exists for -- a stale payload and a frozen learning
+    // loop -- are both measured in hours, so checking faster would only add
+    // noise. Its own GitHub schedule stays on as the backstop for the one
+    // case this cron cannot cover: the Worker itself being down.
+    key: 'signals:cadence:health',
+    intervalSeconds: 30 * 60
+  }),
+  Object.freeze({
     workflow: 'signals-live-scan.yml',
     // Hourly and no faster: every configuration is defined on hourly bars, so
     // scanning twice inside one bar re-evaluates a closed bar and spends the
@@ -8409,7 +8419,25 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       .then(function(r){ cacheState=r.headers.get('x-fcs-cache'); if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(d){
         state.data=d; state.error=null;
-        renderStatus(d); renderOverview(d.overview); renderDashboard(d); renderBoards(d); applyScreenFilters(); if(state.live) applyLivePrices(state.live,true); renderTrackRecord(d); renderMarketContext(d); renderQuantResearch(d); syncDashboardHash(false);
+        // Every renderer runs in one inline script, so a throw in any of them
+        // stops all the ones after it. That used to be SILENT: the outer
+        // .catch below only surfaces when there is no data at all, so a
+        // half-rendered page reported itself as healthy -- to the visitor, to
+        // analytics, and to any monitor watching from outside. Found by
+        // mutation-testing test-dashboard.mjs, which is exactly the class of
+        // bug that suite exists to make impossible to ship quietly.
+        try{
+          renderStatus(d); renderOverview(d.overview); renderDashboard(d); renderBoards(d); applyScreenFilters(); if(state.live) applyLivePrices(state.live,true); renderTrackRecord(d); renderMarketContext(d); renderQuantResearch(d); syncDashboardHash(false);
+        }catch(renderError){
+          var detail=String((renderError&&renderError.message)||renderError).slice(0,200);
+          pushEvent('signals_render_error',{error_detail:detail});
+          $('stateBox').innerHTML='<div class="notice"><b>Part of this dashboard failed to render.</b> '
+            +'What is on screen may be incomplete or from an earlier update. '
+            +'This has been reported automatically.<br><span style="color:var(--dim)">Detail: '+esc(detail)+'</span></div>';
+          // Re-raise out of the promise chain so it reaches window.onerror and
+          // anything monitoring the page from outside, instead of dying here.
+          setTimeout(function(){ throw renderError; },0);
+        }
         if(!firstLoadTracked){
           firstLoadTracked=true;
           pushEvent('signals_data_loaded',{

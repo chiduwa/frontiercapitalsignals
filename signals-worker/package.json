@@ -1,0 +1,8 @@
+{
+  "name": "fcs-signals-worker",
+  "private": true,
+  "description": "Test-only manifest. The Worker and every script here run on plain Node with no runtime dependencies; this exists so CI can install the DOM used by test-dashboard.mjs and scripts/health-check.mjs without dragging in the Next.js site's entire dependency tree. Deliberately no \"type\" field: adding one would change how Node classifies worker.js, which wrangler bundles.",
+  "devDependencies": {
+    "jsdom": "^30.0.1"
+  }
+}
