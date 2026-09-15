@@ -253,6 +253,73 @@ export async function checkSitePages(fetchImpl = fetch) {
   return out;
 }
 
+// ---- alerting policy: on CHANGE, not on persistence -----------------------
+//
+// The first version paged on every failing run. A real, correctly-detected
+// problem therefore produced one alert every 30 minutes for as long as it took
+// to fix — 6 pages in the first three hours, and ~20 by the next morning, all
+// identical. That is how a monitor teaches people to ignore it, which costs
+// more than the outage it was reporting.
+//
+// So: alert when the set of failing checks CHANGES, and stay quiet while it is
+// merely unchanged. The run still exits non-zero and the workflow still shows
+// red for as long as the problem lasts — going green while something is broken
+// would be the actual lie. It is only the notification that is deduplicated.
+//
+// State lives nowhere new. The failing set is emitted as a GitHub annotation,
+// which on a public repo is readable back with no credentials at all (the
+// workflow-run logs are NOT, which is what makes this the available surface).
+// Outside Actions there is no previous run to compare against, so a local or
+// manual run always reports.
+export function fingerprintOf(checks) {
+  return checks.filter((c) => !c.ok).map((c) => `${c.level}:${c.id}`).sort().join(',');
+}
+
+// Purely a fingerprint comparison, deliberately not also keyed on the previous
+// run's conclusion. A warnings-only state exits 0 but still has a fingerprint,
+// and keying on conclusion would re-announce that same warning on every run
+// forever — the exact noise this function exists to stop.
+export function shouldNotify(current, previous, { alwaysNotify = false } = {}) {
+  if (!current) return false;                       // nothing wrong; nothing to say
+  if (alwaysNotify) return true;
+  if (!previous) return true;                       // no history to compare against
+  return previous.fingerprint !== current;          // something DIFFERENT is wrong now
+}
+
+const FINGERPRINT_TITLE = 'fcs-health-fingerprint';
+
+// Reads the previous run of THIS workflow and the fingerprint it published.
+// Unauthenticated on purpose: two public GETs, no token, no new secret on a job
+// whose whole appeal is that it holds nothing but an alert topic.
+async function readPreviousRun() {
+  const repo = process.env.GITHUB_REPOSITORY;
+  const runId = process.env.GITHUB_RUN_ID;
+  const workflow = process.env.GITHUB_WORKFLOW_REF; // owner/repo/.github/workflows/x.yml@ref
+  if (!repo || !runId || !workflow) return null;    // not running in Actions
+  const file = workflow.split('/').pop().split('@')[0];
+  const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'fcs-health-check' };
+  try {
+    const list = await (await fetch(`https://api.github.com/repos/${repo}/actions/workflows/${file}/runs?per_page=10`, { headers })).json();
+    const previous = (list.workflow_runs || [])
+      .filter((r) => String(r.id) !== String(runId) && r.status === 'completed')
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+    if (!previous) return null;
+    // Read the marker whatever the conclusion was: a run can end green and
+    // still have had warnings worth not repeating.
+    const jobs = await (await fetch(`https://api.github.com/repos/${repo}/actions/runs/${previous.id}/jobs`, { headers })).json();
+    let fingerprint = '';
+    for (const job of jobs.jobs || []) {
+      const annotations = await (await fetch(`${job.check_run_url}/annotations`, { headers })).json();
+      const marker = (annotations || []).find((a) => a.title === FINGERPRINT_TITLE);
+      if (marker) { fingerprint = marker.message; break; }
+    }
+    return { conclusion: previous.conclusion, fingerprint };
+  } catch (e) {
+    console.log(`(could not read the previous run for alert dedup: ${e.message}; reporting anyway)`);
+    return null;
+  }
+}
+
 async function notify(title, body, priority) {
   if (!NTFY_TOPIC) return;
   try {
@@ -317,17 +384,39 @@ async function main() {
   }
   console.log(`\n${checks.filter((c) => c.ok).length} ok, ${warnings.length} warning(s), ${failures.length} failure(s)`);
 
+  const fingerprint = fingerprintOf(checks);
+  // Published as an annotation so the NEXT run can tell "still this" from
+  // "something new" without any stored state or credential. Emitted at the
+  // level the run actually ends at, so a warnings-only run does not decorate a
+  // green result with a red annotation.
+  if (fingerprint) {
+    const level = failures.length ? 'error' : 'warning';
+    console.log(`::${level} title=${FINGERPRINT_TITLE}::${fingerprint}`);
+  }
+
+  const previous = await readPreviousRun();
+  const alwaysNotify = process.env.FCS_HEALTH_ALWAYS_NOTIFY === '1';
+  const announce = shouldNotify(fingerprint, previous, { alwaysNotify });
+  if (fingerprint && !announce) {
+    console.log(`(unchanged since the previous run — alert suppressed; the run still fails so this stays visible)`);
+  }
+
   if (failures.length) {
-    await notify(`FCS health (${scope}): ${failures.length} failing`,
-      failures.map((f) => `• ${f.id}: ${f.detail}`).join('\n')
-      + (warnings.length ? `\n\nAlso warning:\n${warnings.map((w) => `• ${w.id}`).join('\n')}` : ''),
-      'high');
+    if (announce) {
+      await notify(`FCS health (${scope}): ${failures.length} failing`,
+        failures.map((f) => `• ${f.id}: ${f.detail}`).join('\n')
+        + (warnings.length ? `\n\nAlso warning:\n${warnings.map((w) => `• ${w.id}`).join('\n')}` : '')
+        + '\n\nThis alert repeats only if the failing set CHANGES.',
+        'high');
+    }
     process.exit(1);
   }
   if (warnings.length) {
-    await notify(`FCS health: ${warnings.length} warning(s)`, warnings.map((w) => `• ${w.id}: ${w.detail}`).join('\n'), 'default');
+    if (announce) await notify(`FCS health: ${warnings.length} warning(s)`, warnings.map((w) => `• ${w.id}: ${w.detail}`).join('\n'), 'default');
+    // Warnings alone do not fail the run; the exit code is reserved for
+    // something actually broken, so a warning cannot cry wolf in the UI either.
   }
-  console.log('HEALTH OK');
+  if (!failures.length) console.log('HEALTH OK');
 }
 
 const invokedDirectly = process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href;

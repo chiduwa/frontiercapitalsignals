@@ -6,7 +6,7 @@
 // 2026-09-11..15 Discovery outage reproduced exactly: a payload that is healthy
 // in every other respect while the learning loop has been dead for five days.
 import assert from 'node:assert/strict';
-import { checkPayload, checkPageResponse, THRESHOLDS } from './scripts/health-check.mjs';
+import { checkPayload, checkPageResponse, THRESHOLDS, shouldNotify, fingerprintOf } from './scripts/health-check.mjs';
 
 const NOW = Date.parse('2026-09-15T12:00:00Z');
 const ago = (ms) => new Date(NOW - ms).toISOString();
@@ -126,5 +126,53 @@ assert.ok(THRESHOLDS.priceAgeWarnMinutes < THRESHOLDS.priceAgeFailMinutes);
 assert.ok(THRESHOLDS.cryptoUniverseFail < THRESHOLDS.cryptoUniverseWarn);
 assert.ok(THRESHOLDS.stockUniverseFail < THRESHOLDS.stockUniverseWarn);
 assert.ok(THRESHOLDS.registryAgeWarnHours < THRESHOLDS.registryAgeFailHours);
+
+// ---- alerting policy ---------------------------------------------------------
+// The monitor paged 6 identical times in its first three hours over one real,
+// correctly-detected problem. Alerting on persistence is how a monitor trains
+// people to ignore it, so it now alerts on CHANGE. What must never happen is
+// that a NEW problem gets swallowed by that dedup.
+const fp = (ids) => ids.map((i) => `fail:${i}`).sort().join(',');
+
+assert.equal(shouldNotify('', null), false, 'nothing failing must never alert');
+assert.equal(shouldNotify('', { conclusion: 'failure', fingerprint: fp(['a']) }), false,
+  'recovering to healthy must not fire the failure alert');
+assert.equal(shouldNotify(fp(['a']), null), true, 'with no history to compare, report');
+assert.equal(shouldNotify(fp(['a']), { conclusion: 'success', fingerprint: '' }), true,
+  'the transition from healthy into broken must always alert');
+// A warnings-only run ends GREEN but still carries a fingerprint. Keying dedup
+// on the conclusion instead of the fingerprint would re-announce that same
+// warning on every single run, forever.
+assert.equal(shouldNotify('warn:x', { conclusion: 'success', fingerprint: 'warn:x' }), false,
+  'an unchanged warning on a green run must not re-announce every run');
+assert.equal(shouldNotify('fail:x', { conclusion: 'success', fingerprint: 'warn:x' }), true,
+  'a warning escalating into a failure must alert even though both runs differ only in level');
+assert.equal(shouldNotify(fp(['a']), { conclusion: 'failure', fingerprint: fp(['a']) }), false,
+  'the SAME failure repeating must stay quiet');
+assert.equal(shouldNotify(fp(['a', 'b']), { conclusion: 'failure', fingerprint: fp(['a']) }), true,
+  'a NEW failure joining an existing one must alert — this is the case dedup must never swallow');
+assert.equal(shouldNotify(fp(['b']), { conclusion: 'failure', fingerprint: fp(['a']) }), true,
+  'a different failure replacing the old one must alert');
+assert.equal(shouldNotify(fp(['a']), { conclusion: 'failure', fingerprint: fp(['a', 'b']) }), true,
+  'a partial recovery changes the set, so it alerts rather than going quiet mid-incident');
+assert.equal(shouldNotify(fp(['a']), { conclusion: 'failure', fingerprint: fp(['a']) }, { alwaysNotify: true }), true,
+  'FCS_HEALTH_ALWAYS_NOTIFY overrides the dedup');
+
+// The fingerprint must be order-independent, or check reordering would look
+// like a new incident every run.
+const shuffled = [
+  { id: 'z', level: 'fail', ok: false }, { id: 'a', level: 'warn', ok: false },
+  { id: 'm', level: 'fail', ok: true }
+];
+assert.equal(fingerprintOf(shuffled), fingerprintOf([...shuffled].reverse()),
+  'fingerprint must not depend on check order');
+assert.equal(fingerprintOf(shuffled), 'fail:z,warn:a'.split(',').sort().join(','),
+  'fingerprint covers level and id, and excludes passing checks');
+assert.equal(fingerprintOf([{ id: 'a', level: 'fail', ok: true }]), '',
+  'an all-clear fingerprints as empty');
+// A warning and a failure with the same id are different states.
+assert.notEqual(fingerprintOf([{ id: 'x', level: 'fail', ok: false }]),
+  fingerprintOf([{ id: 'x', level: 'warn', ok: false }]),
+  'the same check escalating from warn to fail must count as a change');
 
 console.log('health-check tests passed');
