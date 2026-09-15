@@ -6835,6 +6835,11 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     tbody td.sig-td{grid-column:1/-1}
     tbody td::before{content:attr(data-label);color:var(--dim);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;flex:0 0 auto}
     tbody td.rk::before,tbody td.asset::before,tbody td.sig-td::before{display:none}
+    /* Full-width message rows -- "no qualifying setups", "nothing matches the
+       search" -- are one cell in a two-column card grid without this, which
+       squeezes the sentence into half a phone screen. */
+    tbody td[colspan]{grid-column:1/-1}
+    tbody td[colspan]::before{display:none}
     .asset .nm{display:block;margin:2px 0 0}
     .asset .why{max-width:none}
     .sigcell{align-items:stretch}
@@ -6993,6 +6998,74 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   footer{padding:18px 0 28px;font-size:11px}footer .cols{font-size:9px;letter-spacing:.02em;gap:8px 20px;justify-content:space-between}
   .footer-note>summary{cursor:pointer;color:var(--muted);font-size:11px;margin-bottom:10px}.footer-note .legal{margin-top:12px;line-height:1.7}
   .skip-link{position:fixed;top:-80px;left:20px;z-index:99;background:var(--amber);color:var(--ink-0);padding:10px 16px;border-radius:6px}.skip-link:focus{top:10px}
+
+  /* ---- Screen controls: search, asset-class filter, mobile-safe sort ----
+     The boards drop <thead> under 760px, which took the sortable column
+     headers -- the ONLY sort affordance -- off the page entirely on a phone.
+     The select below is that missing control, and on desktop it doubles as a
+     sort-every-board shortcut while the headers keep their per-board sort.
+     Search and the class filter act on the rendered rows rather than
+     re-running renderBoards(): a re-render per keystroke would rebuild four
+     tables, discard the between-build live price patches, and shut every
+     open row detail. */
+  .screen-controls{border:1px solid var(--line);background:var(--ink-1);border-radius:10px;padding:12px 14px;margin:0 0 20px;display:flex;flex-direction:column;gap:10px}
+  .sc-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+  .sc-search{position:relative;display:flex;align-items:center;flex:1 1 240px;min-width:0}
+  .sc-search .sc-ico{position:absolute;left:11px;color:var(--dim);font-size:13px;line-height:1;pointer-events:none}
+  .sc-search input{width:100%;min-width:0;background:var(--ink-0);border:1px solid var(--line);border-radius:8px;color:var(--paper);font-family:var(--mono);font-size:12.5px;padding:10px 32px 10px 30px;-webkit-appearance:none;appearance:none}
+  .sc-search input::placeholder{color:var(--dim)}
+  .sc-search input:focus{outline:none;border-color:var(--amber)}
+  .sc-search input::-webkit-search-cancel-button{display:none}
+  .sc-clear{position:absolute;right:6px;width:22px;height:22px;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:16px;line-height:1;cursor:pointer}
+  .sc-clear:hover{color:var(--paper);background:var(--ink-2)}
+  .sc-seg{display:flex;gap:4px;padding:3px;border:1px solid var(--line);border-radius:999px;background:var(--ink-0);flex:0 0 auto}
+  .sc-chip{border:0;border-radius:999px;background:transparent;color:var(--muted);font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;padding:7px 14px;cursor:pointer;white-space:nowrap}
+  .sc-chip:hover{color:var(--paper)}
+  .sc-chip.is-on{background:var(--ink-2);color:var(--amber)}
+  .sc-sort{display:flex;align-items:center;gap:8px;flex:0 0 auto;min-width:0}
+  .sc-sort-label{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);white-space:nowrap}
+  .sc-sort select{background:var(--ink-0);border:1px solid var(--line);border-radius:8px;color:var(--paper);font-family:var(--mono);font-size:12px;padding:9px 10px;max-width:100%;cursor:pointer}
+  .sc-sort select:focus{outline:none;border-color:var(--amber)}
+  .sc-dirbtn{border:1px solid var(--line);border-radius:8px;background:var(--ink-0);color:var(--muted);font-family:var(--mono);font-size:11px;padding:9px 11px;cursor:pointer;white-space:nowrap}
+  .sc-dirbtn:hover:not(:disabled){border-color:var(--amber);color:var(--paper)}
+  .sc-dirbtn:disabled{opacity:.42;cursor:default}
+  .sc-status{font-family:var(--mono);font-size:11px;line-height:1.6;color:var(--dim);min-height:1.1em}
+  .sc-status b{color:var(--paper);font-weight:600}
+  .sc-status .sc-none{color:var(--amber)}
+  .board-slot{display:flex;flex-direction:column;min-width:0}
+  .board-slot[hidden]{display:none!important}
+  /* The mobile breakpoint gives every row display:grid, which outranks the
+     UA [hidden] rule -- without !important a filtered-out row stays visible
+     on exactly the screens the filter matters most on. */
+  tbody tr[hidden]{display:none!important}
+  .ps-filtered{color:var(--amber)}
+  .board-stamp{padding:10px 18px 0;font-family:var(--mono);font-size:10.5px;line-height:1.7;color:var(--dim)}
+  .board-stamp b{color:var(--muted);font-weight:600}
+
+  /* ---- Freshness strip --------------------------------------------------
+     This page runs on two independent clocks -- the hourly engine build and
+     the ~20s price tick -- and a single undifferentiated "last updated" was
+     the most misread thing on it. Both are now named, stamped, and aged. */
+  .freshness{display:flex;flex-wrap:wrap;align-items:center;gap:8px 22px;border:1px solid var(--line);border-left:2px solid var(--amber);background:var(--ink-1);border-radius:8px;padding:10px 14px;margin:0 0 20px}
+  .fr-item{display:flex;align-items:baseline;gap:8px;min-width:0}
+  .fr-l{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);white-space:nowrap}
+  .fr-item b{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--paper);white-space:nowrap}
+  .fr-sub{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+  .fr-item.fr-warn b{color:var(--amber)}
+  @media(max-width:760px){
+    .screen-controls{padding:10px;border-radius:8px}
+    .sc-row{gap:8px}
+    .sc-search{flex:1 1 100%}
+    .sc-seg{flex:1 1 100%;justify-content:space-between}
+    .sc-chip{flex:1 1 0;padding:9px 4px;text-align:center;letter-spacing:.06em}
+    .sc-sort{flex:1 1 100%;gap:6px}
+    .sc-sort select{flex:1 1 auto;min-width:0;padding:10px 8px}
+    .sc-dirbtn{flex:0 0 auto;padding:10px 9px}
+    .board-stamp{padding:10px 14px 0}
+    .freshness{gap:6px 16px;padding:10px 12px}
+    .fr-item{flex:1 1 100%;flex-wrap:wrap}
+    .fr-sub{white-space:normal}
+  }
   #viewTitle:focus,#dashboardContent:focus{outline:none}
   @media(min-width:761px){.asset{width:27%}.sig-td{width:24%}}
   @media(max-width:1000px){.mast-actions{gap:12px}.universe-label{display:none}.dashboard-insights{grid-template-columns:1.3fr 1fr}.insight-card{padding:18px}.sentiment-layout{gap:16px}.sentiment-ring{width:86px;height:86px}.sentiment-center{width:73px;height:73px}.sentiment-copy b{font-size:15px}}
@@ -7015,8 +7088,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     <span class="stat">UTC <b id="clock">--:--:--</b></span>
     <span class="spacer"></span>
     <span class="stat" id="healthStat">FEEDS <b>—</b></span>
-    <span class="stat">LAST SYNC <b id="lastSync">—</b></span>
-    <span class="stat">NEXT CHECK <b id="countdown">—</b></span>
+    <span class="stat" title="When the hourly engine last rebuilt scores, directions, ranges and every technique read. Everything except price and 24h change is frozen at this time.">MODEL BUILD <b id="lastSync">—</b></span>
+    <span class="stat" title="Countdown to this page re-reading the hourly payload. It does not trigger a rebuild; the engine runs on its own schedule.">NEXT RE-READ <b id="countdown">—</b></span>
     <span class="stat" title="Price and 24h change tick independently of the hourly analysis rebuild">PRICES <b id="liveStamp">—</b></span>
   </div>
 </div>
@@ -7057,6 +7130,45 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   <main id="dashboardContent" tabindex="-1">
     <div class="view-toolbar"><div><span class="eyebrow" id="viewEyebrow">MARKET MONITOR</span><h2 id="viewTitle">Market at a glance</h2><p id="viewDescription">Observed prices, market context, and the evidence behind the screens.</p></div>
       <div class="panel-controls" hidden><button class="qnav-btn" type="button" id="expandAll">Expand all</button><button class="qnav-btn" type="button" id="collapseAll">Collapse all</button></div>
+    </div>
+    <!-- Two clocks, stated separately. The hourly build governs every
+         analytical column; the price tick governs only price and 24h change.
+         Each carries an absolute stamp in local time AND UTC plus a relative
+         age, because "14:03 UTC" alone does not answer "is this current?". -->
+    <div class="freshness" id="freshness">
+      <span class="fr-item" id="frModelItem" title="The hourly engine build. Score, direction, RSI, 7-day change, expected range and every technique read are fixed at this time until the next build.">
+        <span class="fr-l">Model build</span><b id="frModel">—</b><span class="fr-sub" id="frModelSub">waiting for the first payload</span>
+      </span>
+      <span class="fr-item" id="frPriceItem" title="Price and 24-hour change are polled separately, roughly every 20 seconds, and do not wait for the hourly build.">
+        <span class="fr-l">Prices</span><b id="frPrice">—</b><span class="fr-sub" id="frPriceSub">live tick, about every 20s</span>
+      </span>
+      <span class="fr-item" title="Countdown to this page re-reading the hourly payload.">
+        <span class="fr-l">Next re-read</span><b id="frNext">—</b>
+      </span>
+    </div>
+    <!-- Lives outside #boards on purpose: renderBoards() replaces that whole
+         subtree on every hourly load and every sort, which would blow away
+         the search box mid-keystroke. Shown for the screens and watchlists
+         views by applyDashboardView(). -->
+    <div class="screen-controls" id="screenControls" hidden>
+      <div class="sc-row">
+        <label class="sc-search">
+          <span class="sc-ico" aria-hidden="true">⌕</span>
+          <input id="assetSearch" type="search" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Search asset — ticker or name" aria-label="Search the screens by ticker or asset name">
+          <button type="button" class="sc-clear" id="assetSearchClear" hidden aria-label="Clear asset search">×</button>
+        </label>
+        <div class="sc-seg" role="group" aria-label="Filter screens by asset class">
+          <button type="button" class="sc-chip is-on" data-class-filter="all" aria-pressed="true">All</button>
+          <button type="button" class="sc-chip" data-class-filter="crypto" aria-pressed="false">Crypto</button>
+          <button type="button" class="sc-chip" data-class-filter="stock" aria-pressed="false">Equities</button>
+        </div>
+        <div class="sc-sort">
+          <label class="sc-sort-label" for="sortKey">Sort all</label>
+          <select id="sortKey" aria-label="Sort every screen by"></select>
+          <button type="button" class="sc-dirbtn" id="sortDir" disabled title="Switch between highest-first and lowest-first">▼ High first</button>
+        </div>
+      </div>
+      <p class="sc-status" id="screenStatus" aria-live="polite"></p>
     </div>
     <section data-dashboard-view="overview" aria-label="Dashboard overview">
       <div class="overview" id="overview" aria-label="Market overview"></div>
@@ -7106,7 +7218,13 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   'use strict';
   var REFETCH_MS = 10*60*1000;
   var nextCheckAt = Date.now() + REFETCH_MS;
-  var state = { data:null, error:null, sort:{} };
+  // sort      -- per-board overrides set by clicking a column header
+  // sortAll   -- the toolbar's sort-every-board selection (the only sort
+  //              control that exists below 760px, where thead is hidden)
+  // live      -- the last price tick, replayed after any board re-render so a
+  //              sort or filter never rolls prices back to the hourly payload
+  // stamps    -- the page's two independent clocks, kept apart on purpose
+  var state = { data:null, error:null, sort:{}, sortAll:null, live:null, stamps:{model:null,prices:null} };
 
   // Collapsible panels. renderBoards() replaces its whole subtree on every
   // hourly refresh AND on every sort click, so the DOM cannot hold this
@@ -7184,12 +7302,59 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   }
   function pad(n){ return n<10?'0'+n:''+n; }
 
+  // ---- Data timestamps ---------------------------------------------------
+  // An absolute stamp answers "when", a relative age answers "is this
+  // current?", and the page needs both for two different clocks. Local time
+  // is shown alongside UTC rather than instead of it: UTC is what the engine,
+  // the archive and every tooltip on this page are keyed to.
+  function relAge(ms){
+    if(ms==null||!isFinite(ms)) return '—';
+    var sec=Math.max(0,Math.round(ms/1000));
+    if(sec<60) return sec+'s ago';
+    var min=Math.round(sec/60);
+    if(min<60) return min+' min ago';
+    var hr=ms/36e5;
+    if(hr<48) return hr.toFixed(1)+' h ago';
+    return Math.round(hr/24)+' d ago';
+  }
+  function utcStamp(t,withSeconds){
+    return pad(t.getUTCHours())+':'+pad(t.getUTCMinutes())+(withSeconds?':'+pad(t.getUTCSeconds()):'')+' UTC';
+  }
+  function localStamp(t){
+    try{ return t.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',timeZoneName:'short'}); }catch(e){ return ''; }
+  }
+  function renderFreshness(){
+    var now=Date.now();
+    var m=state.stamps.model, p=state.stamps.prices;
+    if(m){
+      var modelAge=now-m.getTime();
+      var loc=localStamp(m);
+      $('frModel').textContent=relAge(modelAge);
+      $('frModelSub').textContent=(loc?loc+' · ':'')+utcStamp(m,false);
+      $('frModelItem').classList.toggle('fr-warn', modelAge>2*36e5);
+      $('lastSync').textContent=utcStamp(m,false)+' · '+relAge(modelAge);
+      // Every board repeats its own build age; they all read the same clock.
+      var ages=document.querySelectorAll('.stamp-age');
+      for(var i=0;i<ages.length;i++) ages[i].textContent=relAge(modelAge);
+    }
+    if(p){
+      var priceAge=now-p.getTime();
+      $('frPrice').textContent=relAge(priceAge);
+      $('frPriceSub').textContent=utcStamp(p,true)+' · live tick, about every 20s';
+      $('frPriceItem').classList.toggle('fr-warn', priceAge>15*6e4);
+      $('liveStamp').textContent=utcStamp(p,true);
+    }
+    var left=Math.max(0,nextCheckAt-Date.now());
+    $('frNext').textContent='in '+pad(Math.floor(left/60000))+':'+pad(Math.floor((left%60000)/1000));
+  }
+
   setInterval(function(){
     var d=new Date();
     $('clock').textContent = pad(d.getUTCHours())+':'+pad(d.getUTCMinutes())+':'+pad(d.getUTCSeconds());
     var ms=Math.max(0,nextCheckAt-Date.now());
     var m=Math.floor(ms/60000), s=Math.floor((ms%60000)/1000);
     $('countdown').textContent = pad(m)+':'+pad(s);
+    renderFreshness();
   },1000);
   $('yr').textContent = new Date().getUTCFullYear();
 
@@ -7216,6 +7381,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     $('viewTitle').textContent=meta[1];
     $('viewDescription').textContent=meta[2];
     document.querySelector('.panel-controls').hidden=activeView==='overview'||activeView==='intraday';
+    // Search, class filter and sort only mean anything where boards are shown.
+    var scEl=$('screenControls');
+    if(scEl) scEl.hidden=!(activeView==='screens'||activeView==='watchlists');
     // All data stays in the DOM so price updates and panel persistence keep
     // their existing targets, even when another dashboard view is selected.
   }
@@ -7486,6 +7654,73 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     });
   }
 
+  // ---- Search + asset-class filter ---------------------------------------
+  // Both act on the rows already in the DOM. Re-running renderBoards() per
+  // keystroke would rebuild four tables, drop the between-build live price
+  // patches, and close every open row detail -- so filtering only toggles
+  // [hidden], and only sorting re-renders.
+  var screenFilters = { q:'', cls:'all' };
+  function rowMatchesQuery(row,q){
+    if(!q) return true;
+    if((row.getAttribute('data-symbol')||'').toLowerCase().indexOf(q)>=0) return true;
+    return (row.getAttribute('data-name')||'').indexOf(q)>=0;
+  }
+  function classLabel(cls){ return cls==='crypto'?'crypto':'US equities'; }
+  function applyScreenFilters(){
+    var q=screenFilters.q.trim().toLowerCase();
+    var slots=document.querySelectorAll('#boards .board-slot');
+    var shownTotal=0, rowTotal=0, visibleBoards=0;
+    for(var i=0;i<slots.length;i++){
+      var slot=slots[i];
+      var classHidden = screenFilters.cls!=='all' && slot.getAttribute('data-board-class')!==screenFilters.cls;
+      slot.hidden=classHidden;
+      var rows=slot.querySelectorAll('tr[data-symbol]');
+      var shown=0;
+      for(var j=0;j<rows.length;j++){
+        var ok=rowMatchesQuery(rows[j],q);
+        rows[j].hidden=!ok;
+        if(ok) shown++;
+      }
+      var empty=slot.querySelector('.filter-empty');
+      if(empty) empty.hidden=!(rows.length&&shown===0);
+      // A collapsed panel has to carry its own match count, or a search looks
+      // like it found nothing when the hits are simply behind a shut summary.
+      var tag=slot.querySelector('.ps-filtered');
+      if(tag){
+        if(!classHidden&&q&&rows.length){ tag.hidden=false; tag.innerHTML=' &middot; <b>'+shown+'</b> MATCH'+(shown===1?'':'ES'); }
+        else { tag.hidden=true; tag.innerHTML=''; }
+      }
+      if(!classHidden){ visibleBoards++; shownTotal+=shown; rowTotal+=rows.length; }
+    }
+    var banners=document.querySelectorAll('#boards [data-withheld-class]');
+    for(var k=0;k<banners.length;k++){
+      banners[k].hidden = screenFilters.cls!=='all' && banners[k].getAttribute('data-withheld-class')!==screenFilters.cls;
+    }
+    var st=$('screenStatus');
+    if(st){
+      var typed=esc(screenFilters.q.trim());
+      if(!slots.length) st.innerHTML='';
+      else if(q&&shownTotal===0)
+        st.innerHTML='<span class="sc-none">Nothing listed matches “'+typed+'”'
+          +(screenFilters.cls!=='all'?' in '+classLabel(screenFilters.cls):'')+'.</span> '
+          +'Only assets that reached a board in this build are listed here — the full screened universe is larger.';
+      else
+        st.innerHTML='Showing <b>'+shownTotal+'</b> of <b>'+rowTotal+'</b> listed rows across <b>'+visibleBoards+'</b> board'+(visibleBoards===1?'':'s')
+          +(q?' &middot; matching “'+typed+'”':'')
+          +(screenFilters.cls!=='all'?' &middot; '+classLabel(screenFilters.cls)+' only':'')+'.';
+    }
+    var clearBtn=$('assetSearchClear');
+    if(clearBtn) clearBtn.hidden=!screenFilters.q;
+  }
+  // Boards are rebuilt from scratch by renderBoards(), so the active filters
+  // and the last price tick both have to be replayed onto the new DOM.
+  function refreshBoards(){
+    if(!state.data) return;
+    renderBoards(state.data);
+    applyScreenFilters();
+    if(state.live) applyLivePrices(state.live,true);
+  }
+
   function abstentionText(row, fallbackReason){
     var a=row&&row.abstained;
     var reason=(a&&a.reason)||fallbackReason||'insufficient-evidence';
@@ -7521,18 +7756,27 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   }
 
   function boardHtml(cfg, rowsIn, universe){
-    var spec = state.sort[cfg.boardId];
+    // A column header click pins one board; the toolbar's selection applies to
+    // every board and is the only sort control that exists on a phone.
+    var spec = state.sort[cfg.boardId] || state.sortAll;
     var rows = spec ? sortRows(rowsIn, spec) : rowsIn;
     var visualSide=cfg.callsWithheld?'withheld':cfg.side;
     var eyebrow=cfg.callsWithheld?(cfg.assetClass==='crypto'?'CRYPTO':'US EQUITIES')+' · <b>SCREEN ONLY</b>':cfg.eyebrow;
     var h=panelStart({
       id:cfg.boardId, tone:'board '+visualSide, open:cfg.open,
       eyebrow:eyebrow, title:cfg.title,
-      meta:'TOP <b>'+(rows?rows.length:0)+'</b> / '+(universe||0)+' SCREENED'
+      meta:'TOP <b>'+(rows?rows.length:0)+'</b> / '+(universe||0)+' SCREENED<span class="ps-filtered" hidden></span>'
     });
     // Any disclaimer specific to this board rides inside the panel, so it is
     // on screen exactly when the rows it qualifies are.
     if(cfg.note) h+=cfg.note;
+    // Which clock each column follows, said once per board and next to the
+    // numbers themselves rather than only in the status bar.
+    h+='<div class="board-stamp">Score, direction, RSI, 7d and range are fixed at the model build '
+      +(state.stamps.model
+        ? '<b>'+utcStamp(state.stamps.model,false)+'</b> (<span class="stamp-age">'+relAge(Date.now()-state.stamps.model.getTime())+'</span>)'
+        : '<b>pending</b>')
+      +'. Price and 24h tick live between builds, about every 20 seconds.</div>';
     h+='<div class="tbl-wrap"><table><thead><tr>';
     h+='<th>#</th>';
     SORT_COLS_LEFT.forEach(function(c){ h+=sortableTh(c, spec, cfg.boardId); });
@@ -7598,7 +7842,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var range = rowSide==='withheld'
           ? '<span class="dim" title="A projected price band is not shown without a validated current setup">withheld</span>'
           : r.range ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+rangeTitle+'. This is an expected-move band, not an exact top, bottom, target, or stop.'+referencePrice+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>' : '<span class="dim">—</span>';
-        h+='<tr class="in" style="animation-delay:'+(i*30)+'ms" data-symbol="'+esc(r.symbol)+'" data-class="'+cfg.assetClass+'">'
+        h+='<tr class="in" style="animation-delay:'+(i*30)+'ms" data-symbol="'+esc(r.symbol)+'" data-name="'+esc(String(r.name||'').toLowerCase())+'" data-class="'+cfg.assetClass+'">'
           +'<td class="rk">#'+(i+1)+'</td>'
           +'<td class="asset">'+symHtml+name+flipNote+'<details class="asset-details"><summary>Asset details</summary><div>'+why+topInd+coil+quality+rotation+ltpNote+moveNote+'</div></details></td>'
           +'<td class="live-price-cell" data-label="Price"><span class="live-price">'+fmtPrice(r.price)+'</span></td>'
@@ -7612,8 +7856,14 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     } else {
       h+='<tr><td colspan="8" style="text-align:left;padding:16px 10px;color:var(--dim)">No qualifying setups this hour.</td></tr>';
     }
+    // Shown by applyScreenFilters() when a search hides every row in this
+    // board, so a filtered board never reads as an empty one.
+    h+='<tr class="filter-empty" hidden><td colspan="8" style="text-align:left;padding:16px 10px;color:var(--dim)">No asset on this board matches the current search.</td></tr>';
     h+='</tbody></table></div>'+PANEL_END;
-    return h;
+    // The wrapper is what the asset-class filter hides, and what the search
+    // counts rows within -- boards are emitted in three different shapes
+    // (paired, solo watchlist, filtered) and this gives all of them one handle.
+    return '<div class="board-slot" data-board-class="'+cfg.assetClass+'" data-board-id="'+cfg.boardId+'">'+h+'</div>';
   }
 
   // Assembled as four labelled zones rather than one long column: what the
@@ -7933,7 +8183,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       var newDir = (prev && prev.key===key) ? -prev.dir : dir;
       state.sort[board] = {key:key, dir:newDir};
       pushEvent('signals_sort_change',{board:board, sort_key:key, sort_dir:newDir===1?'asc':'desc'});
-      renderBoards(state.data);
+      refreshBoards();
       var sortedButton=document.querySelector('th[data-board="'+board+'"][data-key="'+key+'"] button');
       if(sortedButton) sortedButton.focus({preventScroll:true});
     }
@@ -7941,7 +8191,14 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
 
   function renderStatus(d){
     var t=new Date(d.generated_at);
-    $('lastSync').textContent = pad(t.getUTCHours())+':'+pad(t.getUTCMinutes())+' UTC';
+    // Both clocks land here; renderFreshness() owns every element that shows
+    // either one, so the status bar and the strip can never disagree.
+    state.stamps.model=t;
+    if(d.prices_generated_at){
+      var pStamp=new Date(d.prices_generated_at);
+      if(isFinite(pStamp.getTime())&&(!state.stamps.prices||pStamp.getTime()>state.stamps.prices.getTime())) state.stamps.prices=pStamp;
+    }
+    renderFreshness();
     var hs=$('healthStat');
     var eq=d.health.stocks_ok+'/'+d.health.stocks_total;
     var cg=d.health.coingecko?'CG OK':'CG DOWN';
@@ -7996,37 +8253,47 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     el.classList.add('flash');
   }
 
-  // Between-build price ticks. Independent of load()/REFETCH_MS on purpose:
-  // this only ever touches price and 24h change text already in the DOM,
-  // never re-renders or re-sorts a board, so it can't disturb someone
+  // Patches price and 24h change straight into the rows already in the DOM,
+  // never re-rendering or re-sorting a board, so it can't disturb someone
   // mid-sort or mid-scroll the way a full renderBoards() would.
+  // Split out of updateLivePrices() so a board re-render (a sort, a filter, an
+  // hourly reload) can replay the last tick instead of visibly rolling prices
+  // back to whatever the hourly payload carried. "silent" suppresses the
+  // flash on that replay: nothing actually ticked, the DOM was just rebuilt.
+  function applyLivePrices(d,silent){
+    if(!d || (!d.crypto && !d.stocks)) return;
+    var rows = document.querySelectorAll('#boards tr[data-symbol]');
+    rows.forEach(function(row){
+      var sym = row.getAttribute('data-symbol'), cls = row.getAttribute('data-class');
+      var map = cls==='crypto' ? d.crypto : cls==='stock' ? d.stocks : null;
+      var v = map && map[sym];
+      if(!v) return;
+      var priceEl = row.querySelector('.live-price');
+      if(priceEl && v.price!=null){
+        var newPrice = fmtPrice(v.price);
+        if(priceEl.textContent!==newPrice){ priceEl.textContent=newPrice; if(!silent) flashCell(row.querySelector('.live-price-cell')); }
+      }
+      var chgEl = row.querySelector('.live-chg');
+      if(chgEl && v.chg24h!=null){
+        var newChg = fmtPct(v.chg24h);
+        if(chgEl.textContent!==newChg){
+          chgEl.textContent=newChg;
+          var chgCell = row.querySelector('.live-chg-cell');
+          chgCell.className='live-chg-cell '+pctCls(v.chg24h);
+          if(!silent) flashCell(chgCell);
+        }
+      }
+    });
+  }
+
+  // Between-build price ticks. Independent of load()/REFETCH_MS on purpose.
   function updateLivePrices(){
     fetch(PRICES_URL,{cache:'no-store'})
       .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(d){
         if(!d || (!d.crypto && !d.stocks)) return;
-        var rows = document.querySelectorAll('#boards tr[data-symbol]');
-        rows.forEach(function(row){
-          var sym = row.getAttribute('data-symbol'), cls = row.getAttribute('data-class');
-          var map = cls==='crypto' ? d.crypto : cls==='stock' ? d.stocks : null;
-          var v = map && map[sym];
-          if(!v) return;
-          var priceEl = row.querySelector('.live-price');
-          if(priceEl && v.price!=null){
-            var newPrice = fmtPrice(v.price);
-            if(priceEl.textContent!==newPrice){ priceEl.textContent=newPrice; flashCell(row.querySelector('.live-price-cell')); }
-          }
-          var chgEl = row.querySelector('.live-chg');
-          if(chgEl && v.chg24h!=null){
-            var newChg = fmtPct(v.chg24h);
-            if(chgEl.textContent!==newChg){
-              chgEl.textContent=newChg;
-              var chgCell = row.querySelector('.live-chg-cell');
-              chgCell.className='live-chg-cell '+pctCls(v.chg24h);
-              flashCell(chgCell);
-            }
-          }
-        });
+        state.live=d;
+        applyLivePrices(d,false);
         if(state.data&&state.data.overview){
           var liveOverview=Object.assign({},state.data.overview);
           [['btc','crypto','BTC'],['eth','crypto','ETH'],['spy','stocks','SPY']].forEach(function(key){
@@ -8038,7 +8305,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         }
         var t=d.generated_at?new Date(d.generated_at):null;
         if(!t||!isFinite(t.getTime())) return;
-        $('liveStamp').textContent = pad(t.getUTCHours())+':'+pad(t.getUTCMinutes())+':'+pad(t.getUTCSeconds())+' UTC';
+        state.stamps.prices=t;
+        renderFreshness();
       })
       .catch(function(){ /* silent: a missed live tick isn't a feed error, load() already surfaces those */ });
   }
@@ -8049,7 +8317,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       .then(function(r){ cacheState=r.headers.get('x-fcs-cache'); if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(d){
         state.data=d; state.error=null;
-        renderStatus(d); renderOverview(d.overview); renderDashboard(d); renderBoards(d); renderTrackRecord(d); renderMarketContext(d); renderQuantResearch(d); syncDashboardHash(false);
+        renderStatus(d); renderOverview(d.overview); renderDashboard(d); renderBoards(d); applyScreenFilters(); if(state.live) applyLivePrices(state.live,true); renderTrackRecord(d); renderMarketContext(d); renderQuantResearch(d); syncDashboardHash(false);
         if(!firstLoadTracked){
           firstLoadTracked=true;
           pushEvent('signals_data_loaded',{
@@ -8091,6 +8359,103 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   var collapseBtn=document.getElementById('collapseAll');
   if(expandBtn) expandBtn.addEventListener('click',function(){ setAllPanels(true); });
   if(collapseBtn) collapseBtn.addEventListener('click',function(){ setAllPanels(false); });
+
+  // ---- Screen controls ---------------------------------------------------
+  // The sort options are generated from the same column definitions the table
+  // headers use, so the two controls can never drift apart.
+  var searchInput=$('assetSearch');
+  var sortSelect=$('sortKey');
+  var sortDirBtn=$('sortDir');
+  var sortCols=SORT_COLS_LEFT.concat([SIGNAL_COL]);
+  if(sortSelect){
+    var opts='<option value="">Screen rank (default)</option>';
+    sortCols.forEach(function(c){ opts+='<option value="'+c.key+'">'+esc(c.label)+'</option>'; });
+    sortSelect.innerHTML=opts;
+  }
+  function defaultDirFor(key){
+    for(var i=0;i<sortCols.length;i++) if(sortCols[i].key===key) return sortCols[i].dir;
+    return -1;
+  }
+  // "High first" is meaningless for a ticker column, so the button says what
+  // the order actually is for the column that is selected.
+  function sortDirLabel(key,dir){
+    if(!key) return '▼ High first';
+    if(key==='symbol') return dir===1?'▲ A–Z':'▼ Z–A';
+    return dir===1?'▲ Low first':'▼ High first';
+  }
+  function refreshSortDirBtn(){
+    if(!sortDirBtn) return;
+    var key=state.sortAll?state.sortAll.key:'';
+    sortDirBtn.textContent=sortDirLabel(key,state.sortAll?state.sortAll.dir:-1);
+    sortDirBtn.disabled=!state.sortAll;
+  }
+  function applyGlobalSort(key,dir){
+    // A per-board header sort left over from a previous click would silently
+    // contradict the control the visitor is looking at, so it is cleared.
+    state.sort={};
+    state.sortAll = key ? {key:key,dir:dir} : null;
+    refreshSortDirBtn();
+    refreshBoards();
+    pushEvent('signals_sort_change',{board:'all', sort_key:key||'rank', sort_dir:dir===1?'asc':'desc'});
+  }
+  if(sortSelect) sortSelect.addEventListener('change',function(){
+    var key=sortSelect.value;
+    applyGlobalSort(key, defaultDirFor(key));
+  });
+  if(sortDirBtn) sortDirBtn.addEventListener('click',function(){
+    if(!state.sortAll) return;
+    applyGlobalSort(state.sortAll.key, -state.sortAll.dir);
+  });
+
+  var searchEventTimer=null;
+  function setSearch(v){
+    screenFilters.q=v;
+    applyScreenFilters();
+    clearTimeout(searchEventTimer);
+    searchEventTimer=setTimeout(function(){
+      if(screenFilters.q.trim()) pushEvent('signals_asset_search',{query_length:screenFilters.q.trim().length});
+    },800);
+  }
+  if(searchInput){
+    searchInput.addEventListener('input',function(){ setSearch(searchInput.value); });
+    searchInput.addEventListener('keydown',function(e){
+      if(e.key==='Escape'&&searchInput.value){ e.stopPropagation(); searchInput.value=''; setSearch(''); }
+    });
+  }
+  var searchClear=$('assetSearchClear');
+  if(searchClear) searchClear.addEventListener('click',function(){
+    if(searchInput){ searchInput.value=''; searchInput.focus(); }
+    setSearch('');
+  });
+
+  var classChips=document.querySelectorAll('[data-class-filter]');
+  for(var ci=0;ci<classChips.length;ci++){
+    (function(btn){
+      btn.addEventListener('click',function(){
+        screenFilters.cls=btn.getAttribute('data-class-filter');
+        for(var m=0;m<classChips.length;m++){
+          var on=classChips[m]===btn;
+          classChips[m].classList.toggle('is-on',on);
+          classChips[m].setAttribute('aria-pressed',on?'true':'false');
+        }
+        applyScreenFilters();
+        pushEvent('signals_class_filter',{asset_class:screenFilters.cls});
+      });
+    })(classChips[ci]);
+  }
+
+  // "/" jumps to the search box, the convention on every screener that has one.
+  document.addEventListener('keydown',function(e){
+    if(e.key!=='/'||e.metaKey||e.ctrlKey||e.altKey) return;
+    var t=e.target;
+    if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'||t.isContentEditable)) return;
+    var sc=$('screenControls');
+    if(!sc||sc.hidden||!searchInput) return;
+    e.preventDefault();
+    searchInput.focus();
+    searchInput.select();
+  });
+  refreshSortDirBtn();
 
   document.addEventListener('click',function(e){
     var a=e.target.closest&&e.target.closest('a[href^="#"]');
