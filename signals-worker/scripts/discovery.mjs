@@ -30,7 +30,7 @@
 // FCS_CRYPTO_ROUND_TRIP_COST_PCT / FCS_STOCK_ROUND_TRIP_COST_PCT (all-in
 // execution-cost assumptions; defaults are exported below)
 import { chronologicalHalfSplit, RELIABILITY_SIGNIFICANCE_Z } from '../worker.js';
-import { d1, d1Batch } from './d1-client.mjs';
+import { d1, d1Batch, readAllDailyBars } from './d1-client.mjs';
 import { MARKET_CONTEXT_METHOD_VERSION } from './market-context.mjs';
 
 const MARKET_CONTEXT_PROVIDER_BY_METRIC = Object.freeze({
@@ -999,13 +999,27 @@ async function main() {
   const nowIso = new Date().toISOString();
   console.log(`discovery run @ ${nowIso}`);
 
-  // One read. asset_daily_bars is the largest table here, so this is the whole
-  // D1 cost of the run — every family below works off this same slice.
+  // asset_daily_bars is the largest table here, and this read is the whole D1
+  // cost of the run — every family below works off this same slice.
+  //
+  // Read in symbol batches, NOT as one whole-table SELECT. It was one query
+  // until 2026-09-15, and the archive simply outgrew what a single D1 request
+  // may return: from 2026-09-11 onwards every scheduled run died here with
+  // `HTTP 503 [{"code":7010,"message":"Service unavailable"}]`, five days in a
+  // row, while every smaller query against the same database kept succeeding.
+  // 7010 on a plain SELECT is a size ceiling, not an outage — so it failed
+  // identically on every retry and no amount of waiting would have cleared it.
+  // Batching bounds each response instead of betting the whole run on one.
+  //
   // Daily upstreams include today's still-forming candle. Research uses only
   // dates strictly before this run's UTC date so a partial close cannot become
   // either a feature or a supposedly matured outcome.
   const today = nowIso.slice(0, 10);
-  const rows = await d1(env, "SELECT symbol, asset_class, date, open, close FROM asset_daily_bars WHERE symbol NOT LIKE 'SECTOR:%' AND symbol NOT LIKE 'MCAP:%' AND date < ? ORDER BY symbol, date", [today]);
+  const rows = await readAllDailyBars(env, 'symbol, asset_class, date, open, close', {
+    symbolWhere: "symbol NOT LIKE 'SECTOR:%' AND symbol NOT LIKE 'MCAP:%'",
+    extraWhere: 'date < ?',
+    extraParams: [today]
+  });
   const bySymbol = groupBars(rows);
   console.log(`loaded ${rows.length} bars across ${Object.keys(bySymbol).length} symbols`);
   const withOpen = Object.values(bySymbol).filter((v) => v.bars.some((b) => b.open != null)).length;

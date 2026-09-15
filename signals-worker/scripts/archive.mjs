@@ -14,7 +14,7 @@
 // directly (see backfill-history.mjs/daily-refresh.mjs imports) since those
 // two are genuinely the same need either way: "what's in the universe" and
 // "what's each coin's live funding right now."
-import { d1, d1Batch, chunk } from './d1-client.mjs';
+import { chunk, d1, d1Batch, readAllDailyBars } from './d1-client.mjs';
 import { completedDailyBars } from './archive-policy.mjs';
 import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, computeSpreadSeries, levelChangeBefore, detectOutperformanceRotation, detectPossibleLongTermBottom, isNonDirectionalAsset } from '../worker.js';
 
@@ -567,7 +567,7 @@ export function barsRowsToReturnsBySymbol(rows) {
 // and this reads exactly as it always did — fully backward compatible,
 // nothing about the default path changed.
 export async function computeLeadLag(env, preloadedRows) {
-  const rows = preloadedRows || await d1(env, 'SELECT symbol, date, close FROM asset_daily_bars ORDER BY symbol, date');
+  const rows = preloadedRows || await readAllDailyBars(env, 'symbol, date, close');
   const returnsBySymbol = barsRowsToReturnsBySymbol(rows);
 
   const symbols = Object.keys(returnsBySymbol);
@@ -1653,7 +1653,7 @@ export function dailyRangeStatsFromRows(rows, lookbackDays = DAILY_RANGE_LOOKBAC
 }
 
 export async function computeDailyRangeStats(env, preloadedRows, nowIso) {
-  const rows = preloadedRows || await d1(env, 'SELECT symbol, asset_class, date, close, high, low FROM asset_daily_bars ORDER BY symbol, date');
+  const rows = preloadedRows || await readAllDailyBars(env, 'symbol, asset_class, date, close, high, low');
   const stats = dailyRangeStatsFromRows(rows);
   const entries = Object.entries(stats);
   if (!entries.length) return 0;

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_ROUND_TRIP_COST_PCT,
@@ -11,6 +12,7 @@ import {
   walkForwardStrategyAssessment
 } from './scripts/discovery.mjs';
 import { MARKET_CONTEXT_METHOD_VERSION } from './scripts/market-context.mjs';
+import { BAR_SYMBOL_CHUNK } from './scripts/d1-client.mjs';
 
 const dated = (fn, n = 120) => Array.from({ length: n }, (_, i) => ({
   date: new Date(Date.UTC(2020, 0, 1 + i)).toISOString().slice(0, 10),
@@ -148,5 +150,29 @@ assert.equal(evaluateLiveTriggers([mvrvRegistry], {}, '2026-09-03T06:00:00Z', [{
 assert.equal(evaluateLiveTriggers([mvrvRegistry], {}, '2026-09-03T06:00:00Z', [{ ...liveMvrv, method_version: 'future-method' }]).length, 0, 'method mismatch cannot inherit confirmation');
 assert.equal(evaluateLiveTriggers([{ ...mvrvRegistry, hypothesis: `market-context|btc_mayer_multiple|fcs-asset-daily-bars|${MARKET_CONTEXT_METHOD_VERSION}|low|7` }], {}, '2026-09-03T06:00:00Z', [{ ...liveMvrv, metric: 'btc_mayer_multiple', provider: 'fcs-asset-daily-bars' }]).length, 0, 'Mayer remains control-only even if a registry row is manually marked confirmed');
 assert.equal(evaluateLiveTriggers([{ ...mvrvRegistry, hypothesis: `market-context|btc_mvrv|${MARKET_CONTEXT_METHOD_VERSION}|low|7` }], {}, '2026-09-03T06:00:00Z', [liveMvrv]).length, 0, 'legacy hypotheses without provider identity fail closed');
+
+// ---- the archive read must stay batched --------------------------------
+// Between 2026-09-11 and 2026-09-15 every scheduled Signals Discovery run died
+// on one whole-table SELECT with D1's `7010 Service unavailable`: the archive
+// had outgrown what a single D1 request may return. It is a size ceiling, not
+// an outage, so it failed identically five days running and wrote nothing to
+// the registry in that whole window. Four other call sites read the same table
+// the same way -- daily-refresh's inside a try/catch, so it degraded silently
+// rather than failing loudly. They all go through readAllDailyBars now, and
+// these assertions are what stop any of them drifting back.
+const workerScripts = new URL('./scripts/', import.meta.url);
+const readSrc = (f) => readFileSync(new URL(f, workerScripts), 'utf8');
+assert.ok(BAR_SYMBOL_CHUNK > 0 && BAR_SYMBOL_CHUNK + 1 <= 100,
+  'a symbol batch plus its bound date must fit D1\'s 100-parameter statement cap');
+const wholeTableRead = /FROM asset_daily_bars(?:\s+WHERE[^']*?)?\s+ORDER BY symbol, date'/;
+for (const file of ['discovery.mjs', 'archive.mjs', 'daily-refresh.mjs', 'correlation-research.mjs']) {
+  const src = readSrc(file);
+  assert.ok(!wholeTableRead.test(src),
+    `${file} must not read the whole asset_daily_bars archive in one D1 query (that is the 7010 that broke discovery)`);
+  assert.ok(src.includes('readAllDailyBars'),
+    `${file} must read the archive through the shared batched reader`);
+}
+assert.ok(readSrc('d1-client.mjs').includes('chunk(symbols, chunkSize)'),
+  'the batched reader must page by symbol through the shared chunk helper');
 
 console.log('discovery quant-strategy tests passed');

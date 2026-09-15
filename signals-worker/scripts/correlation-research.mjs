@@ -17,7 +17,7 @@
 //
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID
 import { twoSampleZTest, volumeSurgeSeries, forwardReturns, chronologicalHalfSplit, sentimentExtremeForwardReturns, timeOfDaySentimentSplit, RELIABILITY_SIGNIFICANCE_Z, detectMoveEpisodes, detectExhaustionReversals, detectBottomThenMoonshot, volRegime, levelChangeBefore, isNonDirectionalAsset, pegAnchorDeviationPct } from '../worker.js';
-import { d1 } from './d1-client.mjs';
+import { d1, readAllDailyBars } from './d1-client.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
@@ -95,7 +95,7 @@ async function main() {
   const nowIso = new Date().toISOString();
   console.log('correlation-research starting: volume-surge vs forward-return, pooled by asset class, guarded against multiple-testing');
 
-  const rows = await d1(env, 'SELECT symbol, asset_class, date, close, volume FROM asset_daily_bars ORDER BY symbol, date');
+  const rows = await readAllDailyBars(env, 'symbol, asset_class, date, close, volume');
   const bySymbol = {};
   for (const r of rows) {
     (bySymbol[r.symbol] ??= { assetClass: r.asset_class, bars: [] }).bars.push({ date: r.date, close: r.close, volume: r.volume });

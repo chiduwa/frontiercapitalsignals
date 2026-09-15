@@ -86,7 +86,50 @@ const SESSION_EXTREMES_KEY = 'signals:session-extremes';
 const SESSION_EXTREMES_TTL_SECONDS = 3 * 24 * 3600;
 const REFRESH_DISPATCH_STATUS_KEY = 'signals:refresh-dispatch-status';
 const REFRESH_DISPATCH_STATUS_SECONDS = 24 * 60 * 60;
-const GITHUB_REFRESH_DISPATCH_URL = 'https://api.github.com/repos/chiduwa/frontiercapitalsignals/actions/workflows/signals-refresh.yml/dispatches';
+const GITHUB_WORKFLOW_DISPATCH_BASE = 'https://api.github.com/repos/chiduwa/frontiercapitalsignals/actions/workflows/';
+const GITHUB_REFRESH_DISPATCH_URL = GITHUB_WORKFLOW_DISPATCH_BASE + 'signals-refresh.yml/dispatches';
+
+// Workflows whose VALUE depends on firing near a fixed cadence, dispatched from
+// this Worker's cron because GitHub's scheduler does not deliver sub-daily
+// crons on this repo. Measured 2026-09-15 over the trailing run history:
+//
+//   signals-microstructure  4x/hour requested ->   7% delivered, median gap 199min (want 15)
+//   signals-live-scan       1x/hour requested ->  26% delivered, median gap 247min (want 60)
+//   -- versus --
+//   every DAILY cron in this repo -> 100% delivered, median gap 1436-1439min (want 1440)
+//
+// So this is not "GitHub cron is unreliable" in general; it is specifically
+// unreliable below a daily cadence, which is why the daily research jobs stay
+// on their own GitHub schedules and are deliberately NOT listed here.
+//
+// Both jobs listed here are idempotent against an extra firing by construction
+// -- microstructure rejects an overlapping window at write time, live-scan's
+// UNIQUE (config_id, symbol, cast_at) rejects a duplicate cast -- so the
+// surviving GitHub schedule can stay on as fallback coverage without either
+// one being able to double-count evidence.
+//
+// NOTHING heavy moves INTO the Worker: this only replaces the trigger. The
+// engine stays in GitHub Actions for the reason stated in wrangler.toml.
+export const CADENCE_DISPATCHES = Object.freeze([
+  Object.freeze({
+    workflow: 'signals-microstructure.yml',
+    key: 'signals:cadence:microstructure',
+    // The pooled cross-venue test wants many independent five-minute windows
+    // spread across many hours of the day. At 7% delivery it was not merely
+    // accumulating evidence ~14x slowly, it was accumulating it in whichever
+    // hours GitHub happened to deliver -- a time-of-day sampling bias inside
+    // the very analysis that is looking for a time-of-day-sensitive effect.
+    intervalSeconds: 15 * 60
+  }),
+  Object.freeze({
+    workflow: 'signals-live-scan.yml',
+    // Hourly and no faster: every configuration is defined on hourly bars, so
+    // scanning twice inside one bar re-evaluates a closed bar and spends the
+    // fetches to have its casts rejected.
+    key: 'signals:cadence:live-scan',
+    intervalSeconds: 60 * 60
+  })
+]);
 // 250, raised from 100 on 2026-09-06. The old value's stated reason was that
 // a smaller page "saved request budget" for the per-coin daily-history fetch —
 // which was never true of THIS call: /coins/markets returns up to 250 rows in
@@ -6225,6 +6268,63 @@ function isFresh(payload, nowMs = Date.now()) {
   return (nowMs - new Date(payload.generated_at).getTime()) < CACHE_SECONDS * 1000;
 }
 
+// GitHub's body distinguishes failure causes the status code alone does not:
+// 403 covers a token missing Actions:write, a fine-grained token that never had
+// this repo selected, an expired token, AND a secret set on the wrong Worker
+// (this account has both `frontier-capital-signals` and
+// `frontiercapitalsignals`, which differ only by hyphens). Shared by every
+// dispatcher here so a second one cannot regress to reporting a bare status.
+async function readGitHubErrorDetail(response) {
+  try {
+    const body = await response.text();
+    if (!body) return '';
+    const parsed = JSON.parse(body);
+    return parsed && parsed.message ? ` — ${parsed.message}` : ` — ${body.slice(0, 200)}`;
+  } catch {
+    return ''; // body unavailable or not JSON; the status alone still gets reported
+  }
+}
+
+// Asks GitHub to run one workflow at most once per `spec.intervalSeconds`. The
+// KV key IS the schedule: it is written with that interval as its TTL, so the
+// key's own expiry opens the next slot and no timestamp arithmetic is needed.
+//
+// The slot is claimed BEFORE the outbound call, not after, so two overlapping
+// cron invocations cannot both decide to dispatch. On failure the key is
+// rewritten with the short failure cooldown instead, so a broken token retries
+// in minutes rather than holding the lane shut for a whole interval -- the same
+// asymmetry dispatchRefreshIfStale learned the hard way.
+export async function dispatchWorkflowOnCadence(env, spec) {
+  if (!env || !env.FCS_CACHE) throw new Error('FCS_CACHE binding is required for cadence dispatch');
+  if (await env.FCS_CACHE.get(spec.key)) return false;
+  try {
+    if (!env.GITHUB_ACTIONS_TOKEN) throw new Error(`GITHUB_ACTIONS_TOKEN Worker secret is required to dispatch ${spec.workflow}`);
+    await env.FCS_CACHE.put(spec.key, new Date().toISOString(), { expirationTtl: spec.intervalSeconds });
+    const response = await fetch(`${GITHUB_WORKFLOW_DISPATCH_BASE}${spec.workflow}/dispatches`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.GITHUB_ACTIONS_TOKEN}`,
+        'User-Agent': 'frontier-capital-signals',
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ ref: 'main' })
+    });
+    if (!response.ok) {
+      throw new Error(`GitHub ${spec.workflow} dispatch failed: HTTP ${response.status}${await readGitHubErrorDetail(response)}`);
+    }
+  } catch (error) {
+    try {
+      await env.FCS_CACHE.put(spec.key, new Date().toISOString(), { expirationTtl: REFRESH_DISPATCH_FAILURE_COOLDOWN_SECONDS });
+    } catch (cooldownError) {
+      console.error(`Unable to set ${spec.workflow} dispatch cooldown:`, cooldownError.message);
+    }
+    throw error;
+  }
+  return true;
+}
+
 // Dispatches the existing GitHub Actions refresh workflow only after the
 // serving payload is stale. The token is a Cloudflare Worker secret, never a
 // client-facing variable; it needs only the repository's Actions write scope.
@@ -6260,15 +6360,7 @@ export async function dispatchRefreshIfStale(env) {
       // Worker (this account has both `frontier-capital-signals` and
       // `frontiercapitalsignals`, which differ only by hyphens). GitHub's body
       // distinguishes them; the status code alone does not.
-      let detail = '';
-      try {
-        const body = await response.text();
-        if (body) {
-          const parsed = JSON.parse(body);
-          detail = parsed && parsed.message ? ` — ${parsed.message}` : ` — ${body.slice(0, 200)}`;
-        }
-      } catch { /* body unavailable or not JSON; the status alone still gets reported */ }
-      throw new Error(`GitHub signals refresh dispatch failed: HTTP ${response.status}${detail}`);
+      throw new Error(`GitHub signals refresh dispatch failed: HTTP ${response.status}${await readGitHubErrorDetail(response)}`);
     }
     await recordRefreshDispatchStatus(env, { result: 'dispatched' });
   } catch (error) {
@@ -8962,6 +9054,15 @@ export default {
     ctx.waitUntil(dispatchTradeJournalAlerts(env).catch((error) => {
       console.error('Account journal alert dispatch failed:', error.message);
     }));
+    // Before the refresh dispatch, not after: the existing tests capture the
+    // LAST waitUntil promise as "the refresh result", and these must not
+    // displace it. Each cadence lane is independent -- one failing token or
+    // one GitHub outage must not stop the others or the price layer.
+    for (const spec of CADENCE_DISPATCHES) {
+      ctx.waitUntil(dispatchWorkflowOnCadence(env, spec).catch((error) => {
+        console.error(`Cadence dispatch failed for ${spec.workflow}:`, error.message);
+      }));
+    }
     ctx.waitUntil(dispatchRefreshIfStale(env).catch((error) => {
       console.error('Stale signals payload refresh dispatch failed:', error.message);
     }));

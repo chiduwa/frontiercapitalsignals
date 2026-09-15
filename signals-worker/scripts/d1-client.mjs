@@ -97,6 +97,46 @@ export async function forEachConcurrent(items, limit, fn) {
   await Promise.all(Array.from({ length: workerCount }, worker));
 }
 
+// How many symbols' bars to ask for at once. Two independent ceilings: D1 caps
+// a statement at 100 bound parameters, and it also caps how much one query may
+// RETURN. 20 keeps each response a few MB with ~1 round trip per 20 symbols.
+export const BAR_SYMBOL_CHUNK = 20;
+
+// Reads the WHOLE asset_daily_bars archive in symbol batches.
+//
+// It used to be one `SELECT ... FROM asset_daily_bars ORDER BY symbol, date`
+// per caller. On 2026-09-11 the archive outgrew what a single D1 request may
+// return and those reads began failing with
+// `HTTP 503 [{"code":7010,"message":"Service unavailable"}]`. 7010 on a plain
+// SELECT is a SIZE ceiling, not an outage: it fails identically on every retry,
+// so waiting never clears it. Signals Discovery died outright for five straight
+// days; daily-refresh's shared read is inside a try/catch, so it degraded
+// SILENTLY instead — the job stayed green while lead/lag and support/resistance
+// quietly lost their input. That second failure mode is the reason this lives
+// here rather than being fixed once at the call site that happened to shout.
+//
+// Ordering is byte-for-byte what the single query produced: the symbol list is
+// ordered, each batch is ordered by (symbol, date), and a symbol is never split
+// across batches — so callers that relied on a global symbol-major sort are
+// unaffected. `columns` and the WHERE fragments are code-controlled literals,
+// never caller input; every VALUE is still bound.
+export async function readAllDailyBars(env, columns, options = {}) {
+  const { symbolWhere = '', extraWhere = '', extraParams = [], chunkSize = BAR_SYMBOL_CHUNK } = options;
+  const symbolRows = await d1(env,
+    `SELECT DISTINCT symbol FROM asset_daily_bars${symbolWhere ? ` WHERE ${symbolWhere}` : ''} ORDER BY symbol`);
+  const symbols = symbolRows.map((r) => r.symbol);
+  const out = [];
+  for (const group of chunk(symbols, chunkSize)) {
+    const placeholders = group.map(() => '?').join(', ');
+    const rows = await d1(env,
+      `SELECT ${columns} FROM asset_daily_bars WHERE symbol IN (${placeholders})`
+      + `${extraWhere ? ` AND ${extraWhere}` : ''} ORDER BY symbol, date`,
+      [...group, ...extraParams]);
+    for (const row of rows) out.push(row);
+  }
+  return out;
+}
+
 export function chunk(arr, n) {
   const out = [];
   for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));

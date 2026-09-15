@@ -16,12 +16,27 @@ name: Signals Microstructure
 # script rejects an overlapping window at write time rather than trusting the
 # schedule.
 #
-# Every 15 minutes is deliberately more often than needed. The pooled test wants
-# many independent five-minute windows across many hours of the day, and asking
-# for four an hour tends to deliver roughly one given the drop rate above.
+# PRIMARY TRIGGER IS THE CLOUDFLARE WORKER CRON (see CADENCE_DISPATCHES in
+# signals-worker/worker.js), which asks for this workflow every 15 minutes.
+# Measured 2026-09-15 over the trailing run history, this workflow's own
+# 4x/hour GitHub schedule delivered 65 of ~917 requested firings -- 7%, median
+# gap 199 minutes against an intended 15, worst 414. That is not merely slow:
+# the pooled test wants independent windows spread across many hours of the
+# day, so windows arriving only in whatever hours GitHub felt like delivering
+# is a time-of-day sampling bias inside an analysis that is specifically
+# looking for time-of-day-sensitive effects.
+#
+# The GitHub schedule stays as fallback coverage, but at one request an hour
+# rather than four. This repo has already measured that asking for MORE is
+# counter-productive (see signals-refresh.yml's note): extra slots add
+# scheduler pressure without surviving the multi-hour drop windows.
+#
+# Double-firing is safe by construction here -- the script rejects an
+# overlapping window at write time rather than trusting any scheduler -- so
+# fallback coverage can never double-count one window's evidence as two.
 on:
   schedule:
-    - cron: "7,22,37,52 * * * *"
+    - cron: "7 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -37,10 +52,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
 

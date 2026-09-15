@@ -335,10 +335,13 @@ function stubbedFetch(url) {
 
 // ---- mock KV ---------------------------------------------------------------
 class MockKV {
-  constructor() { this.store = new Map(); }
+  // TTLs are recorded, not just accepted: the cadence dispatcher encodes its
+  // whole schedule in the expiry it writes, so a test that ignored the TTL
+  // could not tell a 15-minute slot from a permanent lock.
+  constructor() { this.store = new Map(); this.ttls = new Map(); }
   async get(k) { return this.store.has(k) ? this.store.get(k) : null; }
-  async put(k, v) { this.store.set(k, v); }
-  async delete(k) { this.store.delete(k); }
+  async put(k, v, opts) { this.store.set(k, v); if (opts && opts.expirationTtl != null) this.ttls.set(k, opts.expirationTtl); }
+  async delete(k) { this.store.delete(k); this.ttls.delete(k); }
 }
 
 // ---- mock D1 (Workers binding surface: prepare(sql).bind(...args).all()) --
@@ -387,6 +390,11 @@ global.fetch = async (url, init) => {
   dispatchCalls.push({ url: String(url), init });
   return { ok: true, status: 204 };
 };
+// scheduled() drives several independent dispatch lanes now. Counting every
+// outbound call would make "the refresh dispatcher fired once" depend on how
+// many OTHER lanes happened to be due, so each lane is counted by its own
+// workflow file instead.
+const callsFor = (workflow) => dispatchCalls.filter((c) => c.url.includes(`/actions/workflows/${workflow}/dispatches`));
 
 const freshDispatchEnv = {
   FCS_CACHE: new MockKV(),
@@ -396,7 +404,7 @@ await freshDispatchEnv.FCS_CACHE.put(mod.CACHE_KEY, JSON.stringify({ generated_a
 let scheduledWork;
 worker.scheduled({}, freshDispatchEnv, { waitUntil: (promise) => { scheduledWork = promise; } });
 const freshDispatchResult = await scheduledWork;
-check('fresh cache does not dispatch the refresh workflow', freshDispatchResult === false && dispatchCalls.length === 0, JSON.stringify(dispatchCalls));
+check('fresh cache does not dispatch the refresh workflow', freshDispatchResult === false && callsFor('signals-refresh.yml').length === 0, JSON.stringify(dispatchCalls));
 
 const staleDispatchEnv = {
   FCS_CACHE: new MockKV(),
@@ -408,14 +416,14 @@ await staleDispatchEnv.FCS_CACHE.put(mod.CACHE_KEY, JSON.stringify({
 let staleScheduledWork;
 worker.scheduled({}, staleDispatchEnv, { waitUntil: (promise) => { staleScheduledWork = promise; } });
 const staleDispatchResult = await staleScheduledWork;
-const dispatchRequest = dispatchCalls[0];
+const dispatchRequest = callsFor('signals-refresh.yml')[0];
 const dispatchBody = dispatchRequest && JSON.parse(dispatchRequest.init.body);
-check('stale cache dispatches the existing refresh workflow once', staleDispatchResult === true && dispatchCalls.length === 1 && dispatchRequest.url.endsWith('/actions/workflows/signals-refresh.yml/dispatches'));
+check('stale cache dispatches the existing refresh workflow once', staleDispatchResult === true && callsFor('signals-refresh.yml').length === 1 && dispatchRequest.url.endsWith('/actions/workflows/signals-refresh.yml/dispatches'));
 check('recovery dispatch preserves the freshness gate with force=false', dispatchBody && dispatchBody.ref === 'main' && dispatchBody.inputs.force === 'false');
 check('recovery dispatch authenticates with the Worker secret', dispatchRequest && dispatchRequest.init.headers.Authorization === 'Bearer test-dispatch-token');
 check('recovery dispatch supplies the caller identity required by GitHub', dispatchRequest && dispatchRequest.init.headers['User-Agent'] === 'frontier-capital-signals');
 const duplicateDispatchResult = await mod.dispatchRefreshIfStale(staleDispatchEnv);
-check('dispatcher lock prevents a duplicate dispatch while active', duplicateDispatchResult === false && dispatchCalls.length === 1);
+check('dispatcher lock prevents a duplicate dispatch while active', duplicateDispatchResult === false && callsFor('signals-refresh.yml').length === 1);
 const dispatchedStatusResponse = await worker.fetch(new Request('https://x.com/signals/api/refresh-status'), staleDispatchEnv, ctx);
 const dispatchedStatus = await dispatchedStatusResponse.json();
 check('refresh-status reports a successful guarded dispatch without exposing a token', dispatchedStatus.result === 'dispatched' && !JSON.stringify(dispatchedStatus).includes('test-dispatch-token'), JSON.stringify(dispatchedStatus));
@@ -480,6 +488,60 @@ const staleResponse = await worker.fetch(
 );
 await staleRequestWork;
 check('a stale signals API request returns immediately while queueing guarded recovery', staleResponse.headers.get('x-fcs-cache') === 'stale' && requestFallbackCalls.length === 1);
+
+console.log('\n== cadence dispatch: the Worker cron drives the sub-daily workflows ==');
+// GitHub delivers this repo's DAILY crons at 100% and its sub-daily crons at
+// 7-26%. These two lanes exist because of that gap, so what is asserted here
+// is the discipline that makes an unreliable trigger safe to replace: one
+// dispatch per interval, the slot claimed before the call, and a failure that
+// backs off without holding the lane shut.
+check('only sub-daily workflows are dispatched from the Worker cron; the daily research jobs keep their own schedules',
+  mod.CADENCE_DISPATCHES.every((spec) => spec.intervalSeconds <= 3600)
+  && mod.CADENCE_DISPATCHES.some((s2) => s2.workflow === 'signals-microstructure.yml')
+  && mod.CADENCE_DISPATCHES.some((s2) => s2.workflow === 'signals-live-scan.yml')
+  && !mod.CADENCE_DISPATCHES.some((s2) => /discovery|retrospective|daily|replay|backfill/.test(s2.workflow)),
+  JSON.stringify(mod.CADENCE_DISPATCHES));
+check('live-scan is dispatched no faster than the hourly bars its configurations are defined on',
+  mod.CADENCE_DISPATCHES.find((s2) => s2.workflow === 'signals-live-scan.yml').intervalSeconds === 3600);
+
+const cadenceSpec = mod.CADENCE_DISPATCHES[0];
+const cadenceCalls = [];
+global.fetch = async (url, init) => { cadenceCalls.push({ url: String(url), init }); return { ok: true, status: 204 }; };
+const cadenceEnv = { FCS_CACHE: new MockKV(), GITHUB_ACTIONS_TOKEN: 'test-dispatch-token' };
+const firstCadence = await mod.dispatchWorkflowOnCadence(cadenceEnv, cadenceSpec);
+check('an empty cadence slot dispatches its workflow', firstCadence === true && cadenceCalls.length === 1
+  && cadenceCalls[0].url.endsWith(`/actions/workflows/${cadenceSpec.workflow}/dispatches`));
+check('the cadence dispatch authenticates with the Worker secret and identifies itself',
+  cadenceCalls[0].init.headers.Authorization === 'Bearer test-dispatch-token'
+  && cadenceCalls[0].init.headers['User-Agent'] === 'frontier-capital-signals');
+check('the cadence dispatch targets main and sends no inputs the workflow did not declare',
+  JSON.stringify(JSON.parse(cadenceCalls[0].init.body)) === JSON.stringify({ ref: 'main' }));
+check('a second tick inside the interval does not dispatch again',
+  await mod.dispatchWorkflowOnCadence(cadenceEnv, cadenceSpec) === false && cadenceCalls.length === 1);
+check('the KV slot carries the interval as its own TTL, so the key expiring IS the next slot opening',
+  cadenceEnv.FCS_CACHE.ttls.get(cadenceSpec.key) === cadenceSpec.intervalSeconds,
+  String(cadenceEnv.FCS_CACHE.ttls.get(cadenceSpec.key)));
+
+const cadenceFailEnv = { FCS_CACHE: new MockKV(), GITHUB_ACTIONS_TOKEN: 'test-dispatch-token' };
+global.fetch = async () => ({ ok: false, status: 503, text: async () => JSON.stringify({ message: 'upstream unavailable' }) });
+let cadenceError;
+try { await mod.dispatchWorkflowOnCadence(cadenceFailEnv, cadenceSpec); } catch (e) { cadenceError = e; }
+check('a failed cadence dispatch surfaces GitHub\'s own explanation, not just the status',
+  cadenceError && cadenceError.message.includes('HTTP 503') && cadenceError.message.includes('upstream unavailable'), cadenceError && cadenceError.message);
+check('a failed cadence dispatch backs off for the short cooldown, not the full interval',
+  cadenceFailEnv.FCS_CACHE.ttls.get(cadenceSpec.key) === 5 * 60,
+  String(cadenceFailEnv.FCS_CACHE.ttls.get(cadenceSpec.key)));
+
+const cadenceNoTokenEnv = { FCS_CACHE: new MockKV() };
+let cadenceTokenError;
+let cadenceTokenCalled = false;
+global.fetch = async () => { cadenceTokenCalled = true; return { ok: true, status: 204 }; };
+try { await mod.dispatchWorkflowOnCadence(cadenceNoTokenEnv, cadenceSpec); } catch (e) { cadenceTokenError = e; }
+check('a missing token fails with a named configuration error and never calls GitHub',
+  cadenceTokenError && cadenceTokenError.message.includes('GITHUB_ACTIONS_TOKEN') && cadenceTokenError.message.includes(cadenceSpec.workflow) && cadenceTokenCalled === false);
+check('a missing token still takes the cooldown, so it cannot retry on every cron tick',
+  cadenceNoTokenEnv.FCS_CACHE.ttls.get(cadenceSpec.key) === 5 * 60);
+
 global.fetch = originalFetch;
 
 console.log('\n== routing ==');

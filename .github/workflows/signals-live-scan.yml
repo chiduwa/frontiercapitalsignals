@@ -7,8 +7,19 @@ name: Signals Live Scan
 # UNIQUE (config_id, symbol, cast_at) constraint would reject them, but
 # spending the fetches to be rejected is pointless).
 #
-# Runs at :25 to stay clear of signals-refresh (:13) and the round-hour
-# boundary, per this repo's existing note on scheduling contention.
+# PRIMARY TRIGGER IS THE CLOUDFLARE WORKER CRON (see CADENCE_DISPATCHES in
+# signals-worker/worker.js), which asks for this workflow once an hour.
+# Measured 2026-09-15 over the trailing run history, this workflow's own hourly
+# GitHub schedule delivered 86 of ~331 requested firings -- 26%, median gap 247
+# minutes against an intended 60, worst 467. A scanner whose entire purpose is
+# to warn BEFORE the move cannot do that while missing three hourly bars in
+# four, so the reliable trigger matters more here than almost anywhere else.
+#
+# The GitHub schedule stays as fallback coverage at :25, clear of
+# signals-refresh (:13) and the round-hour boundary, per this repo's existing
+# note on scheduling contention. An occasional double-firing costs a repeat
+# scan of one closed bar whose casts the UNIQUE (config_id, symbol, cast_at)
+# constraint then rejects -- wasteful, bounded, and never double-counted.
 on:
   schedule:
     - cron: "25 * * * *"
@@ -32,10 +43,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
 

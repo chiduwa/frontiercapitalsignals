@@ -32,7 +32,7 @@ import {
   computeOutperformanceRotations, replaceRotationStatus,
   computeLongTermBottomCandidates, replaceLongTermBottomCandidates
 } from './archive.mjs';
-import { d1 } from './d1-client.mjs';
+import { d1, readAllDailyBars } from './d1-client.mjs';
 import { evaluateYesterdaySwingTimes } from './reliability.mjs';
 import { notifyOnNewHacks } from './notify.mjs';
 import { refreshMarketContext } from './market-context.mjs';
@@ -263,7 +263,7 @@ async function main() {
   // behavior to fetching it itself).
   let sharedDailyBarsRows = null;
   try {
-    sharedDailyBarsRows = await d1(env, 'SELECT symbol, asset_class, date, close, high, low FROM asset_daily_bars ORDER BY symbol, date');
+    sharedDailyBarsRows = await readAllDailyBars(env, 'symbol, asset_class, date, close, high, low');
     console.log(`shared archive read for lead/lag + support/resistance: ${sharedDailyBarsRows.length} rows`);
   } catch (e) {
     console.error('shared archive read failed — lead/lag and support/resistance will each fall back to their own read:', e.message);
