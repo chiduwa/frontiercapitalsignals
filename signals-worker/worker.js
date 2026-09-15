@@ -6906,6 +6906,105 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     .bh-row{grid-template-columns:1fr;row-gap:6px}
     .bh-cell[data-l]::before{display:block;content:attr(data-l);color:var(--dim);font-size:9px;letter-spacing:.1em;text-transform:uppercase;flex:1 0 100%;margin-bottom:1px}
   }
+  /* Dashboard presentation: the engine and public payload stay unchanged. */
+  :root{--dim:#8b99b0;--line:#253249;--ink-1:#111b2c;--ink-2:#1a2840}
+  [hidden]{display:none!important}
+  html{scroll-padding-top:110px}
+  body{background:radial-gradient(ellipse at 75% 0,rgba(38,65,96,.18),transparent 50%),var(--ink-0)}
+  .wrap{max-width:1400px;padding-inline:clamp(18px,3.2vw,48px)}
+  .statusbar .wrap{height:34px;font-size:9px;letter-spacing:.08em;gap:16px}
+  .statusbar .dot{width:6px;height:6px;box-shadow:none}
+  .masthead{padding:28px 0 26px}
+  .mast-grid{align-items:center;gap:20px}
+  .dashboard-brand{display:flex;align-items:center;gap:14px}
+  .brand-mark{width:46px;height:46px;border:1px solid #71531e;border-radius:13px;display:flex;align-items:flex-end;justify-content:center;gap:4px;padding:12px;background:rgba(255,178,36,.08)}
+  .brand-mark i{width:5px;background:var(--amber);border-radius:2px}
+  .brand-mark i:nth-child(1){height:9px}.brand-mark i:nth-child(2){height:15px}.brand-mark i:nth-child(3){height:22px}
+  .home-link{font-family:var(--disp);font-size:11px;letter-spacing:.1em;color:var(--muted);margin-bottom:5px}
+  .masthead h1{font-size:clamp(23px,2.8vw,34px);font-weight:700;line-height:1.12;letter-spacing:-.045em;text-transform:none}
+  .masthead h1 .amber{color:var(--paper)}
+  .mast-actions{display:flex;align-items:center;gap:20px;font-size:12px}
+  .universe-label{color:var(--muted);padding-right:20px;border-right:1px solid var(--line)}
+  .universe-label b{font-family:var(--mono);font-size:12px;color:var(--paper)}
+  .utility-link{color:var(--muted);font-size:12px}.utility-link:hover{color:var(--amber)}
+  .quicknav{position:sticky;top:34px;z-index:15;gap:8px;padding:0 0 12px;margin:0 0 18px;border-top:0;background:rgba(10,16,29,.97);backdrop-filter:blur(12px);flex-wrap:nowrap;overflow-x:auto}
+  .qnav-link{font-family:var(--disp);font-size:13px;font-weight:500;text-transform:none;letter-spacing:0;border:1px solid transparent;border-radius:8px;background:transparent;padding:10px 18px;white-space:nowrap;flex:0 0 auto}
+  .qnav-link[aria-current="page"]{background:rgba(255,178,36,.1);border-color:rgba(255,178,36,.2);color:var(--amber)}
+  .research-note{border:1px solid rgba(255,178,36,.17);border-radius:9px;background:rgba(255,178,36,.035);margin-bottom:24px;color:var(--muted);font-size:11px}
+  .research-note>summary{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;list-style:none}
+  .research-note>summary::-webkit-details-marker{display:none}
+  .research-note b{color:#e5bf79;font-size:11px;font-weight:500}
+  .note-dot{width:5px;height:5px;background:var(--amber);border-radius:50%;flex:none}.note-more{margin-left:auto;white-space:nowrap;color:#c6ac7f}
+  .research-note-body{padding:4px 29px 14px;line-height:1.7;max-width:1050px}
+  .view-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 20px}
+  .view-toolbar .eyebrow{font-size:9px;letter-spacing:.15em;color:var(--amber)}
+  .view-toolbar h2{font-size:23px;font-weight:600;letter-spacing:-.035em;margin-top:4px}
+  .view-toolbar p{font-size:12px;color:var(--muted);margin-top:5px}
+  .panel-controls{display:flex;gap:8px;flex-shrink:0}
+  .panel-controls button{padding:8px 11px;border:1px solid var(--line);border-radius:7px;background:var(--ink-1);color:var(--muted);font-family:var(--disp);font-size:11px}
+  .panel-controls button:hover{border-color:var(--amber);color:var(--paper)}
+  .overview{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;background:none;border:0;margin:0 0 18px}
+  .tile{position:relative;padding:20px;border:1px solid var(--line);border-radius:12px;background:linear-gradient(135deg,#142035,#101a2b)}
+  .tile .lbl{font-family:var(--disp);font-size:11px;letter-spacing:.07em;color:var(--muted);margin-bottom:12px}
+  .tile .val{font-size:clamp(20px,2.1vw,29px);font-weight:500;letter-spacing:-.045em}
+  .tile .sub{margin-top:8px;font-size:10px;color:var(--muted)}
+  .dashboard-insights{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:18px;margin-bottom:28px}
+  .insight-card{min-width:0;background:var(--ink-1);border:1px solid var(--line);border-radius:12px;padding:22px}
+  .insight-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
+  .insight-card h3{font-size:14px;font-weight:600;letter-spacing:-.01em}
+  .insight-caption{font-size:11px;color:var(--muted);line-height:1.6}
+  .subtle-chip{font-family:var(--mono);font-size:9px;padding:4px 7px;border:1px solid var(--line);border-radius:5px;color:var(--muted);white-space:nowrap}
+  .move-chart{margin-top:18px}
+  .move-chart-row{display:grid;grid-template-columns:83px minmax(0,1fr) 65px;align-items:center;gap:16px;margin-top:15px;font-family:var(--mono);font-size:11px}
+  .move-chart-row b{font-weight:500;text-align:right}
+  .move-track{height:17px;position:relative;background:linear-gradient(90deg,rgba(255,122,133,.035) 50%,rgba(61,220,151,.035) 50%);border-radius:3px}
+  .move-track:after{content:'';position:absolute;left:50%;top:-5px;bottom:-5px;width:1px;background:#465269}
+  .move-track i{position:absolute;top:3px;height:11px;border-radius:2px;min-width:0;background:var(--up)}
+  .move-track i.negative{background:var(--down)}
+  .chart-axis{display:flex;justify-content:space-between;margin:17px 81px 0 99px;font-family:var(--mono);font-size:9px;color:var(--muted)}
+  .sentiment-layout{display:flex;align-items:center;gap:24px;margin:22px 0 17px}
+  .sentiment-ring{width:104px;height:104px;border-radius:50%;background:conic-gradient(var(--amber) var(--sentiment),var(--ink-2) 0);display:grid;place-items:center;flex:none;transform:rotate(-90deg)}
+  .sentiment-center{width:89px;height:89px;border-radius:50%;background:var(--ink-1);display:flex;flex-direction:column;align-items:center;justify-content:center;transform:rotate(90deg)}
+  .sentiment-center b{font-family:var(--mono);font-size:29px;font-weight:500;line-height:1.15;letter-spacing:-.05em}.sentiment-center small{color:var(--muted);font-size:9px;margin-top:4px}
+  .sentiment-copy b{display:block;font-size:18px;font-weight:500;margin-bottom:6px}.sentiment-copy p{font-size:11px;color:var(--muted);line-height:1.7;max-width:180px}
+  .context-stat{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px;margin-top:12px}.context-stat b{color:var(--paper);font-family:var(--mono);font-weight:500}
+  .dashboard-bottom{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+  .dashboard-number{font-family:var(--mono);font-size:25px;font-weight:500;letter-spacing:-.05em;margin:16px 0 3px;line-height:1.15}
+  .dashboard-number small{font-size:12px;color:var(--muted);letter-spacing:0;font-weight:400}
+  .coverage-track{height:5px;border-radius:4px;background:var(--ink-2);overflow:hidden;margin:15px 0 12px}.coverage-track i{display:block;height:100%;background:#72a9ed;border-radius:4px}
+  .coverage-track.misses i{background:var(--down)}
+  .card-link{display:inline-block;color:var(--amber);font-size:11px;margin-top:15px}
+  .evidence-status-row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:11px 0;border-bottom:1px solid var(--line);font-size:11px}
+  .evidence-status-row:last-of-type{border:0}.evidence-status-row b{font-weight:500;font-size:10px;color:var(--amber)}
+  .sort-button{font:inherit;letter-spacing:inherit;text-transform:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:5px 0}
+  .dashboard-empty,.dashboard-loading{border:1px dashed var(--line);border-radius:10px;padding:24px;color:var(--muted);font-size:13px;grid-column:1/-1}
+  .boards{margin-bottom:0}.boards:empty{display:none}
+  .zone{gap:14px;margin-bottom:26px}.zone-head{margin:10px 0 14px}.zone-head h2{font-size:10px;letter-spacing:.12em}.zone-head .zn{font-size:9px;letter-spacing:.06em}
+  .panel{border-radius:11px;overflow:hidden}.panel>summary{padding:17px 20px}.ps-title{font-size:16px;font-weight:600}.ps-main .eyebrow{font-size:9px;letter-spacing:.1em}.ps-meta{font-size:9px;letter-spacing:.04em}
+  .panel.board{border-top:1px solid var(--line)}.board-pair{gap:14px}.class-withheld{margin:0;padding:12px 16px;border-radius:8px;font-family:var(--disp);font-size:11px;line-height:1.65}
+  tbody td{padding:14px 12px;vertical-align:top;font-size:11px}.asset .nm{display:block;margin:3px 0 0;font-size:10px}.asset .sym{font-size:13px}
+  .asset-details,.evidence-details{margin-top:7px;max-width:270px;white-space:normal;font-family:var(--disp);font-size:10px;color:var(--muted)}
+  .asset-details>summary,.evidence-details>summary{cursor:pointer;font-size:10px;color:var(--muted);padding:0;letter-spacing:0}
+  .asset-details[open]>summary,.evidence-details[open]>summary{color:var(--amber);margin-bottom:7px}.asset-details .why,.asset-details .move-note{line-height:1.6}.asset-details .move-note{display:block;white-space:normal}
+  .meter i{height:9px;width:4px}.sigrow{gap:6px}.dir-arrow{font-size:9px}.conf{font-size:8px;letter-spacing:.04em}.horizon{font-size:9px}.abstain-note{font-size:10px;line-height:1.6}
+  .intraday{border-radius:12px;margin:0 0 26px}.id-grid{grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}.id-card{border-radius:9px}
+  .notice{margin:0 0 22px;padding:16px 20px;border-radius:9px;font-size:11px}
+  #methodology{border-radius:11px;overflow:hidden;margin-bottom:26px}
+  footer{padding:18px 0 28px;font-size:11px}footer .cols{font-size:9px;letter-spacing:.02em;gap:8px 20px;justify-content:space-between}
+  .footer-note>summary{cursor:pointer;color:var(--muted);font-size:11px;margin-bottom:10px}.footer-note .legal{margin-top:12px;line-height:1.7}
+  .skip-link{position:fixed;top:-80px;left:20px;z-index:99;background:var(--amber);color:var(--ink-0);padding:10px 16px;border-radius:6px}.skip-link:focus{top:10px}
+  #viewTitle:focus,#dashboardContent:focus{outline:none}
+  @media(min-width:761px){.asset{width:27%}.sig-td{width:24%}}
+  @media(max-width:1000px){.mast-actions{gap:12px}.universe-label{display:none}.dashboard-insights{grid-template-columns:1.3fr 1fr}.insight-card{padding:18px}.sentiment-layout{gap:16px}.sentiment-ring{width:86px;height:86px}.sentiment-center{width:73px;height:73px}.sentiment-copy b{font-size:15px}}
+  @media(max-width:760px){
+    .wrap{padding-inline:18px}.statusbar .wrap{height:34px;min-height:34px;padding-block:0}.masthead{padding:22px 0}.brand-mark{width:38px;height:38px;padding:8px}.dashboard-brand{gap:10px}.mast-grid{gap:16px}.mast-actions{width:100%;justify-content:flex-end}.mast-actions .utility-link{font-size:11px}.quicknav{gap:4px;padding-bottom:10px}.qnav-link{flex:0 0 auto;padding:9px 13px;font-size:12px}
+    .quicknav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));overflow:visible}.qnav-link{padding:9px 6px;font-size:11px}html{scroll-padding-top:145px}
+    .research-note>summary{display:grid;grid-template-columns:auto 1fr auto;gap:6px 8px;padding:10px 12px}.research-note>summary>span:not([class]){grid-column:1/-1;grid-row:2;padding-left:13px;font-size:10px}.note-more{position:static;grid-column:3;grid-row:1;font-size:10px}.research-note-body{padding:3px 25px 12px}.research-note{margin-bottom:20px}
+    .view-toolbar{align-items:flex-start;flex-direction:column;gap:12px}.view-toolbar h2{font-size:22px}.view-toolbar p{font-size:11px;max-width:46ch}.overview{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.tile{padding:16px}.tile .val{font-size:22px}.tile .lbl{font-size:9px;margin-bottom:10px}.tile .sub{font-size:9px}
+    .dashboard-insights{grid-template-columns:1fr;gap:12px}.dashboard-bottom{grid-template-columns:1fr;gap:12px}.sentiment-layout{gap:24px;margin-block:18px}.sentiment-ring{width:96px;height:96px}.sentiment-center{width:82px;height:82px}.sentiment-copy b{font-size:18px}.sentiment-copy p{max-width:220px}.move-chart-row{grid-template-columns:68px minmax(0,1fr) 59px;gap:10px;font-size:10px}.chart-axis{margin-left:78px;margin-right:69px}
+    .zone-head{margin-top:4px}.panel>summary{padding:15px}.ps-meta{max-width:100px;white-space:normal}.ps-title{font-size:15px}.asset-details{max-width:none}.sigcell{width:100%}.evidence-details{align-self:flex-start}.abstain-note{text-align:left}.asset .flip-note{white-space:normal}.tbl-wrap tbody tr{border-radius:8px}.panel-controls button{padding:8px 12px}footer .cols{display:grid;gap:6px}
+  }
+  @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 </style>
 </head>
 <body>
@@ -6924,64 +7023,55 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
 
 <div class="wrap">
 
+  <a class="skip-link" href="#dashboardContent">Skip to dashboard</a>
   <header class="masthead">
     <div class="mast-grid">
-      <div>
-        <div class="mast-links">
-          <a class="home-link" href="https://frontiercapitalsignals.com/">← Frontier Capital Signals home</a>
-          <a class="home-link rss-link" href="/signals/api/feed" title="Subscribe in any RSS reader for a persistent, browsable history of every alert — a complement to the ntfy push channel, which only shows what's live right now">📡 Alerts RSS feed</a>
-        </div>
-        <h1>Frontier Capital<br><span class="amber">Signals</span></h1>
-        <p class="dek">Quant screens across <b>150+ cryptocurrencies</b> and <b>290 US equities</b>. Up to <b>32 candidate evidence sources</b> are measured, but an unknown or unproven source receives zero live weight. A direction, timeframe, and range are published only when the asset class and the <b>exact asset/side/score/horizon setup</b> beat their measured no-skill baselines on independent outcomes. Otherwise the page says <b>withheld</b>. <b>Analysis syncs hourly; price and 24h change tick live</b> in between.</p>
+      <div class="dashboard-brand">
+        <a class="brand-mark" href="https://frontiercapitalsignals.com/" aria-label="Frontier Capital Signals home"><i></i><i></i><i></i></a>
+        <div><a class="home-link" href="https://frontiercapitalsignals.com/">Frontier Capital</a>
+          <h1>Signals <span class="amber">dashboard</span></h1></div>
       </div>
-      <div class="mast-meta">
-        ANALYSIS REFRESH <b>HOURLY</b><br>
-        PRICE TICKS <b>LIVE</b><br>
-        UNIVERSE <b id="metaUniverse">—</b><br>
-        TECHNIQUES PER ASSET <b>UP TO 32</b>
+      <div class="mast-actions">
+        <span class="universe-label"><b id="metaUniverse">—</b> assets screened</span>
+        <a class="utility-link rss-link" href="/signals/api/feed">Alerts RSS feed <span aria-hidden="true">↗</span></a>
+        <a class="utility-link" href="#methodology">How it works</a>
       </div>
     </div>
-    <div class="mast-rule"></div>
   </header>
 
-  <nav class="quicknav" aria-label="Quick navigation">
-    <a class="qnav-link" href="#overview">Overview</a>
-    <a class="qnav-link" href="#intraday">Intraday</a>
-    <a class="qnav-link" href="#screens">Live screens</a>
-    <a class="qnav-link" href="#learning">Retrospective</a>
-    <a class="qnav-link" href="#watchlists">Watchlists</a>
-    <a class="qnav-link" href="#timing">Timing &amp; range</a>
-    <a class="qnav-link" href="#research">Research</a>
-    <a class="qnav-link" href="#methodology">Methodology</a>
-    <span class="qnav-spacer"></span>
-    <button class="qnav-link qnav-btn" type="button" id="expandAll">Expand all</button>
-    <button class="qnav-link qnav-btn" type="button" id="collapseAll">Collapse all</button>
+  <nav class="quicknav" aria-label="Dashboard navigation">
+    <a class="qnav-link" href="#overview" data-view-link="overview" aria-current="page">Overview</a>
+    <a class="qnav-link" href="#screens" data-view-link="screens">Live screens</a>
+    <a class="qnav-link" href="#intraday" data-view-link="intraday">Intraday</a>
+    <a class="qnav-link" href="#watchlists" data-view-link="watchlists">Watchlists</a>
+    <a class="qnav-link" href="#timing" data-view-link="timing">Timing &amp; range</a>
+    <a class="qnav-link" href="#research" data-view-link="research">Research</a>
   </nav>
 
-  <div class="xp-banner" role="note">
-    <b>Experimental research project — not financial advice.</b> Every score, range, timeframe, and measured scalp context below is a mechanical output from an ongoing, evolving model, not a recommendation. Nothing here has been reviewed by a financial professional. Trading — especially with leverage — risks losing more than you put in. Do your own research and never rely on this page alone.
-  </div>
+  <details class="research-note">
+    <summary><span class="note-dot" aria-hidden="true"></span><b>Experimental research</b><span>Direction is withheld without validated evidence.</span><span class="note-more">Read more</span></summary>
+    <div class="research-note-body">Every score, range, timeframe, and measured scalp context below is a mechanical output from an ongoing, evolving model, not a recommendation or financial advice. Nothing here has been reviewed by a financial professional. Trading — especially with leverage — risks losing more than you put in. Do your own research and never rely on this page alone.</div>
+  </details>
 
-  <section class="overview" id="overview" aria-label="Market overview">
-  </section>
-
-  <section class="intraday" id="intraday" aria-label="Measured scalp context"></section>
-
-  <div id="stateBox"></div>
-
-  <main class="boards" id="boards">
-  </main>
-
-  <div class="zone-head" id="research"><h2>Research and track record</h2><span class="zl"></span><span class="zn">Evidence behind the calls</span></div>
-  <div class="zone">
-    <div id="trackRecord"></div>
-    <div id="marketContext"></div>
-    <div id="quantResearch"></div>
-  </div>
-
-  <details id="methodology">
+  <div id="stateBox" role="status"></div>
+  <main id="dashboardContent" tabindex="-1">
+    <div class="view-toolbar"><div><span class="eyebrow" id="viewEyebrow">MARKET MONITOR</span><h2 id="viewTitle">Market at a glance</h2><p id="viewDescription">Observed prices, market context, and the evidence behind the screens.</p></div>
+      <div class="panel-controls" hidden><button class="qnav-btn" type="button" id="expandAll">Expand all</button><button class="qnav-btn" type="button" id="collapseAll">Collapse all</button></div>
+    </div>
+    <section data-dashboard-view="overview" aria-label="Dashboard overview">
+      <div class="overview" id="overview" aria-label="Market overview"></div>
+      <div id="dashboardInsights" class="dashboard-insights"><div class="dashboard-loading" role="status">Loading market measurements…</div></div>
+    </section>
+    <section class="intraday" id="intraday" data-dashboard-view="intraday" aria-label="Measured scalp context" hidden></section>
+    <div class="boards" id="boards"></div>
+    <section data-dashboard-view="research" hidden>
+      <div class="zone-head" id="research"><h2>Research and track record</h2><span class="zl"></span><span class="zn">Evidence behind the calls</span></div>
+      <div class="zone"><div id="trackRecord"></div><div id="marketContext"></div><div id="quantResearch"></div></div>
+    </section>
+  <details id="methodology" data-dashboard-view="research" hidden>
     <summary>Methodology and data</summary>
     <div class="method">
+      <p class="model-introduction">Quant screens across <b>150+ cryptocurrencies</b> and <b>290 US equities</b>. Up to <b>32 candidate evidence sources</b> are measured, but an unknown or unproven source receives zero live weight. A direction, timeframe, and range are published only when the asset class and the <b>exact asset/side/score/horizon setup</b> beat their measured no-skill baselines on independent outcomes. Otherwise the page says <b>withheld</b>. <b>Analysis syncs hourly; price and 24h change tick live</b> in between.</p>
       <p><b>The confluence model.</b> Every asset is evaluated by up to 32 candidate techniques. They are not assumed statistically independent. Each raw vote is logged for learning, but unknown, weak, or baseline-level techniques receive zero live weight. A board direction survives only when class-level evidence and the exact current asset/side/score/horizon calibration both have enough independent periods and a conservative edge over the measured no-skill baseline.</p>
       <p><b>The 32 techniques.</b> Multi-horizon momentum alignment; Wilder RSI(14) regime and direction; MACD(12/26/9) histogram level and direction; moving-average stack (SMA20/50/200, computed from real daily bars for both equities and crypto); Bollinger %B with squeeze-and-expansion detection; stochastic (14,3) crosses; Donchian 20-bar breakout or breakdown proximity; volume confirmation versus baseline; on-balance volume trend; swing structure of higher-highs and higher-lows; a momentum divergence proxy that flags new price extremes without RSI support; a volatility regime read separating coiled compression from climactic expansion; a reversal-pattern read (below); how long an asset has been coiled at its own long-run high or low and whether it's decoupled from the broader market (below); a seasonal-analog read comparing the current pattern against the asset's own history one or more years back (below); a valuation-or-positioning layer, positioning now weighted by this asset's own funding-rate percentile once enough of its own history exists rather than a fixed global threshold; a Fibonacci retracement read off the asset's most recent swing, direction-aware and never firing without independent confirmation; open interest relative to this asset's own recent history, paired with price direction to separate real participation from a thin, untrusted move; a time-of-day and day-of-week behavioral profile (UTC, New York, London, and Tokyo session hours — which alone captures midnight ET and the NYSE's 9am/4pm hours — and day of week), learned per asset once a slot has real sample depth and a real effect size; market sentiment (Fear &amp; Greed for crypto, VIX's position in its own recent range for equities, pooled with per-asset community/news sentiment where available); a swing-timing read that separately learns what time of day this specific asset's own daily high or low tends to land, firing only when that proven timing pattern and the asset's current price position both confirm; a hack/exploit-severity read that turns a recent, matched security incident from a public hacks tracker into a bearish signal sized to the dollar loss relative to this asset's own market cap, decaying over roughly two weeks; a cross-asset and cross-sector lead/lag read that looks up whichever other assets or curated crypto-sector composites (DeFi, layer-1s, layer-2s, governance tokens, gaming/metaverse, meme, and other baskets) — in either asset class, including the dollar, gold, oil, and the 2-year/10-year Treasury yield spread — have proven, over the full historical archive, to predict this one's moves some number of days later; for crypto, sustained capital flowing into or out of a matched DeFi protocol's on-chain total value locked, paired with price direction before it fires; options-implied volatility (Deribit's DVOL for Bitcoin and Ether, the front-month options chain for equities) at an extreme relative to that asset's own history, a contrarian fear-or-euphoria read that only fires alongside a genuinely stretched price; for equities, an earnings-calendar awareness read that never votes a direction, only flags elevated gap risk and pulls down conviction accordingly, whenever a stock's next reported earnings date falls inside a call's own expected timeframe; a key support/resistance break read that only counts a level once price has reversed off it more than once, sized by how far this asset has historically moved in the 24 hours after that same kind of break; an accumulation/distribution read that looks for a genuinely coiled range — tightening Bollinger bands or realized volatility well under its own baseline, with price itself still flat — and asks which way on-balance volume is quietly leaning inside it, before that lean shows up in price at all; for crypto, a broad-market-outlier read that compares this asset's own 7-day move against the whole tracked crypto market's, voting only when the asset is genuinely decoupled — moving well beyond, or opposite to, what the market itself is doing — not when it's simply riding the same wave everything else is; and, for crypto, a yield-curve read: the one candidate, out of nineteen tested against the full historical record of every major crypto breakout and breakdown, that actually held up independently in both halves of that history — the 2-year/10-year Treasury spread moving more negative over the preceding five days measurably precedes a crypto breakdown, and only that direction, since the mirror case for breakouts did not hold up the same way.</p>
       <p><b>Reversal detection.</b> A separate read from plain RSI level: it looks for RSI having actually bottomed or topped over the last ~10 bars and turned back, confirmed by at least one independent signal (a stochastic cross, a Bollinger band extreme, swing structure, on-balance volume, or the divergence proxy) — it never fires on RSI alone. Market-wide sentiment adds confidence on top when it lines up: extreme fear on the Fear &amp; Greed index for a crypto bottom, or VIX sitting high in its own recent range for an equity bottom (and the mirror image — extreme greed or a complacent VIX — for tops).</p>
@@ -6999,8 +7089,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     </div>
   </details>
 
+  </main>
   <footer>
-    <p class="legal">Frontier Capital Signals is an experimental, ongoing research project — an informational tool, not a finished or audited product. Nothing on this page is investment advice, a recommendation, or a solicitation to buy or sell any asset. Inputs include market, positioning, news/sentiment, event, and selected fundamental context, but coverage can be delayed or incomplete and the system abstains when evidence is not reliable. The scalp panel is descriptive and deliberately makes no current direction, entry, target, top, or bottom call. Crypto and equity markets involve substantial risk of loss, and leveraged trading can lose more than the amount put in. Do your own research and do not rely on this page alone.</p>
+    <details class="footer-note"><summary>About this research &amp; risks</summary><p class="legal">Frontier Capital Signals is an experimental, ongoing research project — an informational tool, not a finished or audited product. Nothing on this page is investment advice, a recommendation, or a solicitation to buy or sell any asset. Inputs include market, positioning, news/sentiment, event, and selected fundamental context, but coverage can be delayed or incomplete and the system abstains when evidence is not reliable. The scalp panel is descriptive and deliberately makes no current direction, entry, target, top, or bottom call. Crypto and equity markets involve substantial risk of loss, and leveraged trading can lose more than the amount put in. Do your own research and do not rely on this page alone.</p></details>
     <div class="cols">
       <span>© <span id="yr"></span> Frontier Capital Signals</span>
       <span>Data: CoinGecko · CoinMetrics · CMC · alternative.me · Yahoo Finance / Stooq</span>
@@ -7105,6 +7196,83 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   function tile(label, valHtml, subHtml){
     return '<div class="tile"><div class="lbl">'+label+'</div><div class="val">'+valHtml+'</div>'+(subHtml?'<div class="sub">'+subHtml+'</div>':'')+'</div>';
   }
+  var activeView='overview';
+  var dashboardViews={
+    overview:['MARKET MONITOR','Market at a glance','Observed prices, market context, and the evidence behind the screens.'],
+    screens:['ASSET SCREENER','Live screens','Compare ranked assets. Open an asset’s details for its drivers and evidence.'],
+    intraday:['SESSION MONITOR','Intraday context','Live range measurements and historical time windows. Observation only.'],
+    watchlists:['STANDING COVERAGE','Watchlists','Always-tracked assets and descriptive long-term lows, in one place.'],
+    timing:['HISTORICAL MEASUREMENTS','Timing & range','Explore when assets moved and how much of their normal range they used.'],
+    research:['MODEL EVIDENCE','Research & track record','Review missed moves, measured performance, and research still being tested.']
+  };
+  function applyDashboardView(){
+    var meta=dashboardViews[activeView];
+    document.querySelectorAll('[data-dashboard-view]').forEach(function(el){ el.hidden=el.getAttribute('data-dashboard-view')!==activeView; });
+    document.querySelectorAll('[data-view-link]').forEach(function(el){
+      if(el.getAttribute('data-view-link')===activeView) el.setAttribute('aria-current','page');
+      else el.removeAttribute('aria-current');
+    });
+    $('viewEyebrow').textContent=meta[0];
+    $('viewTitle').textContent=meta[1];
+    $('viewDescription').textContent=meta[2];
+    document.querySelector('.panel-controls').hidden=activeView==='overview'||activeView==='intraday';
+    // All data stays in the DOM so price updates and panel persistence keep
+    // their existing targets, even when another dashboard view is selected.
+  }
+  function viewForHash(hash){
+    var id; try{id=decodeURIComponent((hash||'').slice(1));}catch(e){return null;}
+    if(Object.prototype.hasOwnProperty.call(dashboardViews,id)) return id;
+    if(id==='learning'||id==='methodology') return 'research';
+    var target=document.getElementById(id);
+    var section=target&&target.closest('[data-dashboard-view]');
+    return section?section.getAttribute('data-dashboard-view'):null;
+  }
+  function syncDashboardHash(focus){
+    activeView=viewForHash(location.hash)||(location.hash?activeView:'overview');
+    applyDashboardView();
+    var target;try{target=document.getElementById(decodeURIComponent(location.hash.slice(1)));}catch(e){}
+    if(target&&target.tagName==='DETAILS') target.open=true;
+    if(focus){
+      $('viewTitle').setAttribute('tabindex','-1');
+      $('viewTitle').focus({preventScroll:true});
+      if(target&&target.tagName==='DETAILS') target.scrollIntoView({block:'start'});
+      else window.scrollTo({top:0});
+    }
+  }
+  function measuredNumber(v){return typeof v==='number'&&isFinite(v);}
+  function renderDashboard(d,pricesOnly){
+    var o=d.overview||{},g=o.global||{},fg=o.fear_greed;
+    var changes=[{name:'Bitcoin',value:o.btc&&o.btc.chg24h},{name:'Ethereum',value:o.eth&&o.eth.chg24h},{name:'SPY · 1d',value:o.spy&&o.spy.chg24h},{name:'Crypto cap',value:g.mcap_chg24h}];
+    var max=Math.ceil(Math.max.apply(null,[1].concat(changes.map(function(x){return measuredNumber(x.value)?Math.abs(x.value):0;})))*10)/10;
+    var chart=changes.map(function(x){
+      var ok=measuredNumber(x.value),width=ok?Math.abs(x.value)/max*50:0;
+      return '<div class="move-chart-row"><span>'+esc(x.name)+'</span><span class="move-track" aria-hidden="true"><i class="'+(x.value<0?'negative':'')+'" style="left:'+(x.value<0?50-width:50)+'%;width:'+width+'%"></i></span><b class="'+pctCls(x.value)+'">'+(ok?fmtPct(x.value,2):'—')+'</b></div>';
+    }).join('');
+    var chartContent='<div class="move-chart">'+chart+'</div><div class="chart-axis" aria-hidden="true"><span>−'+max.toFixed(1)+'%</span><span>0</span><span>+'+max.toFixed(1)+'%</span></div>';
+    if(pricesOnly){if($('marketMovement')) $('marketMovement').innerHTML=chartContent;return;}
+    var fgValue=fg&&measuredNumber(fg.value)&&fg.value>=0&&fg.value<=100?fg.value:null;
+    var sentiment='<div class="sentiment-layout"><div class="sentiment-ring" style="--sentiment:'+(fgValue==null?0:fgValue)+'%" aria-hidden="true"><div class="sentiment-center"><b>'+(fgValue==null?'—':fgValue)+'</b><small>OUT OF 100</small></div></div><div class="sentiment-copy"><b>'+(fgValue==null?'Unavailable':esc(fg.label||'Fear & Greed'))+'</b><p>'+(fgValue==null?'Waiting for a measured sentiment reading.':'Crypto Fear &amp; Greed: '+fgValue+'/100. A sentiment reading, not a direction forecast.')+'</p></div></div>';
+    var cs=d.classSkill||{};
+    var evidence=['crypto','stock'].map(function(key){
+      var proven=cs[key]&&cs[key].proven===true;
+      return '<div class="evidence-status-row"><span>'+(key==='crypto'?'Crypto':'US equities')+'</span><b>'+(proven?'Class evidence passed':'Direction withheld')+'</b></div>';
+    }).join('');
+    var rt=d.retrospective,patterns=rt&&rt.patterns||[];
+    var total=patterns.reduce(function(n,x){return n+(measuredNumber(x.n)?x.n:0);},0);
+    var caught=patterns.reduce(function(n,x){return n+(x.cause==='caught'&&measuredNumber(x.n)?x.n:0);},0);
+    var missed=total-caught;
+    var retrospective=total?'<div class="dashboard-number">'+missed.toLocaleString('en-US')+' <small>/ '+total.toLocaleString('en-US')+' missed</small></div><div class="coverage-track misses" aria-hidden="true"><i style="width:'+(missed/total*100)+'%"></i></div><p class="insight-caption">'+(missed/total*100).toFixed(1)+'% of audited large moves were not called before the move.</p>':'<div class="dashboard-number">—</div><p class="insight-caption">No completed retrospective is available yet.</p>';
+    var a=d.adaptiveResearch;
+    var hasResearch=a&&measuredNumber(a.freshForecasts)&&measuredNumber(a.assetHorizons)&&a.assetHorizons>0;
+    var research=hasResearch?'<div class="dashboard-number">'+a.freshForecasts.toLocaleString('en-US')+' <small>/ '+a.assetHorizons.toLocaleString('en-US')+' fresh</small></div><div class="coverage-track" aria-hidden="true"><i style="width:'+Math.min(100,a.freshForecasts/a.assetHorizons*100)+'%"></i></div><p class="insight-caption">Asset/horizon pairs with usable inputs at the last research run. '+(a.status==='stale'?'This research run is stale.':'Shadow evaluation; no live trade vote.')+'</p>':'<div class="dashboard-number">—</div><p class="insight-caption">Research coverage is unavailable. No readiness value is inferred.</p>';
+    $('dashboardInsights').innerHTML=
+      '<article class="insight-card"><div class="insight-head"><h3>Market movement</h3><span class="subtle-chip">OBSERVED · 24H</span></div><p class="insight-caption">Major reference markets · SPY uses its daily change</p><div id="marketMovement">'+chartContent+'</div></article>'
+      +'<article class="insight-card"><div class="insight-head"><h3>Market sentiment</h3><span class="subtle-chip">CONTEXT</span></div>'+sentiment+'<div class="context-stat"><span>BTC dominance</span><b>'+(measuredNumber(g.btc_dominance)?g.btc_dominance.toFixed(1)+'%':'—')+'</b></div><div class="context-stat"><span>VIX</span><b>'+(o.vix&&measuredNumber(o.vix.price)?o.vix.price.toFixed(2):'—')+' <span class="'+pctCls(o.vix&&o.vix.chg24h)+'">'+(o.vix?fmtPct(o.vix.chg24h)+' 1d':'')+'</span></b></div></article>'
+      +'<div class="dashboard-bottom"><article class="insight-card"><div class="insight-head"><h3>Direction evidence</h3><span class="subtle-chip">LIVE MODEL</span></div>'+evidence+'<p class="insight-caption">Each current setup must also pass its own evidence gate.</p><a class="card-link" href="#screens">Explore the screens ↗</a></article>'
+      +'<article class="insight-card"><div class="insight-head"><h3>What the model missed</h3></div>'+retrospective+'<a class="card-link" href="#learning">Review the retrospective ↗</a></article>'
+      +'<article class="insight-card"><div class="insight-head"><h3>Learning coverage</h3><span class="subtle-chip">SHADOW</span></div>'+research+'<a class="card-link" href="#research">Open research &amp; evidence ↗</a></article></div>';
+  }
+
   function fgTone(v){ if(v==null) return 'flat'; if(v<=25) return 'down'; if(v>=65) return 'up'; return 'amber-t'; }
 
   function renderOverview(o){
@@ -7114,10 +7282,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     html+=tile('BTC / USD', o.btc?fmtPrice(o.btc.price):'—', o.btc?'<span class="'+pctCls(o.btc.chg24h)+'">'+fmtPct(o.btc.chg24h)+' 24h</span>':'');
     html+=tile('ETH / USD', o.eth?fmtPrice(o.eth.price):'—', o.eth?'<span class="'+pctCls(o.eth.chg24h)+'">'+fmtPct(o.eth.chg24h)+' 24h</span>':'');
     html+=tile('TOTAL CRYPTO MCAP', fmtBig(g.total_mcap), g.mcap_chg24h!=null?'<span class="'+pctCls(g.mcap_chg24h)+'">'+fmtPct(g.mcap_chg24h)+' 24h</span>':'');
-    html+=tile('BTC DOMINANCE', g.btc_dominance!=null?g.btc_dominance.toFixed(1)+'%':'—','');
-    html+=tile('FEAR &amp; GREED', fg?'<span class="'+fgTone(fg.value)+'">'+fg.value+'</span>':'—', fg?'<span class="'+fgTone(fg.value)+'">'+esc(fg.label)+'</span>':'');
     html+=tile('SPY', o.spy?fmtPrice(o.spy.price):'—', o.spy?'<span class="'+pctCls(o.spy.chg24h)+'">'+fmtPct(o.spy.chg24h)+' 1d</span>':'');
-    html+=tile('VIX', o.vix?o.vix.price.toFixed(2):'—', o.vix?'<span class="'+pctCls(o.vix.chg24h)+'">'+fmtPct(o.vix.chg24h)+' 1d</span>':'');
     $('overview').innerHTML=html;
   }
 
@@ -7305,7 +7470,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   function sortableTh(c, spec, boardId){
     var active = spec&&spec.key===c.key;
     var arrow = active ? (spec.dir===1?' ▲':' ▼') : '';
-    return '<th class="sortable'+(active?' active':'')+'" data-board="'+boardId+'" data-key="'+c.key+'" data-dir="'+(active?spec.dir:c.dir)+'">'+c.label+arrow+'</th>';
+    return '<th class="sortable'+(active?' active':'')+'" data-board="'+boardId+'" data-key="'+c.key+'" data-dir="'+(active?spec.dir:c.dir)+'" aria-sort="'+(active?(spec.dir===1?'ascending':'descending'):'none')+'"><button type="button" class="sort-button" aria-label="Sort by '+c.label+'">'+c.label+arrow+'</button></th>';
   }
   function sortRows(rows, spec){
     if(!spec||!rows) return rows;
@@ -7435,13 +7600,13 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           : r.range ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+rangeTitle+'. This is an expected-move band, not an exact top, bottom, target, or stop.'+referencePrice+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>' : '<span class="dim">—</span>';
         h+='<tr class="in" style="animation-delay:'+(i*30)+'ms" data-symbol="'+esc(r.symbol)+'" data-class="'+cfg.assetClass+'">'
           +'<td class="rk">#'+(i+1)+'</td>'
-          +'<td class="asset">'+symHtml+name+why+topInd+coil+quality+rotation+flipNote+ltpNote+moveNote+'</td>'
+          +'<td class="asset">'+symHtml+name+flipNote+'<details class="asset-details"><summary>Asset details</summary><div>'+why+topInd+coil+quality+rotation+ltpNote+moveNote+'</div></details></td>'
           +'<td class="live-price-cell" data-label="Price"><span class="live-price">'+fmtPrice(r.price)+'</span></td>'
           +'<td class="live-chg-cell '+pctCls(r.chg24h)+'" data-label="24h"><span class="live-chg">'+fmtPct(r.chg24h)+'</span></td>'
           +'<td class="'+pctCls(r.chg7d)+'" data-label="7d">'+fmtPct(r.chg7d)+'</td>'
           +'<td class="'+rsiCls(r.rsi)+'" data-label="RSI">'+(r.rsi!=null?r.rsi.toFixed(0):'—')+'</td>'
           +'<td data-label="Range">'+range+'</td>'
-          +'<td class="sig-td" data-label="Screen"><span class="sigcell"><span class="sigrow">'+meter(r.score)+'<span class="score">'+r.score+'</span>'+directionMark+'</span>'+conf+horizon+abstain+'</span></td>'
+          +'<td class="sig-td" data-label="Screen"><span class="sigcell"><span class="sigrow">'+meter(r.score)+'<span class="score">'+r.score+'</span>'+directionMark+'</span>'+conf+horizon+(abstain?'<details class="evidence-details"><summary>Why withheld</summary>'+abstain+'</details>':'')+'</span></td>'
           +'</tr>';
       });
     } else {
@@ -7467,12 +7632,10 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     var stockWithheldReason=stockCallsWithheld&&cs.stock?'no-demonstrated-edge':'insufficient-evidence';
 
     // ---- Zone 1: retrospective ---------------------------------------------
-    // Deliberately still ABOVE the boards, not tucked away at the bottom: this
-    // section is the engine's own record of what it got wrong, and burying
-    // that under the calls it is currently making would invert the honesty it
-    // exists to provide. It is collapsible like everything else, but it opens
-    // by default and its summary carries the miss rate, so shutting it cannot
-    // make the bad news disappear. Renders nothing until the daily job runs.
+    // The overview prominently summarizes missed moves. The full audit leads
+    // the Research view, retaining its counts, explanations, and saved panel
+    // state without filling the initial screen with every historical episode.
+    // Renders nothing until the daily job runs.
     if(d.retrospective && d.retrospective.patterns && d.retrospective.patterns.length){
       var rt = d.retrospective;
       var causeLabel = {
@@ -7518,7 +7681,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           +(r.gainToPeakPct!=null && r.detected ? '<span class="rt-avail-inline" title="Available from the first tell to the peak.">+'+r.gainToPeakPct.toFixed(1)+'% available</span>' : '')
         +'</div>';
       }).join('');
-      b+=zoneHead('learning','Engine retrospective','Failures counted, not argued')
+      b+='<section data-dashboard-view="research" hidden>'+zoneHead('learning','Engine retrospective','Failures counted, not argued')
         +'<div class="zone">'
         +panelStart({id:'retrospective', tone:'learn', open:true,
           eyebrow:'LEARNING &middot; <b>RETROSPECTIVE</b>',
@@ -7530,13 +7693,13 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         +'</div>'
         +(eRows?'<div class="rt-eps"><div class="rt-eps-h">Most recent episodes</div>'+eRows+'</div>':'')
         +PANEL_END
-        +'</div>';
+        +'</div></section>';
     }
 
     // ---- Zone 2: the live screens ------------------------------------------
     // The four directional boards, paired long/short per asset class, are the
     // reason the page exists, so they lead and they open by default.
-    b+=zoneHead('screens','Live screens','Rebuilt hourly · crypto and US equities')+'<div class="zone">';
+    b+='<section data-dashboard-view="screens" hidden>'+zoneHead('screens','Live screens','Rebuilt hourly · crypto and US equities')+'<div class="zone">';
     b+=classWithheldBanner('crypto',cs.crypto);
     b+='<div class="board-pair">'
       +boardHtml({side:'long', assetClass:'crypto', boardId:'crypto-long', eyebrow:'CRYPTO &middot; <b>LONG SIDE</b>', title:'Breakout watch', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.breakout, d.crypto.universe)
@@ -7547,7 +7710,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       +boardHtml({side:'long', assetClass:'stock', boardId:'stock-long', eyebrow:'US EQUITIES &middot; <b>LONG SIDE</b>', title:'Breakout watch', callsWithheld:stockCallsWithheld, withheldReason:stockWithheldReason}, d.stocks.breakout, d.stocks.universe)
       +boardHtml({side:'short', assetClass:'stock', boardId:'stock-short', eyebrow:'US EQUITIES &middot; <b>RISK SIDE</b>', title:'Breakdown risk', callsWithheld:stockCallsWithheld, withheldReason:stockWithheldReason}, d.stocks.breakdown, d.stocks.universe)
       +'</div>';
-    b+='</div>';
+    b+='</div></section>';
 
     // ---- Zone 3: standing watchlists ---------------------------------------
     // Not this hour's output: lists that are tracked regardless of score. The
@@ -7565,7 +7728,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     if(d.stocks.longTermPotential && d.stocks.longTermPotential.length){
       watch+=boardHtml({side:'favorites', assetClass:'stock', boardId:'stock-ltp', open:false, note:ltpNoteStock, eyebrow:'EQUITIES &middot; <b>LONG-TERM POTENTIAL</b>', title:'Possible multi-month/year lows', callsWithheld:stockCallsWithheld, withheldReason:stockWithheldReason}, d.stocks.longTermPotential, d.stocks.longTermPotential.length);
     }
-    if(watch) b+=zoneHead('watchlists','Watchlists','Tracked regardless of this hour’s score')+'<div class="zone">'+watch+'</div>';
+    b+='<section data-dashboard-view="watchlists" hidden>'+zoneHead('watchlists','Watchlists','Tracked regardless of this hour’s score')+'<div class="zone">'+(watch||'<div class="dashboard-empty">No watchlist rows are available in this update.</div>')+'</div></section>';
 
     // ---- Zone 4: timing and range ------------------------------------------
     // All three are backward-looking measurement, none of them is a call, and
@@ -7709,10 +7872,11 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         +PANEL_END;
     }
 
-    if(timing) b+=zoneHead('timing','Timing and range','Backward-looking measurement, never a call')+'<div class="zone">'+timing+'</div>';
+    b+='<section data-dashboard-view="timing" hidden>'+zoneHead('timing','Timing and range','Backward-looking measurement, never a call')+'<div class="zone">'+(timing||'<div class="dashboard-empty">Timing measurements are still gathering enough historical observations.</div>')+'</div></section>';
 
     $('boards').innerHTML=b;
     wirePanels($('boards'));
+    applyDashboardView();
   }
 
   function renderTrackRecord(d){
@@ -7770,6 +7934,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       state.sort[board] = {key:key, dir:newDir};
       pushEvent('signals_sort_change',{board:board, sort_key:key, sort_dir:newDir===1?'asc':'desc'});
       renderBoards(state.data);
+      var sortedButton=document.querySelector('th[data-board="'+board+'"][data-key="'+key+'"] button');
+      if(sortedButton) sortedButton.focus({preventScroll:true});
     }
   });
 
@@ -7806,6 +7972,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   }
 
   function renderError(msg){
+    $('dashboardInsights').innerHTML='<div class="dashboard-empty">Market measurements are unavailable. The dashboard will retry automatically.</div>';
     $('sysState').textContent='OFFLINE';
     $('sysDot').style.background='var(--down)';
     $('stateBox').innerHTML='<div class="notice"><b>Signal feed unreachable.</b><br>'
@@ -7860,7 +8027,17 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
             }
           }
         });
-        var t=new Date();
+        if(state.data&&state.data.overview){
+          var liveOverview=Object.assign({},state.data.overview);
+          [['btc','crypto','BTC'],['eth','crypto','ETH'],['spy','stocks','SPY']].forEach(function(key){
+            var tick=d[key[1]]&&d[key[1]][key[2]];
+            if(tick&&measuredNumber(tick.price)) liveOverview[key[0]]=Object.assign({},liveOverview[key[0]]||{},tick);
+          });
+          renderOverview(liveOverview);
+          renderDashboard(Object.assign({},state.data,{overview:liveOverview}),true);
+        }
+        var t=d.generated_at?new Date(d.generated_at):null;
+        if(!t||!isFinite(t.getTime())) return;
         $('liveStamp').textContent = pad(t.getUTCHours())+':'+pad(t.getUTCMinutes())+':'+pad(t.getUTCSeconds())+' UTC';
       })
       .catch(function(){ /* silent: a missed live tick isn't a feed error, load() already surfaces those */ });
@@ -7872,7 +8049,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       .then(function(r){ cacheState=r.headers.get('x-fcs-cache'); if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
       .then(function(d){
         state.data=d; state.error=null;
-        renderStatus(d); renderOverview(d.overview); renderBoards(d); renderTrackRecord(d); renderMarketContext(d); renderQuantResearch(d);
+        renderStatus(d); renderOverview(d.overview); renderDashboard(d); renderBoards(d); renderTrackRecord(d); renderMarketContext(d); renderQuantResearch(d); syncDashboardHash(false);
         if(!firstLoadTracked){
           firstLoadTracked=true;
           pushEvent('signals_data_loaded',{
@@ -7904,7 +8081,10 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   // the localStorage state stays correct without a second write path here.
   function setAllPanels(open){
     var list=document.querySelectorAll('details[data-panel], details#methodology');
-    for(var i=0;i<list.length;i++) list[i].open=open;
+    for(var i=0;i<list.length;i++){
+      var section=list[i].closest('[data-dashboard-view]');
+      if(!section||!section.hidden) list[i].open=open;
+    }
     pushEvent('signals_panels_bulk',{action:open?'expand_all':'collapse_all'});
   }
   var expandBtn=document.getElementById('expandAll');
@@ -7912,17 +8092,18 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   if(expandBtn) expandBtn.addEventListener('click',function(){ setAllPanels(true); });
   if(collapseBtn) collapseBtn.addEventListener('click',function(){ setAllPanels(false); });
 
-  // A jump link that lands on a shut panel would show the visitor a closed
-  // summary and nothing else, so open the target on the way there.
-  var quicknavEl=document.querySelector('.quicknav');
-  if(quicknavEl) quicknavEl.addEventListener('click',function(e){
-    var a=e.target.closest&&e.target.closest('a.qnav-link');
-    if(!a) return;
-    var href=a.getAttribute('href')||'';
-    if(href.charAt(0)!=='#') return;
-    var target=document.getElementById(href.slice(1));
-    if(target&&target.tagName==='DETAILS'&&!target.open) target.open=true;
+  document.addEventListener('click',function(e){
+    var a=e.target.closest&&e.target.closest('a[href^="#"]');
+    if(!a||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey) return;
+    var href=a.getAttribute('href');
+    var view=viewForHash(href);
+    if(!view) return;
+    e.preventDefault();
+    if(location.hash===href) syncDashboardHash(true);
+    else location.hash=href;
   });
+  window.addEventListener('hashchange',function(){syncDashboardHash(true);});
+  syncDashboardHash(false);
   setInterval(load, REFETCH_MS);
   setInterval(updateLivePrices, LIVE_MS);
   setInterval(loadScalp, SCALP_MS);
