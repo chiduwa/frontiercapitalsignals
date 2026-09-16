@@ -7535,12 +7535,29 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     var a=d.adaptiveResearch;
     var hasResearch=a&&measuredNumber(a.freshForecasts)&&measuredNumber(a.assetHorizons)&&a.assetHorizons>0;
     var research=hasResearch?'<div class="dashboard-number">'+a.freshForecasts.toLocaleString('en-US')+' <small>/ '+a.assetHorizons.toLocaleString('en-US')+' fresh</small></div><div class="coverage-track" aria-hidden="true"><i style="width:'+Math.min(100,a.freshForecasts/a.assetHorizons*100)+'%"></i></div><p class="insight-caption">Asset/horizon pairs with usable inputs at the last research run. '+(a.status==='stale'?'This research run is stale.':'Shadow evaluation; no live trade vote.')+'</p>':'<div class="dashboard-number">—</div><p class="insight-caption">Research coverage is unavailable. No readiness value is inferred.</p>';
+    // Per-asset learning. The headline is the mean shrinkage weight: the share
+    // of each asset's own fitted coefficients that survived pooling with its
+    // class. That, not an accuracy, is what this model can establish -- whether
+    // the evidence supports per-asset models at all. Low is a measurement, not
+    // a failure, and never a call: this lane is actionable:false by construction.
+    var hr=d.hierarchicalResearch;
+    var hrPrediction=hr&&hr.prediction&&(hr.prediction['crypto|1']||hr.prediction['stock|1']);
+    var perAsset='';
+    var hrShrinkage=hrPrediction&&hrPrediction.shrinkage;
+    if(hrShrinkage&&measuredNumber(hrShrinkage.atFinalRefit)){
+      var earned=Math.max(0,Math.min(1,hrShrinkage.atFinalRefit));
+      var pooledPct=(100-earned*100);
+      perAsset='<div class="evidence-status-row"><span>Own coefficients earned</span><b>'+(earned*100).toFixed(0)+'%</b></div>'
+        +'<p class="insight-caption">'+pooledPct.toFixed(0)+'% of the average asset model is pooled with its class, because its own history does not support differing by more than sampling noise. Shadow research; no live vote.</p>';
+    } else if(hr&&hr.status){
+      perAsset='<p class="insight-caption">Per-asset regression research is '+(hr.status==='awaiting-first-run'?'awaiting its first run':hr.status)+'. No value is inferred.</p>';
+    }
     $('dashboardInsights').innerHTML=
       '<article class="insight-card"><div class="insight-head"><h3>Market movement</h3><span class="subtle-chip">OBSERVED · 24H</span></div><p class="insight-caption">Major reference markets · SPY uses its daily change</p><div id="marketMovement">'+chartContent+'</div></article>'
       +'<article class="insight-card"><div class="insight-head"><h3>Market sentiment</h3><span class="subtle-chip">CONTEXT</span></div>'+sentiment+'<div class="context-stat"><span>BTC dominance</span><b>'+(measuredNumber(g.btc_dominance)?g.btc_dominance.toFixed(1)+'%':'—')+'</b></div><div class="context-stat"><span>VIX</span><b>'+(o.vix&&measuredNumber(o.vix.price)?o.vix.price.toFixed(2):'—')+' <span class="'+pctCls(o.vix&&o.vix.chg24h)+'">'+(o.vix?fmtPct(o.vix.chg24h)+' 1d':'')+'</span></b></div></article>'
       +'<div class="dashboard-bottom"><article class="insight-card"><div class="insight-head"><h3>Direction evidence</h3><span class="subtle-chip">LIVE MODEL</span></div>'+evidence+'<p class="insight-caption">Each current setup must also pass its own evidence gate.</p><a class="card-link" href="#screens">Explore the screens ↗</a></article>'
       +'<article class="insight-card"><div class="insight-head"><h3>What the model missed</h3></div>'+retrospective+'<a class="card-link" href="#learning">Review the retrospective ↗</a></article>'
-      +'<article class="insight-card"><div class="insight-head"><h3>Learning coverage</h3><span class="subtle-chip">SHADOW</span></div>'+research+'<a class="card-link" href="#research">Open research &amp; evidence ↗</a></article></div>';
+      +'<article class="insight-card"><div class="insight-head"><h3>Learning coverage</h3><span class="subtle-chip">SHADOW</span></div>'+research+perAsset+'<a class="card-link" href="#research">Open research &amp; evidence ↗</a></article></div>';
   }
 
   function fgTone(v){ if(v==null) return 'flat'; if(v<=25) return 'down'; if(v>=65) return 'up'; return 'amber-t'; }

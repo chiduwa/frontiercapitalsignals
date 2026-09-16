@@ -284,6 +284,46 @@ check('a hours-old model layer raises a visible notice',
 check('and the freshness strip flags it rather than reading as current',
   stale.doc.getElementById('frModelItem').className.includes('fr-warn'));
 
+// ============== the per-asset learning card states a measurement ============
+// This card reports a SHRINKAGE weight, not an accuracy. The failure mode worth
+// testing is it reading as a call or a skill claim when the number is really
+// "how much of each asset model is its own rather than its class's".
+console.log('\n== per-asset learning is reported as a measurement, never as a call ==');
+const hierarchical = (shrinkage) => ({
+  ...payload(),
+  hierarchicalResearch: {
+    status: 'shadow', actionable: false,
+    prediction: { 'crypto|1': { assets: 272, shrinkage } }
+  }
+});
+
+const learned = await render(hierarchical({ atFinalRefit: 0.0425, overScoredForecasts: 0.0052, learnedFeatures: [] }));
+const learnedCard = learned.doc.getElementById('dashboardInsights').textContent;
+check('the card reports the share of each asset model that is its own',
+  learnedCard.includes('Own coefficients earned') && learnedCard.includes('4%'), learnedCard.slice(0, 40));
+check('and states the remainder is pooled with the class, with the reason',
+  /9[5-6]% of the average asset model is pooled/.test(learnedCard)
+  && learnedCard.includes('sampling noise'));
+check('the per-asset lane never presents itself as a live vote',
+  learnedCard.includes('no live vote') && !/\bBUY\b|\bSELL\b/.test(learnedCard));
+
+// Fully pooled is the EXPECTED result on this data, so it must render as a
+// real zero rather than falling through to the unavailable branch.
+const pooled = await render(hierarchical({ atFinalRefit: 0, overScoredForecasts: 0, learnedFeatures: [] }));
+const pooledCard = pooled.doc.getElementById('dashboardInsights').textContent;
+check('zero shrinkage renders as a measured 0%, not as missing data',
+  pooledCard.includes('Own coefficients earned') && pooledCard.includes('0%')
+  && pooledCard.includes('100% of the average asset model is pooled'), pooledCard.slice(0, 60));
+
+// And an absent or not-yet-run lane must infer nothing at all.
+const awaiting = await render({ ...payload(),
+  hierarchicalResearch: { status: 'awaiting-first-run', actionable: false } });
+check('a lane awaiting its first run infers no value',
+  awaiting.doc.getElementById('dashboardInsights').textContent.includes('awaiting its first run'));
+const absent = await render(payload());
+check('and an absent lane adds nothing to the card rather than rendering a zero',
+  !absent.doc.getElementById('dashboardInsights').textContent.includes('Own coefficients earned'));
+
 // ===================== degraded payloads must not crash ====================
 // Every renderer runs inside ONE inline script. A throw in any of them stops
 // all the ones after it, so a thin or partial payload has to degrade, not

@@ -21,6 +21,7 @@ import { loadXsCoefficients, writeXsForecasts, loadDecileEvidence, xsDecileIsPub
 import { loadLatestFundamentals } from './fundamentals-panel.mjs';
 import { d1 } from './d1-client.mjs';
 import { loadAdaptiveHealth } from './adaptive-research.mjs';
+import { loadHierarchicalHealth } from './hierarchical-research.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES, GITHUB_EVENT_NAME, FORCE_REFRESH, NTFY_TOPIC } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID })) {
@@ -232,6 +233,15 @@ if (FCS_D1_DATABASE_ID) {
   } catch (error) {
     payload.adaptiveResearch = { status: 'unavailable', actionable: false };
     console.error('adaptive research health unavailable:', error.message);
+  }
+  // Aggregate diagnostics only, and `actionable: false` like the adaptive lane.
+  // Individual per-asset forecasts stay in the snapshot tables until this model
+  // clears the same evidence gate every published call has to clear.
+  try {
+    payload.hierarchicalResearch = await loadHierarchicalHealth(env);
+  } catch (error) {
+    payload.hierarchicalResearch = { status: 'unavailable', actionable: false };
+    console.error('hierarchical research health unavailable:', error.message);
   }
 }
 

@@ -49,3 +49,4 @@ next-env.d.ts
 
 # Reproducible, potentially large local research artifacts (CI uploads these).
 /signals-worker/reports/adaptive/
+/signals-worker/reports/hierarchical/
