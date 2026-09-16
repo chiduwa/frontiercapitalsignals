@@ -306,6 +306,7 @@ check('and states the remainder is pooled with the class, with the reason',
   && learnedCard.includes('sampling noise'));
 check('the per-asset lane never presents itself as a live vote',
   learnedCard.includes('no live vote') && !/\bBUY\b|\bSELL\b/.test(learnedCard));
+learned.dom.window.close();
 
 // Fully pooled is the EXPECTED result on this data, so it must render as a
 // real zero rather than falling through to the unavailable branch.
@@ -314,12 +315,14 @@ const pooledCard = pooled.doc.getElementById('dashboardInsights').textContent;
 check('zero shrinkage renders as a measured 0%, not as missing data',
   pooledCard.includes('Own coefficients earned') && pooledCard.includes('0%')
   && pooledCard.includes('100% of the average asset model is pooled'), pooledCard.slice(0, 60));
+pooled.dom.window.close();
 
 // And an absent or not-yet-run lane must infer nothing at all.
 const awaiting = await render({ ...payload(),
   hierarchicalResearch: { status: 'awaiting-first-run', actionable: false } }, { settleMs: 1200 });
 check('a lane awaiting its first run infers no value',
   awaiting.doc.getElementById('dashboardInsights').textContent.includes('awaiting its first run'));
+awaiting.dom.window.close();
 // Reuses the plain-payload render above rather than paying for another one:
 // rendering this 500KB+ page in jsdom is the single most expensive thing in
 // this suite, and the deploy job has a wall-clock budget.
