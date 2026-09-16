@@ -297,7 +297,7 @@ const hierarchical = (shrinkage) => ({
   }
 });
 
-const learned = await render(hierarchical({ atFinalRefit: 0.0425, overScoredForecasts: 0.0052, learnedFeatures: [] }));
+const learned = await render(hierarchical({ atFinalRefit: 0.0425, overScoredForecasts: 0.0052, learnedFeatures: [] }), { settleMs: 1200 });
 const learnedCard = learned.doc.getElementById('dashboardInsights').textContent;
 check('the card reports the share of each asset model that is its own',
   learnedCard.includes('Own coefficients earned') && learnedCard.includes('4%'), learnedCard.slice(0, 40));
@@ -309,7 +309,7 @@ check('the per-asset lane never presents itself as a live vote',
 
 // Fully pooled is the EXPECTED result on this data, so it must render as a
 // real zero rather than falling through to the unavailable branch.
-const pooled = await render(hierarchical({ atFinalRefit: 0, overScoredForecasts: 0, learnedFeatures: [] }));
+const pooled = await render(hierarchical({ atFinalRefit: 0, overScoredForecasts: 0, learnedFeatures: [] }), { settleMs: 1200 });
 const pooledCard = pooled.doc.getElementById('dashboardInsights').textContent;
 check('zero shrinkage renders as a measured 0%, not as missing data',
   pooledCard.includes('Own coefficients earned') && pooledCard.includes('0%')
@@ -317,12 +317,14 @@ check('zero shrinkage renders as a measured 0%, not as missing data',
 
 // And an absent or not-yet-run lane must infer nothing at all.
 const awaiting = await render({ ...payload(),
-  hierarchicalResearch: { status: 'awaiting-first-run', actionable: false } });
+  hierarchicalResearch: { status: 'awaiting-first-run', actionable: false } }, { settleMs: 1200 });
 check('a lane awaiting its first run infers no value',
   awaiting.doc.getElementById('dashboardInsights').textContent.includes('awaiting its first run'));
-const absent = await render(payload());
+// Reuses the plain-payload render above rather than paying for another one:
+// rendering this 500KB+ page in jsdom is the single most expensive thing in
+// this suite, and the deploy job has a wall-clock budget.
 check('and an absent lane adds nothing to the card rather than rendering a zero',
-  !absent.doc.getElementById('dashboardInsights').textContent.includes('Own coefficients earned'));
+  !ui.doc.getElementById('dashboardInsights').textContent.includes('Own coefficients earned'));
 
 // ===================== degraded payloads must not crash ====================
 // Every renderer runs inside ONE inline script. A throw in any of them stops
