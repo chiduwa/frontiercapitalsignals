@@ -212,6 +212,93 @@ half-life decays them further, standard errors grow, Q falls below its degrees
 of freedom, and τ² pins to zero. Absence of detected heterogeneity at 7d says
 nothing about whether it exists.
 
+## v2: the ridge penalty was measuring the wrong thing (2026-09-18)
+
+v1 added a flat constant to every diagonal of `X'X`. The columns are not on one
+scale, so an identical constant is a wildly different penalty per column.
+Measured over the crypto majors, with the 365-day half-life's effective weight
+of ~527:
+
+| column | mean square | share of the coefficient the flat ridge removed |
+| --- | --- | --- |
+| `supplyGrowth30` | 0.00004 | 99.6% |
+| `oiPriceDivergence` | 0.0033 | 74.2% |
+| `oiChange1` | 0.0045 | 67.7% |
+| `oiChange7` | 0.030 | 23.8% |
+| `return1` … `return60` | ~1.0 | ~0.9% |
+| `drawdownFromHigh` | 14.6 | 0.06% |
+
+The penalty landed hardest on precisely the features this lane exists to
+measure. `oiChange1` and `oiChange7` are the two features v1 itself reported as
+the only ones carrying real per-asset heterogeneity.
+
+**The bias is confirmed against an unpenalized reference.** The inference pass
+runs at `ridge = 0`. It reports `oiChange1` I² = **0.954**. v1's online learner,
+on the same data, reported **0.70**; v2 reports **0.94**. The estimator now
+agrees with the unbiased fit it is supposed to approximate.
+
+v2 scales each column's penalty by its own decayed mean square, so the shrink is
+`ridge/(weight + ridge)` for every column regardless of units — the usual
+"standardize, then penalize" ridge, expressed on the sufficient statistics so no
+second pass over the rows is needed and coefficients stay in natural units.
+`test-hierarchical-model.mjs` pins the identity: rescaling a column by `c` must
+scale its coefficient by exactly `1/c` and move nothing else. Under a flat ridge
+a column whose true coefficient is 60 comes back below 5.
+
+### What changed, and what did not
+
+At crypto 1d the detected heterogeneity changes substantively:
+
+| | v1 (flat) | v2 (scale-invariant) |
+| --- | --- | --- |
+| `oiChange1` | I²=0.70 | I²=0.94 |
+| `return1` | I²=0.30 | I²=0.38 |
+| `oiPriceDivergence` | not detected | I²=0.23 |
+| `oiChange7` | I²=0.35 | dropped |
+| mean shrinkage | 0.0444 | 0.0507 |
+
+`oiPriceDivergence` was the second-most-penalized column and was invisible in
+v1. It is also the only feature the cross-sectional lane selected independently
+(t=3.79). Two unrelated methods were agreeing on open-interest/price divergence;
+the flat penalty was suppressing the agreement on this side.
+
+**Prediction is unchanged: there is still no edge.** Walk-forward, clustered by
+decision date, over four lanes and two estimators, plus a penalty-strength sweep
+at 5/25/100/400:
+
+| lane | v1 t | v2 t | v1 OOS R² | v2 OOS R² |
+| --- | --- | --- | --- | --- |
+| crypto 1d | +0.17 | −1.32 | +0.0001 | −0.0003 |
+| crypto 7d | −2.98 | −4.14 | −0.590 | −0.052 |
+| stock 1d | −2.42 | −3.42 | −0.011 | −0.022 |
+| stock 5d | +0.13 | −1.41 | −0.005 | −0.023 |
+
+Three facts hold across every arm tested:
+
+- **The point forecast never beats forecasting zero.** MAE exceeds the
+  zero-return baseline in every lane, every estimator, every penalty strength.
+- **Interval coverage stays in 0.7994–0.8116** against its 0.80 target while
+  R², t and MAE swing around. The calibrated interval is the one output robust
+  to the estimator, and the only part of this model worth consuming.
+- **Per-asset learning still survives only at crypto 1d.** Shrinkage is exactly
+  0 in the other three lanes under both estimators, so that result was never an
+  artifact of the penalty.
+
+### The penalty strength is deliberately not tuned
+
+Raising the scale-invariant penalty monotonically improves the stock lanes'
+headline metrics — stock 1d OOS R² goes −0.022 → −0.008 → −0.003 → −0.0008 at
+ridge 5 → 25 → 100 → 400, and t rises −3.42 → −0.55. This is not a discovery.
+As the penalty grows the predictions shrink toward zero, so every metric
+converges to the null *by construction*; directional accuracy falls the whole
+way, 0.4984 → 0.4958. On the stock lanes the model scores best exactly when it
+predicts least, which is a statement about absence of signal.
+
+Selecting a penalty on that sweep would be fitting the walk-forward the sweep
+was measured on. The default stays at a single principled value — strength 5,
+which leaves the well-scaled columns at the ~0.9% shrink they already had under
+v1 — and the class sensitivity is recorded here rather than acted on.
+
 ## What it is not allowed to claim
 
 - Walk-forward research over archived daily closes. Daily closes are not

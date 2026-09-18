@@ -225,6 +225,44 @@ test('the accumulator learns online and refuses to run time backwards', () => {
   assert.equal(createAccumulator(2).solve(), null, 'an empty accumulator has no solution');
 });
 
+test('the ridge penalty is invariant to the units a column is measured in', () => {
+  // Rescaling a regressor is a change of units, not of information, so the
+  // model it implies is identical: beta_j must scale by exactly 1/c and every
+  // other coefficient must not move at all. A flat ridge fails this -- it
+  // penalizes the absolute size of a coefficient, so a column measured in
+  // small units is charged far more for the same fit. That is not academic
+  // here: `oiChange1` has a mean square ~200x smaller than `return1`, and it
+  // is one of only two features carrying real per-asset heterogeneity.
+  const fit = (c, scaleInvariantRidge) => {
+    const accumulator = createAccumulator(3, { halfLifeDays: 1e9, ridge: 5, scaleInvariantRidge });
+    for (let i = 0; i < 400; i++) {
+      const small = Math.sin(i) * 0.005;      // the "open interest" column
+      const large = Math.cos(i / 3);          // the "return" column
+      const y = 2 + 60 * small - 0.4 * large;
+      accumulator.update([1, small * c, large], y, day(i));
+    }
+    return accumulator.solve().beta;
+  };
+
+  const base = fit(1, true);
+  const rescaled = fit(100, true);
+  assert.ok(Math.abs(rescaled[1] * 100 - base[1]) < 1e-9 * Math.abs(base[1]) + 1e-12,
+    `scaled ridge must rescale exactly: ${rescaled[1] * 100} vs ${base[1]}`);
+  assert.ok(Math.abs(rescaled[0] - base[0]) < 1e-9, 'intercept must not move');
+  assert.ok(Math.abs(rescaled[2] - base[2]) < 1e-9, 'the other slope must not move');
+
+  // The scale-invariant penalty must also actually recover the small column's
+  // steep coefficient, which the flat penalty crushes toward zero.
+  assert.ok(base[1] > 55, `scaled ridge should recover ~60, got ${base[1]}`);
+  const flat = fit(1, false);
+  assert.ok(flat[1] < 5, `flat ridge should crush the small-scale column, got ${flat[1]}`);
+
+  // And the flat penalty must demonstrably depend on the units chosen.
+  const flatRescaled = fit(100, false);
+  assert.ok(Math.abs(flatRescaled[1] * 100 - flat[1]) > 1,
+    'flat ridge is unit-dependent; if this ever passes the arms have converged');
+});
+
 test('the walk-forward panel discovers a real per-asset split and keeps its timing honest', () => {
   // Half the universe mean-reverts, half trends. The spread is far larger than
   // sampling noise, so a working learner must find it.

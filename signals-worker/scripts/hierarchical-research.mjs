@@ -20,6 +20,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { d1, d1Batch, chunk } from './d1-client.mjs';
 import { buildQuarantineIndex, cleanBars } from './bar-quarantine.mjs';
+import { buildZooSection, ZOO_VERSION } from './model-zoo.mjs';
 import {
   HIERARCHICAL_VERSION, buildAssetSample, fitAssetRegression, poolAcrossAssets, walkForwardPanel
 } from './hierarchical-model.mjs';
@@ -208,7 +209,20 @@ export function runPrediction(panel, { asOf, costBps = 20, refitEvery = 21, log 
         derivativesBySymbol: derivatives, supplyBySymbol: supply, costBps, refitEvery
       });
       const { outcomes, ...rest } = result;
-      out[`${modelClass}|${horizon}`] = rest;
+      // Score the whole candidate field on the same forecasts, split by
+      // survivorship cohort. This exists because a combination rule once
+      // cleared every persistence check this project had and was still an
+      // artifact of recently-listed assets; a cohort split catches that class
+      // of error automatically instead of relying on someone thinking to look.
+      let zoo = null;
+      try {
+        zoo = buildZooSection(members, outcomes, { horizon, costPct: costBps / 100 });
+      } catch (error) {
+        // The field is diagnostic. It must never be able to fail the run that
+        // produces the actual research output.
+        zoo = { zooVersion: ZOO_VERSION, actionable: false, status: 'failed', error: String(error?.message || error) };
+      }
+      out[`${modelClass}|${horizon}`] = { ...rest, zoo };
     }
   }
   return out;
@@ -245,7 +259,10 @@ export function buildHierarchicalReport(panel, {
         atFinalRefit: mean((v.assets || []).map(a => a.meanShrinkage).filter(Number.isFinite)),
         overScoredForecasts: v.metrics?.meanShrinkage ?? null,
         learnedFeatures: learnedFeatures(v.prior)
-      }
+      },
+      // The candidate field, always cohort-split. A number here that appears
+      // only under `recent` is survivorship until shown otherwise.
+      zoo: v.zoo ?? null
     }])),
     limitations: [
       'Walk-forward research over archived daily closes. Daily closes are not executable issue-time quotes, so none of this is a live track record.',

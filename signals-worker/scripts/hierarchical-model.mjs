@@ -32,7 +32,18 @@ import {
   featureRow, usableColumns, pruneCollinear, independentColumns, sanitizeBars
 } from './panel-features.mjs';
 
-export const HIERARCHICAL_VERSION = 'hierarchical-mlr-v1';
+// v2 (2026-09-18): the ridge penalty is scale-invariant. v1 added a flat
+// constant to every X'X diagonal, which -- because the columns are not on one
+// scale -- charged `oiChange1` 68% of its coefficient and `return1` 0.9%. That
+// biased the heterogeneity measurement this lane exists to make: v1's online
+// learner reported oiChange1 I2=0.70 where the unpenalized full-sample pass
+// reported 0.954. v2 reports 0.94, and additionally surfaces
+// `oiPriceDivergence`, the one feature the cross-sectional lane had already
+// selected independently. Stored runs are keyed by model version, so the bump
+// keeps v1 and v2 walk-forwards from being compared as if they were the same
+// estimator. Prediction is unchanged in the only way that matters: still no
+// edge, in any lane, at any penalty strength.
+export const HIERARCHICAL_VERSION = 'hierarchical-mlr-v2';
 const DAY = 86400000;
 const dateMs = d => Date.parse(`${d}T00:00:00Z`);
 const mean = xs => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null);
@@ -284,7 +295,7 @@ export function shrinkTowardPrior(coefficient, prior) {
 // ---------------------------------------------------------------------------
 
 /** Exponentially-decayed sufficient statistics for one asset's regression. */
-export function createAccumulator(p, { halfLifeDays = 365, ridge = 5 } = {}) {
+export function createAccumulator(p, { halfLifeDays = 365, ridge = 5, scaleInvariantRidge = true } = {}) {
   const a = Array.from({ length: p }, () => Array(p).fill(0));
   const b = Array(p).fill(0);
   let syy = 0, weight = 0, count = 0, lastDate = null;
@@ -308,7 +319,23 @@ export function createAccumulator(p, { halfLifeDays = 365, ridge = 5 } = {}) {
      *  non-overlapping by construction, so the classical form is the right one
      *  here; HAC is applied in the full-sample inference path instead. */
     solve() {
-      const penalized = a.map((row, i) => row.map((v, j) => v + (i === j && i !== 0 ? ridge : 0)));
+      // A flat ridge penalizes every column by the same absolute amount, but the
+      // columns are not on the same scale: a vol-normalized return has mean
+      // square ~1 while an open-interest change has ~0.0045. Measured over the
+      // crypto majors, a flat ridge of 5 removes 0.9% of `return1` and 68% of
+      // `oiChange1` -- and `oiChange1`/`oiChange7` are the only two features
+      // carrying real per-asset heterogeneity, so the penalty lands hardest
+      // exactly where the signal is. Scaling each column's penalty by its own
+      // decayed mean square makes the shrink identical everywhere
+      // (ridge/(weight+ridge)), which is the usual "standardize, then penalize"
+      // ridge expressed on the sufficient statistics, so no second pass over
+      // the rows is needed and the coefficients stay in their natural units.
+      const penalized = a.map((row, i) => row.map((v, j) => {
+        if (i !== j || i === 0) return v;
+        if (!scaleInvariantRidge) return v + ridge;
+        const meanSquare = weight > 0 ? a[i][i] / weight : 0;
+        return v + ridge * (meanSquare > 0 ? meanSquare : 1);
+      }));
       const inverse = invert(penalized);
       if (!inverse) return null;
       const beta = inverse.map(row => row.reduce((s, v, j) => s + v * b[j], 0));
@@ -350,6 +377,7 @@ export function walkForwardPanel(assets, {
   horizon = 1, assetClass = 'crypto', asOf = new Date().toISOString().slice(0, 10),
   benchmark = [], derivativesBySymbol = new Map(), supplyBySymbol = new Map(),
   costBps = 20, coverage = 0.8, halfLifeDays = 365, ridge = 5,
+  scaleInvariantRidge = true,
   refitEvery = 21, minTrainingSamples = 40, onProgress = null
 } = {}) {
   const p = FEATURE_NAMES.length;
@@ -365,11 +393,11 @@ export function walkForwardPanel(assets, {
     state.push({
       symbol: asset.symbol, archiveClass: asset.assetClass || assetClass, sample,
       byDate: new Map(sample.map(r => [r.date, r])),
-      accumulator: createAccumulator(p, { halfLifeDays, ridge }),
+      accumulator: createAccumulator(p, { halfLifeDays, ridge, scaleInvariantRidge }),
       solved: null, shrunk: null, pending: [], residuals: [], outcomes: []
     });
   }
-  if (!state.length) return emptyPanelResult({ horizon, assetClass, asOf, costBps, coverage, halfLifeDays, ridge, refitEvery });
+  if (!state.length) return emptyPanelResult({ horizon, assetClass, asOf, costBps, coverage, halfLifeDays, ridge, scaleInvariantRidge, refitEvery });
 
   const timeline = [...new Set(state.flatMap(s => s.sample.map(r => r.date)))].sort();
   const priorHistory = [];
@@ -451,7 +479,7 @@ export function walkForwardPanel(assets, {
     }
   }
   return assemblePanelResult(state, prior, priorHistory,
-    { horizon, assetClass, asOf, costBps, coverage, halfLifeDays, ridge, refitEvery, minTrainingSamples });
+    { horizon, assetClass, asOf, costBps, coverage, halfLifeDays, ridge, scaleInvariantRidge, refitEvery, minTrainingSamples });
 }
 
 const clipPrediction = v => (Number.isFinite(v) ? Math.max(-4, Math.min(4, v)) : 0);
