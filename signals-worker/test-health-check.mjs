@@ -6,7 +6,7 @@
 // 2026-09-11..15 Discovery outage reproduced exactly: a payload that is healthy
 // in every other respect while the learning loop has been dead for five days.
 import assert from 'node:assert/strict';
-import { checkPayload, checkPageResponse, THRESHOLDS, shouldNotify, fingerprintOf } from './scripts/health-check.mjs';
+import { checkPayload, checkPageResponse, THRESHOLDS, shouldNotify, fingerprintOf, checkDeployFreshness } from './scripts/health-check.mjs';
 
 const NOW = Date.parse('2026-09-15T12:00:00Z');
 const ago = (ms) => new Date(NOW - ms).toISOString();
@@ -174,5 +174,50 @@ assert.equal(fingerprintOf([{ id: 'a', level: 'fail', ok: true }]), '',
 assert.notEqual(fingerprintOf([{ id: 'x', level: 'fail', ok: false }]),
   fingerprintOf([{ id: 'x', level: 'warn', ok: false }]),
   'the same check escalating from warn to fail must count as a change');
+
+// ---- THE CLOUDFLARE TOKEN OUTAGE (2026-09-14 .. 09-18) ---------------------
+// Replayed exactly. For four days the deploy step failed on a dead
+// CLOUDFLARE_API_TOKEN while the repo committed daily, /signals/ stayed current
+// off the Worker cron, and every page returned 200. Nothing in this file
+// noticed, because nothing compared the repo against production.
+const DNOW = Date.parse('2026-09-18T20:00:00Z');
+const dFailing = (live, repo, now = DNOW) =>
+  checkDeployFreshness(live, repo, now).filter((c) => !c.ok && c.level === 'fail').map((c) => c.id);
+const dNotOk = (live, repo, now = DNOW) =>
+  checkDeployFreshness(live, repo, now).filter((c) => !c.ok).map((c) => c.id);
+
+// Baseline: production carries what the repo carries, today.
+assert.deepEqual(dNotOk('2026-09-18T00:00:00.000Z', '2026-09-18T00:00:00.000Z'), [],
+  'a deployed, current site must raise nothing');
+
+// The outage itself.
+assert.ok(dFailing('2026-09-14T00:00:00.000Z', '2026-09-18T00:00:00.000Z').includes('deploy-reached-production'),
+  'four days of undeployed commits must FAIL — this is the outage that ran unnoticed');
+
+// The false positive that would have made this monitor untrustworthy: sitemap
+// <lastmod> is date-only, so every morning between the commit and the deploy
+// the repo is a quantised day ahead. That window must stay silent.
+assert.deepEqual(
+  dFailing('2026-09-17T00:00:00.000Z', '2026-09-18T00:00:00.000Z', Date.parse('2026-09-18T06:43:00Z')),
+  [], 'the normal commit-then-deploy window must not fail');
+// But the same lag must fail once it has clearly stopped being a window.
+assert.ok(
+  dFailing('2026-09-17T00:00:00.000Z', '2026-09-18T00:00:00.000Z', Date.parse('2026-09-18T18:00:00Z'))
+    .includes('deploy-reached-production'),
+  'content still undeployed 18h into its own day is a failure, not a window');
+
+// Outside a checkout there is no repo date; that must degrade to the absolute
+// age check rather than inventing a pass or a crash.
+assert.deepEqual(dNotOk('2026-09-18T00:00:00.000Z', null), [],
+  'a fresh site with no repo to compare against must stay silent');
+assert.ok(dNotOk('2026-09-16T00:00:00.000Z', null).includes('deploy-freshness'),
+  'without a repo date, staleness alone must still register');
+assert.ok(dFailing('2026-09-14T00:00:00.000Z', null).includes('deploy-freshness'),
+  `content older than ${THRESHOLDS.deployAgeFailHours}h must fail on age alone`);
+
+// An unreadable sitemap is a failure, not a silent skip — the check going
+// blind is the one outcome that would recreate the original blind spot.
+assert.ok(dFailing(null, '2026-09-18T00:00:00.000Z').includes('deploy-sitemap'),
+  'an unreadable sitemap must fail rather than pass quietly');
 
 console.log('health-check tests passed');

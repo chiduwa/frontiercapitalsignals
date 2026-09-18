@@ -59,7 +59,20 @@ export const THRESHOLDS = Object.freeze({
   registryAgeWarnHours: 36,
   registryAgeFailHours: 72,
   // The dashboard's own feed warning uses the same 80% equity coverage bar.
-  equityCoverageFail: 0.8
+  equityCoverageFail: 0.8,
+  // Intelligence lands daily, so 36h absorbs one missed run. Past 60h a deploy
+  // has failed rather than slipped. Sized from the 2026-09-14 token outage,
+  // which sat at ~48h before anyone looked.
+  deployAgeWarnHours: 36,
+  // Generous, because deploy-reached-production below is the precise detector
+  // and this is only its backstop. One missed generation run should read as a
+  // warning, not a page.
+  deployAgeFailHours: 72,
+  // Repo-ahead-of-production is the exact signature. It needs one tolerance:
+  // sitemap <lastmod> is date-only, so between the daily commit and the deploy
+  // landing, the repo is legitimately a whole quantised day ahead. Fail only
+  // once content dated today is STILL undeployed this far into the day.
+  deployLagGraceHours: 12
 });
 
 const hours = (ms) => ms / 3_600_000;
@@ -239,6 +252,68 @@ export async function checkRender(html, payload, prices) {
 }
 
 // ---- the rest of the site --------------------------------------------------
+// ---- did the build actually REACH production? ------------------------------
+//
+// The 2026-09-14 Cloudflare token outage, reduced to one check. Every existing
+// probe in this file passed throughout it: /signals/ was current because the
+// Worker cron owns that payload and reaches D1 through bindings, not a token;
+// every page returned 200; the repo kept committing daily. The only observable
+// was that DEPLOYED content stopped moving, and nothing compared those two.
+//
+// So compare them. `newestRepoISO` comes from the checkout the workflow already
+// has, which makes this exact rather than a guess about cadence: if the repo
+// holds an article production does not, a deploy failed, full stop. The
+// absolute age check is the backstop for running outside a checkout.
+export function checkDeployFreshness(newestLiveISO, newestRepoISO, now = Date.now()) {
+  const out = [];
+  const push = (id, level, ok, detail) => out.push(result(id, level, ok, detail));
+
+  const live = Date.parse(newestLiveISO ?? '');
+  if (!Number.isFinite(live)) {
+    push('deploy-sitemap', 'fail', false, 'could not read a single <lastmod> from /sitemap.xml');
+    return out;
+  }
+
+  const age = hours(now - live);
+  push('deploy-freshness',
+    age >= THRESHOLDS.deployAgeFailHours ? 'fail' : 'warn',
+    age < THRESHOLDS.deployAgeWarnHours,
+    `newest deployed content is ${age.toFixed(1)}h old (${newestLiveISO}); intelligence lands daily, so check deploy.yml's CLOUDFLARE_API_TOKEN first — a dead token fails the deploy while leaving every other check green`);
+
+  const repo = Date.parse(newestRepoISO ?? '');
+  if (Number.isFinite(repo)) {
+    const undeployedFor = hours(now - repo);
+    const behind = repo > live;
+    push('deploy-reached-production', 'fail',
+      !(behind && undeployedFor >= THRESHOLDS.deployLagGraceHours),
+      `the repo holds content dated ${newestRepoISO} and production's newest is ${newestLiveISO}, still undeployed ${undeployedFor.toFixed(1)}h on — a deploy has failed, not merely slipped`);
+  }
+  return out;
+}
+
+// Newest <lastmod> in the live sitemap: what production actually believes it
+// has. Read from the sitemap rather than the rendered page because it is a
+// build artifact, so it cannot be kept warm by the Worker's cron.
+export async function readNewestLiveContentDate(fetchImpl = fetch) {
+  const res = await fetchImpl(`${ORIGIN}/sitemap.xml`, { redirect: 'follow' });
+  if (!res.ok) return null;
+  const stamps = [...(await res.text()).matchAll(/<lastmod>([^<]+)<\/lastmod>/g)]
+    .map((m) => Date.parse(m[1])).filter(Number.isFinite);
+  return stamps.length ? new Date(Math.max(...stamps)).toISOString() : null;
+}
+
+// Newest article in the checkout. Returns null outside a checkout, which
+// downgrades this to the absolute age check rather than inventing a failure.
+export async function readNewestRepoContentDate(dir = new URL('../../content/intelligence/', import.meta.url)) {
+  try {
+    const { readdir } = await import('node:fs/promises');
+    const stamps = (await readdir(dir))
+      .map((f) => /^(\d{4}-\d{2}-\d{2})/.exec(f)?.[1])
+      .filter(Boolean).map((d) => Date.parse(`${d}T00:00:00Z`)).filter(Number.isFinite);
+    return stamps.length ? new Date(Math.max(...stamps)).toISOString() : null;
+  } catch { return null; }
+}
+
 export async function checkSitePages(fetchImpl = fetch) {
   const paths = ['/', '/intelligence', '/signals/api/feed'];
   const out = [];
@@ -374,6 +449,14 @@ async function main() {
   if (wantData && payload) checks.push(...checkPayload(payload, now));
   if (wantPage && html && payload) checks.push(...await checkRender(html, payload, prices || { generated_at: new Date().toISOString(), crypto: {}, stocks: {} }));
   if (wantPage) checks.push(...await checkSitePages());
+  if (wantPage) {
+    try {
+      checks.push(...checkDeployFreshness(
+        await readNewestLiveContentDate(), await readNewestRepoContentDate(), now));
+    } catch (e) {
+      checks.push(result('deploy-sitemap', 'fail', false, `could not read /sitemap.xml: ${e.message}`));
+    }
+  }
 
   const failures = checks.filter((c) => !c.ok && c.level === 'fail');
   const warnings = checks.filter((c) => !c.ok && c.level === 'warn');
