@@ -32,6 +32,17 @@ crons = ["*/5 * * * *"]
 
 # Serve only on the /signals path of the existing zone; the rest of the site
 # on Cloudflare (the Next.js app) is untouched.
+#
+# This block is the sole reason CLOUDFLARE_API_TOKEN needs a ZONE-scoped
+# permission: wrangler resolves zone_name to a zone id and asserts the route on
+# every deploy, so the token needs Zone / Workers Routes / Edit on
+# frontiercapitalsignals.com, on top of the account-scoped Workers Scripts, KV
+# and D1 it shares with every other workflow. That row is easy to miss — the
+# dashboard's permission editor opens on the Account group, where Workers Routes
+# does not appear at all. An account-only token passes every other workflow in
+# this repo (the root wrangler.toml declares no routes, and the signals-* jobs
+# only touch D1/KV) and fails here alone, which makes it read as a problem with
+# this Worker rather than with the token. Cost us the 2026-09-18 rotation.
 [[routes]]
 pattern = "frontiercapitalsignals.com/signals*"
 zone_name = "frontiercapitalsignals.com"
