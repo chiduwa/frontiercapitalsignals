@@ -29,7 +29,8 @@ import {
 } from './regression-diagnostics.mjs';
 import {
   FEATURE_NAMES, FEATURE_BLOCKS, BLOCK_NAMES, BLOCK_OF, OPTIONAL_BLOCKS,
-  featureRow, usableColumns, pruneCollinear, independentColumns, sanitizeBars
+  featureRow, usableColumns, pruneCollinear, independentColumns, sanitizeBars,
+  EXPERIMENTAL_BLOCKS_ENABLED
 } from './panel-features.mjs';
 
 // v2 (2026-09-18): the ridge penalty is scale-invariant. v1 added a flat
@@ -43,7 +44,15 @@ import {
 // keeps v1 and v2 walk-forwards from being compared as if they were the same
 // estimator. Prediction is unchanged in the only way that matters: still no
 // edge, in any lane, at any penalty strength.
-export const HIERARCHICAL_VERSION = 'hierarchical-mlr-v2';
+// The version tracks the COLUMN SPACE, not just the code, because a stored
+// coefficient vector is positional. v2 is the 29-column production space with
+// the scale-invariant ridge. `FCS_EXPERIMENTAL_BLOCKS=1` adds the funding and
+// sentiment lanes (36 columns) and renames the model accordingly, so runs from
+// the two spaces can never be compared as if they were the same estimator.
+// See panel-features.mjs for why those blocks are off by default.
+export const HIERARCHICAL_VERSION = EXPERIMENTAL_BLOCKS_ENABLED
+  ? 'hierarchical-mlr-v3-exp'
+  : 'hierarchical-mlr-v2';
 const DAY = 86400000;
 const dateMs = d => Date.parse(`${d}T00:00:00Z`);
 const mean = xs => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null);
@@ -61,14 +70,14 @@ const mean = xs => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null
  */
 export function buildAssetSample(rawBars, {
   horizon = 1, assetClass = 'crypto', benchmarkByDate = new Map(),
-  derivatives = [], supply = [], asOf = null
+  derivatives = [], supply = [], funding = [], sentimentByDate = new Map(), asOf = null
 } = {}) {
   const bars = sanitizeBars(rawBars, { asOf });
   const rows = [];
   const maxGap = assetClass === 'crypto' ? 1 : 4;
   let nextIndependent = 0;
   for (let i = 0; i < bars.length - horizon; i++) {
-    const features = featureRow(bars, i, { benchmarkByDate, derivatives, supply, assetClass });
+    const features = featureRow(bars, i, { benchmarkByDate, derivatives, supply, funding, sentimentByDate, assetClass });
     if (!features) continue;
     const exit = bars[i + horizon];
     const path = bars.slice(i, i + horizon + 1);
@@ -376,6 +385,7 @@ const intervalRadius = (residuals, coverage, minimum = 30) => {
 export function walkForwardPanel(assets, {
   horizon = 1, assetClass = 'crypto', asOf = new Date().toISOString().slice(0, 10),
   benchmark = [], derivativesBySymbol = new Map(), supplyBySymbol = new Map(),
+  fundingBySymbol = new Map(), sentimentByDate = new Map(),
   costBps = 20, coverage = 0.8, halfLifeDays = 365, ridge = 5,
   scaleInvariantRidge = true,
   refitEvery = 21, minTrainingSamples = 40, onProgress = null
@@ -387,7 +397,9 @@ export function walkForwardPanel(assets, {
     const sample = buildAssetSample(asset.bars, {
       horizon, assetClass, benchmarkByDate,
       derivatives: derivativesBySymbol.get(asset.symbol) || [],
-      supply: supplyBySymbol.get(asset.symbol) || []
+      supply: supplyBySymbol.get(asset.symbol) || [],
+      funding: fundingBySymbol.get(asset.symbol) || [],
+      sentimentByDate
     }).filter(r => r.date < asOf);
     if (!sample.length) continue;
     state.push({

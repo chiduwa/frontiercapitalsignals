@@ -313,3 +313,56 @@ v1 — and the class sensitivity is recorded here rather than acted on.
 
 Related: [[PREDICTION_WEIGHTS_EVIDENCE]], [[MODEL_IMPROVEMENT_2026_09_14]],
 [[CROSS_SECTIONAL_EVIDENCE]], [[DERIVATIVES_EVIDENCE]]
+
+## Funding and sentiment: measured, and left out (2026-09-18)
+
+Two lanes the archive already held and the model never read:
+`funding_rate_daily` (77,337 rows, 299 symbols, 100% non-null since 2021) and
+`sentiment_daily.fear_greed_altme` (2,085 dates, 100% non-null). Funding is the
+carry cost of the open interest that is the one place this project found real
+per-asset structure, so its absence beside `oiChange1` was the conspicuous gap.
+
+Implemented as two optional blocks — `fundingRate` (tanh of the rate × 500,
+near-linear at the 5.6e-4 median and bounding prints past 0.5 that are squeezes
+or bad data), `fundingPercentile` against the asset's own trailing 252 days,
+`fundingChange7`, plus `fearGreed` centred as (fg−50)/50 and `fearGreedChange7`.
+
+**They made every lane worse.** Same panel, same code, one arm receiving the
+new lanes:
+
+| lane | OOS R² base → +blocks | MAE base → +blocks |
+| --- | --- | --- |
+| crypto 1d | −0.00036 → **−0.00218** | 3.9161 → 3.9495 |
+| crypto 7d | −0.0640 → **−0.1202** | 9.989 → 10.088 |
+| stock 1d | −0.0222 → **−0.0265** | 1.8335 → 1.8391 |
+| stock 5d | −0.0230 → **−0.0313** | 4.3711 → 4.3977 |
+
+Eight of eight metrics worse, and no funding or sentiment feature entered the
+learned-heterogeneity set on any lane.
+
+**They are not empty in sample**, which is the part worth recording. Over 277
+crypto assets at 1d, funding clears 5% on 58 of 228 fitted against 11.4 expected
+under the null, median incremental R² 0.0028. That is this project's standing
+pattern restated by a third lane: in-sample significance that does not convert.
+
+One caveat on the sentiment count specifically — 97 of 277 significant looks
+like 7× the null rate, but Fear & Greed is ONE market-wide series shared by
+every asset. Those are not 277 independent trials; they are closer to one trial
+run 277 times. The funding count does not have this defect, because funding is
+per asset.
+
+Both blocks stay implemented and tested, excluded from the production column
+vector by default. `FCS_EXPERIMENTAL_BLOCKS=1` includes them and renames the
+model `hierarchical-mlr-v3-exp` (36 columns) so runs from the two column spaces
+can never be compared as though they came from the same estimator.
+
+### The control that caught a real bug
+
+Equities were run as a control: with no perpetual funding leg and a crypto-only
+fear index, the stock lanes should have been byte-identical between arms. They
+were not — `fearGreed` was reaching equity rows, and it cost them (stock 1d
+OOS R² −0.0222 → −0.0265, t −3.43 → −3.72). Both blocks are now gated on asset
+class inside `featureRow` rather than relying on callers passing empty arrays;
+there are zero stock/crypto symbol collisions in `funding_rate_daily` today, but
+a future ticker collision must not be able to become a regressor quietly. With
+the gate, the stock lanes return to baseline exactly (R² −0.022217 both arms).

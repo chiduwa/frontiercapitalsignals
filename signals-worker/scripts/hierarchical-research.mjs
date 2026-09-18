@@ -100,8 +100,29 @@ export async function loadHierarchicalPanel(query, env, asOf, { log = console.lo
     }
   }
   log(`[hierarchical] supply for ${supply.size} symbols`);
+
+  // Perpetual funding, per asset. Batched for the same D1 size ceiling reason.
+  const funding = new Map();
+  const fundingSymbols = (await query(env,
+    `SELECT DISTINCT symbol FROM funding_rate_daily ORDER BY symbol`)).map(r => r.symbol);
+  for (const page of chunk(fundingSymbols, SYMBOL_BATCH * 3)) {
+    const rows = await query(env, `SELECT symbol, date, funding_rate FROM funding_rate_daily
+      WHERE symbol IN (${page.map(quote).join(',')}) AND date >= '${ORIGIN}' AND date < '${asOf}'
+        AND funding_rate IS NOT NULL ORDER BY symbol, date`);
+    for (const symbol of page) funding.set(symbol, rows.filter(r => r.symbol === symbol));
+  }
+  log(`[hierarchical] funding for ${funding.size} symbols`);
+
+  // Market-wide sentiment rides the symbol='' sentinel row, one value per date.
+  const sentimentRows = await query(env, `SELECT date, fear_greed_altme FROM sentiment_daily
+    WHERE symbol = '' AND date >= '${ORIGIN}' AND date < '${asOf}'
+      AND fear_greed_altme IS NOT NULL ORDER BY date`);
+  log(`[hierarchical] sentiment for ${sentimentRows.length} dates`);
+
   return { asOf, assets: panel,
-    derivatives: Object.fromEntries(derivatives), supply: Object.fromEntries(supply) };
+    derivatives: Object.fromEntries(derivatives), supply: Object.fromEntries(supply),
+    funding: Object.fromEntries(funding),
+    sentiment: sentimentRows.map(r => [r.date, r.fear_greed_altme]) };
 }
 
 const modelClassOf = assetClass => (['stock', 'benchmark'].includes(assetClass) ? 'stock' : 'crypto');
@@ -115,6 +136,8 @@ export function runInference(panel, { asOf, minObservations = 60, maxVif = 10, l
     crypto: panel.assets.find(a => a.symbol === 'BTC' && a.assetClass === 'crypto')?.bars || [],
     stock: panel.assets.find(a => a.symbol === 'SPY')?.bars || []
   };
+  const funding = new Map(Object.entries(panel.funding || {}));
+  const sentimentByDate = new Map(panel.sentiment || []);
   const out = {};
   for (const modelClass of ['crypto', 'stock']) {
     const benchmarkByDate = new Map(benchmarks[modelClass].map(b => [b.date, b.close]));
@@ -129,6 +152,7 @@ export function runInference(panel, { asOf, minObservations = 60, maxVif = 10, l
         if (++done % 50 === 0) log(`[hierarchical]   ${done}/${members.length} ${modelClass} ${horizon}d`);
         const sample = buildAssetSample(asset.bars, {
           horizon, assetClass: modelClass, benchmarkByDate,
+          funding: funding.get(asset.symbol) || [], sentimentByDate,
           derivatives: derivatives.get(asset.symbol) || [],
           supply: supply.get(asset.symbol) || []
         });
@@ -194,6 +218,8 @@ const compactFit = f => ({
 export function runPrediction(panel, { asOf, costBps = 20, refitEvery = 21, log = console.log } = {}) {
   const derivatives = new Map(Object.entries(panel.derivatives || {}));
   const supply = new Map(Object.entries(panel.supply || {}));
+  const fundingBySymbol = new Map(Object.entries(panel.funding || {}));
+  const sentimentByDate = new Map(panel.sentiment || []);
   const benchmarks = {
     crypto: panel.assets.find(a => a.symbol === 'BTC' && a.assetClass === 'crypto')?.bars || [],
     stock: panel.assets.find(a => a.symbol === 'SPY')?.bars || []
@@ -206,7 +232,8 @@ export function runPrediction(panel, { asOf, costBps = 20, refitEvery = 21, log 
       log(`[hierarchical] walk-forward ${modelClass} ${horizon}d over ${members.length} assets`);
       const result = walkForwardPanel(members, {
         horizon, assetClass: modelClass, asOf, benchmark: benchmarks[modelClass],
-        derivativesBySymbol: derivatives, supplyBySymbol: supply, costBps, refitEvery
+        derivativesBySymbol: derivatives, supplyBySymbol: supply,
+        fundingBySymbol, sentimentByDate, costBps, refitEvery
       });
       const { outcomes, ...rest } = result;
       // Score the whole candidate field on the same forecasts, split by

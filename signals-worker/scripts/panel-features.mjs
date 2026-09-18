@@ -23,12 +23,45 @@ export const FEATURE_BLOCKS = {
   market: ['market5', 'market20', 'relative5', 'beta60'],
   range: ['rangePosition', 'drawdownFromHigh', 'dwellShare'],
   derivatives: ['oiChange1', 'oiChange7', 'oiPercentile', 'oiPriceDivergence', 'takerRatio', 'accountLsChange'],
+  // Funding is the PRICE of the open interest the derivatives block measures.
+  // Open interest is the one place this project found real per-asset structure
+  // (oiChange1 I2=0.94), so the cost of carrying that position belongs beside
+  // it. Perpetuals only: an equity has no funding leg, hence an optional block.
+  funding: ['fundingRate', 'fundingPercentile', 'fundingChange7'],
+  // Market-wide sentiment. One value per DATE, shared by every asset, so it can
+  // only be identified in an asset's own time series -- and it will be
+  // collinear with the market block by construction. The VIF/Gram-Schmidt pass
+  // decides whether it survives; that is the point of having one.
+  sentiment: ['fearGreed', 'fearGreedChange7'],
   supply: ['supplyGrowth30', 'supplyOverhang']
 };
 
+// Implemented, tested and MEASURED -- and excluded from the production column
+// vector, because measuring them is what settled it. Adding funding and
+// sentiment made all four lanes worse out of sample, on every metric:
+//
+//   lane        OOS R2 base -> +blocks      MAE base -> +blocks
+//   crypto 1d   -0.00036    -> -0.00218     3.9161   -> 3.9495
+//   crypto 7d   -0.0640     -> -0.1202      9.989    -> 10.088
+//   stock 1d    -0.0222     -> -0.0265      1.8335   -> 1.8391
+//   stock 5d    -0.0230     -> -0.0313      4.3711   -> 4.3977
+//
+// and no funding or sentiment feature entered the learned-heterogeneity set on
+// any lane. In sample they are NOT empty -- funding clears 5% on 58 of 228
+// assets against 11.4 expected -- which is this project's standing pattern
+// restated: in-sample significance that does not convert. Set
+// FCS_EXPERIMENTAL_BLOCKS=1 to include them and re-measure when the archive is
+// deeper; the version string changes with them so stored coefficients cannot
+// be compared across the two column spaces.
+export const EXPERIMENTAL_BLOCKS = ['funding', 'sentiment'];
+export const EXPERIMENTAL_BLOCKS_ENABLED =
+  (globalThis.process?.env?.FCS_EXPERIMENTAL_BLOCKS ?? '') === '1';
+const blockActive = b => EXPERIMENTAL_BLOCKS_ENABLED || !EXPERIMENTAL_BLOCKS.includes(b);
+
 /** Blocks that can be absent for an asset or a date, and so carry an indicator. */
-export const OPTIONAL_BLOCKS = ['market', 'derivatives', 'supply'];
-export const BLOCK_NAMES = Object.keys(FEATURE_BLOCKS);
+export const OPTIONAL_BLOCKS =
+  ['market', 'derivatives', 'funding', 'sentiment', 'supply'].filter(blockActive);
+export const BLOCK_NAMES = Object.keys(FEATURE_BLOCKS).filter(blockActive);
 const indicatorName = block => `${block}Missing`;
 
 /** Column order is fixed and derived, never hand-maintained, so that a stored
@@ -94,8 +127,8 @@ const ratioChange = (now, then) => (now > 0 && then > 0 ? Math.log(now / then) :
  * an asset that cannot be measured must be skipped, never imputed.
  */
 export function featureRow(bars, i, {
-  benchmarkByDate = new Map(), derivatives = [], supply = [],
-  assetClass = 'crypto'
+  benchmarkByDate = new Map(), derivatives = [], supply = [], funding = [],
+  sentimentByDate = new Map(), assetClass = 'crypto'
 } = {}) {
   if (i < MIN_HISTORY) return null;
   const window = bars.slice(i - MIN_HISTORY, i + 1);
@@ -191,6 +224,42 @@ export function featureRow(bars, i, {
     const lsPrior = derivPrior(1);
     values.accountLsChange = lsPrior && deriv.all_account_ls > 0 && lsPrior.all_account_ls > 0
       ? Math.log(deriv.all_account_ls / lsPrior.all_account_ls) : null;
+  }
+
+  // --- funding (perpetuals only)
+  // The raw rate is tiny (mean |rate| 5.6e-4) with occasional prints past 0.5
+  // that are squeezes or bad data. tanh keeps the normal range near-linear and
+  // bounds the tail instead of letting one print dominate X'X.
+  // Gated on class, not on the caller handing over an empty array. There are
+  // no stock/crypto symbol collisions in `funding_rate_daily` today (checked:
+  // zero), but an equity has no perpetual funding leg as a matter of fact, and
+  // a future listing colliding on ticker must not quietly become a regressor.
+  const fundingRow = assetClass === 'stock' ? null : asOfRow(funding, date, 2);
+  if (fundingRow && Number.isFinite(fundingRow.funding_rate)) {
+    values.fundingRate = Math.tanh(fundingRow.funding_rate * 500);
+    const prior7 = asOfRow(funding, new Date(dateMs(date) - 7 * DAY).toISOString().slice(0, 10), 2);
+    values.fundingChange7 = prior7 && Number.isFinite(prior7.funding_rate)
+      ? Math.tanh((fundingRow.funding_rate - prior7.funding_rate) * 500) : null;
+    // "Is funding high FOR THIS ASSET" -- the question the archive was built to
+    // answer, and the robust one: a percentile cannot be moved by an outlier.
+    const history = funding.filter(r => r.date <= date && Number.isFinite(r.funding_rate))
+      .slice(-252).map(r => r.funding_rate);
+    values.fundingPercentile = history.length >= 60
+      ? history.filter(v => v <= fundingRow.funding_rate).length / history.length - 0.5 : null;
+  }
+
+  // --- sentiment (market-wide, carried on the symbol='' row for the date)
+  // alternative.me's Fear & Greed is a CRYPTO index. Handing it to an equity
+  // regression is an unjustified cross-asset borrow, and it measured as one:
+  // with stocks receiving it, stock 1d OOS R2 went -0.0222 -> -0.0265 and
+  // t -3.43 -> -3.72. Gated here rather than at the call site so there is one
+  // place this can be true. `vix_range_pos` would be the equity-appropriate
+  // field and is 2.3% populated, so equities simply have no sentiment lane.
+  const fg = assetClass === 'stock' ? null : sentimentByDate.get(date);
+  if (Number.isFinite(fg)) {
+    values.fearGreed = (fg - 50) / 50;
+    const prior = sentimentByDate.get(new Date(dateMs(date) - 7 * DAY).toISOString().slice(0, 10));
+    values.fearGreedChange7 = Number.isFinite(prior) ? (fg - prior) / 50 : null;
   }
 
   // --- supply

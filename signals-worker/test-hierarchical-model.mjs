@@ -7,7 +7,8 @@ import {
 } from './scripts/hierarchical-model.mjs';
 import {
   FEATURE_NAMES, FEATURE_BLOCKS, BLOCK_OF, OPTIONAL_BLOCKS, featureRow,
-  usableColumns, pruneCollinear, independentColumns, asOfRow, sanitizeBars
+  usableColumns, pruneCollinear, independentColumns, asOfRow, sanitizeBars,
+  EXPERIMENTAL_BLOCKS, EXPERIMENTAL_BLOCKS_ENABLED
 } from './scripts/panel-features.mjs';
 import { varianceInflationFactors } from './scripts/regression-diagnostics.mjs';
 
@@ -423,4 +424,81 @@ test('collinear and constant columns are removed before anything is claimed abou
   const kept = pruneCollinear(rows, varying, { maxVif: 10, computeVif: varianceInflationFactors });
   assert.ok(kept.length < varying.length, 'one of the duplicated columns must go');
   assert.ok(kept.includes(0) && kept.includes(3));
+});
+
+test('funding and sentiment become features, and announce themselves absent', { skip: !EXPERIMENTAL_BLOCKS_ENABLED && 'experimental blocks are off by default' }, () => {
+  // 120 daily bars so every window the row needs is satisfied.
+  const bars = Array.from({ length: 120 }, (_, i) => ({
+    date: day(i), close: 100 * (1 + 0.01 * Math.sin(i / 3)), volume: 1000 + i
+  }));
+  const at = day(119);
+  const funding = Array.from({ length: 120 }, (_, i) => ({
+    date: day(i), funding_rate: 0.0002 + 0.0001 * Math.sin(i / 5)
+  }));
+  const sentimentByDate = new Map(Array.from({ length: 120 }, (_, i) => [day(i), 40 + (i % 40)]));
+
+  const withAll = featureRow(bars, 119, { funding, sentimentByDate, assetClass: 'crypto' });
+  const idx = name => FEATURE_NAMES.indexOf(name);
+
+  // Funding: the tanh transform is near-linear at realistic magnitudes, so a
+  // rate of 2e-4 must NOT saturate -- the whole point of choosing the scale.
+  const rate = funding[119].funding_rate;
+  assert.ok(Math.abs(withAll.raw.fundingRate - Math.tanh(rate * 500)) < 1e-12);
+  assert.ok(Math.abs(withAll.raw.fundingRate) < 0.3, 'realistic funding must stay off the tanh shoulder');
+  // Percentile is centred on zero and bounded.
+  assert.ok(withAll.raw.fundingPercentile > -0.5 && withAll.raw.fundingPercentile <= 0.5);
+  // Sentiment is centred: 50 maps to 0, 100 to +1, 0 to -1.
+  const fg = sentimentByDate.get(at);
+  assert.ok(Math.abs(withAll.raw.fearGreed - (fg - 50) / 50) < 1e-12);
+  assert.equal(withAll.available.funding, true);
+  assert.equal(withAll.available.sentiment, true);
+  assert.equal(withAll.x[idx('fundingMissing')], 0);
+  assert.equal(withAll.x[idx('sentimentMissing')], 0);
+
+  // An equity has no funding leg and no crypto sentiment row. The block must
+  // zero out AND raise its indicator, so the other lanes are still estimated
+  // where they exist instead of the whole row being discarded.
+  // Supply BOTH lanes and still assert absence: an equity has no perpetual
+  // funding leg, and alternative.me's Fear & Greed is a CRYPTO index, so
+  // handing it to a stock regression is a cross-asset borrow. Measured when it
+  // leaked: stock 1d OOS R2 -0.0222 -> -0.0265, t -3.43 -> -3.72. Passing the
+  // data in is the point of this assertion -- omitting it tests nothing.
+  const without = featureRow(bars, 119, { funding, sentimentByDate, assetClass: 'stock' });
+  assert.equal(without.available.funding, false);
+  assert.equal(without.available.sentiment, false);
+  assert.equal(without.raw.fearGreed, undefined, 'crypto sentiment must not reach an equity row');
+  assert.equal(without.x[idx('fundingMissing')], 1);
+  assert.equal(without.x[idx('sentimentMissing')], 1);
+  assert.equal(without.x[idx('fundingRate')], 0);
+  assert.equal(without.x[idx('fearGreed')], 0);
+
+  // An extreme funding print must be bounded, not allowed to dominate X'X.
+  const squeeze = funding.map((r, i) => (i === 119 ? { ...r, funding_rate: 0.78 } : r));
+  const wild = featureRow(bars, 119, { funding: squeeze, sentimentByDate, assetClass: 'crypto' });
+  assert.ok(Math.abs(wild.raw.fundingRate) <= 1, 'tanh must bound the tail');
+  assert.ok(Math.abs(wild.x[idx('fundingRate')]) <= 4, 'and clip must hold it inside the design bound');
+});
+
+test('the column vector length and the model version move together', () => {
+  // A stored coefficient vector is positional, so the version must change with
+  // the column space or coefficients silently remap onto different features.
+  // Default is the 29-column production space; the experimental blocks are off.
+  // Both spaces are pinned, and the pairing is the invariant: 29 <-> v2,
+  // 36 <-> v3-exp. Neither may move without the other.
+  const expected = EXPERIMENTAL_BLOCKS_ENABLED
+    ? { columns: 36, version: 'hierarchical-mlr-v3-exp' }
+    : { columns: 29, version: 'hierarchical-mlr-v2' };
+  assert.equal(FEATURE_NAMES.length, expected.columns);
+  assert.equal(HIERARCHICAL_VERSION, expected.version);
+  assert.equal(FEATURE_NAMES[0], 'intercept');
+  for (const f of ['fundingRate', 'fearGreed']) {
+    assert.equal(FEATURE_NAMES.includes(f), EXPERIMENTAL_BLOCKS_ENABLED,
+      `${f} presence must follow the experimental flag`);
+  }
+  // Indicators come last, after every block feature.
+  const firstIndicator = FEATURE_NAMES.findIndex(n => n.endsWith('Missing'));
+  assert.ok(FEATURE_NAMES.slice(firstIndicator).every(n => n.endsWith('Missing')));
+  // And the blocks are defined, tested and reachable -- excluded, not deleted.
+  assert.deepEqual(EXPERIMENTAL_BLOCKS, ['funding', 'sentiment']);
+  for (const b of EXPERIMENTAL_BLOCKS) assert.ok(FEATURE_BLOCKS[b]?.length);
 });
