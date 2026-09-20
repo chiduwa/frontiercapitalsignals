@@ -3464,20 +3464,50 @@ console.log('\n== getCryptoMarkets 429 retry ==');
   global.fetch = async () => { calls++; return calls <= 2
     ? { ok: false, status: 429, json: async () => ({}) }
     : { ok: true, status: 200, json: async () => ({ recovered: true }) }; };
-  const recovered = await mod.fetchJsonRetrying429('https://example.test/a', [5, 5, 5]);
+  const recovered = await mod.fetchJsonRetryingTransient('https://example.test/a', [5, 5, 5]);
   check('a transient 429 is retried and recovers', recovered && recovered.recovered === true && calls === 3, `calls=${calls}`);
 
   calls = 0;
   global.fetch = async () => { calls++; return { ok: false, status: 404, json: async () => ({}) }; };
   let threw = false;
-  try { await mod.fetchJsonRetrying429('https://example.test/b', [5, 5, 5]); } catch { threw = true; }
+  try { await mod.fetchJsonRetryingTransient('https://example.test/b', [5, 5, 5]); } catch { threw = true; }
   check('a 404 is NOT retried — it will not fix itself', threw && calls === 1, `calls=${calls}`);
 
   calls = 0;
   global.fetch = async () => { calls++; return { ok: false, status: 429, json: async () => ({}) }; };
   threw = false;
-  try { await mod.fetchJsonRetrying429('https://example.test/c', [5, 5]); } catch { threw = true; }
+  try { await mod.fetchJsonRetryingTransient('https://example.test/c', [5, 5]); } catch { threw = true; }
   check('a persistent 429 gives up rather than looping forever', threw && calls === 3, `calls=${calls}`);
+
+  // ---- widened 2026-09-20 -------------------------------------------------
+  // "Not 429" was being treated as "the server answered and meant it", so a
+  // 502 from CoinGecko's edge or a dropped connection aborted the whole daily
+  // job on its very first call, with no retry at all.
+  calls = 0;
+  global.fetch = async () => { calls++; return calls <= 2
+    ? { ok: false, status: 503, json: async () => ({}) }
+    : { ok: true, status: 200, json: async () => ({ recovered: true }) }; };
+  const after5xx = await mod.fetchJsonRetryingTransient('https://example.test/d', [5, 5, 5]);
+  check('a transient 5xx is retried and recovers', after5xx && after5xx.recovered === true && calls === 3, `calls=${calls}`);
+
+  calls = 0;
+  global.fetch = async () => { calls++; if (calls <= 2) throw new TypeError('fetch failed');
+    return { ok: true, status: 200, json: async () => ({ recovered: true }) }; };
+  const afterReset = await mod.fetchJsonRetryingTransient('https://example.test/e', [5, 5, 5]);
+  check('a dropped connection is retried and recovers', afterReset && afterReset.recovered === true && calls === 3, `calls=${calls}`);
+
+  calls = 0;
+  global.fetch = async () => { calls++; return { ok: false, status: 401, json: async () => ({}) }; };
+  threw = false;
+  try { await mod.fetchJsonRetryingTransient('https://example.test/f', [5, 5, 5]); } catch { threw = true; }
+  check('a 401 is NOT retried — a bad credential is not transient', threw && calls === 1, `calls=${calls}`);
+
+  check('the retry predicate classifies by status class, not by exact code',
+    mod.isRetryableFetchError(new Error('HTTP 502 x')) === true
+    && mod.isRetryableFetchError(new Error('HTTP 429 x')) === true
+    && mod.isRetryableFetchError(new TypeError('fetch failed')) === true
+    && mod.isRetryableFetchError(new Error('HTTP 404 x')) === false
+    && mod.isRetryableFetchError(new Error('HTTP 400 x')) === false);
   global.fetch = realFetch;
 }
 

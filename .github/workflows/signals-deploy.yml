@@ -30,6 +30,15 @@ jobs:
         with:
           node-version: "24"
 
+      # Static, credential-free check that every workflow is wired to the
+      # configuration it actually reads. Runs FIRST and on its own, because the
+      # bug it exists for (signals-replay.yml reading the D1 id from the wrong
+      # context for its entire life) is invisible to every other test here:
+      # those import the Worker, while this one reads the YAML.
+      - name: Check workflow wiring
+        working-directory: signals-worker
+        run: node test-workflows.mjs
+
       # Fail before touching remote schema or code if the public Worker, the
       # private journal route, or the lagged retrospective statistics regress.
       - name: Test Worker and analytical additions

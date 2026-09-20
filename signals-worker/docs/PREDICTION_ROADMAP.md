@@ -35,6 +35,52 @@ Replace `--as-of` with the desired cutoff; never compare changed histories as
 though they were the same experiment. Credentials are handled by Wrangler's
 existing login or the standard D1 environment variables; do not print them.
 
+## 0. Scheduled-job reliability, September 20
+
+Three scheduled jobs were failing when this section was written. They are not
+one story, and only the first is fully explained.
+
+**Signals Replay — fixed.** It read the D1 database id from
+`secrets.FCS_D1_DATABASE_ID`; the other nineteen workflows read
+`vars.FCS_D1_DATABASE_ID`. GitHub substitutes an empty string for an undefined
+context entry without warning, so the job ran, checked out, and applied
+migrations successfully — Wrangler resolves the database by NAME and never
+needs the id — then failed one second into `replay-history.mjs` on its own
+argument check. It had never succeeded: runs #1 (09-13) and #2 (09-20) failed
+identically. `test-workflows.mjs` now fails on any name read from two contexts,
+on a D1 script whose workflow omits a credential, and on a scheduled job with
+no `timeout-minutes`; `signals-deploy.yml` runs it before the Worker tests.
+**The replay has therefore still never produced a walk-forward ledger.** Its
+first green run is new evidence, not a regression check — read the edge report
+against the baseline before treating any of it as confirmation of skill.
+
+**Signals Retrospective — cause NOT established.** Run #20 (09-20 09:19Z)
+failed after 19 consecutive successes, 11 seconds into `retrospective.mjs`,
+with migrations already applied. The code was unchanged, and migrations
+0043–0045 only create new tables, none of which it reads. The step log needs
+admin auth, so the actual error was never seen; do not record this as diagnosed.
+Two things were hardened on the evidence available, neither confirmed as the
+cause:
+
+- The retry predicate retried **only 429**, so a 502/503 from CoinGecko's edge
+  or a dropped connection aborted the run with no retry at all — and this job
+  makes its wide market scan first, before anything else can start. 11s fits
+  that shape; an exhausted 429 backoff would have taken 21s or more. Now shared
+  as `isRetryableFetchError` (429, any 5xx, transport failures; 4xx still fails
+  fast) between `worker.js` and the script's own loop.
+- `refreshFeatureCorrelations` read `retrospective_feature_snapshots` with one
+  unbounded SELECT. That table is appended to every daily run and is never
+  pruned, which is the same slow-motion D1 7010 that killed Signals Discovery
+  for five days once `asset_daily_bars` outgrew a single response. It reads
+  through `readAllRows` now. This is a latent fault fixed on its own merits;
+  it runs late in `main()`, so it is unlikely to explain an 11s failure.
+
+If the retrospective fails again, get the step log before changing anything
+else. Re-verify by watching runs, not by reasoning about the diff.
+
+**Signals Health** failed twice (#223, #224) and recovered on its own at 08:06Z
+with no change. Left alone deliberately.
+
 ## 1. Completed release and follow-up monitoring
 
 The release and one-off funding repair below were executed September 20;

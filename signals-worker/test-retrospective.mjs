@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { pageAll } from './scripts/d1-client.mjs';
 import {
   RETRO_BASELINE_METHOD_VERSION,
   RETRO_LEAD_LAG_FAMILY_TESTS,
@@ -400,6 +402,64 @@ test('only observations after frozen discovery can replicate or decay a lead/lag
   })[0];
   assert.equal(decayed.status, 'decayed-research-only');
   assert.equal(decayed.liveEdgeEligible, 0);
+});
+
+
+// ---- the feature-snapshot read must stay paged ---------------------------
+// retrospective_feature_snapshots is appended to on every daily run and is
+// never pruned, so reading it with one unbounded SELECT is the same size
+// ceiling that killed Signals Discovery for five days once asset_daily_bars
+// outgrew a single D1 response. There is no diff on the day it triggers, so
+// these assertions are the only thing standing between the daily learning
+// pass and a 7010 that looks like an outage and never clears.
+test('the feature-snapshot correlation read is paged, not a whole-table SELECT', () => {
+  const src = readFileSync(new URL('./scripts/retrospective.mjs', import.meta.url), 'utf8');
+  assert.ok(src.includes('readAllRows(env, `\n    SELECT run_at, asset_class, symbol, technique_id'),
+    'refreshFeatureCorrelations must read retrospective_feature_snapshots through the shared pager');
+  const unpagedRead = /d1\(env, `\s*\n\s*SELECT run_at, asset_class, symbol, technique_id/;
+  assert.ok(!unpagedRead.test(src),
+    'that read must not go back to a single unbounded d1() call');
+});
+
+test('paging orders by the full row identity, so no row is dropped or repeated', () => {
+  const src = readFileSync(new URL('./scripts/retrospective.mjs', import.meta.url), 'utf8');
+  // run_at repeats across every row a single run writes. Paging on it alone is
+  // a partial order, and LIMIT/OFFSET over a partial order silently drops rows
+  // at page boundaries and returns others twice.
+  assert.ok(src.includes('ORDER BY run_at ASC, asset_class ASC, symbol ASC, technique_id ASC'),
+    'the paged read needs a total order (the table\'s unique key less method_version)');
+});
+
+test('pageAll keeps paging until a short page, preserving order', async () => {
+  const all = Array.from({ length: 23 }, (_, i) => ({ i }));
+  const calls = [];
+  // Stands in for D1, honouring LIMIT/OFFSET exactly as SQLite would.
+  const rows = await pageAll((limit, offset) => {
+    calls.push([limit, offset]);
+    return Promise.resolve(all.slice(offset, offset + limit));
+  }, 10);
+  assert.equal(rows.length, 23, 'every row is returned exactly once');
+  assert.deepEqual(rows.map((r) => r.i), all.map((r) => r.i), 'order is preserved across pages');
+  assert.equal(calls.length, 3, 'stops on the first short page rather than probing forever');
+  assert.deepEqual(calls, [[10, 0], [10, 10], [10, 20]]);
+});
+
+test('pageAll proves the end with one extra read when the last page is exactly full', async () => {
+  const all = Array.from({ length: 20 }, (_, i) => ({ i }));
+  let calls = 0;
+  const rows = await pageAll((limit, offset) => {
+    calls++;
+    return Promise.resolve(all.slice(offset, offset + limit));
+  }, 10);
+  assert.equal(rows.length, 20, 'an exact multiple returns every row and no phantom extras');
+  assert.equal(calls, 3, 'a full final page is never trusted as the end');
+});
+
+test('pageAll on an empty table is one read and no rows', async () => {
+  let calls = 0;
+  const rows = await pageAll(() => { calls++; return Promise.resolve([]); }, 10);
+  assert.equal(rows.length, 0);
+  assert.equal(calls, 1);
 });
 
 console.log(`\n${passed} retrospective tests passed`);

@@ -48,10 +48,11 @@
 // RETRO_LEAD_LAG_MIN_HOLDOUT_DATES, RETRO_LEAD_LAG_MIN_OOS_DATES
 // Invoked by .github/workflows/signals-retrospective.yml.
 import { pathToFileURL } from 'node:url';
-import { d1, chunk, forEachConcurrent } from './d1-client.mjs';
+import { d1, chunk, forEachConcurrent, readAllRows } from './d1-client.mjs';
 import {
   binanceGlobalKlines, binanceGlobalTradablePairs, describeMissedMove, classifyMiss,
-  isNonDirectionalAsset, COINGECKO_BACKOFFS_MS, CRYPTO_UNIVERSE, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME,
+  isNonDirectionalAsset, COINGECKO_BACKOFFS_MS, isRetryableFetchError,
+  CRYPTO_UNIVERSE, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME,
   FAVORITE_SYMBOLS, TECHNIQUE_META, pearsonCorr
 } from '../worker.js';
 
@@ -913,8 +914,13 @@ async function fetchJsonOnce(url) {
 // used ranges. A single un-retried 429 took the Signals Daily job down on
 // both 2026-08-31 and 2026-09-01 (see getCryptoMarkets in worker.js);
 // this job makes the same class of call on its own daily schedule and
-// would have failed identically. Only 429 is retried — a 404 will not fix
-// itself by being asked again.
+// would have failed identically.
+//
+// The retry PREDICATE is imported rather than re-stated here. This loop and
+// the one in worker.js were hand-copied from each other and had to be widened
+// from 429-only twice; sharing the rule is what stops them drifting a third
+// time. The loop itself stays local because fetchJsonOnce carries this job's
+// own AbortController budget.
 async function fetchJson(url) {
   let lastErr;
   for (let attempt = 0; attempt <= COINGECKO_BACKOFFS_MS.length; attempt++) {
@@ -922,8 +928,8 @@ async function fetchJson(url) {
       return await fetchJsonOnce(url);
     } catch (e) {
       lastErr = e;
-      if (!/^HTTP 429/.test(String(e && e.message)) || attempt === COINGECKO_BACKOFFS_MS.length) break;
-      console.log(`  rate-limited, backing off ${COINGECKO_BACKOFFS_MS[attempt]}ms`);
+      if (!isRetryableFetchError(e) || attempt === COINGECKO_BACKOFFS_MS.length) break;
+      console.log(`  transient fetch failure (${String(e && e.message).slice(0, 60)}), backing off ${COINGECKO_BACKOFFS_MS[attempt]}ms`);
       await new Promise((r) => setTimeout(r, COINGECKO_BACKOFFS_MS[attempt]));
     }
   }
@@ -1145,12 +1151,23 @@ async function writeFeatureSnapshots(rows) {
 }
 
 async function refreshFeatureCorrelations(nowIso) {
-  const snapshots = await d1(env, `
+  // Paged, not a single read. This table is appended to on every daily run and
+  // is never pruned, so an unbounded SELECT over it is the same slow-motion
+  // 7010 that killed Signals Discovery for five days once asset_daily_bars
+  // outgrew one D1 response — it would fail here on an ordinary Tuesday, with
+  // nothing in the diff to explain it.
+  //
+  // ORDER BY is widened from `run_at` alone to the row's full identity (the
+  // table's unique key, minus the method_version this query pins). run_at
+  // repeats across every row a run writes, so it is not a total order, and
+  // paging on a partial order is what silently drops and duplicates rows.
+  const snapshots = await readAllRows(env, `
     SELECT run_at, asset_class, symbol, technique_id, technique_dir, move_pct,
            aligned, regime, time_bucket
       FROM retrospective_feature_snapshots
      WHERE method_version = ?
-     ORDER BY run_at ASC`, [RETRO_FEATURE_METHOD_VERSION]);
+     ORDER BY run_at ASC, asset_class ASC, symbol ASC, technique_id ASC`,
+  [RETRO_FEATURE_METHOD_VERSION]);
   const evidence = buildFeatureCorrelationEvidence(snapshots, {
     minIndependentDates: FEATURE_MIN_INDEPENDENT_DATES,
     familyAlpha: FEATURE_FAMILY_ALPHA

@@ -4574,17 +4574,40 @@ export async function poolPaced(items, batchSize, delayMs, fn) {
 // own daily schedule and would have inherited the identical failure.
 export const COINGECKO_BACKOFFS_MS = [3000, 6000, 12000];
 
-export async function fetchJsonRetrying429(url, backoffsMs = COINGECKO_BACKOFFS_MS) {
+// Is this failure worth asking again about?
+//
+// The original rule here was "429 and nothing else", on the reasoning that a
+// 404 or a malformed payload will not fix itself and retrying it only turns a
+// fast, legible failure into a slow one. That reasoning is right about 4xx and
+// wrong about everything else, because it treats "not 429" as "the server
+// answered and meant it". A 502 from CoinGecko's edge, a 503 while it sheds
+// load, or a dropped connection are all transient by definition — and on the
+// free tier they are ordinary, not exceptional.
+//
+// The cost of getting this wrong is asymmetric and was being paid daily: these
+// jobs make their wide market scan FIRST, so a single unretried blip aborts the
+// whole run before any of the work behind it starts, and a daily cron turns
+// that into a 24-hour feedback loop.
+//
+// Retried: 429, any 5xx, and transport-level failures (DNS, reset, timeout —
+// these surface as a TypeError or AbortError with no "HTTP nnn" prefix).
+// Not retried: every other 4xx. A 404 still fails fast, as it should.
+export function isRetryableFetchError(e) {
+  const message = String((e && e.message) || e);
+  const status = /^HTTP (\d{3})/.exec(message);
+  if (!status) return true;              // no HTTP status => transport failure
+  const code = Number(status[1]);
+  return code === 429 || code >= 500;
+}
+
+export async function fetchJsonRetryingTransient(url, backoffsMs = COINGECKO_BACKOFFS_MS) {
   let lastErr;
   for (let attempt = 0; attempt <= backoffsMs.length; attempt++) {
     try {
       return await fetchJson(url);
     } catch (e) {
       lastErr = e;
-      // Only 429. A 404 or a malformed payload will not fix itself by
-      // being asked again, and retrying those would just turn a fast,
-      // legible failure into a slow one.
-      if (!/^HTTP 429/.test(String(e && e.message)) || attempt === backoffsMs.length) break;
+      if (!isRetryableFetchError(e) || attempt === backoffsMs.length) break;
       await new Promise((r) => setTimeout(r, backoffsMs[attempt]));
     }
   }
@@ -4638,7 +4661,7 @@ export async function getCryptoMarkets() {
       + `?vs_currency=usd&order=market_cap_desc&per_page=${CRYPTO_MARKETS_PAGE_SIZE}&page=${page}`
       + '&sparkline=true&price_change_percentage=1h,24h,7d,30d';
     try {
-      const rows = await fetchJsonRetrying429(url);
+      const rows = await fetchJsonRetryingTransient(url);
       if (!Array.isArray(rows) || !rows.length) break;
       out.push(...rows);
       if (rows.length < CRYPTO_MARKETS_PAGE_SIZE) break;

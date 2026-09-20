@@ -137,6 +137,49 @@ export async function readAllDailyBars(env, columns, options = {}) {
   return out;
 }
 
+// How many rows to take per page in readAllRows. Sized like BAR_SYMBOL_CHUNK
+// above: small enough that a page stays a few MB whatever the row width, large
+// enough that an ordinary table is one or two round trips.
+export const ROW_PAGE_SIZE = 5000;
+
+// Reads an arbitrary ordered query in pages, for the OTHER shape of the same
+// 7010 problem readAllDailyBars exists for.
+//
+// readAllDailyBars fixed the table that had already outgrown a single D1
+// response. It is not the only one that will: any `SELECT ... FROM t WHERE
+// <constant>` over an append-only table is a size ceiling with a date on it,
+// and the failure is nasty precisely because nothing changes on the day it
+// arrives — the query is the same, the data is the same shape, and the error
+// is a 503 that reads like an outage and never clears on retry.
+//
+// The caller supplies the ordering, which must be a TOTAL order (enough
+// columns to break every tie), or paging would drop and duplicate rows across
+// page boundaries. Safe under LIMIT/OFFSET because these jobs hold a
+// concurrency group and write before they read, so no one is inserting
+// underneath the pagination.
+// The paging loop itself, with the transport handed in. Separated so the
+// boundary behaviour that makes paging dangerous — the short page that ends
+// it, and the exactly-full last page that does not — is testable without a
+// database. `fetchPage(limit, offset)` returns one page of rows.
+export async function pageAll(fetchPage, pageSize = ROW_PAGE_SIZE) {
+  const out = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const page = await fetchPage(pageSize, offset);
+    for (const row of page) out.push(row);
+    // A short page is the only proof there is nothing after it. A full page
+    // is never trusted, even when it is the last one — that costs one extra
+    // empty read per exact multiple, which is the cheap side of this trade.
+    if (page.length < pageSize) return out;
+  }
+}
+
+export async function readAllRows(env, sql, params = [], options = {}) {
+  const { pageSize = ROW_PAGE_SIZE } = options;
+  // LIMIT/OFFSET are code-controlled numbers, never caller input; every VALUE
+  // is still bound through params, exactly as readAllDailyBars does.
+  return pageAll((limit, offset) => d1(env, `${sql} LIMIT ${limit} OFFSET ${offset}`, params), pageSize);
+}
+
 export function chunk(arr, n) {
   const out = [];
   for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
