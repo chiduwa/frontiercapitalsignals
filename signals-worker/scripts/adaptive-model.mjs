@@ -1,6 +1,7 @@
 // Additive, deliberately separate challenger. No imports of live evidence or
 // current fundamentals: both would leak the future into a historical anchor.
-export const ADAPTIVE_VERSION = 'adaptive-ridge-v1';
+import { alignDailyResearchBars } from './archive-policy.mjs';
+export const ADAPTIVE_VERSION = 'adaptive-ridge-v2';
 export const FEATURE_NAMES = ['intercept', 'return1', 'return5', 'return20', 'trend', 'volume', 'market5', 'relative5', 'marketMissing'];
 const DAY = 86400000;
 const clip = (x, bound = 4) => Math.max(-bound, Math.min(bound, x));
@@ -11,7 +12,7 @@ export function validateBars(input, { assetClass = 'crypto', asOf = new Date().t
   const dates = new Set();
   const rejected = { invalid: 0, duplicate: 0, incomplete: 0 };
   const bars = [];
-  for (const b of [...input].sort((a, b) => String(a.date).localeCompare(String(b.date)))) {
+  for (const b of alignDailyResearchBars(input).sort((a, b) => String(a.date).localeCompare(String(b.date)))) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(b.date) || !Number.isFinite(dateMs(b.date))
       || new Date(dateMs(b.date)).toISOString().slice(0, 10) !== b.date
       || !Number.isFinite(b.close) || !(b.close > 0)) { rejected.invalid++; continue; }

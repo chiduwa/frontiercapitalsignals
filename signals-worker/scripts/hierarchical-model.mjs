@@ -51,8 +51,8 @@ import {
 // the two spaces can never be compared as if they were the same estimator.
 // See panel-features.mjs for why those blocks are off by default.
 export const HIERARCHICAL_VERSION = EXPERIMENTAL_BLOCKS_ENABLED
-  ? 'hierarchical-mlr-v3-exp'
-  : 'hierarchical-mlr-v2';
+  ? 'hierarchical-mlr-v4-exp'
+  : 'hierarchical-mlr-v4';
 const DAY = 86400000;
 const dateMs = d => Date.parse(`${d}T00:00:00Z`);
 const mean = xs => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null);
@@ -399,7 +399,7 @@ export function walkForwardPanel(assets, {
       derivatives: derivativesBySymbol.get(asset.symbol) || [],
       supply: supplyBySymbol.get(asset.symbol) || [],
       funding: fundingBySymbol.get(asset.symbol) || [],
-      sentimentByDate
+      sentimentByDate, asOf
     }).filter(r => r.date < asOf);
     if (!sample.length) continue;
     state.push({

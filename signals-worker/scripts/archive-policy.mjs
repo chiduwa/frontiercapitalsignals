@@ -1,6 +1,20 @@
 // Daily observations are immutable once archived. Never freeze an unfinished
 // session as its final close. A UTC-day delay also covers US early closes/DST
 // without guessing an exchange holiday calendar.
+// Legacy CoinGecko market_chart daily rows store a sample at 00:00 UTC under
+// that timestamp's date, not the close of that UTC day. Align only at the
+// research boundary; preserve the immutable source record. Otherwise a BTC
+// end-of-day benchmark gives a CG asset almost an entire day of future price.
+export function alignDailyResearchBars(bars) {
+  return bars.map(b => {
+    if (b.source !== 'coingecko' || b.dateAlignment || !/^\d{4}-\d{2}-\d{2}$/.test(b.date)) return b;
+    const time = Date.parse(`${b.date}T00:00:00Z`);
+    if (!Number.isFinite(time) || new Date(time).toISOString().slice(0,10) !== b.date) return b;
+    return { ...b, sourceDate:b.date, date:new Date(time-86400000).toISOString().slice(0,10),
+      dateAlignment:'midnight-sample-as-prior-day-close' };
+  });
+}
+
 export function completedDailyBars(bars, nowMs = Date.now()) {
   const today = new Date(nowMs).toISOString().slice(0, 10);
   return bars.filter(b => typeof b.date === 'string' && b.date < today

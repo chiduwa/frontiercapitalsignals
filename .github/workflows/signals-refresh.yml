@@ -44,6 +44,12 @@ on:
         default: true
         type: boolean
 
+      quiet:
+        description: "Suppress outbound alerts for a deployment verification rebuild"
+        required: false
+        default: false
+        type: boolean
+
 concurrency:
   # This run touches shared state (D1, KV) and now takes ~10-11 minutes;
   # if a delayed firing ever overlaps the next hour's, queue rather than
@@ -88,7 +94,8 @@ jobs:
           FCS_KV_NAMESPACE_ID: ${{ vars.FCS_KV_NAMESPACE_ID }}
           FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
           TREFIS_OVERRIDES: ${{ vars.TREFIS_OVERRIDES }}
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_TOPIC: ${{ (github.event_name != 'workflow_dispatch' || !inputs.quiet) && secrets.NTFY_TOPIC || '' }}
+          CMC_API_KEY: ${{ secrets.CMC_API_KEY }}
           # Lets build-signals.mjs's freshness pre-check apply only to
           # scheduled firings and Cloudflare's force=false recovery dispatch.
           # A manual workflow dispatch defaults to true and still means

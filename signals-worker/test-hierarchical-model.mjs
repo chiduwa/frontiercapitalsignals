@@ -483,11 +483,11 @@ test('the column vector length and the model version move together', () => {
   // A stored coefficient vector is positional, so the version must change with
   // the column space or coefficients silently remap onto different features.
   // Default is the 29-column production space; the experimental blocks are off.
-  // Both spaces are pinned, and the pairing is the invariant: 29 <-> v2,
-  // 36 <-> v3-exp. Neither may move without the other.
+  // Both spaces are pinned, and the pairing is the invariant: 29 <-> v4,
+  // 36 <-> v4-exp. Neither may move without the other.
   const expected = EXPERIMENTAL_BLOCKS_ENABLED
-    ? { columns: 36, version: 'hierarchical-mlr-v3-exp' }
-    : { columns: 29, version: 'hierarchical-mlr-v2' };
+    ? { columns: 36, version: 'hierarchical-mlr-v4-exp' }
+    : { columns: 29, version: 'hierarchical-mlr-v4' };
   assert.equal(FEATURE_NAMES.length, expected.columns);
   assert.equal(HIERARCHICAL_VERSION, expected.version);
   assert.equal(FEATURE_NAMES[0], 'intercept');

@@ -656,3 +656,21 @@ Change the watchlist, universe size, and filters in the config constants near th
 ## Honest notes
 
 A score of 70 is a candidate ranking, not a 70% probability. Only the separately labelled conservative estimate is calibrated, and it is still uncertain. Event, earnings, security, positioning, sentiment, and macro coverage is partial; missing coverage is not evidence that no catalyst exists. Markets change regimes, so confirmed research can decay and must fail closed. See `QUANT_SIGNAL_DIAGNOSIS.md` for the FIL/PEPE Five-Whys, quant publication contract, cycle-indicator choices, and rollout requirements. The footer marks the page as informational, not advice. If access is commercialized, obtain appropriate legal/compliance review.
+
+
+### Always-tracked asset audit (2026-09-19)
+
+The seven-favorite audit separates direction, magnitude and lead-lag selection,
+checks source coverage, and repairs research timing/provenance defects. Read
+[the measured findings](docs/TRACKED_ASSET_AUDIT_2026_09_19.md) and
+[the reproducible rollout/continuation roadmap](docs/PREDICTION_ROADMAP.md).
+The new audit workflow writes research artifacts only. No candidate is promoted.
+Deploy migration 0043 before rolling out the updated funding collector.
+
+The audit also includes a [per-asset session and stablecoin study](docs/research-2026-09-19/session-report.md),
+with DST-aware movement profiles and controlled conditional-rule tests. The
+weekly `signals-session-research.yml` workflow and matched-clock snapshot
+collection require migration 0044 and the coordinated v9 release described in
+the roadmap. These local changes have not been deployed.
+
+The [calendar, eight-stablecoin and explanatory-context extension](docs/CALENDAR_STABLECOIN_INSIGHTS_2026_09_19.md) documents the completed local studies, optional CMC integration, collector authentication incident, and release dependencies.

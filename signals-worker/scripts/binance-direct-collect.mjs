@@ -25,19 +25,22 @@
 // its only source was a CoinGecko snapshot taken once per build — there is no
 // historical funding endpoint on the free tier anywhere, and the portal does
 // not export one. /fapi/v1/fundingRate returns the complete settlement history
-// per contract, 8 hours apart, back to listing. That turns a six-week series
+// per contract, at its applicable settlement cadence, back to listing. That turns a six-week series
 // into a multi-year one, which is what `funding_pct` needs to stop being one of
 // the XS lane's structurally-dead features.
 //
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID
-// Optional env: BINANCE_FAPI_BASE (default https://fapi.binance.com),
+// Optional env: COLLECT_FROM_DATE=YYYY-MM-DD to repair truncated old history,
+//   BINANCE_FAPI_BASE (default https://fapi.binance.com),
 //   COLLECT_SYMBOLS, COLLECT_TIME_BUDGET_MIN (default 20)
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { venueSymbol } from './derivatives-archive.mjs';
+import { foldFundingToDaily, fundingResumeTime } from './funding-quality.mjs';
+export { foldFundingToDaily } from './funding-quality.mjs';
 import { d1, d1Batch, chunk } from './d1-client.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
-for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
-  if (!v) { console.error(`Missing required env var: ${name}`); process.exit(1); }
-}
 const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID };
 
 const FAPI = (process.env.BINANCE_FAPI_BASE || 'https://fapi.binance.com').replace(/\/$/, '');
@@ -65,46 +68,45 @@ async function fapiJson(path, params = {}) {
   return res.json();
 }
 
-// Full funding history for one contract, walking forward in 1000-row pages.
-// Each row is one 8-hourly settlement.
-export async function fetchFundingHistory(venueSymbol, { startTime = null, maxPages = 40 } = {}) {
-  const out = [];
-  let cursor = startTime;
+// Walk forward in bounded pages. A truncated page stream must NOT publish its
+// final calendar day as complete; it may end halfway through that day's events.
+export async function fetchFundingHistory(venueSymbol, { startTime = null, maxPages = 40,
+  query = fapiJson, budgetExpired = outOfTime, wait = () => sleep(PACE_MS) } = {}) {
+  let out = [], cursor = startTime, reachedEnd = false, stopReason = 'page-cap';
   for (let page = 0; page < maxPages; page++) {
+    if (budgetExpired()) { stopReason = 'time-budget'; break; }
     const params = { symbol: venueSymbol, limit: 1000 };
     if (cursor) params.startTime = cursor;
-    const rows = await fapiJson('/fapi/v1/fundingRate', params);
-    if (!Array.isArray(rows) || !rows.length) break;
+    const rows = await query('/fapi/v1/fundingRate', params);
+    if (!Array.isArray(rows)) throw new Error('Invalid funding response');
+    if (!rows.length) { reachedEnd = true; stopReason = 'end'; break; }
+    let maxTime = -Infinity;
     for (const r of rows) {
-      const rate = Number(r.fundingRate);
-      const t = Number(r.fundingTime);
-      if (!Number.isFinite(rate) || !Number.isFinite(t)) continue;
-      out.push({ time: t, rate });
+      if (r.fundingRate == null || String(r.fundingRate).trim() === ''
+        || r.fundingTime == null || String(r.fundingTime).trim() === ''
+        || (r.symbol && r.symbol !== venueSymbol)) throw new Error('Invalid funding settlement');
+      const rate = Number(r.fundingRate), t = Number(r.fundingTime);
+      if (!Number.isFinite(rate) || !Number.isFinite(t) || t <= 0) throw new Error('Invalid funding settlement');
+      out.push({ time: t, rate }); maxTime = Math.max(maxTime,t);
     }
-    if (rows.length < 1000) break;
-    cursor = Number(rows[rows.length - 1].fundingTime) + 1;
-    await sleep(PACE_MS);
+    if (rows.length < 1000) { reachedEnd = true; stopReason = 'end'; break; }
+    if (cursor != null && maxTime < cursor) throw new Error('Funding pagination did not advance');
+    cursor = maxTime + 1;
+    await wait();
   }
+  if (!reachedEnd && out.length) {
+    const tailDay = Math.floor(Math.max(...out.map(r => r.time)) / 86400000);
+    out = out.filter(r => Math.floor(r.time / 86400000) < tailDay);
+  }
+  out.completion = { reachedEnd, stopReason };
   return out;
 }
 
-// Collapses 8-hourly settlements into one daily row. The DAILY MEAN is the
-// right summary, not the last settlement: funding is paid three times a day
-// and a position held for a day pays all three, so the mean is what the
-// position's carry actually was.
-export function foldFundingToDaily(settlements) {
-  const byDate = new Map();
-  for (const s of settlements) {
-    const date = new Date(s.time).toISOString().slice(0, 10);
-    if (!byDate.has(date)) byDate.set(date, []);
-    byDate.get(date).push(s.rate);
-  }
-  return [...byDate.entries()]
-    .map(([date, rates]) => ({ date, funding_rate: rates.reduce((a, b) => a + b, 0) / rates.length, settlements: rates.length }))
-    .sort((a, b) => (a.date < b.date ? -1 : 1));
+async function main() {
+  for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
+  if (!v) { console.error(`Missing required env var: ${name}`); process.exit(1); }
 }
 
-async function main() {
   console.log(`binance direct collector against ${FAPI}`);
   // Fail fast and LOUDLY if this is not the un-geo-blocked host, rather than
   // writing a partial archive that looks like a supplier outage later.
@@ -116,24 +118,31 @@ async function main() {
     process.exit(2);
   }
 
-  const symbols = process.env.COLLECT_SYMBOLS
+  let symbols = process.env.COLLECT_SYMBOLS
     ? process.env.COLLECT_SYMBOLS.split(',').map((s) => s.trim()).filter(Boolean)
     : (await d1(env, `SELECT DISTINCT symbol FROM derivatives_daily ORDER BY symbol`)).map((r) => r.symbol);
 
+  // Canonical-table watermark also makes a crash after legacy writes retry
+  // missing canonical history rather than skipping it forever.
   // Only fetch what is missing: the earliest date already stored per symbol is
   // the watermark, so a caught-up archive costs one cheap page per symbol.
   const existing = new Map((await d1(env,
-    `SELECT symbol, MIN(date) lo, MAX(date) hi FROM funding_rate_daily
+    `SELECT symbol, MIN(date) lo, MAX(date) hi FROM funding_settlement_daily
      WHERE source = 'binance-fapi-direct' GROUP BY symbol`)).map((r) => [r.symbol, r]));
 
+  // Favorites first, then oldest watermark first, so a time budget cannot
+  // repeatedly starve the tail of the alphabet.
+  const favorites = new Set(['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR']);
+  symbols.sort((a,b) => Number(favorites.has(b))-Number(favorites.has(a))
+    || String(existing.get(a)?.hi || '').localeCompare(String(existing.get(b)?.hi || '')));
   let done = 0, written = 0, skipped = 0;
   const failures = [];
   for (const symbol of symbols) {
     if (outOfTime()) { console.log(`time budget reached after ${done} symbols — re-run to continue`); break; }
-    const venue = `${symbol}USDT`;
+    const venue = venueSymbol(symbol);
     try {
       const have = existing.get(symbol);
-      // Resume from the day after what is stored; otherwise walk forward from
+      // Re-read the last two stored days; otherwise walk forward from
       // before any USD-M perp existed.
       //
       // An explicit early startTime is REQUIRED for a first fill. With no
@@ -143,10 +152,12 @@ async function main() {
       // that looks identical to a young contract. Walking forward from a fixed
       // early anchor gets everything from listing onward.
       const FIRST_PERP_ANCHOR_MS = Date.parse('2019-09-01T00:00:00Z');
-      const startTime = have?.hi ? Date.parse(`${have.hi}T00:00:00Z`) + 86400000 : FIRST_PERP_ANCHOR_MS;
+      const startTime = fundingResumeTime(have?.hi, FIRST_PERP_ANCHOR_MS, process.env.COLLECT_FROM_DATE);
       const settlements = await fetchFundingHistory(venue, { startTime });
+      if (!settlements.completion.reachedEnd) console.log(`${symbol}: ${settlements.completion.stopReason}; incomplete final day withheld, re-run from the repaired watermark`);
       if (!settlements.length) { skipped++; continue; }
       const daily = foldFundingToDaily(settlements);
+      if (!daily.length) { skipped++; continue; }
       // COALESCE on open_interest/basis_pct so this never clobbers the columns
       // the CoinGecko snapshot owns — it only fills funding_rate.
       const statements = chunk(daily, 12).map((group) => ({
@@ -155,6 +166,18 @@ async function main() {
           + ` ON CONFLICT(symbol, date) DO UPDATE SET funding_rate = excluded.funding_rate, source = excluded.source`,
         params: group.flatMap((d) => [symbol, d.date, d.funding_rate, 'binance-fapi-direct'])
       }));
+      // A separate table distinguishes actual daily carry from mean settlement
+      // rates and keeps counts/timestamps for quality audits. Apply migration 0043.
+      statements.push(...chunk(daily, 10).map(group => ({
+        sql: `INSERT INTO funding_settlement_daily
+          (symbol,date,rate_sum,rate_mean,settlements,first_time,last_time,source)
+          VALUES ${group.map(() => '(?,?,?,?,?,?,?,?)').join(',')}
+          ON CONFLICT(symbol,date) DO UPDATE SET rate_sum=excluded.rate_sum,
+          rate_mean=excluded.rate_mean,settlements=excluded.settlements,
+          first_time=excluded.first_time,last_time=excluded.last_time,source=excluded.source`,
+        params: group.flatMap(d => [symbol,d.date,d.funding_sum,d.funding_rate,
+          d.settlements,d.first_time,d.last_time,'binance-fapi-direct'])
+      })));
       for (const batch of chunk(statements, 40)) await d1Batch(env, batch);
       written += daily.length;
       done++;
@@ -171,7 +194,12 @@ async function main() {
                              FROM funding_rate_daily WHERE funding_rate IS NOT NULL`);
   console.log(`\ndone: ${done} symbols, +${written} daily rows, ${skipped} with no history.`);
   console.log(`funding_rate_daily now ${tot[0].n} rows / ${tot[0].s} symbols / ${tot[0].lo}..${tot[0].hi}`);
-  if (failures.length) console.log(`failures (${failures.length}): ${failures.slice(0, 8).join('; ')}`);
+  if (failures.length) {
+    console.error(`failures (${failures.length}): ${failures.slice(0, 8).join('; ')}`);
+    process.exitCode = 1; // Partial source/write failures must not make the timer appear healthy.
+  }
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((e) => { console.error(e); process.exitCode = 1; });
+}

@@ -56,4 +56,7 @@ INSERT OR IGNORE INTO d1_migrations (name) VALUES
   ('0039_xs_forecast_provenance.sql'),
   ('0040_flush_event_price_comparison.sql'),
   ('0041_adaptive_research.sql'),
-  ('0042_hierarchical_research.sql');
+  ('0042_hierarchical_research.sql'),
+  ('0043_funding_settlement_daily.sql'),
+  ('0044_session_flow_research.sql'),
+  ('0045_liquidation_observations.sql');

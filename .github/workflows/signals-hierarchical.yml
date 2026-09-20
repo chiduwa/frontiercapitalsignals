@@ -35,6 +35,7 @@ jobs:
         run: |
           node --test test-regression-diagnostics.mjs
           node --test test-hierarchical-model.mjs
+          node --test test-data-quality.mjs
       - name: Apply additive schema
         working-directory: signals-worker
         run: npx --yes wrangler@4 d1 migrations apply frontier-capital-signals-reliability --remote

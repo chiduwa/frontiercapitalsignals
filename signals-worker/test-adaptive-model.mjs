@@ -164,7 +164,7 @@ test('archive loader keeps same ticker classes separate and applies quarantine',
   db.close();
 });
 
-test('composite reliability excludes the old weighting model while retaining unchanged technique evidence', async () => {
+test('corrected funding model starts a separate evidence cohort', async () => {
   const db = new DatabaseSync(':memory:');
   db.exec(`CREATE TABLE forecast_outcomes (
     asset_class TEXT, symbol TEXT, series_key TEXT, horizon_minutes INTEGER,
@@ -174,7 +174,9 @@ test('composite reliability excludes the old weighting model while retaining unc
     ('crypto','T','composite',1440,1,1,'technique',1,'confluence-v7','direction-deadband-0.5pct-v1','2023-01-01'),
     ('crypto','T','composite',1440,0,1,'technique',1,'confluence-v8','direction-deadband-0.5pct-v1','2023-01-02'),
     ('crypto','T','rsi',1440,1,1,'technique',1,'confluence-v7','direction-deadband-0.5pct-v1','2023-01-01'),
-    ('crypto','T','rsi',1440,0,1,'technique',1,'confluence-v8','direction-deadband-0.5pct-v1','2023-01-02');`);
+    ('crypto','T','rsi',1440,0,1,'technique',1,'confluence-v8','direction-deadband-0.5pct-v1','2023-01-02'),
+    ('crypto','T','composite',1440,0,1,'technique',1,'confluence-v9','direction-deadband-0.5pct-v1','2023-01-03'),
+    ('crypto','T','rsi',1440,1,1,'technique',1,'confluence-v9','direction-deadband-0.5pct-v1','2023-01-03');`);
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (_url, options) => {
     const { sql, params } = JSON.parse(options.body);
@@ -184,7 +186,7 @@ test('composite reliability excludes the old weighting model while retaining unc
     const stats = await loadReliability({});
     assert.equal(stats.blended['T|composite'].total, 1);
     assert.equal(stats.blended['T|composite'].accuracy, 0);
-    assert.equal(stats.blended['T|rsi'].total, 2);
+    assert.equal(stats.blended['T|rsi'].total, 1);
     assert.equal(stats.byHorizon[24]['crypto|T|composite|1'].total, 1);
   } finally { globalThis.fetch = realFetch; db.close(); }
 });

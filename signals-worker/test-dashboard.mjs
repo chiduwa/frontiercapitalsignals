@@ -76,7 +76,7 @@ function payload({ cryptoProven = false, stockProven = false, cryptoRows = null 
   return {
     generated_at: iso(18 * 60000),
     prices_generated_at: iso(25 * 1000),
-    model: 'confluence-v8',
+    model: 'confluence-v9',
     health: { stocks_ok: 280, stocks_total: 290, coingecko: true, valuation_ok: 120, crypto_daily_ok: 211, crypto_daily_total: 231 },
     classSkill: {
       crypto: { accuracy: 0.42, baseline: 0.4213, edge: -0.0013, samples: 92763, effectiveSamples: 1305, proven: cryptoProven },
@@ -293,6 +293,7 @@ const hierarchical = (shrinkage) => ({
   ...payload(),
   hierarchicalResearch: {
     status: 'shadow', actionable: false,
+    dataQuality: { asOf: '2026-09-19', needsAttention: 1, assets: [{symbol:'BTC',issues:['Settlement-rate collection missing or stale']}] },
     prediction: { 'crypto|1': { assets: 272, shrinkage } }
   }
 });
@@ -306,6 +307,7 @@ check('and states the remainder is pooled with the class, with the reason',
   && learnedCard.includes('sampling noise'));
 check('the per-asset lane never presents itself as a live vote',
   learnedCard.includes('no live vote') && !/\bBUY\b|\bSELL\b/.test(learnedCard));
+check('per-asset data quality is visible without implying accuracy', learnedCard.includes('Tracked data checks') && learnedCard.includes('BTC') && learnedCard.includes('Settlement-rate collection missing or stale') && learnedCard.includes('Coverage does not establish prediction accuracy'));
 learned.dom.window.close();
 
 // Fully pooled is the EXPECTED result on this data, so it must render as a
@@ -369,11 +371,38 @@ check('the risk disclaimer is present and not hidden behind a view',
   meta.body.textContent.includes('not a recommendation or financial advice')
   || meta.body.textContent.includes('not investment advice'));
 check('the model version in the footer matches the payload it rendered',
-  meta.body.textContent.includes('confluence-v8'));
+  meta.body.textContent.includes('confluence-v9'));
 
 for (const view of ['screens', 'watchlists', 'research', 'timing', 'overview']) {
   check(`the ${view} view has content to show`, meta.querySelectorAll(`[data-dashboard-view="${view}"]`).length > 0);
 }
+
+const sessionView = await render({ ...payload(), sessionResearch:{asOf:'2026-09-19',status:'research-only',actionable:false,
+  assets:{BTC:{instrument:'spot',profiles:{weekday:{hoursET:[10,9,11],replicated:true,testDays:186},all:{directions:[]}},
+    morning:[{if:'up',n:117,closeProbability:.709,forwardProbability:.573,supported:false}]}},
+  stablecoin:{snapshotDays:18,proxy:'USDC/USDT turnover proxy',assets:{BTC:[{horizonDays:1,features:'ratio',directionEvidence:{adjustedP:1,low:-.1},magnitudeEvidence:{adjustedP:1,low:-.1}}]}}}}, {settleMs:1200});
+const sessionText=sessionView.doc.getElementById('panel-sessionResearch')?.textContent||'';
+check('session research renders without disrupting the page',sessionView.pageErrors.length===0 && sessionText.includes('BTC'));
+check('conditional close association is distinct from subsequent return',sessionText.includes('70.9% close higher') && sessionText.includes('57.3% continue after 10') && sessionText.includes('descriptive only'));
+check('timing and stablecoin evidence never become a directional call',sessionText.includes('no cost-clearing evidence') && sessionText.includes('direction unconfirmed') && sessionText.includes('do not create trade calls'));
+check('weekday time is local and missing weekend history stays missing',sessionText.includes('10:00, 09:00, 11:00 ET') && sessionText.includes('Insufficient history'));
+sessionView.dom.window.close();
+
+const {researchSupplement}=await import('./scripts/session-health.mjs');
+const {explainAssetMove}=await import('./scripts/market-explanations.mjs');
+const calendarFixture=JSON.parse(readFileSync(new URL('./docs/research-2026-09-19/calendar-report.json',import.meta.url),'utf8'));
+const basketFixture=researchSupplement(JSON.parse(readFileSync(new URL('./docs/research-2026-09-19/stable-basket-report.json',import.meta.url),'utf8')));
+const newResearch=await render({...payload(),sessionResearch:{calendar:calendarFixture,stableBasket:basketFixture},marketExplanations:{asOf:new Date(NOW).toISOString(),liquidationProviderStatus:'not-configured',assets:{BTC:explainAssetMove({symbol:'BTC',nowMs:NOW})}}},{settleMs:1200});
+const calendarText=newResearch.doc.getElementById('panel-calendarResearch')?.textContent||'';
+const basketText=newResearch.doc.getElementById('panel-stableBasketResearch')?.textContent||'';
+const insightText=newResearch.doc.getElementById('panel-marketExplanations')?.textContent||'';
+check('real calendar, stablecoin and insight payloads render without errors',newResearch.pageErrors.length===0,JSON.stringify(newResearch.pageErrors));
+check('calendar exposes weekdays with counts and avoids majority peak claims',calendarText.includes('Monday')&&calendarText.includes('Sunday')&&calendarText.includes('20% fraction does not mean')&&calendarText.includes('Large dumps:'));
+check('HYPE weekday insufficiency is visible',calendarText.includes('HYPE')&&calendarText.includes('insufficient development history'));
+check('exact named basket and market benchmarks appear',basketText.includes('USDG')&&basketText.includes('RLUSD')&&basketText.includes('CMC100')&&basketText.includes('TRACKED_MEDIAN'));
+check('unproven flow rules stay descriptive',basketText.includes('Direction: unconfirmed')&&basketText.includes('Corrected comparisons passing: 0')&&basketText.includes('Conditional percentages are descriptive'));
+check('missing OI and liquidations cannot render fabricated causal explanations',insightText.includes('insufficient-live-data')&&insightText.includes('Missing reports are not zero')&&insightText.includes('cannot be confirmed'));
+newResearch.dom.window.close();
 
 [withheld, proven, ui, clocks, stale].forEach((r) => r.dom.window.close());
 

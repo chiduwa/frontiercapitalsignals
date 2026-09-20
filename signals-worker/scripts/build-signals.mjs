@@ -1,3 +1,5 @@
+import { buildMarketExplanations,persistLiquidations } from './market-explanations.mjs';
+import { loadSessionHealth } from './session-health.mjs';
 // Runs the Frontier Capital Signals engine (the same buildPayload() the
 // Worker used to run inline) in a normal Node process — no 10ms-CPU or
 // 50-subrequest ceiling here, unlike Workers Free plan — then writes the
@@ -28,7 +30,7 @@ for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUN
   if (!v) { console.error(`Missing required env var: ${name}`); process.exit(1); }
 }
 
-const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, NTFY_TOPIC };
+const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, NTFY_TOPIC, CMC_API_KEY: process.env.CMC_API_KEY };
 
 // GitHub Actions' `schedule` trigger is only a request, not a guarantee —
 // confirmed live over 97 scheduled runs: average gap 142min against the
@@ -243,6 +245,26 @@ if (FCS_D1_DATABASE_ID) {
     payload.hierarchicalResearch = { status: 'unavailable', actionable: false };
     console.error('hierarchical research health unavailable:', error.message);
   }
+  try {
+    payload.sessionResearch = await loadSessionHealth(env);
+  } catch (error) {
+    payload.sessionResearch = { status: 'unavailable', actionable: false };
+    console.error('session research unavailable:', error.message);
+  }
+}
+
+// Independent explanatory layer: measured facts, explicit uncertainty and levels.
+// A data/source failure cannot manufacture a market cause or a live trade vote.
+if (FCS_D1_DATABASE_ID) {
+  try {
+    const explanation = await buildMarketExplanations(env);
+    log.liquidationObservations = explanation.liquidationObservations;
+    delete explanation.liquidationObservations;
+    payload.marketExplanations = explanation;
+  } catch (error) {
+    payload.marketExplanations = { status: 'unavailable', actionable: false, assets: {} };
+    console.error('market explanations unavailable:', error.message);
+  }
 }
 
 // Display-only, so attached here rather than threaded through
@@ -323,6 +345,8 @@ console.log(`wrote ${CACHE_KEY} to KV namespace ${FCS_KV_NAMESPACE_ID}`);
 if (FCS_D1_DATABASE_ID) {
   try {
     await logRun(env, payload.generated_at, log);
+    try { await persistLiquidations(env, log.liquidationObservations || []); }
+    catch (error) { console.error('liquidation archive unavailable:', error.message); }
     const evaluatedCount = await evaluateMatured(env, payload.generated_at);
     console.log(`logged ${log.votes.length} votes + ${log.prices.length} prices + ${log.ranges.length} range predictions; scored ${evaluatedCount} matured outcomes`);
     // Cross-sectional shadow lane, in its own try: this lane is research, and

@@ -1,0 +1,207 @@
+{
+  "asOf": "2026-09-19",
+  "scope": "spot-close cross-source audit",
+  "checks": [
+    {
+      "symbol": "BTC",
+      "date": "2026-09-01",
+      "archivedClose": 77403.625,
+      "archiveSource": "yahoo",
+      "venueClose": 77439,
+      "differencePct": -0.04568111674996267,
+      "status": "within-1pct",
+      "url": "https://data.binance.vision/data/spot/daily/klines/BTCUSDT/1d/BTCUSDT-1d-2026-09-01.zip"
+    },
+    {
+      "symbol": "BTC",
+      "date": "2026-09-08",
+      "archivedClose": 78409.7734375,
+      "archiveSource": "yahoo",
+      "venueClose": 78455.8,
+      "differencePct": -0.05866559578769914,
+      "status": "within-1pct",
+      "url": "https://data.binance.vision/data/spot/daily/klines/BTCUSDT/1d/BTCUSDT-1d-2026-09-08.zip"
+    },
+    {
+      "symbol": "BTC",
+      "date": "2026-09-17",
+      "archivedClose": 76403.7734375,
+      "archiveSource": "yahoo",
+      "venueClose": 76417.01,
+      "differencePct": -0.01732148706158343,
+      "status": "within-1pct",
+      "url": "https://data.binance.vision/data/spot/daily/klines/BTCUSDT/1d/BTCUSDT-1d-2026-09-17.zip"
+    },
+    {
+      "symbol": "ETH",
+      "date": "2026-09-01",
+      "archivedClose": 2417.842041015625,
+      "archiveSource": "yahoo",
+      "venueClose": 2418.57,
+      "differencePct": -0.03009873538393215,
+      "status": "within-1pct",
+      "url": "https://data.binance.vision/data/spot/daily/klines/ETHUSDT/1d/ETHUSDT-1d-2026-09-01.zip"
+    },
+    {
+      "symbol": "ETH",
+      "date": "2026-09-08",
+      "archivedClose": 2475.050048828125,
+      "archiveSource": "yahoo",
+      "venueClose": 2485.06,
+      "differencePct": -0.40280521081482723,
+      "status": "within-1pct",
+      "url": "https://data.binance.vision/data/spot/daily/klines/ETHUSDT/1d/ETHUSDT-1d-2026-09-08.zip"
+    },
+    {
+      "symbol": "ETH",
+      "date": "2026-09-17",
+      "archivedClose": 2447.106689453125,
+      "archiveSource": "yahoo",
+      "venueClose": 2447.28,
+      "differencePct": -0.007081762073612996,
+      "status": "within-1pct",
+      "url": "https://data.binance.vision/data/spot/daily/klines/ETHUSDT/1d/ETHUSDT-1d-2026-09-17.zip"
+    },
+    {
+      "symbol": "SOL",
+      "date": "2026-09-01",
+      "archivedClose": 99.98687744140625,
+      "archiveSource": "yahoo",
+      "venueClose": 100,
+      "differencePct": -0.01312255859374778,
+      "status": "within-1pct",
+      "url": "https://data.binance.vision/data/spot/daily/klines/SOLUSDT/1d/SOLUSDT-1d-2026-09-01.zip"
+    },
+    {
+      "symbol": "SOL",
+      "date": "2026-09-08",
+      "archivedClose": 102.80000305175781,
+      "archiveSource": "yahoo",
+      "venueClose": 103.37,
+      "differencePct": -0.5514142867777849,
+      "status": "within-1pct",
+      "url": "https://data.binance.vision/data/spot/daily/klines/SOLUSDT/1d/SOLUSDT-1d-2026-09-08.zip"
+    },
+    {
+      "symbol": "SOL",
+      "date": "2026-09-17",
+      "archivedClose": 101.6033935546875,
+      "archiveSource": "yahoo",
+      "venueClose": 101.64,
+      "differencePct": -0.0360157864152888,
+      "status": "within-1pct",
+      "url": "https://data.binance.vision/data/spot/daily/klines/SOLUSDT/1d/SOLUSDT-1d-2026-09-17.zip"
+    },
+    {
+      "symbol": "XLM",
+      "date": "2026-09-01",
+      "archivedClose": 0.17576399445533752,
+      "archiveSource": "yahoo",
+      "venueClose": 0.1758,
+      "differencePct": -0.020480969660119364,
+      "status": "within-1pct",
+      "url": "https://data.binance.vision/data/spot/daily/klines/XLMUSDT/1d/XLMUSDT-1d-2026-09-01.zip"
+    },
+    {
+      "symbol": "XLM",
+      "date": "2026-09-08",
+      "archivedClose": 0.18915599584579468,
+      "archiveSource": "yahoo",
+      "venueClose": 0.1877,
+      "differencePct": 0.7757037004766598,
+      "status": "within-1pct",
+      "url": "https://data.binance.vision/data/spot/daily/klines/XLMUSDT/1d/XLMUSDT-1d-2026-09-08.zip"
+    },
+    {
+      "symbol": "XLM",
+      "date": "2026-09-17",
+      "archivedClose": 0.1834840029478073,
+      "archiveSource": "yahoo",
+      "venueClose": 0.1834,
+      "differencePct": 0.04580313402797742,
+      "status": "within-1pct",
+      "url": "https://data.binance.vision/data/spot/daily/klines/XLMUSDT/1d/XLMUSDT-1d-2026-09-17.zip"
+    },
+    {
+      "symbol": "XRP",
+      "date": "2026-09-01",
+      "archivedClose": 1.3516370058059692,
+      "archiveSource": "yahoo",
+      "venueClose": 1.3518,
+      "differencePct": -0.012057567245937761,
+      "status": "within-1pct",
+      "url": "https://data.binance.vision/data/spot/daily/klines/XRPUSDT/1d/XRPUSDT-1d-2026-09-01.zip"
+    },
+    {
+      "symbol": "XRP",
+      "date": "2026-09-08",
+      "archivedClose": 1.3861000537872314,
+      "archiveSource": "yahoo",
+      "venueClose": 1.4171,
+      "differencePct": -2.1875623606498196,
+      "status": "review-difference",
+      "url": "https://data.binance.vision/data/spot/daily/klines/XRPUSDT/1d/XRPUSDT-1d-2026-09-08.zip"
+    },
+    {
+      "symbol": "XRP",
+      "date": "2026-09-17",
+      "archivedClose": 1.2958719730377197,
+      "archiveSource": "yahoo",
+      "venueClose": 1.2964,
+      "differencePct": -0.04073025009875275,
+      "status": "within-1pct",
+      "url": "https://data.binance.vision/data/spot/daily/klines/XRPUSDT/1d/XRPUSDT-1d-2026-09-17.zip"
+    },
+    {
+      "symbol": "HYPE",
+      "date": "2026-09-01",
+      "status": "source-unavailable",
+      "httpStatus": 404,
+      "url": "https://data.binance.vision/data/spot/daily/klines/HYPEUSDT/1d/HYPEUSDT-1d-2026-09-01.zip"
+    },
+    {
+      "symbol": "HYPE",
+      "date": "2026-09-08",
+      "status": "source-unavailable",
+      "httpStatus": 404,
+      "url": "https://data.binance.vision/data/spot/daily/klines/HYPEUSDT/1d/HYPEUSDT-1d-2026-09-08.zip"
+    },
+    {
+      "symbol": "HYPE",
+      "date": "2026-09-17",
+      "status": "source-unavailable",
+      "httpStatus": 404,
+      "url": "https://data.binance.vision/data/spot/daily/klines/HYPEUSDT/1d/HYPEUSDT-1d-2026-09-17.zip"
+    },
+    {
+      "symbol": "HBAR",
+      "date": "2026-09-01",
+      "archivedClose": 0.07405800372362137,
+      "archiveSource": "yahoo",
+      "venueClose": 0.07407,
+      "differencePct": -0.016195863883661232,
+      "status": "within-1pct",
+      "url": "https://data.binance.vision/data/spot/daily/klines/HBARUSDT/1d/HBARUSDT-1d-2026-09-01.zip"
+    },
+    {
+      "symbol": "HBAR",
+      "date": "2026-09-08",
+      "archivedClose": 0.08043999969959259,
+      "archiveSource": "yahoo",
+      "venueClose": 0.07906,
+      "differencePct": 1.7455093594644477,
+      "status": "review-difference",
+      "url": "https://data.binance.vision/data/spot/daily/klines/HBARUSDT/1d/HBARUSDT-1d-2026-09-08.zip"
+    },
+    {
+      "symbol": "HBAR",
+      "date": "2026-09-17",
+      "archivedClose": 0.07460799813270569,
+      "archiveSource": "yahoo",
+      "venueClose": 0.0746,
+      "differencePct": 0.010721357514320573,
+      "status": "within-1pct",
+      "url": "https://data.binance.vision/data/spot/daily/klines/HBARUSDT/1d/HBARUSDT-1d-2026-09-17.zip"
+    }
+  ]
+}

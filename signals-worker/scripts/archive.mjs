@@ -160,7 +160,7 @@ export function fundingSnapshotToRows(fundingMap, date) {
   const rows = [];
   for (const [symbol, v] of Object.entries(fundingMap || {})) {
     if (v.fundingRate == null && v.openInterest == null && v.basisPct == null) continue;
-    rows.push({ symbol, date, fundingRate: v.fundingRate ?? null, openInterest: v.openInterest ?? null, basisPct: v.basisPct ?? null, source: 'coingecko' });
+    rows.push({ symbol, date, fundingRate: v.fundingRate ?? null, openInterest: v.openInterest ?? null, basisPct: v.basisPct ?? null, market: v.market ?? null, contractId: v.contractId ?? null, source: 'coingecko' });
   }
   return rows;
 }
@@ -229,6 +229,19 @@ export async function upsertDailyBars(env, rows) {
 // OI-only row for the same day (they come from two separate Bybit calls)
 // both land on the same archive row rather than overwriting each other.
 export async function upsertFundingDaily(env, rows) {
+  // Separate storage allows canonical protection AND ongoing comparable live
+  // snapshot percentiles; one must not prevent the other from accumulating.
+  const observedAt = new Date().toISOString();
+  for (const batch of chunk(rows.filter(r => r.source === 'coingecko'), 10)) {
+    await d1(env, `INSERT INTO funding_snapshot_daily
+      (symbol,date,funding_rate,open_interest,basis_pct,source,observed_at,venue,contract_id,rate_unit)
+      VALUES ${batch.map(() => '(?,?,?,?,?,?,?,?,?,?)').join(',')}
+      ON CONFLICT(symbol,date,source) DO UPDATE SET
+        funding_rate=excluded.funding_rate,open_interest=excluded.open_interest,
+        basis_pct=excluded.basis_pct,observed_at=excluded.observed_at,
+        venue=excluded.venue,contract_id=excluded.contract_id,rate_unit=excluded.rate_unit`,
+    batch.flatMap(r => [r.symbol,r.date,r.fundingRate ?? null,r.openInterest ?? null,r.basisPct ?? null,r.source,observedAt,r.market ?? null,r.contractId ?? null,'provider-native']));
+  }
   let attempted = 0;
   for (const batch of chunk(rows, 12)) {
     const placeholders = batch.map(() => '(?,?,?,?,?,?)').join(',');
@@ -237,7 +250,12 @@ export async function upsertFundingDaily(env, rows) {
       INSERT INTO funding_rate_daily (symbol, date, funding_rate, open_interest, basis_pct, source)
       VALUES ${placeholders}
       ON CONFLICT(symbol, date) DO UPDATE SET
-        funding_rate = COALESCE(excluded.funding_rate, funding_rate_daily.funding_rate),
+        funding_rate = CASE WHEN funding_rate_daily.source = 'binance-fapi-direct'
+          AND excluded.source <> 'binance-fapi-direct' THEN funding_rate_daily.funding_rate
+          ELSE COALESCE(excluded.funding_rate, funding_rate_daily.funding_rate) END,
+        source = CASE WHEN funding_rate_daily.source = 'binance-fapi-direct'
+          AND excluded.source <> 'binance-fapi-direct' THEN funding_rate_daily.source
+          WHEN excluded.funding_rate IS NOT NULL THEN excluded.source ELSE funding_rate_daily.source END,
         open_interest = COALESCE(excluded.open_interest, funding_rate_daily.open_interest),
         basis_pct = COALESCE(excluded.basis_pct, funding_rate_daily.basis_pct)
     `, params);

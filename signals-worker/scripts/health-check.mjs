@@ -135,6 +135,27 @@ export function checkPayload(payload, now = Date.now()) {
       `equity coverage ${health.stocks_ok}/${health.stocks_total} (${Math.round(coverage * 100)}%)`);
   }
 
+  // Collector clocks are measured against the build time: the public payload is
+  // hourly, while the underlying OI sampler is continuous. Wall-clock payload
+  // age is checked separately above, so healthy hourly builds are not penalized.
+  if (payload.marketExplanations) {
+    const assets = payload.marketExplanations.assets || {};
+    const clock = Date.parse(payload.marketExplanations.asOf || payload.generated_at);
+    for (const symbol of ['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR']) {
+      const last = Date.parse(assets[symbol]?.lastOiAt);
+      const age = minutes(clock-last);
+      push('oi-collector-'+symbol, 'fail', Number.isFinite(age) && age>=-1 && age<=15,
+        symbol+' OI collector is missing or '+(Number.isFinite(age)?age.toFixed(0):'unknown')+' minutes behind the build; inspect fcs-oi-sampler.service and D1 authentication');
+    }
+  }
+  if (payload.sessionResearch) {
+    for (const [name,report] of [['sessions',payload.sessionResearch],['calendar',payload.sessionResearch.calendar],['stable-basket',payload.sessionResearch.stableBasket]]) {
+      const age = hours(now-Date.parse(report?.asOf+'T00:00:00Z'))/24;
+      push('research-fresh-'+name, 'warn', Number.isFinite(age) && age>=0 && age<=10,
+        name+' research is missing or older than 10 days; inspect the weekly research workflow');
+    }
+  }
+
   // --- THE GATE. Nothing here may publish a direction its class has not earned.
   for (const [cls, key] of [['crypto', 'crypto'], ['stock', 'stocks']]) {
     const skill = payload.classSkill?.[cls];

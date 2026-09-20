@@ -47,7 +47,7 @@ export function unzipSingleFile(buf) {
   return inflateRawSync(payload).toString('utf8');
 }
 
-const NUM = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+const NUM = (v) => { if (v == null || String(v).trim() === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
 
 // Collapses one day of 5-minute metric bars into a single daily row.
 // `close` is the last bar of the UTC day so it lines up with a daily price
@@ -63,17 +63,24 @@ export function aggregateMetricsCsv(csv, { symbol, venue, date, source = 'binanc
 
   const oiUsd = [], oiQty = [], tAcc = [], tPos = [], aAcc = [], taker = [];
   let lastUsd = null, lastQty = null, lastTime = '';
+  const seen = new Map();
   for (let i = 1; i < lines.length; i++) {
     const f = lines[i].split(',');
     if (f.length < head.length) continue;
     const t = (f[col.create_time] || '').trim();
     // The portal occasionally includes a stray bar from the neighbouring day;
     // keep the file's own date authoritative rather than trusting the name.
-    if (t.slice(0, 10) !== date) continue;
+    if (t.slice(0, 10) !== date || !Number.isFinite(Date.parse(t.replace(' ','T')+'Z'))) continue;
+    if ('symbol' in col && f[col.symbol].trim() !== venue) continue;
+    if (seen.has(t)) {
+      if (seen.get(t) !== lines[i].trim()) throw new Error(`Conflicting derivatives sample at ${t}`);
+      continue;
+    }
+    seen.set(t, lines[i].trim());
     const usd = NUM(f[col.sum_open_interest_value]);
     const qty = NUM(f[col.sum_open_interest]);
-    if (usd != null && usd > 0) { oiUsd.push(usd); if (t >= lastTime) { lastUsd = usd; lastTime = t; } }
-    if (qty != null && qty > 0) { oiQty.push(qty); if (t >= lastTime) lastQty = qty; }
+    if (usd != null && usd > 0) { oiUsd.push(usd); if (t >= lastTime) { lastUsd = usd; lastTime = t; lastQty = qty > 0 ? qty : null; } }
+    if (qty != null && qty > 0) oiQty.push(qty);
     const push = (arr, name) => { if (name in col) { const v = NUM(f[col[name]]); if (v != null && v > 0) arr.push(v); } };
     push(tAcc, 'count_toptrader_long_short_ratio');
     push(tPos, 'sum_toptrader_long_short_ratio');

@@ -1,0 +1,17 @@
+{
+  "stable-basket-panel.json.gz": {
+    "uncompressedSha256": "ad2d1374108850c93a738e7190207609ab65d40644e44a46d11f16f4f0cc8ea7",
+    "bytes": 1075305,
+    "compressedBytes": 296155
+  },
+  "cmc100-series.json.gz": {
+    "uncompressedSha256": "b60aac24ae3cad4951b394a78ee86bf956d2b761a7696e6d0278054f0b15196d",
+    "bytes": 30196,
+    "compressedBytes": 5953
+  },
+  "stable-basket-predictions.json.gz": {
+    "uncompressedSha256": "03a21d047ea7d13dac1cb52a2a50a2346d2b32a7a80298af61fb5ae155ee2858",
+    "bytes": 13163476,
+    "compressedBytes": 3213789
+  }
+}

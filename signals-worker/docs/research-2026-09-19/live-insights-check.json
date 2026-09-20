@@ -1,0 +1,408 @@
+{
+  "version": "market-explanation-v1",
+  "asOf": "2026-09-19T22:33:18.988Z",
+  "actionable": false,
+  "liquidationProviderStatus": "not-configured",
+  "assets": {
+    "BTC": {
+      "symbol": "BTC",
+      "version": "market-explanation-v1",
+      "asOf": "2026-09-19T22:33:18.988Z",
+      "actionable": false,
+      "status": "insufficient-live-data",
+      "oiWindow": null,
+      "lastOiAt": "2026-09-14T23:59:41.172Z",
+      "levels": {
+        "status": "available",
+        "through": "2026-09-17",
+        "basis": "20 completed UTC daily bars",
+        "levels": [
+          {
+            "label": "Previous completed daily close",
+            "value": 76403.7734375
+          },
+          {
+            "label": "20-day high",
+            "value": 82262.2109375
+          },
+          {
+            "label": "20-day low",
+            "value": 74944.59375
+          }
+        ]
+      },
+      "facts": [
+        {
+          "text": "No fresh, verified liquidation totals are available for this asset. Missing reports are not zero liquidations.",
+          "source": "Collection status",
+          "asOf": "2026-09-19T22:33:18.988Z"
+        }
+      ],
+      "interpretation": [
+        "Recent, continuous OI observations are unavailable. A short squeeze or liquidation-driven move cannot be confirmed from this feed."
+      ],
+      "watch": [
+        {
+          "condition": "A completed bar above the 20-day high",
+          "level": 82262.2109375,
+          "meaning": "A range break to monitor; look for sustained spot participation and a successful retest. No continuation probability is established."
+        },
+        {
+          "condition": "A completed bar below the 20-day low",
+          "level": 74944.59375,
+          "meaning": "A lower range break to monitor; distinguish persistent selling from a brief wick. No rebound probability is established."
+        },
+        {
+          "condition": "To judge whether the move persists",
+          "meaning": "Watch subsequent price acceptance, spot buying/selling imbalance, contract OI and fresh forced-liquidation reports together. These observations are not a trade signal."
+        }
+      ],
+      "liquidations": null,
+      "causalClaim": false,
+      "continuationProbability": null
+    },
+    "ETH": {
+      "symbol": "ETH",
+      "version": "market-explanation-v1",
+      "asOf": "2026-09-19T22:33:18.988Z",
+      "actionable": false,
+      "status": "insufficient-live-data",
+      "oiWindow": null,
+      "lastOiAt": "2026-09-14T23:59:38.219Z",
+      "levels": {
+        "status": "available",
+        "through": "2026-09-17",
+        "basis": "20 completed UTC daily bars",
+        "levels": [
+          {
+            "label": "Previous completed daily close",
+            "value": 2447.106689453125
+          },
+          {
+            "label": "20-day high",
+            "value": 2545.62353515625
+          },
+          {
+            "label": "20-day low",
+            "value": 2357.959228515625
+          }
+        ]
+      },
+      "facts": [
+        {
+          "text": "No fresh, verified liquidation totals are available for this asset. Missing reports are not zero liquidations.",
+          "source": "Collection status",
+          "asOf": "2026-09-19T22:33:18.988Z"
+        }
+      ],
+      "interpretation": [
+        "Recent, continuous OI observations are unavailable. A short squeeze or liquidation-driven move cannot be confirmed from this feed."
+      ],
+      "watch": [
+        {
+          "condition": "A completed bar above the 20-day high",
+          "level": 2545.62353515625,
+          "meaning": "A range break to monitor; look for sustained spot participation and a successful retest. No continuation probability is established."
+        },
+        {
+          "condition": "A completed bar below the 20-day low",
+          "level": 2357.959228515625,
+          "meaning": "A lower range break to monitor; distinguish persistent selling from a brief wick. No rebound probability is established."
+        },
+        {
+          "condition": "To judge whether the move persists",
+          "meaning": "Watch subsequent price acceptance, spot buying/selling imbalance, contract OI and fresh forced-liquidation reports together. These observations are not a trade signal."
+        }
+      ],
+      "liquidations": null,
+      "causalClaim": false,
+      "continuationProbability": null
+    },
+    "SOL": {
+      "symbol": "SOL",
+      "version": "market-explanation-v1",
+      "asOf": "2026-09-19T22:33:18.988Z",
+      "actionable": false,
+      "status": "insufficient-live-data",
+      "oiWindow": null,
+      "lastOiAt": "2026-09-14T23:59:42.725Z",
+      "levels": {
+        "status": "available",
+        "through": "2026-09-17",
+        "basis": "20 completed daily closing observations",
+        "levels": [
+          {
+            "label": "Previous completed daily close",
+            "value": 101.6033935546875
+          },
+          {
+            "label": "20-day closing high",
+            "value": 106.4476318359375
+          },
+          {
+            "label": "20-day closing low",
+            "value": 96.88836669921875
+          }
+        ]
+      },
+      "facts": [
+        {
+          "text": "No fresh, verified liquidation totals are available for this asset. Missing reports are not zero liquidations.",
+          "source": "Collection status",
+          "asOf": "2026-09-19T22:33:18.988Z"
+        }
+      ],
+      "interpretation": [
+        "Recent, continuous OI observations are unavailable. A short squeeze or liquidation-driven move cannot be confirmed from this feed."
+      ],
+      "watch": [
+        {
+          "condition": "A completed bar above the 20-day closing high",
+          "level": 106.4476318359375,
+          "meaning": "A range break to monitor; look for sustained spot participation and a successful retest. No continuation probability is established."
+        },
+        {
+          "condition": "A completed bar below the 20-day closing low",
+          "level": 96.88836669921875,
+          "meaning": "A lower range break to monitor; distinguish persistent selling from a brief wick. No rebound probability is established."
+        },
+        {
+          "condition": "To judge whether the move persists",
+          "meaning": "Watch subsequent price acceptance, spot buying/selling imbalance, contract OI and fresh forced-liquidation reports together. These observations are not a trade signal."
+        }
+      ],
+      "liquidations": null,
+      "causalClaim": false,
+      "continuationProbability": null
+    },
+    "XLM": {
+      "symbol": "XLM",
+      "version": "market-explanation-v1",
+      "asOf": "2026-09-19T22:33:18.988Z",
+      "actionable": false,
+      "status": "insufficient-live-data",
+      "oiWindow": null,
+      "lastOiAt": "2026-09-14T23:59:34.971Z",
+      "levels": {
+        "status": "available",
+        "through": "2026-09-17",
+        "basis": "20 completed daily closing observations",
+        "levels": [
+          {
+            "label": "Previous completed daily close",
+            "value": 0.1834840029478073
+          },
+          {
+            "label": "20-day closing high",
+            "value": 0.19373400509357452
+          },
+          {
+            "label": "20-day closing low",
+            "value": 0.1747490018606186
+          }
+        ]
+      },
+      "facts": [
+        {
+          "text": "No fresh, verified liquidation totals are available for this asset. Missing reports are not zero liquidations.",
+          "source": "Collection status",
+          "asOf": "2026-09-19T22:33:18.988Z"
+        }
+      ],
+      "interpretation": [
+        "Recent, continuous OI observations are unavailable. A short squeeze or liquidation-driven move cannot be confirmed from this feed."
+      ],
+      "watch": [
+        {
+          "condition": "A completed bar above the 20-day closing high",
+          "level": 0.19373400509357452,
+          "meaning": "A range break to monitor; look for sustained spot participation and a successful retest. No continuation probability is established."
+        },
+        {
+          "condition": "A completed bar below the 20-day closing low",
+          "level": 0.1747490018606186,
+          "meaning": "A lower range break to monitor; distinguish persistent selling from a brief wick. No rebound probability is established."
+        },
+        {
+          "condition": "To judge whether the move persists",
+          "meaning": "Watch subsequent price acceptance, spot buying/selling imbalance, contract OI and fresh forced-liquidation reports together. These observations are not a trade signal."
+        }
+      ],
+      "liquidations": null,
+      "causalClaim": false,
+      "continuationProbability": null
+    },
+    "XRP": {
+      "symbol": "XRP",
+      "version": "market-explanation-v1",
+      "asOf": "2026-09-19T22:33:18.988Z",
+      "actionable": false,
+      "status": "insufficient-live-data",
+      "oiWindow": null,
+      "lastOiAt": "2026-09-14T23:59:39.157Z",
+      "levels": {
+        "status": "available",
+        "through": "2026-09-17",
+        "basis": "20 completed daily closing observations",
+        "levels": [
+          {
+            "label": "Previous completed daily close",
+            "value": 1.2958719730377197
+          },
+          {
+            "label": "20-day closing high",
+            "value": 1.4513189792633057
+          },
+          {
+            "label": "20-day closing low",
+            "value": 1.2846920490264893
+          }
+        ]
+      },
+      "facts": [
+        {
+          "text": "No fresh, verified liquidation totals are available for this asset. Missing reports are not zero liquidations.",
+          "source": "Collection status",
+          "asOf": "2026-09-19T22:33:18.988Z"
+        }
+      ],
+      "interpretation": [
+        "Recent, continuous OI observations are unavailable. A short squeeze or liquidation-driven move cannot be confirmed from this feed."
+      ],
+      "watch": [
+        {
+          "condition": "A completed bar above the 20-day closing high",
+          "level": 1.4513189792633057,
+          "meaning": "A range break to monitor; look for sustained spot participation and a successful retest. No continuation probability is established."
+        },
+        {
+          "condition": "A completed bar below the 20-day closing low",
+          "level": 1.2846920490264893,
+          "meaning": "A lower range break to monitor; distinguish persistent selling from a brief wick. No rebound probability is established."
+        },
+        {
+          "condition": "To judge whether the move persists",
+          "meaning": "Watch subsequent price acceptance, spot buying/selling imbalance, contract OI and fresh forced-liquidation reports together. These observations are not a trade signal."
+        }
+      ],
+      "liquidations": null,
+      "causalClaim": false,
+      "continuationProbability": null
+    },
+    "HYPE": {
+      "symbol": "HYPE",
+      "version": "market-explanation-v1",
+      "asOf": "2026-09-19T22:33:18.988Z",
+      "actionable": false,
+      "status": "insufficient-live-data",
+      "oiWindow": null,
+      "lastOiAt": "2026-09-14T23:59:38.739Z",
+      "levels": {
+        "status": "available",
+        "through": "2026-09-17",
+        "basis": "20 completed daily closing observations",
+        "levels": [
+          {
+            "label": "Previous completed daily close",
+            "value": 85.06358331852043
+          },
+          {
+            "label": "20-day closing high",
+            "value": 87.951916819731
+          },
+          {
+            "label": "20-day closing low",
+            "value": 76.91913911509157
+          }
+        ]
+      },
+      "facts": [
+        {
+          "text": "No fresh, verified liquidation totals are available for this asset. Missing reports are not zero liquidations.",
+          "source": "Collection status",
+          "asOf": "2026-09-19T22:33:18.988Z"
+        }
+      ],
+      "interpretation": [
+        "Recent, continuous OI observations are unavailable. A short squeeze or liquidation-driven move cannot be confirmed from this feed."
+      ],
+      "watch": [
+        {
+          "condition": "A completed bar above the 20-day closing high",
+          "level": 87.951916819731,
+          "meaning": "A range break to monitor; look for sustained spot participation and a successful retest. No continuation probability is established."
+        },
+        {
+          "condition": "A completed bar below the 20-day closing low",
+          "level": 76.91913911509157,
+          "meaning": "A lower range break to monitor; distinguish persistent selling from a brief wick. No rebound probability is established."
+        },
+        {
+          "condition": "To judge whether the move persists",
+          "meaning": "Watch subsequent price acceptance, spot buying/selling imbalance, contract OI and fresh forced-liquidation reports together. These observations are not a trade signal."
+        }
+      ],
+      "liquidations": null,
+      "causalClaim": false,
+      "continuationProbability": null
+    },
+    "HBAR": {
+      "symbol": "HBAR",
+      "version": "market-explanation-v1",
+      "asOf": "2026-09-19T22:33:18.988Z",
+      "actionable": false,
+      "status": "insufficient-live-data",
+      "oiWindow": null,
+      "lastOiAt": "2026-09-14T23:44:01.787Z",
+      "levels": {
+        "status": "available",
+        "through": "2026-09-17",
+        "basis": "20 completed daily closing observations",
+        "levels": [
+          {
+            "label": "Previous completed daily close",
+            "value": 0.07460799813270569
+          },
+          {
+            "label": "20-day closing high",
+            "value": 0.08193299919366837
+          },
+          {
+            "label": "20-day closing low",
+            "value": 0.07358700037002563
+          }
+        ]
+      },
+      "facts": [
+        {
+          "text": "No fresh, verified liquidation totals are available for this asset. Missing reports are not zero liquidations.",
+          "source": "Collection status",
+          "asOf": "2026-09-19T22:33:18.988Z"
+        }
+      ],
+      "interpretation": [
+        "Recent, continuous OI observations are unavailable. A short squeeze or liquidation-driven move cannot be confirmed from this feed."
+      ],
+      "watch": [
+        {
+          "condition": "A completed bar above the 20-day closing high",
+          "level": 0.08193299919366837,
+          "meaning": "A range break to monitor; look for sustained spot participation and a successful retest. No continuation probability is established."
+        },
+        {
+          "condition": "A completed bar below the 20-day closing low",
+          "level": 0.07358700037002563,
+          "meaning": "A lower range break to monitor; distinguish persistent selling from a brief wick. No rebound probability is established."
+        },
+        {
+          "condition": "To judge whether the move persists",
+          "meaning": "Watch subsequent price acceptance, spot buying/selling imbalance, contract OI and fresh forced-liquidation reports together. These observations are not a trade signal."
+        }
+      ],
+      "liquidations": null,
+      "causalClaim": false,
+      "continuationProbability": null
+    }
+  },
+  "liquidationObservations": []
+}

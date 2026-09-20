@@ -11,6 +11,8 @@
 //      it with a silent zero would tell the regression the feature was measured
 //      and found to be average, which is a different and false claim.
 
+import { alignDailyResearchBars } from './archive-policy.mjs';
+
 const DAY = 86400000;
 const dateMs = d => Date.parse(`${d}T00:00:00Z`);
 const mean = xs => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null);
@@ -96,8 +98,8 @@ const MIN_HISTORY = 60;
 export function sanitizeBars(bars, { asOf = null } = {}) {
   const seen = new Set();
   const out = [];
-  for (const bar of [...(bars || [])].sort((a, b) => String(a.date).localeCompare(String(b.date)))) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(bar.date) || !Number.isFinite(dateMs(bar.date))) continue;
+  for (const bar of alignDailyResearchBars(bars || []).sort((a, b) => String(a.date).localeCompare(String(b.date)))) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(bar.date) || (!Number.isFinite(dateMs(bar.date)) || new Date(dateMs(bar.date)).toISOString().slice(0, 10) !== bar.date)) continue;
     if (!Number.isFinite(bar.close) || !(bar.close > 0)) continue;
     if (asOf && bar.date >= asOf) continue;
     if (seen.has(bar.date)) continue;
@@ -203,8 +205,8 @@ export function featureRow(bars, i, {
   values.dwellShare = near.length / Math.min(60, i + 1) - 0.5;
 
   // --- derivatives (crypto only; absent for equities by construction)
-  const deriv = asOfRow(derivatives, date, 2);
-  const derivPrior = n => asOfRow(derivatives, new Date(dateMs(date) - n * DAY).toISOString().slice(0, 10), 2);
+  const deriv = assetClass === 'stock' ? null : asOfRow(derivatives, date, 0);
+  const derivPrior = n => asOfRow(derivatives, new Date(dateMs(date) - n * DAY).toISOString().slice(0, 10), 0);
   if (deriv && deriv.oi_usd_close > 0) {
     const d1 = derivPrior(1), d7 = derivPrior(7);
     values.oiChange1 = d1 ? ratioChange(deriv.oi_usd_close, d1.oi_usd_close) : null;
@@ -234,10 +236,10 @@ export function featureRow(bars, i, {
   // no stock/crypto symbol collisions in `funding_rate_daily` today (checked:
   // zero), but an equity has no perpetual funding leg as a matter of fact, and
   // a future listing colliding on ticker must not quietly become a regressor.
-  const fundingRow = assetClass === 'stock' ? null : asOfRow(funding, date, 2);
+  const fundingRow = assetClass === 'stock' ? null : asOfRow(funding, date, 0);
   if (fundingRow && Number.isFinite(fundingRow.funding_rate)) {
     values.fundingRate = Math.tanh(fundingRow.funding_rate * 500);
-    const prior7 = asOfRow(funding, new Date(dateMs(date) - 7 * DAY).toISOString().slice(0, 10), 2);
+    const prior7 = asOfRow(funding, new Date(dateMs(date) - 7 * DAY).toISOString().slice(0, 10), 0);
     values.fundingChange7 = prior7 && Number.isFinite(prior7.funding_rate)
       ? Math.tanh((fundingRow.funding_rate - prior7.funding_rate) * 500) : null;
     // "Is funding high FOR THIS ASSET" -- the question the archive was built to
@@ -263,13 +265,13 @@ export function featureRow(bars, i, {
   }
 
   // --- supply
-  const supplyRow = asOfRow(supply, date, 3);
+  const supplyRow = assetClass === 'stock' ? null : asOfRow(supply, date, 3);
   const supplyPrior = asOfRow(supply, new Date(dateMs(date) - 30 * DAY).toISOString().slice(0, 10), 5);
   if (supplyRow && supplyRow.circulating_supply > 0) {
     values.supplyGrowth30 = supplyPrior?.circulating_supply > 0
       ? Math.log(supplyRow.circulating_supply / supplyPrior.circulating_supply) : null;
     values.supplyOverhang = supplyRow.max_supply > 0
-      ? supplyRow.circulating_supply / supplyRow.max_supply - 0.5 : null;
+      ? (supplyRow.snapshot_circulating_supply ?? supplyRow.circulating_supply) / supplyRow.max_supply - 0.5 : null;
   }
 
   // --- assemble, recording which optional blocks were actually measured

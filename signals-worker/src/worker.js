@@ -3812,7 +3812,8 @@ export function evaluateTechniques(m, kind, reliability, ctx = {}) {
     // whose funding always runs hot needs a different bar than one where
     // it never does, the same "asset teaches the model its own behavior"
     // idea bestVolLookback already applies to volatility. Falls back to
-    // the original fixed global thresholds — unchanged — until then, same
+    // fixed fraction thresholds only when rate units are known; vendor-native
+    // snapshots abstain until their same-source percentile is available. Same
     // historical-vs-methodology basis switch used throughout this engine.
     if (f != null) {
       if (m.fundingPercentile != null) {
@@ -3821,7 +3822,8 @@ export function evaluateTechniques(m, kind, reliability, ctx = {}) {
         else if (p <= 0.1 && (c7 ?? 0) > 0) push('positioning', 1.0, 1, 'rally with funding in its own bottom decile');
         else if (p >= 0.97) push('positioning', 1.0, -1, 'funding at a historic extreme for this asset');
         else push('positioning', 1.0, 0, null);
-      } else if (f >= 0.0005 && (c7 ?? 0) > bigMove) push('positioning', 1.0, -1, `crowded longs, funding ${(f * 100).toFixed(3)}%`);
+      } else if (m.fundingRateUnit === 'provider-native') push('positioning', 1.0, null, null);
+      else if (f >= 0.0005 && (c7 ?? 0) > bigMove) push('positioning', 1.0, -1, `crowded longs, funding ${(f * 100).toFixed(3)}%`);
       else if (f <= 0 && (c7 ?? 0) > 0) push('positioning', 1.0, 1, 'rally with skeptical funding');
       else if (f >= 0.0008) push('positioning', 1.0, -1, 'extreme positive funding');
       else push('positioning', 1.0, 0, null);
@@ -5134,7 +5136,7 @@ export async function getFundingMap() {
     const rank = openInterest ?? -1;
     if (!(base in bestOi) || rank > bestOi[base]) {
       bestOi[base] = rank;
-      map[base] = { fundingRate, openInterest, market: t.market || null, basisPct: perpBasisPct(price, index) };
+      map[base] = { fundingRate, fundingRateUnit: 'provider-native', openInterest, market: t.market || null, contractId: t.symbol, basisPct: perpBasisPct(price, index) };
     }
   }
   if (!Object.keys(map).length) throw new Error('empty derivatives map');
@@ -5341,6 +5343,10 @@ export function buildCryptoMetrics(item, extras = {}) {
   const fib = haveDaily ? fibonacciLevels(closes) : null;
   const dailyMoves = haveDaily ? dailyMovementStats(extras.daily.bars || []) : null;
 
+  // Vendor snapshots may switch the largest-OI venue. Compare only with that
+  // venue/contract's snapshots; unknown legacy instruments cannot calibrate it.
+  const matchingFundingHistory = extras.funding?.fundingRateUnit === 'provider-native'
+    ? extras.fundingHistory?.byInstrument?.[JSON.stringify([extras.funding.market,extras.funding.contractId])] : extras.fundingHistory;
   return {
     symbol,
     id: item.id,
@@ -5388,11 +5394,12 @@ export function buildCryptoMetrics(item, extras = {}) {
     divergence: divergenceProxy(closes, rNow, haveDaily ? 25 : 36),
     volReg: volRegime(closes, haveDaily ? 20 : 24, haveDaily ? 100 : 120),
     funding: extras.funding != null ? extras.funding.fundingRate : null,
+    fundingRateUnit: extras.funding?.fundingRateUnit ?? 'fraction',
     openInterest: extras.funding != null ? extras.funding.openInterest : null,
-    fundingPercentile: (extras.fundingHistory && extras.fundingHistory.fundingRates && extras.funding != null)
-      ? percentileRank(extras.fundingHistory.fundingRates, extras.funding.fundingRate) : null,
-    oiPercentile: (extras.fundingHistory && extras.fundingHistory.openInterests && extras.funding != null)
-      ? percentileRank(extras.fundingHistory.openInterests, extras.funding.openInterest) : null,
+    fundingPercentile: (matchingFundingHistory && matchingFundingHistory.fundingRates && extras.funding != null)
+      ? percentileRank(matchingFundingHistory.fundingRates, extras.funding.fundingRate) : null,
+    oiPercentile: (matchingFundingHistory && matchingFundingHistory.openInterests && extras.funding != null)
+      ? percentileRank(matchingFundingHistory.openInterests, extras.funding.openInterest) : null,
     // dvol/ivPercentile: Deribit-only (BTC/ETH), see loadIvHistory's docs
     // for why "today's value" is just the archive's own most recent point
     // rather than a separate live fetch the way funding/OI's `extras.funding`
@@ -5768,6 +5775,27 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
 // Returns { payload, log }: `payload` is the servable JSON (what goes to KV
 // and the dashboard); `log` is the per-asset vote/price data reliability.mjs
 // needs to score past forecasts and isn't meant to be public.
+// Matched-clock collection with exact provider IDs; never classify a gold peg or
+// tokenized equity as USD liquidity. Missing/stale values remain visible.
+export function marketFlowSnapshot(markets, observedAt) {
+  const stableIds = new Set(['tether','usd-coin','dai','first-digital-usd','true-usd','ethena-usde','paypal-usd','usdd','frax','liquity-usd','paxos-standard','gemini-dollar','ripple-usd','usd1-wlfi','global-dollar']);
+  const majorIds = new Set(['bitcoin','ethereum','solana','stellar','ripple','hedera-hashgraph','hyperliquid','binancecoin','dogecoin','cardano','tron']);
+  const seen = new Set(), rows = [];
+  for (const c of Array.isArray(markets) ? markets : []) {
+    if (!c.id || seen.has(c.id) || (!stableIds.has(c.id) && !majorIds.has(c.id))) continue;
+    seen.add(c.id);
+    const age = Date.parse(observedAt) - Date.parse(c.last_updated);
+    const validVolume = Number.isFinite(c.total_volume) && c.total_volume >= 0;
+    rows.push({observedAt, id:c.id, symbol:String(c.symbol || '').toUpperCase(),
+      group:stableIds.has(c.id) ? 'usd-stable' : 'crypto', providerAt:c.last_updated || null,
+      volume:validVolume ? c.total_volume : null,
+      mcap:Number.isFinite(c.market_cap) && c.market_cap > 0 ? c.market_cap : null,
+      price:Number.isFinite(c.current_price) && c.current_price > 0 ? c.current_price : null,
+      quality:!Number.isFinite(age) ? 'missing-provider-time' : age < -60000 ? 'future-provider-time' : age > 1800000 ? 'stale' : !validVolume ? 'missing-volume' : 'ok'});
+  }
+  return rows;
+}
+
 export async function buildPayload(env, reliability, reliabilityByHorizon, moveStats, rangeReliability, todStats, fundingHistory, sentimentMap, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, ivHistory, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityData, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, detailedCalibration, dailyRangeStats, todEdge, scoreCalibration, xsCoefficients, decileEvidence, liveFundamentals) {
   const started = Date.now();
   const nowIso = new Date().toISOString();
@@ -6058,7 +6086,8 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     // above). build-signals.mjs writes these to stable_value_observations
     // so peg supply/volume/tightness accumulates as a real time series to
     // test hypotheses against, rather than being discarded at the filter.
-    stableValue: cryptoStableValue
+    stableValue: cryptoStableValue,
+    marketFlow: cryptoR.status === 'fulfilled' ? marketFlowSnapshot(cryptoR.value, new Date().toISOString()) : []
   };
 
   // Track record: which assets (either class) have DEMONSTRATED directional
@@ -6104,7 +6133,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     // (it only reads KV), so this string is asserted against it in
     // test-worker.mjs instead — a payload claiming a version its own ledger is
     // not keyed to would make every accuracy figure on the page unverifiable.
-    model: 'confluence-v8 (prior-weighted panel, independent outcomes, calibrated abstention)',
+    model: 'confluence-v9 (source-isolated funding, independent outcomes, calibrated abstention)',
     health: {
       coingecko: cryptoR.status === 'fulfilled',
       global: globalR.status === 'fulfilled' && !!globalR.value,
@@ -6989,6 +7018,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .dr-entry.dr-long{color:var(--up)}
   .dr-why{color:var(--dim);font-size:10.5px;font-family:var(--disp);line-height:1.45}
 
+  #panel-sessionResearch .bh-cell,#panel-calendarResearch .bh-cell,#panel-stableBasketResearch .bh-cell{display:block;line-height:1.7}
   .bh-list{display:flex;flex-direction:column;gap:1px;background:var(--line);border:1px solid var(--line)}
   .bh-head,.bh-row{display:grid;grid-template-columns:minmax(90px,.7fr) minmax(200px,1.4fr) minmax(200px,1.4fr);gap:12px;align-items:baseline;padding:8px 12px;font-family:var(--mono);font-size:11.5px;background:var(--ink-1)}
   .bh-head{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
@@ -7309,7 +7339,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     <div class="cols">
       <span>© <span id="yr"></span> Frontier Capital Signals</span>
       <span>Data: CoinGecko · CoinMetrics · CMC · alternative.me · Yahoo Finance / Stooq</span>
-      <span>Model: confluence-v8</span>
+      <span>Model: confluence-v9</span>
     </div>
   </footer>
 
@@ -7551,6 +7581,12 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         +'<p class="insight-caption">'+pooledPct.toFixed(0)+'% of the average asset model is pooled with its class, because its own history does not support differing by more than sampling noise. Shadow research; no live vote.</p>';
     } else if(hr&&hr.status){
       perAsset='<p class="insight-caption">Per-asset regression research is '+(hr.status==='awaiting-first-run'?'awaiting its first run':hr.status)+'. No value is inferred.</p>';
+    }
+    var quality=hr&&hr.dataQuality;
+    if(quality&&Array.isArray(quality.assets)){
+      perAsset+='<details class="research-note"><summary>Tracked data checks · '+quality.needsAttention+' / '+quality.assets.length+' need review</summary>'
+        +'<p class="insight-caption">Daily archive as of '+esc(quality.asOf)+'. Coverage does not establish prediction accuracy.</p>'
+        +quality.assets.map(function(asset){return '<p class="insight-caption"><b>'+esc(asset.symbol)+'</b>: '+esc((asset.issues||[]).join('; ')||'Coverage checks passed')+'.</p>';}).join('')+'</details>';
     }
     $('dashboardInsights').innerHTML=
       '<article class="insight-card"><div class="insight-head"><h3>Market movement</h3><span class="subtle-chip">OBSERVED · 24H</span></div><p class="insight-caption">Major reference markets · SPY uses its daily change</p><div id="marketMovement">'+chartContent+'</div></article>'
@@ -8138,14 +8174,107 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           meta:'<b>'+bhKeys.length+'</b> ASSETS'+(bhSoon?' &middot; <span class="amber-t">'+bhSoon+' WITHIN THE HOUR</span>':'')})
         +'<div class="dr-note">Mean 1-hour-forward return by UTC hour, measured on this engine&#39;s own hourly archive. '
         +'An hour is only listed if it clears a significance bar set for the number of hours &times; assets tested <b>and</b> holds the same sign across both halves of its history. '
-        +'The strongest hour across the tracked coins is <b>20:00 UTC (16:00 ET)</b> &mdash; the US equity close &mdash; which matches the documented overnight effect in equities. '
-        +'<b>Read the size, not just the sign:</b> these edges are around 0.05%/hour while a retail round trip costs roughly 0.12%, so on their own most do not survive fees. '
-        +'They are better used to time an entry you were already going to make than as a strategy.</div>'
+        +'UTC slots have different local-clock mappings across daylight-saving seasons. Use the per-asset ET study below for local-session comparisons. '
+        +'<b>Historical association only:</b> compare the displayed return with fees and spread. Agreement between two historical halves is not prospective validation. '
+        +'These UTC summaries do not establish that timing an entry with them improves outcomes.</div>'
         +'<div class="bh-list">'
           +'<div class="bh-head"><span>Asset</span><span>Strongest up hour</span><span>Strongest down hour</span></div>'
           +bhRows
         +'</div>'
         +PANEL_END;
+    }
+
+    var session = d.sessionResearch;
+    if(session && session.assets){
+      var sessionPct = function(x){ return typeof x==='number' && isFinite(x) ? (x*100).toFixed(1)+'%' : 'unavailable'; };
+      var sessionHours = function(p){
+        if(!p) return 'Insufficient history';
+        return (p.hoursET||[]).map(function(h){return String(h).padStart(2,'0')+':00';}).join(', ')
+          +' ET · '+(p.replicated?'activity replicated':'activity unconfirmed')+' · n='+p.testDays;
+      };
+      var sessionRows = Object.keys(session.assets).map(function(sym){
+        var a=session.assets[sym],p=a.profiles||{};
+        var morning=(a.morning||[]).map(function(c){return 'If 8–10 ET '+esc(c.if)+': '+sessionPct(c.closeProbability)
+          +' close '+(c.if==='up'?'higher':'lower')+'; '+sessionPct(c.forwardProbability)+' continue after 10 (n='+c.n+')'
+          +(c.supported?' · candidate evidence':' · descriptive only');}).join('<br>');
+        var directions=(p.all && p.all.directions || []).map(function(c){return c.hourET+':00 ET '+(c.meanPct>0?'up':'down')+' '+Math.abs(c.meanPct).toFixed(2)+'%';}).join(', ');
+        return '<div class="bh-row"><span class="bh-sym">'+esc(sym)+(a.instrument==='perpetual'?' (perp)':'')+'</span>'
+          +'<span class="bh-cell">Weekdays: '+esc(sessionHours(p.weekday))+'<br>Weekends: '+esc(sessionHours(p.weekend))
+          +'<br>Direction: '+esc(directions||'no cost-clearing evidence')+'</span>'
+          +'<span class="bh-cell">'+morning+'</span></div>';
+      }).join('');
+      var stable=session.stablecoin||{},flowRows=Object.keys(stable.assets||{}).map(function(sym){
+        var c=(stable.assets[sym]||[]).find(function(x){return x.horizonDays===1 && x.features==='ratio';});
+        if(!c || !c.directionEvidence) return esc(sym)+': insufficient history';
+        var de=c.directionEvidence,me=c.magnitudeEvidence,mm=c.magnitudeMedianEvidence;
+        var direction=de.adjustedP<0.05 && de.low>0;
+        var magnitude=me.adjustedP<0.05 && me.low>0 && mm && mm.adjustedP<0.05 && mm.low>0;
+        return esc(sym)+': direction '+(direction?'candidate evidence':'unconfirmed')+'; move size '+(magnitude?'candidate evidence':'unconfirmed');
+      }).join('<br>');
+      timing+=panelStart({id:'sessionResearch',tone:'timing',open:false,
+        eyebrow:'TIMING &middot; STABLECOIN RESEARCH',title:'When each tracked asset moves most',
+        meta:esc(session.asOf)+' · '+esc(session.status||'research-only')})
+        +'<div class="dr-note">Hours start at the displayed Eastern time and adjust for daylight saving. Selected on history through 2025, checked from January 2026. '
+        +'Larger moves do not imply an upward or downward edge. Weekdays include exchange holidays. HYPE uses perpetual prices. '
+        +'The daily-close rule uses midnight New York closes; the morning move is already part of that return. Its continuation percentage measures only the move after 10 ET. '
+        +'<b>Research only; these patterns do not create trade calls.</b></div>'
+        +'<div class="bh-list"><div class="bh-head"><span>Asset</span><span>Largest-move hours</span><span>8–10 ET conditional history</span></div>'+sessionRows+'</div>'
+        +'<div class="dr-note"><b>Stablecoin activity</b><br>'+esc(stable.proxy||'')
+        +'. This measures trading turnover, not money entering crypto. BTC_ETH_SOL is a three-asset market proxy. '
+        +'Original first-seen archive: '+(stable.snapshotDays||0)+' days; accumulation continues. All candidates remain research only.<br>'+flowRows+'</div>'+PANEL_END;
+    } else if(session) {
+      timing+=panelStart({id:'sessionResearch',tone:'timing',open:false,eyebrow:'TIMING RESEARCH',title:'Per-asset session study',meta:esc(session.status||'unavailable')})
+        +'<div class="dr-note">Awaiting a completed session and stablecoin research run.</div>'+PANEL_END;
+    }
+
+    var researchPct=function(x){return typeof x==='number'&&isFinite(x)?(100*x).toFixed(1)+'%':'unavailable';};
+    var researchWindow=function(x){return x&&x.hoursET&&x.hoursET.length?String(x.hoursET[0]).padStart(2,'0')+':00–'+String(x.hoursET[x.hoursET.length-1]+1).padStart(2,'0')+':00 ET':'insufficient history';};
+    var calendar=session&&session.calendar;
+    if(calendar&&calendar.assets){
+      var calendarRows=Object.keys(calendar.assets).map(function(sym){
+        var a=calendar.assets[sym],all=a.allDays||{};
+        var summary=['peak','bottom'].map(function(k){var x=all[k];return k+': '+researchWindow(x)+' ('+researchPct(x&&x.holdoutProbability&&x.holdoutProbability.mean)+')';}).join(' · ');
+        var days=(a.weekdays||[]).map(function(day){
+          if(day.status==='insufficient-history')return '<div class="dr-note">'+esc(day.day)+': insufficient development history (test n='+day.testN+').</div>';
+          var p=day.extremes.peak,b=day.extremes.bottom,j=day.events.jump,dump=day.events.dump;
+          return '<div class="bh-row"><span class="bh-sym">'+esc(day.day)+'<br>n='+day.testN+'</span>'
+            +'<span class="bh-cell">Peak: '+researchWindow(p)+' · '+researchPct(p.holdoutProbability.mean)+'<br>Bottom: '+researchWindow(b)+' · '+researchPct(b.holdoutProbability.mean)
+            +'<br>'+((p.weekdaySupported||b.weekdaySupported)?'Candidate weekday evidence':'No confirmed weekday-specific timing')+'</span>'
+            +'<span class="bh-cell">Large jumps: '+j.testCount+' ('+researchPct(j.holdoutRate.mean)+')<br>Large dumps: '+dump.testCount+' ('+researchPct(dump.holdoutRate.mean)+')'
+            +'<br>'+((j.weekdaySupported||dump.weekdaySupported)?'Candidate weekday evidence':'No confirmed jump/dump weekday')+'</span></div>';
+        }).join('');
+        return '<details><summary>'+esc(sym)+' · '+esc(summary)+'</summary><div class="dr-note">'+esc(a.instrument)+' · '+a.testDays+' holdout days. Jump threshold '+a.thresholdsPct.jump.toFixed(2)+'%; dump threshold '+a.thresholdsPct.dump.toFixed(2)+'% from the New York opening price.</div><div class="bh-list">'+days+'</div></details>';
+      }).join('');
+      timing+=panelStart({id:'calendarResearch',tone:'timing',open:false,eyebrow:'DAILY EXTREMES',title:'Peak, bottom and large-move timing by weekday',meta:esc(calendar.asOf)+' · '+esc(calendar.status||'research-only')})
+        +'<div class="dr-note">Three-hour windows selected through 2025; percentages measured on completed New York days in 2026. A 20% fraction does not mean an asset usually peaks there. Highs and lows are known only after the day ends; these are descriptive distributions, not live peak calls. Midnight boundary effects matter. Weekday claims must pass correction across '+calendar.testFamilySize+' tests. Expand an asset for Monday–Sunday results.</div>'+calendarRows+PANEL_END;
+    }
+    var basket=session&&session.stableBasket;
+    if(basket&&basket.assets){
+      var basketRows=Object.keys(basket.assets).map(function(sym){
+        var a=basket.assets[sym],conditions=a.conditional&&a.conditional.basket8||{},up=conditions.volumeUp10pct,down=conditions.volumeDown10pct,model=a.basketModel||{},e=model.directionEvidence;
+        if(a.status==='insufficient-history')return '<div class="dr-note">'+esc(sym)+': insufficient history.</div>';
+        return '<div class="bh-row"><span class="bh-sym">'+esc(sym)+'<br>n='+a.testN+'</span><span class="bh-cell">Unconditional down: '+researchPct(a.baselineDownRate)
+          +'<br>If basket volume rises ≥10%: '+researchPct(up&&up.downProbability)+' down (n='+(up?up.n:0)+')'
+          +'<br>If volume falls ≥10%: '+researchPct(down&&down.downProbability)+' down (n='+(down?down.n:0)+')</span>'
+          +'<span class="bh-cell">Direction: '+(e&&e.adjustedP<.05&&e.low>0?'candidate evidence':'unconfirmed')
+          +'<br>Corrected comparisons passing: '+(a.supported&&a.supported.length||0)+'<br>Conditional percentages are descriptive.</span></div>';
+      }).join('');
+      timing+=panelStart({id:'stableBasketResearch',tone:'timing',open:false,eyebrow:'STABLECOIN HYPOTHESIS',title:'Do stablecoin volumes lead crypto declines?',meta:esc(basket.asOf)+' · '+esc(basket.status||'research-only')})
+        +'<div class="dr-note">USDT, USDC, USDe, DAI, USD1, USDG, PYUSD and RLUSD tested individually and together, with 1/3/7-day changes and additional delays. These global rolling volumes overlap across trades and do not identify investors cashing out. The displayed rule uses a full-day delay after the snapshot, then the next 24-hour return. CMC100 is the broad-market benchmark; TRACKED_MEDIAN is the majority direction of the seven tracked assets. '+basket.testFamilySize+' corrected comparisons; research only.</div>'
+        +'<div class="bh-list"><div class="bh-head"><span>Asset / market</span><span>Conditional history</span><span>Out-of-sample evidence</span></div>'+basketRows+'</div>'+PANEL_END;
+    }
+    var explanations=d.marketExplanations;
+    if(explanations&&explanations.assets){
+      var insightRows=Object.keys(explanations.assets).map(function(sym){
+        var a=explanations.assets[sym];
+        var facts=(a.facts||[]).map(function(f){return '<li>'+esc(f.text)+' <small>'+esc(f.source)+' · '+esc(f.asOf)+'</small></li>';}).join('');
+        var interpretations=(a.interpretation||[]).map(function(s){return '<li>'+esc(s)+'</li>';}).join('');
+        var levels=a.levels||{},watch=(a.watch||[]).map(function(w){return '<li>If '+esc(w.condition)+(typeof w.level==='number'?' ($'+w.level.toLocaleString('en-US',{maximumSignificantDigits:7})+')':'')+': '+esc(w.meaning)+'</li>';}).join('');
+        return '<details><summary>'+esc(sym)+' · '+esc(a.status)+'</summary><div class="dr-note">As of '+esc(a.asOf)+' · Latest OI: '+esc(a.lastOiAt||'unavailable')+'<br>Levels: '+esc(levels.status||'unavailable')+' · '+esc(levels.basis||'')+' · through '+esc(levels.through||'unavailable')+'</div>'
+          +'<div class="dr-note"><b>Observed</b><ul>'+facts+'</ul><b>Interpretation</b><ul>'+interpretations+'</ul><b>Conditions to watch</b><ul>'+watch+'</ul></div></details>';
+      }).join('');
+      timing+=panelStart({id:'marketExplanations',tone:'timing',open:false,eyebrow:'MOVE CONTEXT',title:'What the price and positioning data support',meta:esc(explanations.asOf)+' · liquidation feed: '+esc(explanations.liquidationProviderStatus||'unavailable')})
+        +'<div class="dr-note">Measured observations, possible explanations and conditions to monitor. Open interest alone cannot confirm forced liquidations or predict whether a spike will fade. No unverified news attribution or trading probability is generated.</div>'+insightRows+PANEL_END;
     }
 
     var dr = d.dayRange || {};

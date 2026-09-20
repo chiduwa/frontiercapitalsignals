@@ -724,7 +724,7 @@ check('the dashboard footer names that same version', workerSource.includes(`Mod
 // Narrow on purpose: only the two places that DISPLAY a version. A prose
 // mention of v7 in a comment is legitimate history in this file and must not
 // fail the suite.
-check('no stale version survives in either place that displays one', !/model:\s*'confluence-v(?!8)/.test(workerSource) && !/Model: confluence-v(?!8)</.test(workerSource));
+check('no stale version survives in either place that displays one', !/model:\s*'confluence-v(?!9)/.test(workerSource) && !/Model: confluence-v(?!9)</.test(workerSource));
 check('crypto boards populated', built.crypto.breakout.length > 0 && built.crypto.universe >= 3);
 // Five clear the liquidity/favorite universe rule, but only the three with a
 // trustworthy daily series may enter the daily signal model. Favorites bypass

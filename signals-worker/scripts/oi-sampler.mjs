@@ -338,6 +338,14 @@ export function shouldAlert(last, move, nowMs, { cooldownMin = ALERT_COOLDOWN_MI
   return { alert: false, reason: `within ${cooldownMin}min cooldown` };
 }
 
+// Always-tracked assets must retain continuous coverage even when they leave
+// the highest-OI ranking. Keep the existing request budget for the default list.
+export const ALWAYS_TRACKED_OI = Object.freeze(['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR']);
+export function selectOiWatchlist(rankedSymbols, limit = 40) {
+  const cap = Math.max(ALWAYS_TRACKED_OI.length, Number.isFinite(limit) ? Math.floor(limit) : 40);
+  return [...new Set([...ALWAYS_TRACKED_OI, ...rankedSymbols])].slice(0, cap);
+}
+
 async function watchlist() {
   if (process.env.OI_SAMPLE_SYMBOLS) {
     return process.env.OI_SAMPLE_SYMBOLS.split(',').map((s) => s.trim()).filter(Boolean);
@@ -347,7 +355,7 @@ async function watchlist() {
   const rows = await d1(env,
     `SELECT symbol FROM derivatives_daily WHERE date >= date('now','-14 day')
      GROUP BY symbol ORDER BY AVG(oi_usd_close) DESC LIMIT ?`, [MAX_SYMBOLS]);
-  return rows.map((r) => r.symbol);
+  return selectOiWatchlist(rows.map((r) => r.symbol), MAX_SYMBOLS);
 }
 
 // Scores events whose recovery window has closed, against the outcome the

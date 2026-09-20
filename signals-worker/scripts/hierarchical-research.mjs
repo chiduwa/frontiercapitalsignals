@@ -24,6 +24,7 @@ import { buildZooSection, ZOO_VERSION } from './model-zoo.mjs';
 import {
   HIERARCHICAL_VERSION, buildAssetSample, fitAssetRegression, poolAcrossAssets, walkForwardPanel
 } from './hierarchical-model.mjs';
+import { assessTrackedPanel } from './tracked-data-quality.mjs';
 import { FEATURE_NAMES, BLOCK_NAMES } from './panel-features.mjs';
 
 const exec = promisify(execFile);
@@ -50,10 +51,11 @@ export function wranglerQuery() {
  * because D1 answers an oversized SELECT with a 7010 that looks like an outage
  * and is really a size ceiling -- it fails identically on every retry.
  */
-export async function loadHierarchicalPanel(query, env, asOf, { log = console.log } = {}) {
+export async function loadHierarchicalPanel(query, env, asOf, { log = console.log, symbols = null } = {}) {
+  const scope = symbols?.length ? ` AND symbol IN (${[...new Set([...symbols, 'BTC', 'SPY'])].map(quote).join(',')})` : '';
   const assets = await query(env, `SELECT DISTINCT asset_class, symbol FROM asset_daily_bars
     WHERE (asset_class IN ('crypto','stock') OR symbol IN ('SPY','MCAP:BROAD','MCAP:TOTAL'))
-      AND date >= '${ORIGIN}' ORDER BY asset_class, symbol`);
+      AND date >= '${ORIGIN}'${scope} ORDER BY asset_class, symbol`);
   const quarantineRows = await query(env, `SELECT asset_class, symbol, date, reason
     FROM asset_bar_quarantine WHERE reason IN ('spike','level-shift')`);
   const quarantine = new Map([...new Set(assets.map(a => a.asset_class))].map(cls =>
@@ -62,7 +64,7 @@ export async function loadHierarchicalPanel(query, env, asOf, { log = console.lo
   const panel = [];
   for (const page of chunk(assets, SYMBOL_BATCH)) {
     const tuples = page.map(a => `(${quote(a.asset_class)},${quote(a.symbol)})`).join(',');
-    const rows = await query(env, `SELECT asset_class, symbol, date, close, volume FROM asset_daily_bars
+    const rows = await query(env, `SELECT asset_class, symbol, date, open, high, low, close, volume, source FROM asset_daily_bars
       WHERE (asset_class, symbol) IN (${tuples}) AND date >= '${ORIGIN}' AND date < '${asOf}'
       ORDER BY symbol, date`);
     for (const asset of page) {
@@ -75,11 +77,11 @@ export async function loadHierarchicalPanel(query, env, asOf, { log = console.lo
   }
 
   const derivativeSymbols = (await query(env,
-    `SELECT DISTINCT symbol FROM derivatives_daily ORDER BY symbol`)).map(r => r.symbol);
+    `SELECT DISTINCT symbol FROM derivatives_daily WHERE 1=1${scope} ORDER BY symbol`)).map(r => r.symbol);
   const derivatives = new Map();
   for (const page of chunk(derivativeSymbols, SYMBOL_BATCH)) {
     const rows = await query(env, `SELECT symbol, date, oi_usd_close, taker_buy_sell_ratio,
-      all_account_ls, toptrader_position_ls FROM derivatives_daily
+      all_account_ls, toptrader_position_ls, oi_qty_close, samples, source FROM derivatives_daily
       WHERE symbol IN (${page.map(quote).join(',')}) AND date < '${asOf}' ORDER BY symbol, date`);
     for (const symbol of page) derivatives.set(symbol, rows.filter(r => r.symbol === symbol));
   }
@@ -87,16 +89,19 @@ export async function loadHierarchicalPanel(query, env, asOf, { log = console.lo
 
   const supply = new Map();
   const supplySymbols = (await query(env,
-    `SELECT DISTINCT symbol FROM asset_supply_daily ORDER BY symbol`)).map(r => r.symbol);
-  const maxSupply = new Map((await query(env,
-    `SELECT symbol, max_supply FROM asset_supply_snapshot WHERE max_supply > 0`))
-    .map(r => [r.symbol, r.max_supply]));
+    `SELECT DISTINCT symbol FROM asset_supply_daily WHERE 1=1${scope} ORDER BY symbol`)).map(r => r.symbol);
+  // Maximum supply is time-varying metadata. Never project today's snapshot
+  // backward. Historical ratios require a dated, matching observation.
+  const supplySnapshots = await query(env, `SELECT symbol, date, circulating_supply, max_supply
+    FROM asset_supply_snapshot_daily WHERE date < '${asOf}'${scope} ORDER BY symbol, date`);
+  const snapshotByKey = new Map(supplySnapshots.map(r => [`${r.symbol}|${r.date}`, r]));
   for (const page of chunk(supplySymbols, SYMBOL_BATCH * 3)) {
     const rows = await query(env, `SELECT symbol, date, circulating_supply FROM asset_supply_daily
       WHERE symbol IN (${page.map(quote).join(',')}) AND date < '${asOf}' ORDER BY symbol, date`);
     for (const symbol of page) {
       supply.set(symbol, rows.filter(r => r.symbol === symbol)
-        .map(r => ({ ...r, max_supply: maxSupply.get(symbol) ?? null })));
+        .map(r => ({ ...r, max_supply: snapshotByKey.get(`${symbol}|${r.date}`)?.max_supply ?? null,
+          snapshot_circulating_supply: snapshotByKey.get(`${symbol}|${r.date}`)?.circulating_supply ?? null })));
     }
   }
   log(`[hierarchical] supply for ${supply.size} symbols`);
@@ -104,9 +109,9 @@ export async function loadHierarchicalPanel(query, env, asOf, { log = console.lo
   // Perpetual funding, per asset. Batched for the same D1 size ceiling reason.
   const funding = new Map();
   const fundingSymbols = (await query(env,
-    `SELECT DISTINCT symbol FROM funding_rate_daily ORDER BY symbol`)).map(r => r.symbol);
+    `SELECT DISTINCT symbol FROM funding_rate_daily WHERE 1=1${scope} ORDER BY symbol`)).map(r => r.symbol);
   for (const page of chunk(fundingSymbols, SYMBOL_BATCH * 3)) {
-    const rows = await query(env, `SELECT symbol, date, funding_rate FROM funding_rate_daily
+    const rows = await query(env, `SELECT symbol, date, funding_rate, source FROM funding_rate_daily
       WHERE symbol IN (${page.map(quote).join(',')}) AND date >= '${ORIGIN}' AND date < '${asOf}'
         AND funding_rate IS NOT NULL ORDER BY symbol, date`);
     for (const symbol of page) funding.set(symbol, rows.filter(r => r.symbol === symbol));
@@ -119,7 +124,16 @@ export async function loadHierarchicalPanel(query, env, asOf, { log = console.lo
       AND fear_greed_altme IS NOT NULL ORDER BY date`);
   log(`[hierarchical] sentiment for ${sentimentRows.length} dates`);
 
-  return { asOf, assets: panel,
+  // Only the bounded specialist audit uses order-book features. Do not add a
+  // universe-wide unbounded SELECT to the existing daily regression job.
+  const liquidity = [];
+  if (symbols?.length) for (const page of chunk(symbols, SYMBOL_BATCH)) {
+    liquidity.push(...await query(env, `SELECT symbol, date, book_imbalance_1pct, depth_1pct_usd, snapshots, source
+      FROM asset_liquidity_daily WHERE date >= '${ORIGIN}' AND date < '${asOf}'
+        AND symbol IN (${page.map(quote).join(',')}) ORDER BY symbol, date`));
+  }
+  return { asOf, assets: panel, liquidity,
+    supplySnapshots,
     derivatives: Object.fromEntries(derivatives), supply: Object.fromEntries(supply),
     funding: Object.fromEntries(funding),
     sentiment: sentimentRows.map(r => [r.date, r.fear_greed_altme]) };
@@ -260,11 +274,11 @@ export function buildHierarchicalReport(panel, {
 } = {}) {
   const inference = runInference(panel, { asOf, log });
   const prediction = runPrediction(panel, { asOf, costBps, refitEvery, log });
-  const inputHash = hash({ assets: panel.assets.length, asOf,
-    bars: panel.assets.reduce((s, a) => s + a.bars.length, 0) });
+  const inputHash = hash(panel);
   const summary = {
     modelVersion: HIERARCHICAL_VERSION, asOf, generatedAt: now,
     status: 'shadow', actionable: false,
+    dataQuality: assessTrackedPanel({ ...panel, asOf }),
     features: FEATURE_NAMES.length, lanes: BLOCK_NAMES,
     assets: panel.assets.length,
     costs: { roundTripBps: costBps, fundingBorrowAndImpactIncluded: false },
@@ -421,7 +435,7 @@ async function main() {
   if (useWrangler && !dryRun) throw new Error('--wrangler is read-only; add --dry-run');
   const panel = input
     ? JSON.parse(await readFile(input, 'utf8'))
-    : await loadHierarchicalPanel(useWrangler ? wranglerQuery() : d1, process.env, asOf);
+    : await loadHierarchicalPanel(useWrangler ? wranglerQuery() : d1, process.env, asOf, { symbols: arg('symbols')?.split(',') });
   if (arg('save-input')) {
     await writeFile(resolve(arg('save-input')), JSON.stringify(panel));
     console.log(`Panel saved: ${resolve(arg('save-input'))}`);

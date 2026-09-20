@@ -1,0 +1,862 @@
+{
+  "asOf": "2026-09-19",
+  "start": "2026-03-23",
+  "actionable": false,
+  "dataQuality": {
+    "asOf": "2026-09-19",
+    "scope": "always-tracked-crypto",
+    "assets": [
+      {
+        "symbol": "BTC",
+        "priceBars": 2086,
+        "lastPrice": "2026-09-17",
+        "derivativeDays": 1357,
+        "lastDerivatives": "2026-09-18",
+        "settlementDays": 169,
+        "lastSettlement": "2026-09-14",
+        "fundingSources": [
+          "binance-fapi-direct",
+          "coingecko"
+        ],
+        "invalidPriceRows": 0,
+        "status": "needs-review",
+        "issues": [
+          "Latest completed daily close missing",
+          "Less than one year of settlement-rate history",
+          "Settlement-rate collection missing or stale",
+          "Recent funding mixes settlement means and vendor snapshots"
+        ]
+      },
+      {
+        "symbol": "ETH",
+        "priceBars": 2086,
+        "lastPrice": "2026-09-17",
+        "derivativeDays": 1357,
+        "lastDerivatives": "2026-09-18",
+        "settlementDays": 169,
+        "lastSettlement": "2026-09-14",
+        "fundingSources": [
+          "binance-fapi-direct",
+          "coingecko"
+        ],
+        "invalidPriceRows": 0,
+        "status": "needs-review",
+        "issues": [
+          "Latest completed daily close missing",
+          "Less than one year of settlement-rate history",
+          "Settlement-rate collection missing or stale",
+          "Recent funding mixes settlement means and vendor snapshots"
+        ]
+      },
+      {
+        "symbol": "SOL",
+        "priceBars": 2086,
+        "lastPrice": "2026-09-17",
+        "derivativeDays": 1357,
+        "lastDerivatives": "2026-09-18",
+        "settlementDays": 169,
+        "lastSettlement": "2026-09-14",
+        "fundingSources": [
+          "binance-fapi-direct",
+          "coingecko"
+        ],
+        "invalidPriceRows": 0,
+        "status": "needs-review",
+        "issues": [
+          "Latest completed daily close missing",
+          "Less than one year of settlement-rate history",
+          "Settlement-rate collection missing or stale",
+          "Recent funding mixes settlement means and vendor snapshots"
+        ]
+      },
+      {
+        "symbol": "XLM",
+        "priceBars": 2086,
+        "lastPrice": "2026-09-17",
+        "derivativeDays": 1356,
+        "lastDerivatives": "2026-09-18",
+        "settlementDays": 169,
+        "lastSettlement": "2026-09-14",
+        "fundingSources": [
+          "binance-fapi-direct",
+          "coingecko"
+        ],
+        "invalidPriceRows": 4,
+        "status": "needs-review",
+        "issues": [
+          "Latest completed daily close missing",
+          "4 invalid price or high/low rows",
+          "Less than one year of settlement-rate history",
+          "Settlement-rate collection missing or stale",
+          "Recent funding mixes settlement means and vendor snapshots"
+        ]
+      },
+      {
+        "symbol": "XRP",
+        "priceBars": 2086,
+        "lastPrice": "2026-09-17",
+        "derivativeDays": 1357,
+        "lastDerivatives": "2026-09-18",
+        "settlementDays": 169,
+        "lastSettlement": "2026-09-14",
+        "fundingSources": [
+          "binance-fapi-direct",
+          "coingecko"
+        ],
+        "invalidPriceRows": 1,
+        "status": "needs-review",
+        "issues": [
+          "Latest completed daily close missing",
+          "1 invalid price or high/low rows",
+          "Less than one year of settlement-rate history",
+          "Settlement-rate collection missing or stale",
+          "Recent funding mixes settlement means and vendor snapshots"
+        ]
+      },
+      {
+        "symbol": "HYPE",
+        "priceBars": 393,
+        "lastPrice": "2026-09-17",
+        "derivativeDays": 477,
+        "lastDerivatives": "2026-09-18",
+        "settlementDays": 86,
+        "lastSettlement": "2026-09-14",
+        "fundingSources": [
+          "binance-fapi-direct",
+          "coingecko"
+        ],
+        "invalidPriceRows": 0,
+        "status": "needs-review",
+        "issues": [
+          "Latest completed daily close missing",
+          "Less than two years of daily prices",
+          "Less than one year of settlement-rate history",
+          "Settlement-rate collection missing or stale",
+          "Recent funding mixes settlement means and vendor snapshots"
+        ]
+      },
+      {
+        "symbol": "HBAR",
+        "priceBars": 2086,
+        "lastPrice": "2026-09-17",
+        "derivativeDays": 1357,
+        "lastDerivatives": "2026-09-18",
+        "settlementDays": 169,
+        "lastSettlement": "2026-09-14",
+        "fundingSources": [
+          "binance-fapi-direct",
+          "coingecko"
+        ],
+        "invalidPriceRows": 2,
+        "status": "needs-review",
+        "issues": [
+          "Latest completed daily close missing",
+          "2 invalid price or high/low rows",
+          "Less than one year of settlement-rate history",
+          "Settlement-rate collection missing or stale",
+          "Recent funding mixes settlement means and vendor snapshots"
+        ]
+      }
+    ],
+    "needsAttention": 7,
+    "status": "needs-review",
+    "actionable": false
+  },
+  "versions": {
+    "hierarchical": "hierarchical-mlr-v4",
+    "adaptive": "adaptive-ridge-v2"
+  },
+  "assets": {
+    "BTC": {
+      "1": {
+        "hierarchical": {
+          "n": 177,
+          "directionAccuracy": 0.4858757062146893,
+          "signedMaePct": 1.4509092699219497,
+          "zeroMaePct": 1.4121905942111195,
+          "oosR2": -0.0311941590149607,
+          "magnitudeMaePct": 1.2557408878018521,
+          "magnitudeSpearman": -0.05808201035300636,
+          "intervalCoverage": 0.8248587570621468,
+          "netPct": -0.09070525559571081
+        },
+        "adaptive": {
+          "n": 177,
+          "directionAccuracy": 0.480225988700565,
+          "signedMaePct": 1.445291416149029,
+          "zeroMaePct": 1.4121905942111195,
+          "oosR2": -0.017217252687052653,
+          "magnitudeMaePct": 1.3147433505971275,
+          "magnitudeSpearman": -0.0374820380533578,
+          "intervalCoverage": 0.8361581920903954,
+          "netPct": -0.11509386519929954
+        },
+        "commonDates": {
+          "hierarchical": {
+            "n": 177,
+            "directionAccuracy": 0.4858757062146893,
+            "signedMaePct": 1.4509092699219497,
+            "zeroMaePct": 1.4121905942111195,
+            "oosR2": -0.0311941590149607,
+            "magnitudeMaePct": 1.2557408878018521,
+            "magnitudeSpearman": -0.05808201035300636,
+            "intervalCoverage": 0.8248587570621468,
+            "netPct": -0.09070525559571081
+          },
+          "adaptive": {
+            "n": 177,
+            "directionAccuracy": 0.480225988700565,
+            "signedMaePct": 1.445291416149029,
+            "zeroMaePct": 1.4121905942111195,
+            "oosR2": -0.017217252687052653,
+            "magnitudeMaePct": 1.3147433505971275,
+            "magnitudeSpearman": -0.0374820380533578,
+            "intervalCoverage": 0.8361581920903954,
+            "netPct": -0.11509386519929954
+          }
+        }
+      },
+      "7": {
+        "hierarchical": {
+          "n": 24,
+          "directionAccuracy": 0.4166666666666667,
+          "signedMaePct": 4.524752266272033,
+          "zeroMaePct": 4.4471014187041975,
+          "oosR2": -0.0021275987247433292,
+          "magnitudeMaePct": 3.7479570481965006,
+          "magnitudeSpearman": 0.2669565217391304,
+          "intervalCoverage": 0.8333333333333334,
+          "netPct": 0.8080246823905005
+        },
+        "adaptive": {
+          "n": 25,
+          "directionAccuracy": 0.36,
+          "signedMaePct": 4.536807665055148,
+          "zeroMaePct": 4.411917206751764,
+          "oosR2": -0.018995052735290452,
+          "magnitudeMaePct": 3.828358005926529,
+          "magnitudeSpearman": 0.4115384615384615,
+          "intervalCoverage": 0.8,
+          "netPct": 0.6546669091031031
+        },
+        "commonDates": {
+          "hierarchical": {
+            "n": 24,
+            "directionAccuracy": 0.4166666666666667,
+            "signedMaePct": 4.524752266272033,
+            "zeroMaePct": 4.4471014187041975,
+            "oosR2": -0.0021275987247433292,
+            "magnitudeMaePct": 3.7479570481965006,
+            "magnitudeSpearman": 0.2669565217391304,
+            "intervalCoverage": 0.8333333333333334,
+            "netPct": 0.8080246823905005
+          },
+          "adaptive": {
+            "n": 24,
+            "directionAccuracy": 0.3333333333333333,
+            "signedMaePct": 4.585067085358999,
+            "zeroMaePct": 4.4471014187041975,
+            "oosR2": -0.020575608833890424,
+            "magnitudeMaePct": 3.847098690433354,
+            "magnitudeSpearman": 0.45130434782608697,
+            "intervalCoverage": 0.7916666666666666,
+            "netPct": 0.681944696982399
+          }
+        }
+      }
+    },
+    "ETH": {
+      "1": {
+        "hierarchical": {
+          "n": 177,
+          "directionAccuracy": 0.4632768361581921,
+          "signedMaePct": 1.9358960741224744,
+          "zeroMaePct": 1.8775912605058755,
+          "oosR2": -0.050494651050873696,
+          "magnitudeMaePct": 1.6457686753170455,
+          "magnitudeSpearman": 0.07008405325392567,
+          "intervalCoverage": 0.8531073446327684,
+          "netPct": -0.40934214984715017
+        },
+        "adaptive": {
+          "n": 177,
+          "directionAccuracy": 0.5310734463276836,
+          "signedMaePct": 1.9030594973032844,
+          "zeroMaePct": 1.8775912605058755,
+          "oosR2": -0.021099556077445403,
+          "magnitudeMaePct": 1.7056264207667318,
+          "magnitudeSpearman": 0.08974264642232649,
+          "intervalCoverage": 0.864406779661017,
+          "netPct": -0.09372293308153412
+        },
+        "commonDates": {
+          "hierarchical": {
+            "n": 177,
+            "directionAccuracy": 0.4632768361581921,
+            "signedMaePct": 1.9358960741224744,
+            "zeroMaePct": 1.8775912605058755,
+            "oosR2": -0.050494651050873696,
+            "magnitudeMaePct": 1.6457686753170455,
+            "magnitudeSpearman": 0.07008405325392567,
+            "intervalCoverage": 0.8531073446327684,
+            "netPct": -0.40934214984715017
+          },
+          "adaptive": {
+            "n": 177,
+            "directionAccuracy": 0.5310734463276836,
+            "signedMaePct": 1.9030594973032844,
+            "zeroMaePct": 1.8775912605058755,
+            "oosR2": -0.021099556077445403,
+            "magnitudeMaePct": 1.7056264207667318,
+            "magnitudeSpearman": 0.08974264642232649,
+            "intervalCoverage": 0.864406779661017,
+            "netPct": -0.09372293308153412
+          }
+        }
+      },
+      "7": {
+        "hierarchical": {
+          "n": 24,
+          "directionAccuracy": 0.4583333333333333,
+          "signedMaePct": 6.065865720856745,
+          "zeroMaePct": 5.525043324384982,
+          "oosR2": -0.12003558272990289,
+          "magnitudeMaePct": 4.5527747854730265,
+          "magnitudeSpearman": 0.08956521739130435,
+          "intervalCoverage": 0.7916666666666666,
+          "netPct": -0.8078685618389628
+        },
+        "adaptive": {
+          "n": 25,
+          "directionAccuracy": 0.36,
+          "signedMaePct": 5.7329123720658846,
+          "zeroMaePct": 5.4268078115134415,
+          "oosR2": -0.07072489443080388,
+          "magnitudeMaePct": 4.631686599938225,
+          "magnitudeSpearman": 0.15538461538461537,
+          "intervalCoverage": 0.8,
+          "netPct": -0.26296403121639983
+        },
+        "commonDates": {
+          "hierarchical": {
+            "n": 24,
+            "directionAccuracy": 0.4583333333333333,
+            "signedMaePct": 6.065865720856745,
+            "zeroMaePct": 5.525043324384982,
+            "oosR2": -0.12003558272990289,
+            "magnitudeMaePct": 4.5527747854730265,
+            "magnitudeSpearman": 0.08956521739130435,
+            "intervalCoverage": 0.7916666666666666,
+            "netPct": -0.8078685618389628
+          },
+          "adaptive": {
+            "n": 24,
+            "directionAccuracy": 0.375,
+            "signedMaePct": 5.821021541612045,
+            "zeroMaePct": 5.525043324384982,
+            "oosR2": -0.06877710419347993,
+            "magnitudeMaePct": 4.71967276234253,
+            "magnitudeSpearman": 0.1391304347826087,
+            "intervalCoverage": 0.7916666666666666,
+            "netPct": -0.13770605324223043
+          }
+        }
+      }
+    },
+    "HBAR": {
+      "1": {
+        "hierarchical": {
+          "n": 177,
+          "directionAccuracy": 0.5310734463276836,
+          "signedMaePct": 1.792321512697848,
+          "zeroMaePct": 1.8050041430155568,
+          "oosR2": 0.012894683842412324,
+          "magnitudeMaePct": 1.5466577710252927,
+          "magnitudeSpearman": -0.047367600976437385,
+          "intervalCoverage": 0.8248587570621468,
+          "netPct": 0.12330480832737217
+        },
+        "adaptive": {
+          "n": 177,
+          "directionAccuracy": 0.4632768361581921,
+          "signedMaePct": 1.8231288935995678,
+          "zeroMaePct": 1.8050041430155568,
+          "oosR2": -0.0023706949944717337,
+          "magnitudeMaePct": 1.6341145579374996,
+          "magnitudeSpearman": -0.10841441457038486,
+          "intervalCoverage": 0.8022598870056498,
+          "netPct": -0.11526926577057932
+        },
+        "commonDates": {
+          "hierarchical": {
+            "n": 177,
+            "directionAccuracy": 0.5310734463276836,
+            "signedMaePct": 1.792321512697848,
+            "zeroMaePct": 1.8050041430155568,
+            "oosR2": 0.012894683842412324,
+            "magnitudeMaePct": 1.5466577710252927,
+            "magnitudeSpearman": -0.047367600976437385,
+            "intervalCoverage": 0.8248587570621468,
+            "netPct": 0.12330480832737217
+          },
+          "adaptive": {
+            "n": 177,
+            "directionAccuracy": 0.4632768361581921,
+            "signedMaePct": 1.8231288935995678,
+            "zeroMaePct": 1.8050041430155568,
+            "oosR2": -0.0023706949944717337,
+            "magnitudeMaePct": 1.6341145579374996,
+            "magnitudeSpearman": -0.10841441457038486,
+            "intervalCoverage": 0.8022598870056498,
+            "netPct": -0.11526926577057932
+          }
+        }
+      },
+      "7": {
+        "hierarchical": {
+          "n": 24,
+          "directionAccuracy": 0.4583333333333333,
+          "signedMaePct": 4.778782587899306,
+          "zeroMaePct": 4.6344413058555265,
+          "oosR2": -0.07218761116560102,
+          "magnitudeMaePct": 3.4337784642347553,
+          "magnitudeSpearman": 0.21304347826086956,
+          "intervalCoverage": 0.875,
+          "netPct": -0.34334681933788086
+        },
+        "adaptive": {
+          "n": 25,
+          "directionAccuracy": 0.52,
+          "signedMaePct": 4.639288420100797,
+          "zeroMaePct": 4.756572197614465,
+          "oosR2": 0.03640883731811828,
+          "magnitudeMaePct": 4.212607269537132,
+          "magnitudeSpearman": 0.12846153846153846,
+          "intervalCoverage": 0.92,
+          "netPct": 0.7285611055493068
+        },
+        "commonDates": {
+          "hierarchical": {
+            "n": 24,
+            "directionAccuracy": 0.4583333333333333,
+            "signedMaePct": 4.778782587899306,
+            "zeroMaePct": 4.6344413058555265,
+            "oosR2": -0.07218761116560102,
+            "magnitudeMaePct": 3.4337784642347553,
+            "magnitudeSpearman": 0.21304347826086956,
+            "intervalCoverage": 0.875,
+            "netPct": -0.34334681933788086
+          },
+          "adaptive": {
+            "n": 24,
+            "directionAccuracy": 0.5,
+            "signedMaePct": 4.552993709965853,
+            "zeroMaePct": 4.6344413058555265,
+            "oosR2": 0.021840126264390802,
+            "magnitudeMaePct": 4.108534178128703,
+            "magnitudeSpearman": 0.09130434782608696,
+            "intervalCoverage": 0.9166666666666666,
+            "netPct": 0.44692975162098697
+          }
+        }
+      }
+    },
+    "HYPE": {
+      "1": {
+        "hierarchical": {
+          "n": 177,
+          "directionAccuracy": 0.4745762711864407,
+          "signedMaePct": 3.594411036809077,
+          "zeroMaePct": 3.3407558522479404,
+          "oosR2": -0.15074718729600867,
+          "magnitudeMaePct": 2.5078207807542983,
+          "magnitudeSpearman": 0.008487560810927788,
+          "intervalCoverage": 0.807909604519774,
+          "netPct": -0.8411318995160926
+        },
+        "adaptive": {
+          "n": 177,
+          "directionAccuracy": 0.5141242937853108,
+          "signedMaePct": 3.368199127493892,
+          "zeroMaePct": 3.3407558522479404,
+          "oosR2": -0.01944200226343029,
+          "magnitudeMaePct": 3.012364252642848,
+          "magnitudeSpearman": 0.026951576323124598,
+          "intervalCoverage": 0.7853107344632768,
+          "netPct": -0.3221556292771404
+        },
+        "commonDates": {
+          "hierarchical": {
+            "n": 177,
+            "directionAccuracy": 0.4745762711864407,
+            "signedMaePct": 3.594411036809077,
+            "zeroMaePct": 3.3407558522479404,
+            "oosR2": -0.15074718729600867,
+            "magnitudeMaePct": 2.5078207807542983,
+            "magnitudeSpearman": 0.008487560810927788,
+            "intervalCoverage": 0.807909604519774,
+            "netPct": -0.8411318995160926
+          },
+          "adaptive": {
+            "n": 177,
+            "directionAccuracy": 0.5141242937853108,
+            "signedMaePct": 3.368199127493892,
+            "zeroMaePct": 3.3407558522479404,
+            "oosR2": -0.01944200226343029,
+            "magnitudeMaePct": 3.012364252642848,
+            "magnitudeSpearman": 0.026951576323124598,
+            "intervalCoverage": 0.7853107344632768,
+            "netPct": -0.3221556292771404
+          }
+        }
+      },
+      "7": {
+        "hierarchical": {
+          "n": 5,
+          "directionAccuracy": 0.2,
+          "signedMaePct": 13.448452488084442,
+          "zeroMaePct": 9.962726463394375,
+          "oosR2": -0.3335894609923338,
+          "magnitudeMaePct": 7.918437249308736,
+          "magnitudeSpearman": 0.1,
+          "intervalCoverage": null,
+          "netPct": -10.072943921323205
+        },
+        "adaptive": {
+          "n": 16,
+          "directionAccuracy": 0.3125,
+          "signedMaePct": 9.053305628528937,
+          "zeroMaePct": 7.8676153237530855,
+          "oosR2": -0.18476832336162818,
+          "magnitudeMaePct": 6.488355500588382,
+          "magnitudeSpearman": -0.05588235294117647,
+          "intervalCoverage": null,
+          "netPct": -1.6028777514326678
+        },
+        "commonDates": {
+          "hierarchical": {
+            "n": 5,
+            "directionAccuracy": 0.2,
+            "signedMaePct": 13.448452488084442,
+            "zeroMaePct": 9.962726463394375,
+            "oosR2": -0.3335894609923338,
+            "magnitudeMaePct": 7.918437249308736,
+            "magnitudeSpearman": 0.1,
+            "intervalCoverage": null,
+            "netPct": -10.072943921323205
+          },
+          "adaptive": {
+            "n": 5,
+            "directionAccuracy": 0.6,
+            "signedMaePct": 9.82221690126299,
+            "zeroMaePct": 9.962726463394375,
+            "oosR2": 0.07751635222934672,
+            "magnitudeMaePct": 9.471329530270335,
+            "magnitudeSpearman": -0.7,
+            "intervalCoverage": null,
+            "netPct": 6.997433756566754
+          }
+        }
+      }
+    },
+    "SOL": {
+      "1": {
+        "hierarchical": {
+          "n": 177,
+          "directionAccuracy": 0.4689265536723164,
+          "signedMaePct": 2.1259824294332574,
+          "zeroMaePct": 2.0968080871730654,
+          "oosR2": -0.04724112008087866,
+          "magnitudeMaePct": 1.867375982588408,
+          "magnitudeSpearman": 0.0960271636571389,
+          "intervalCoverage": 0.8022598870056498,
+          "netPct": -0.41085055165288126
+        },
+        "adaptive": {
+          "n": 177,
+          "directionAccuracy": 0.5141242937853108,
+          "signedMaePct": 2.130335326275775,
+          "zeroMaePct": 2.0968080871730654,
+          "oosR2": -0.021346106990002278,
+          "magnitudeMaePct": 1.9121918637114383,
+          "magnitudeSpearman": 0.09478714011184017,
+          "intervalCoverage": 0.7909604519774012,
+          "netPct": -0.14142518023470482
+        },
+        "commonDates": {
+          "hierarchical": {
+            "n": 177,
+            "directionAccuracy": 0.4689265536723164,
+            "signedMaePct": 2.1259824294332574,
+            "zeroMaePct": 2.0968080871730654,
+            "oosR2": -0.04724112008087866,
+            "magnitudeMaePct": 1.867375982588408,
+            "magnitudeSpearman": 0.0960271636571389,
+            "intervalCoverage": 0.8022598870056498,
+            "netPct": -0.41085055165288126
+          },
+          "adaptive": {
+            "n": 177,
+            "directionAccuracy": 0.5141242937853108,
+            "signedMaePct": 2.130335326275775,
+            "zeroMaePct": 2.0968080871730654,
+            "oosR2": -0.021346106990002278,
+            "magnitudeMaePct": 1.9121918637114383,
+            "magnitudeSpearman": 0.09478714011184017,
+            "intervalCoverage": 0.7909604519774012,
+            "netPct": -0.14142518023470482
+          }
+        }
+      },
+      "7": {
+        "hierarchical": {
+          "n": 24,
+          "directionAccuracy": 0.5,
+          "signedMaePct": 7.033834619196618,
+          "zeroMaePct": 6.0447353539848585,
+          "oosR2": -0.36311981227165946,
+          "magnitudeMaePct": 5.069540266750917,
+          "magnitudeSpearman": 0.0052173913043478265,
+          "intervalCoverage": 0.7916666666666666,
+          "netPct": -1.110826841467125
+        },
+        "adaptive": {
+          "n": 25,
+          "directionAccuracy": 0.44,
+          "signedMaePct": 6.192630738516569,
+          "zeroMaePct": 6.032970693796052,
+          "oosR2": -0.03757131104260769,
+          "magnitudeMaePct": 5.293048340744706,
+          "magnitudeSpearman": 0.06153846153846154,
+          "intervalCoverage": 0.72,
+          "netPct": 0.045105555660287885
+        },
+        "commonDates": {
+          "hierarchical": {
+            "n": 24,
+            "directionAccuracy": 0.5,
+            "signedMaePct": 7.033834619196618,
+            "zeroMaePct": 6.0447353539848585,
+            "oosR2": -0.36311981227165946,
+            "magnitudeMaePct": 5.069540266750917,
+            "magnitudeSpearman": 0.0052173913043478265,
+            "intervalCoverage": 0.7916666666666666,
+            "netPct": -1.110826841467125
+          },
+          "adaptive": {
+            "n": 24,
+            "directionAccuracy": 0.4583333333333333,
+            "signedMaePct": 6.199155056449231,
+            "zeroMaePct": 6.0447353539848585,
+            "oosR2": -0.03626968725367408,
+            "magnitudeMaePct": 5.285875747009206,
+            "magnitudeSpearman": 0.09130434782608696,
+            "intervalCoverage": 0.7083333333333334,
+            "netPct": 0.2949274058654952
+          }
+        }
+      }
+    },
+    "XLM": {
+      "1": {
+        "hierarchical": {
+          "n": 177,
+          "directionAccuracy": 0.5649717514124294,
+          "signedMaePct": 2.9314539092954437,
+          "zeroMaePct": 2.8812155207813195,
+          "oosR2": -0.03546107262380538,
+          "magnitudeMaePct": 2.387970771178237,
+          "magnitudeSpearman": -0.06973996295077994,
+          "intervalCoverage": 0.8361581920903954,
+          "netPct": 0.263566671497366
+        },
+        "adaptive": {
+          "n": 177,
+          "directionAccuracy": 0.4632768361581921,
+          "signedMaePct": 2.9945632604412205,
+          "zeroMaePct": 2.8812155207813195,
+          "oosR2": -0.07357352609226986,
+          "magnitudeMaePct": 2.3299520951614503,
+          "magnitudeSpearman": 0.17455766001281142,
+          "intervalCoverage": 0.807909604519774,
+          "netPct": 0.04427872949454845
+        },
+        "commonDates": {
+          "hierarchical": {
+            "n": 177,
+            "directionAccuracy": 0.5649717514124294,
+            "signedMaePct": 2.9314539092954437,
+            "zeroMaePct": 2.8812155207813195,
+            "oosR2": -0.03546107262380538,
+            "magnitudeMaePct": 2.387970771178237,
+            "magnitudeSpearman": -0.06973996295077994,
+            "intervalCoverage": 0.8361581920903954,
+            "netPct": 0.263566671497366
+          },
+          "adaptive": {
+            "n": 177,
+            "directionAccuracy": 0.4632768361581921,
+            "signedMaePct": 2.9945632604412205,
+            "zeroMaePct": 2.8812155207813195,
+            "oosR2": -0.07357352609226986,
+            "magnitudeMaePct": 2.3299520951614503,
+            "magnitudeSpearman": 0.17455766001281142,
+            "intervalCoverage": 0.807909604519774,
+            "netPct": 0.04427872949454845
+          }
+        }
+      },
+      "7": {
+        "hierarchical": {
+          "n": 24,
+          "directionAccuracy": 0.6666666666666666,
+          "signedMaePct": 8.000775439624102,
+          "zeroMaePct": 8.312187217436007,
+          "oosR2": -0.05504011455938951,
+          "magnitudeMaePct": 6.683743212502659,
+          "magnitudeSpearman": -0.11652173913043479,
+          "intervalCoverage": 0.8333333333333334,
+          "netPct": -1.5880443723392013
+        },
+        "adaptive": {
+          "n": 25,
+          "directionAccuracy": 0.28,
+          "signedMaePct": 8.813810913793914,
+          "zeroMaePct": 8.255535545913927,
+          "oosR2": -0.06962509594500443,
+          "magnitudeMaePct": 7.406135520574627,
+          "magnitudeSpearman": -0.4207692307692308,
+          "intervalCoverage": 0.8,
+          "netPct": -6.37247134534907
+        },
+        "commonDates": {
+          "hierarchical": {
+            "n": 24,
+            "directionAccuracy": 0.6666666666666666,
+            "signedMaePct": 8.000775439624102,
+            "zeroMaePct": 8.312187217436007,
+            "oosR2": -0.05504011455938951,
+            "magnitudeMaePct": 6.683743212502659,
+            "magnitudeSpearman": -0.11652173913043479,
+            "intervalCoverage": 0.8333333333333334,
+            "netPct": -1.5880443723392013
+          },
+          "adaptive": {
+            "n": 24,
+            "directionAccuracy": 0.2916666666666667,
+            "signedMaePct": 8.880092541832282,
+            "zeroMaePct": 8.312187217436007,
+            "oosR2": -0.06930580527259012,
+            "magnitudeMaePct": 7.441027041519611,
+            "magnitudeSpearman": -0.4330434782608696,
+            "intervalCoverage": 0.7916666666666666,
+            "netPct": -6.342328675180945
+          }
+        }
+      }
+    },
+    "XRP": {
+      "1": {
+        "hierarchical": {
+          "n": 177,
+          "directionAccuracy": 0.5141242937853108,
+          "signedMaePct": 1.8609788877255806,
+          "zeroMaePct": 1.8334507337856054,
+          "oosR2": 0.004733248202721363,
+          "magnitudeMaePct": 1.6549233535680952,
+          "magnitudeSpearman": -0.07293199563719464,
+          "intervalCoverage": 0.8192090395480226,
+          "netPct": 0.053674088221316286
+        },
+        "adaptive": {
+          "n": 177,
+          "directionAccuracy": 0.536723163841808,
+          "signedMaePct": 1.8611536576833796,
+          "zeroMaePct": 1.8334507337856054,
+          "oosR2": -0.0070183653091735465,
+          "magnitudeMaePct": 1.6775257133499726,
+          "magnitudeSpearman": -0.0949537750385208,
+          "intervalCoverage": 0.7966101694915254,
+          "netPct": -0.09378845929073765
+        },
+        "commonDates": {
+          "hierarchical": {
+            "n": 177,
+            "directionAccuracy": 0.5141242937853108,
+            "signedMaePct": 1.8609788877255806,
+            "zeroMaePct": 1.8334507337856054,
+            "oosR2": 0.004733248202721363,
+            "magnitudeMaePct": 1.6549233535680952,
+            "magnitudeSpearman": -0.07293199563719464,
+            "intervalCoverage": 0.8192090395480226,
+            "netPct": 0.053674088221316286
+          },
+          "adaptive": {
+            "n": 177,
+            "directionAccuracy": 0.536723163841808,
+            "signedMaePct": 1.8611536576833796,
+            "zeroMaePct": 1.8334507337856054,
+            "oosR2": -0.0070183653091735465,
+            "magnitudeMaePct": 1.6775257133499726,
+            "magnitudeSpearman": -0.0949537750385208,
+            "intervalCoverage": 0.7966101694915254,
+            "netPct": -0.09378845929073765
+          }
+        }
+      },
+      "7": {
+        "hierarchical": {
+          "n": 24,
+          "directionAccuracy": 0.5833333333333334,
+          "signedMaePct": 5.685005132214278,
+          "zeroMaePct": 5.926573419601671,
+          "oosR2": 0.004530877773790465,
+          "magnitudeMaePct": 4.752313776933545,
+          "magnitudeSpearman": 0.15043478260869564,
+          "intervalCoverage": 0.875,
+          "netPct": -0.5665847464748399
+        },
+        "adaptive": {
+          "n": 25,
+          "directionAccuracy": 0.48,
+          "signedMaePct": 6.022858360312873,
+          "zeroMaePct": 5.98215315167449,
+          "oosR2": -0.02302277431577493,
+          "magnitudeMaePct": 5.235652625936698,
+          "magnitudeSpearman": 0.22923076923076924,
+          "intervalCoverage": 0.84,
+          "netPct": -1.1616757763804877
+        },
+        "commonDates": {
+          "hierarchical": {
+            "n": 24,
+            "directionAccuracy": 0.5833333333333334,
+            "signedMaePct": 5.685005132214278,
+            "zeroMaePct": 5.926573419601671,
+            "oosR2": 0.004530877773790465,
+            "magnitudeMaePct": 4.752313776933545,
+            "magnitudeSpearman": 0.15043478260869564,
+            "intervalCoverage": 0.875,
+            "netPct": -0.5665847464748399
+          },
+          "adaptive": {
+            "n": 24,
+            "directionAccuracy": 0.4583333333333333,
+            "signedMaePct": 6.026691536371328,
+            "zeroMaePct": 5.926573419601671,
+            "oosR2": -0.03107259758162617,
+            "magnitudeMaePct": 5.206685563062812,
+            "magnitudeSpearman": 0.20434782608695654,
+            "intervalCoverage": 0.8333333333333334,
+            "netPct": -1.506581713788931
+          }
+        }
+      }
+    }
+  },
+  "limits": [
+    "Weekly samples use each native estimator’s anchor grid; compare candidate pairs on common dates.",
+    "Hierarchical partial pooling uses the seven tracked assets here, not the full production universe.",
+    "Magnitude is absolute point-return forecast, not prediction-interval quality."
+  ]
+}

@@ -50,3 +50,13 @@ next-env.d.ts
 # Reproducible, potentially large local research artifacts (CI uploads these).
 /signals-worker/reports/adaptive/
 /signals-worker/reports/hierarchical/
+
+/signals-worker/reports/tracked/
+/signals-worker/scripts/__pycache__/
+
+/signals-worker/reports/sessions/
+
+/signals-worker/reports/stable-basket/
+
+# Standalone signals test dependencies
+/signals-worker/node_modules/

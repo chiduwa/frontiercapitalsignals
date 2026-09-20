@@ -1,0 +1,90 @@
+{
+  "build": "2026-09-19T11:41:09.065Z",
+  "checkedAt": "2026-09-19T12:14:29.199Z",
+  "checks": [
+    {
+      "id": "model-freshness",
+      "level": "warn",
+      "ok": true,
+      "detail": "model build is 0.6h old (2026-09-19T11:41:09.065Z); the refresh dispatch chain should keep this under 1.75h"
+    },
+    {
+      "id": "price-freshness",
+      "level": "warn",
+      "ok": true,
+      "detail": "price tick is 3 min old; the Worker cron refreshes it every 5 min"
+    },
+    {
+      "id": "crypto-universe",
+      "level": "warn",
+      "ok": true,
+      "detail": "225 crypto assets screened (expected >= 150)"
+    },
+    {
+      "id": "stock-universe",
+      "level": "warn",
+      "ok": true,
+      "detail": "290 equities screened (expected >= 260)"
+    },
+    {
+      "id": "boards-populated",
+      "level": "fail",
+      "ok": true,
+      "detail": "board row counts: 10/10/10/10 — every board empty means the build produced nothing"
+    },
+    {
+      "id": "coingecko-feed",
+      "level": "fail",
+      "ok": true,
+      "detail": "CoinGecko is reported down by the build"
+    },
+    {
+      "id": "equity-feed",
+      "level": "warn",
+      "ok": true,
+      "detail": "equity coverage 290/290 (100%)"
+    },
+    {
+      "id": "gate-crypto",
+      "level": "fail",
+      "ok": true,
+      "detail": "0 crypto row(s) carry a direction while the class is unproven"
+    },
+    {
+      "id": "gate-crypto-horizon",
+      "level": "fail",
+      "ok": true,
+      "detail": "0 unproven crypto row(s) publish a trade timeframe"
+    },
+    {
+      "id": "gate-crypto-range",
+      "level": "fail",
+      "ok": true,
+      "detail": "0 unproven crypto row(s) publish a projected range"
+    },
+    {
+      "id": "gate-stock",
+      "level": "fail",
+      "ok": true,
+      "detail": "0 stock row(s) carry a direction while the class is unproven"
+    },
+    {
+      "id": "gate-stock-horizon",
+      "level": "fail",
+      "ok": true,
+      "detail": "0 unproven stock row(s) publish a trade timeframe"
+    },
+    {
+      "id": "gate-stock-range",
+      "level": "fail",
+      "ok": true,
+      "detail": "0 unproven stock row(s) publish a projected range"
+    },
+    {
+      "id": "research-registry-fresh",
+      "level": "warn",
+      "ok": true,
+      "detail": "research registry last moved 3h ago (2026-09-19T09:41:45.908Z) — Signals Discovery writes this daily, so a frozen registry means it is failing"
+    }
+  ]
+}

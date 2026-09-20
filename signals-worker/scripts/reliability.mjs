@@ -67,33 +67,14 @@ const OUTCOME_BATCH_STATEMENTS = 25;
 // docs in worker.js for the measured deadlock that forced the change. Only the
 // AGGREGATION of technique votes changed, which is why the compatibility list
 // below exists rather than a clean break.
-export const OUTCOME_MODEL_VERSION = 'confluence-v8';
+// v9: funding votes now require comparable source units. Older votes cannot
+// establish the corrected model's live track record.
+export const OUTCOME_MODEL_VERSION = 'confluence-v9';
 export const OUTCOME_LABEL_VERSION = 'direction-deadband-0.5pct-v1';
 
-// Model versions whose outcomes stay comparable across the v7 -> v8 weighting
-// change, for the series where that change provably cannot reach.
-//
-// In evaluateTechniques, `push(id, w, dir, note)` derives `dir` purely from the
-// technique's own branch logic over `m` — the weight `w` is carried alongside
-// it and only ever consumed when confluence() sums the panel. confluence()'s
-// returned `votes` array is `{id, dir}`; the weight is not in it. So a
-// technique's own directional record, its regime split, its pairwise combos,
-// and the market's realized direction are all bit-identical under either
-// weighting, and discarding 28,353 matured technique outcomes to honour a
-// version bump that cannot have touched them would be destroying evidence for
-// bookkeeping's sake.
-//
-// Confirmed live rather than assumed: all 27 non-composite techniques kept
-// voting normally right through the six days when every weight was 0 and the
-// composite series was dead.
-//
-// The composite series is the exception and is NOT listed here — it is a
-// weighted sum, so it changed meaning. Its loaders (loadCalibration,
-// loadDetailedCalibration, loadExcursionEvidence) and the range series it
-// sizes (loadRangeReliability) pin OUTCOME_MODEL_VERSION exactly, which
-// deliberately drops the 281 v7 composite rows. At 10 independent periods for
-// crypto and 4 for stocks they carried no weight anyway.
-export const WEIGHT_INDEPENDENT_MODEL_VERSIONS = ['confluence-v7', 'confluence-v8'];
+// The v9 change reaches a technique vote and every combination containing it.
+// Start a clean evidence cohort; do not pool v7/v8 into the corrected model.
+export const WEIGHT_INDEPENDENT_MODEL_VERSIONS = ['confluence-v9'];
 // A composite outcome expands to at most five statements (base reliability,
 // regime, pooled calibration, detailed calibration, ledger commit). Eight
 // outcomes therefore stay comfortably bounded while amortizing REST latency.
@@ -156,7 +137,7 @@ export async function loadReliability(env) {
            SUM(CASE WHEN dir = -1 THEN 1 ELSE 0 END) AS votes_down
     FROM forecast_outcomes
     WHERE series_kind = 'technique' AND aggregated = 1
-      AND model_version IN (?, ?) AND label_version = ?
+      AND model_version IN (${WEIGHT_INDEPENDENT_MODEL_VERSIONS.map(() => "?").join(", ")}) AND label_version = ?
       AND (series_key != 'composite' OR model_version = ?)
     GROUP BY asset_class, symbol, series_key, horizon_minutes
   `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION, OUTCOME_MODEL_VERSION]);
@@ -199,7 +180,7 @@ export async function loadReliability(env) {
            COUNT(DISTINCT substr(run_at, 1, 10)) AS effective_samples
     FROM forecast_outcomes
     WHERE series_kind = 'technique' AND aggregated = 1 AND dir IN (-1, 1)
-      AND model_version IN (?, ?) AND label_version = ?
+      AND model_version IN (${WEIGHT_INDEPENDENT_MODEL_VERSIONS.map(() => "?").join(", ")}) AND label_version = ?
       AND (series_key != 'composite' OR model_version = ?)
     GROUP BY asset_class, symbol, series_key, dir, horizon_minutes
   `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION, OUTCOME_MODEL_VERSION]);
@@ -230,7 +211,7 @@ export async function loadDirectionBaselines(env) {
            SUM(CASE WHEN actual_dir = -1 THEN 1 ELSE 0 END) AS n_down
     FROM forecast_outcomes
     WHERE series_kind = 'market' AND aggregated = 1
-      AND model_version IN (?, ?) AND label_version = ?
+      AND model_version IN (${WEIGHT_INDEPENDENT_MODEL_VERSIONS.map(() => "?").join(", ")}) AND label_version = ?
     GROUP BY asset_class, horizon_minutes
   `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION]);
   const out = {};
@@ -259,7 +240,7 @@ export async function loadTechniquePriors(env) {
            COUNT(DISTINCT substr(run_at, 1, 10)) AS effective_periods
     FROM forecast_outcomes
     WHERE series_kind = 'technique' AND aggregated = 1
-      AND model_version IN (?, ?) AND label_version = ?
+      AND model_version IN (${WEIGHT_INDEPENDENT_MODEL_VERSIONS.map(() => "?").join(", ")}) AND label_version = ?
     GROUP BY asset_class, series_key, horizon_minutes
   `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION]);
   const grouped = {};
@@ -297,7 +278,7 @@ export async function loadRegimeReliability(env) {
            SUM(correct) AS correct, COUNT(*) AS total
     FROM forecast_outcomes
     WHERE series_kind = 'technique' AND aggregated = 1 AND regime IS NOT NULL
-      AND model_version IN (?, ?) AND label_version = ?
+      AND model_version IN (${WEIGHT_INDEPENDENT_MODEL_VERSIONS.map(() => "?").join(", ")}) AND label_version = ?
     GROUP BY symbol, series_key, regime, horizon_minutes
   `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION]);
   // Average horizon accuracies and use only the deepest horizon as effective n.
@@ -331,7 +312,7 @@ export async function loadComboReliability(env) {
            SUM(correct) AS correct, COUNT(*) AS total
     FROM forecast_outcomes
     WHERE series_kind = 'combo' AND aggregated = 1
-      AND model_version IN (?, ?) AND label_version = ?
+      AND model_version IN (${WEIGHT_INDEPENDENT_MODEL_VERSIONS.map(() => "?").join(", ")}) AND label_version = ?
     GROUP BY symbol, series_key, horizon_minutes
   `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION]);
   const rows = [];
@@ -485,6 +466,7 @@ export function buildPublicationSnapshots(publicPayload, prices, runAt) {
 // Persists this run's per-asset price and per-technique directional votes,
 // to be scored once they mature (see evaluateMatured).
 export async function logRun(env, runAt, log) {
+  await d1(env, 'INSERT OR IGNORE INTO forecast_run_versions(run_at,model_version) VALUES(?,?)', [runAt, OUTCOME_MODEL_VERSION]);
   await forEachConcurrent(chunk(log.prices, CHUNK), D1_WRITE_CONCURRENCY, async (batch) => {
     const placeholders = batch.map(() => '(?,?,?,?)').join(',');
     const params = batch.flatMap((p) => [runAt, p.asset_class, p.symbol, p.price]);
@@ -537,6 +519,14 @@ export async function logRun(env, runAt, log) {
         basis = excluded.basis, last_seen_at = excluded.last_seen_at`,
       batch.flatMap((r) => [obsDate, r.symbol, r.name ?? null, r.price ?? null, r.mcap ?? null, r.volume ?? null, r.medianBarPct ?? null, r.chg24h ?? null, r.deviationPct ?? null, r.basis, runAt]));
   });
+  // Immutable raw matched-clock observations, including missingness/age flags.
+  // 9 bindings per row, at most 99 in one statement. Retain independent IDs.
+  await forEachConcurrent(chunk(log.marketFlow || [], 11), D1_WRITE_CONCURRENCY, async (batch) => {
+    await d1(env, `INSERT OR IGNORE INTO market_flow_observations
+      (observed_at,asset_id,symbol,asset_group,provider_at,volume_usd_24h,market_cap_usd,price_usd,quality)
+      VALUES ${batch.map(() => '(?,?,?,?,?,?,?,?,?)').join(',')}`,
+    batch.flatMap(r => [r.observedAt,r.id,r.symbol,r.group,r.providerAt,r.volume,r.mcap,r.price,r.quality]));
+  });
   for (const snapshot of log.publicationSnapshots || []) {
     await d1(env, `
       INSERT OR REPLACE INTO signal_publication_snapshots
@@ -561,7 +551,7 @@ export async function loadMoveStats(env) {
            SUM(return_pct) AS sum_pct, SUM(return_pct * return_pct) AS sum_pct_sq
     FROM forecast_outcomes
     WHERE series_kind = 'market' AND aggregated = 1 AND return_pct IS NOT NULL
-      AND model_version IN (?, ?) AND label_version = ?
+      AND model_version IN (${WEIGHT_INDEPENDENT_MODEL_VERSIONS.map(() => "?").join(", ")}) AND label_version = ?
     GROUP BY symbol, horizon_minutes
   `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION]);
   const out = {};
@@ -1072,6 +1062,18 @@ export async function aggregatePendingForecastOutcomes(env, nowIso) {
 // independent observations of it (the same correlation trap fixed in
 // horizonEstimate's confidence gate). Returns how many (symbol, technique,
 // horizon) outcomes were scored this call.
+export async function loadMaturedForecastRows(env, cutoff, h, query = d1) {
+  const col = EVAL_COLUMN[h];
+  if (!col) throw new Error('Unsupported maturity horizon');
+  const due = await query(env, `SELECT run_at, asset_class, symbol, technique_id, dir, score, regime FROM technique_votes
+    WHERE run_at <= ? AND ${col} = 0 AND EXISTS
+      (SELECT 1 FROM forecast_run_versions v WHERE v.run_at=technique_votes.run_at AND v.model_version=?) ORDER BY run_at`, [cutoff, OUTCOME_MODEL_VERSION]);
+  const dueRanges = await query(env, `SELECT run_at, asset_class, symbol, low, high FROM range_log
+    WHERE horizon_hours = ? AND run_at <= ? AND EXISTS
+      (SELECT 1 FROM forecast_run_versions v WHERE v.run_at=range_log.run_at AND v.model_version=?)`, [h, cutoff, OUTCOME_MODEL_VERSION]);
+  return { due, dueRanges };
+}
+
 export async function evaluateMatured(env, nowIso) {
   const now = new Date(nowIso).getTime();
   let evaluatedCount = 0;
@@ -1084,11 +1086,7 @@ export async function evaluateMatured(env, nowIso) {
   for (const h of HORIZONS_HOURS) {
     const cutoff = new Date(now - h * 3600 * 1000).toISOString();
     const col = EVAL_COLUMN[h];
-    const due = await d1(env, `SELECT run_at, asset_class, symbol, technique_id, dir, score, regime FROM technique_votes WHERE run_at <= ? AND ${col} = 0 ORDER BY run_at`, [cutoff]);
-    // Range predictions logged at this same horizon (see RANGE_LOG_HORIZONS_DAYS
-    // in worker.js) — each row matures once, at its own horizon_hours, so
-    // there's no evaluated flag to filter on here, just the cutoff.
-    const dueRanges = await d1(env, 'SELECT run_at, asset_class, symbol, low, high FROM range_log WHERE horizon_hours = ? AND run_at <= ?', [h, cutoff]);
+    const { due, dueRanges } = await loadMaturedForecastRows(env, cutoff, h);
     if (!due.length && !dueRanges.length) continue;
 
     // Deduplicate requests before querying: every technique vote for one
@@ -1513,25 +1511,51 @@ export async function evaluateTimeOfDay(env, nowIso, thisRunPrices) {
 const FUNDING_HISTORY_MIN_DAYS = 20;
 
 // { [symbol]: { fundingRates: sortedAscending[], openInterests: sortedAscending[] } }
-// from the permanent funding_rate_daily archive — consumed by
+// from provider-isolated snapshots (with uncontested legacy fallback) — consumed by
 // percentileRank (worker.js) to turn today's live funding/OI reading into
 // an asset-relative percentile. A symbol only gets an array once it has
 // FUNDING_HISTORY_MIN_DAYS real days on record; until then its entry is
 // omitted (not a thin/misleading array), same abstain-not-guess pattern
 // used throughout this engine.
 export async function loadFundingHistory(env) {
-  const rows = await d1(env, 'SELECT symbol, funding_rate, open_interest FROM funding_rate_daily');
+  const rows = await d1(env, `
+    SELECT symbol, funding_rate, open_interest, source, venue, contract_id FROM funding_snapshot_daily
+    WHERE source='coingecko' AND date<date('now')
+    UNION ALL
+    SELECT f.symbol, f.funding_rate, f.open_interest, f.source, NULL AS venue, NULL AS contract_id FROM funding_rate_daily f
+    WHERE f.source='coingecko' AND f.date<date('now') AND NOT EXISTS
+      (SELECT 1 FROM funding_snapshot_daily s WHERE s.symbol=f.symbol AND s.date=f.date AND s.source=f.source)`);
   const bySymbol = {};
   for (const r of rows) {
-    const rec = (bySymbol[r.symbol] ??= { fundingRates: [], openInterests: [] });
-    if (r.funding_rate != null) rec.fundingRates.push(r.funding_rate);
+    const rec = (bySymbol[r.symbol] ??= { fundingRates: [], openInterests: [], byVenue: {}, byInstrument: {} });
+    // The live map is CoinGecko; settlement fractions are a different measurement.
+    if (r.source === 'coingecko' && Number.isFinite(r.funding_rate)) rec.fundingRates.push(r.funding_rate);
     if (r.open_interest != null) rec.openInterests.push(r.open_interest);
+    if (r.source === 'coingecko' && r.venue) {
+      const venue = (rec.byVenue[r.venue] ??= { fundingRates: [], openInterests: [] });
+      if (Number.isFinite(r.funding_rate)) venue.fundingRates.push(r.funding_rate);
+      if (Number.isFinite(r.open_interest)) venue.openInterests.push(r.open_interest);
+      if (r.contract_id) {
+        const instrument = (rec.byInstrument[JSON.stringify([r.venue,r.contract_id])] ??= { fundingRates: [], openInterests: [] });
+        if (Number.isFinite(r.funding_rate)) instrument.fundingRates.push(r.funding_rate);
+        if (Number.isFinite(r.open_interest)) instrument.openInterests.push(r.open_interest);
+      }
+    }
   }
   const out = {};
   for (const [symbol, rec] of Object.entries(bySymbol)) {
     const fundingRates = rec.fundingRates.length >= FUNDING_HISTORY_MIN_DAYS ? rec.fundingRates.slice().sort((a, b) => a - b) : null;
     const openInterests = rec.openInterests.length >= FUNDING_HISTORY_MIN_DAYS ? rec.openInterests.slice().sort((a, b) => a - b) : null;
-    if (fundingRates || openInterests) out[symbol] = { fundingRates, openInterests };
+    const byVenue = {};
+    for (const [name,v] of Object.entries(rec.byVenue)) byVenue[name] = {
+      fundingRates: v.fundingRates.length >= FUNDING_HISTORY_MIN_DAYS ? v.fundingRates.sort((a,b)=>a-b) : null,
+      openInterests: v.openInterests.length >= FUNDING_HISTORY_MIN_DAYS ? v.openInterests.sort((a,b)=>a-b) : null
+    };
+    const byInstrument = Object.fromEntries(Object.entries(rec.byInstrument).map(([name,v]) => [name, {
+      fundingRates: v.fundingRates.length >= FUNDING_HISTORY_MIN_DAYS ? v.fundingRates.sort((a,b)=>a-b) : null,
+      openInterests: v.openInterests.length >= FUNDING_HISTORY_MIN_DAYS ? v.openInterests.sort((a,b)=>a-b) : null
+    }]));
+    if (fundingRates || openInterests) out[symbol] = { fundingRates, openInterests, byVenue, byInstrument };
   }
   return out;
 }
