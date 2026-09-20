@@ -59,4 +59,5 @@ INSERT OR IGNORE INTO d1_migrations (name) VALUES
   ('0042_hierarchical_research.sql'),
   ('0043_funding_settlement_daily.sql'),
   ('0044_session_flow_research.sql'),
-  ('0045_liquidation_observations.sql');
+  ('0045_liquidation_observations.sql'),
+  ('0046_session_rule_freezes.sql');

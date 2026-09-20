@@ -336,10 +336,33 @@ historical stability.
 
 ### Next experiments, in priority order
 
-- **Prospective confirmation:** freeze the 2026-09-19 hypotheses and record
-  forecasts before outcomes occur. Analyze the new period separately from the
-  growing, repeatedly inspected 2026 holdout. Do not choose a new hour/window
-  from the old holdout and still call that same period out-of-sample.
+- **Prospective confirmation — the freeze is now BUILT; the evidence is not.**
+  `scripts/session-freeze.mjs` runs at the end of `signals-session-research.yml`
+  and writes every candidate timing rule into `session_rule_freezes`
+  (migration 0046) with its exact parameters and an `evaluation_starts_at` set
+  to the day after the study's as-of date. The first freeze covers **230 rules**
+  from the September 20 study — 126 directional, 104 activity-only — of which
+  the study supported 16; the other 214 are frozen deliberately as the control
+  group, because freezing only the winners would throw away the family-wise
+  correction the study already computed.
+
+  The table is append-only and the writer uses `ON CONFLICT DO NOTHING`, so a
+  rerun cannot move an existing freeze. A study that re-picks 09:00 instead of
+  10:00 produces a **different `rule_id`** and therefore a new row with its own
+  later start date — which is precisely what stops "do not choose a new window
+  from the old holdout and still call it out-of-sample" from happening by
+  accident. `claim_type` is a CHECK constraint, not a convention: activity
+  rules say only *when* moves are larger and can never acquire a side.
+
+  **What is still missing is the scoring pass.** Nothing yet reads this table
+  and compares a frozen rule against outcomes after its start date. Write that
+  next, and make it refuse any observation dated on or before
+  `evaluation_starts_at`. Until it exists and has accumulated enough
+  post-freeze observations, every timing number on the page remains
+  retrospective and must keep saying so. The earliest any of these rules can
+  show real prospective evidence is **2026-09-21 onward**; do not shorten that
+  wait by reaching back into the 2026 holdout, which has now been inspected
+  many times over and is no longer out-of-sample in any meaningful sense.
 - **Timing:** retain activity and direction separately. Add 30-minute bars for
   the exact NYSE opening interval, genuine exchange holiday/early-close
   calendars, US/UK DST-mismatch weeks, funding-settlement clocks, and scheduled

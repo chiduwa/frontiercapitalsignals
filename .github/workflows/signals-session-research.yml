@@ -58,6 +58,25 @@ jobs:
         run: |
           node scripts/session-context.mjs publish reports/sessions/results/session-report.json
           node scripts/session-context.mjs publish reports/sessions/results/calendar-report.json
+
+      # Record WHAT today's rules are, before their outcomes exist.
+      #
+      # Separate step, and deliberately after publication: the freeze is the
+      # only part of this pipeline whose value is destroyed by being late, but
+      # it must never be able to take publication down with it. Append-only and
+      # idempotent, so a rerun re-freezes nothing -- the whole point is that an
+      # existing rule keeps its original start date no matter how often the
+      # study is recomputed. See scripts/session-freeze.mjs.
+      - name: Freeze today's timing rules for prospective evaluation
+        working-directory: signals-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+        run: |
+          node scripts/session-freeze.mjs \
+            reports/sessions/results/session-report.json \
+            reports/sessions/results/calendar-report.json
       - name: Collect the named stablecoin basket and CMC100 benchmark
         working-directory: signals-worker
         run: |
