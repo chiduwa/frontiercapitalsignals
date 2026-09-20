@@ -340,10 +340,19 @@ historical stability.
   `scripts/session-freeze.mjs` runs at the end of `signals-session-research.yml`
   and writes every candidate timing rule into `session_rule_freezes`
   (migration 0046) with its exact parameters and an `evaluation_starts_at` set
-  to the day after the study's as-of date. The first freeze covers **230 rules**
-  from the September 20 study — 126 directional, 104 activity-only — of which
-  the study supported 16; the other 214 are frozen deliberately as the control
-  group, because freezing only the winners would throw away the family-wise
+  to the day after the study's as-of date.
+
+  **Deployed 2026-09-20; not yet run.** Migration 0046 is applied and the step
+  is wired, but `signals-session-research.yml` is on a Monday 10:41 UTC cron,
+  so the first freeze is written **2026-09-22** against that day's study, with
+  evaluation starting 2026-09-23. Nothing is banked until that run completes —
+  a green deploy is not a freeze. Dry-running the extractor over the frozen
+  September 20 report yields **230 rules** (126 directional, 104 activity-only,
+  16 of them study-supported), which is the expected order of magnitude to
+  check the first real run against, not a record of collected evidence.
+
+  The 214 unsupported rules are frozen deliberately as the control group,
+  because freezing only the winners would throw away the family-wise
   correction the study already computed.
 
   The table is append-only and the writer uses `ON CONFLICT DO NOTHING`, so a
@@ -360,9 +369,15 @@ historical stability.
   `evaluation_starts_at`. Until it exists and has accumulated enough
   post-freeze observations, every timing number on the page remains
   retrospective and must keep saying so. The earliest any of these rules can
-  show real prospective evidence is **2026-09-21 onward**; do not shorten that
-  wait by reaching back into the 2026 holdout, which has now been inspected
-  many times over and is no longer out-of-sample in any meaningful sense.
+  show real prospective evidence is **2026-09-23 onward**, and a useful sample
+  is months away; do not shorten that wait by reaching back into the 2026
+  holdout, which has now been inspected many times over and is no longer
+  out-of-sample in any meaningful sense.
+
+  First check on 2026-09-22: confirm the run wrote roughly 230 rows, then
+  confirm a SECOND run adds zero. A rerun that re-freezes anything means
+  `rule_id` is not stable and the start dates are resetting — which would make
+  every number this table later produces worthless while looking perfectly fine.
 - **Timing:** retain activity and direction separately. Add 30-minute bars for
   the exact NYSE opening interval, genuine exchange holiday/early-close
   calendars, US/UK DST-mismatch weeks, funding-settlement clocks, and scheduled
