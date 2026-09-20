@@ -9,14 +9,42 @@ name: Signals Replay
 # blending two models' evidence. Keeping the runner wired up means re-answering
 # "does this model have skill" is a dispatch, not an afternoon.
 #
-# Deliberately manual + weekly rather than daily. The archive only grows by one
-# bar a day, so a daily run would re-walk thousands of anchors to add a handful
-# of new ones; signals-daily.yml already tops up the live ledger at that cadence.
+# That checkpoint-key property is exactly what makes this job urgent right now
+# rather than occasional: the v8 -> v9 move on September 20 started a fresh
+# replay AND invalidated every outcome the engine had accumulated, so this is
+# currently the only thing that can restore a published direction this side of
+# February. The schedule note below has the numbers.
 on:
   schedule:
-    # Sundays 04:11 UTC. Off signals-daily's 02:37 and the hourly :13 mark, and
-    # after D1's 00:00 write-quota reset so a long run starts with a full budget.
-    - cron: "11 4 * * 0"
+    # 04:11 UTC DAILY, not weekly. Off signals-daily's 02:37 and the hourly :13
+    # mark, and after D1's 00:00 write-quota reset so a long run starts with a
+    # full budget.
+    #
+    # The weekly cadence above was right for a BUILT ledger and wrong for an
+    # empty one, and the ledger is empty: the September 20 release moved
+    # OUTCOME_MODEL_VERSION to confluence-v9 and narrowed
+    # WEIGHT_INDEPENDENT_MODEL_VERSIONS to ['confluence-v9'], so every
+    # accumulated v7/v8 outcome stopped counting at once. That is the correct
+    # call scientifically — v9 is a different model and blending their outcomes
+    # would be worse — but it means assetClassSkill is back to needing
+    # CLASS_SKILL_MIN_SAMPLES (150) DISTINCT run_at days of matured composite
+    # outcomes, and live accrual adds one day per day. That is five months of
+    # every direction withheld and the trading bot able to open nothing.
+    #
+    # This job is the designed way out (see commit 742421f, "break the
+    # reliability deadlock and replay history instead of waiting for it"): it
+    # writes composite outcomes with HISTORICAL run_at dates, so one run can
+    # supply hundreds of distinct days. It is checkpointed per
+    # (asset_class, horizon, model_version) and budgeted, so a daily run
+    # resumes the backfill instead of re-walking it, and a run that hits its
+    # budget or the 120-minute cap costs a day rather than a week.
+    #
+    # Once classSkill publishes again, daily is cheap rather than useful — the
+    # archive grows by one bar a day — so this may go back to "11 4 * * 0"
+    # then. It is not a threshold change either way: nothing here lowers a
+    # publication gate, it only stops the engine waiting on evidence it could
+    # have computed.
+    - cron: "11 4 * * *"
   workflow_dispatch:
     inputs:
       asset_class:
