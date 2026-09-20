@@ -1,0 +1,12 @@
+{
+  "name": "fcs-multi-market-research-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test.mjs",
+    "collect": "node collect.mjs",
+    "research": "node research.mjs",
+    "scan": "node scan.mjs"
+  }
+}

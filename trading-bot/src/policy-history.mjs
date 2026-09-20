@@ -20,7 +20,14 @@ export const referenceEventId = (intentId, hours) => createHash('sha256')
 export function referenceWindow(intent, horizonHours, nowMs) {
   const created = Date.parse(intent?.created_at);
   const observed = Date.parse(intent?.signal_price_at);
-  if (!intent?.client_order_id || !/^[A-Z0-9_]{2,35}USDT$/.test(intent.symbol || '')
+  // Symbol SHAPE, not a whitelist of what we happen to recognise. Binance
+  // lists 15 single-character base assets (TUSDT, 4USDT, VUSDT) and five
+  // CJK-named perps (币安人生USDT, 龙虾USDT), so requiring 2+ ASCII uppercase
+  // characters silently dropped 20 of the 856 live USDT perps out of policy
+  // research — a measurement gap, not a trading block, which is why nothing
+  // ever failed loudly. Unicode letters/digits still exclude whitespace,
+  // punctuation and URL metacharacters.
+  if (!intent?.client_order_id || !/^[\p{L}\p{N}_]{1,35}USDT$/u.test(intent.symbol || '')
       || !['BUY', 'SELL'].includes(intent.side)
       || !['crypto', 'stock', 'commodity'].includes(intent.asset_class)
       || !HORIZONS.includes(horizonHours) || !Number.isFinite(created)

@@ -1,0 +1,62 @@
+{
+  "version": "multi-market-research-v1",
+  "mode": "historical-snapshot",
+  "liveEligible": false,
+  "observations": [
+    {
+      "symbol": "SPY",
+      "observedAt": 1789070400000,
+      "ageAtCollectionHours": 11.90659111111111,
+      "enter": false,
+      "exit": false,
+      "reason": "deviation-from-20-bar-mean",
+      "atr": 0.9118510656702272,
+      "executable": false,
+      "source": "Yahoo chart SPY; research price proxy"
+    },
+    {
+      "symbol": "QQQ",
+      "observedAt": 1789070400000,
+      "ageAtCollectionHours": 11.90659111111111,
+      "enter": false,
+      "exit": false,
+      "reason": "deviation-from-20-bar-mean",
+      "atr": 1.1663531314941464,
+      "executable": false,
+      "source": "Yahoo chart QQQ; research price proxy"
+    },
+    {
+      "symbol": "BTC/USD",
+      "observedAt": 1789110000000,
+      "ageAtCollectionHours": 0.9065911111111111,
+      "enter": false,
+      "exit": false,
+      "reason": "prior-20-bar-channel-and-volume",
+      "atr": 350.39539036930864,
+      "executable": false,
+      "source": "Coinbase Exchange BTC-USD hourly OHLCV; proxy for Alpaca execution"
+    },
+    {
+      "symbol": "GLD",
+      "observedAt": 1789070400000,
+      "ageAtCollectionHours": 11.90659111111111,
+      "enter": false,
+      "exit": false,
+      "reason": "50-200-ema-cross",
+      "atr": 4.8160037719852165,
+      "executable": false,
+      "source": "Yahoo chart GLD; research price proxy"
+    },
+    {
+      "symbol": "USO",
+      "observedAt": 1789070400000,
+      "ageAtCollectionHours": 11.90659111111111,
+      "enter": false,
+      "exit": false,
+      "reason": "50-200-ema-cross",
+      "atr": 2.9358905085714655,
+      "executable": false,
+      "source": "Yahoo chart USO; research price proxy"
+    }
+  ]
+}

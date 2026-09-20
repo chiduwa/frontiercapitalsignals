@@ -16,6 +16,14 @@ assert.equal(w.mature, true);
 assert.equal(referenceWindow(intent, 24, now).mature, false);
 assert.equal(referenceWindow({ ...intent, signal_price_at: '2025-01-01' }, 1, now), null);
 assert.equal(referenceWindow({ ...intent, symbol: 'SOLUSDT?evil=1' }, 1, now), null);
+// Every real Binance USDT perp must pass the shape check. Binance lists 15
+// single-character base assets and five CJK-named perps; a 2+ ASCII-uppercase
+// rule rejected 20 of 856 live symbols, which dropped them out of policy
+// research without ever failing loudly.
+for (const sym of ['TUSDT', '4USDT', 'VUSDT', '\u5e01\u5b89\u4eba\u751fUSDT', '\u9f99\u867eUSDT'])
+  assert.ok(referenceWindow({ ...intent, symbol: sym }, 1, now), `real Binance perp rejected: ${sym}`);
+for (const sym of ['USDT', 'BTC USDT', 'BTC/USDT', 'BTC.USDT', 'btcusdt', 'SOLUSD', ''])
+  assert.equal(referenceWindow({ ...intent, symbol: sym }, 1, now), null, `malformed symbol accepted: ${sym}`);
 assert.equal(REGISTERED_POLICIES.length, 24);
 const info = { symbols: [{ symbol: 'SOLUSDT', baseAsset: 'SOL', quoteAsset: 'USDT', marginAsset: 'USDT',
   status: 'TRADING', underlyingType: 'COIN', contractType: 'PERPETUAL' }] };

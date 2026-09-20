@@ -1,5 +1,10 @@
 # FrontierCapitalSignals trading bot
 
+For the September 2026 Facebook five-market bot investigation, see the separate
+[multi-market research bot](../multi-market-bot/README.md) and its
+[claim assessment and measured results](../multi-market-bot/research/ASSESSMENT.md).
+Those experimental rules do not authorize entries in this futures bot.
+
 Autonomous Binance USDS-M Futures bot, driven by the live signals at
 [frontiercapitalsignals.com/signals](https://frontiercapitalsignals.com/signals).
 Runs as a one-shot script fired every 5 minutes by a systemd timer on a
