@@ -1,0 +1,46 @@
+{
+  "releaseCommit": "835c4864c118a4956ec1666987f9612252b7b834",
+  "files": {
+    "calendar-report.json": "48a5bd1b22c8ffea414812f2c7d64f747bfb58f492ff925c1bdb89b48ab403f5",
+    "calendar-report.md": "9c711fb37e8ad472431966f198205106502c65838384369c7239940811ff3f43",
+    "collectors.json": "e8d580a2e4367004399c1e810314781ebf9ba5405849fc3eb5af5d61d299b26a",
+    "d1-proof.json": "bae7b8a786b34d83768d66121f0f6041be97a8bc573f719b1c05c4eab64c5efc",
+    "funding-coverage.json": "f962f2f0f65ea9457a906f75371b99d5aa8956592d8753e3eb64c2b22a0589e9",
+    "funding-source-check.json": "acac4b1d2f7842394aee1ff84b798800451991cbcb4c4515dc91b0093971088d",
+    "live-render.json": "5d6cc849b4901ab7c5972cbd2eafb3052c639a388ba0a4bf90c2183941230f55",
+    "page-health.txt": "5eebf5b5d20557c086978f0a83030d532ff79697f7c3b8e1f151da32dee5e29d",
+    "session-report.json": "91f775517848ec5cf28f0140011994fa77383cf59a00f0efdf241adfa7776692",
+    "session-report.md": "9e43783c8b6380a0108965d5d8c31b64de21bae9d521549a7d57a6e01830106f",
+    "stable-basket-report.json": "53c918869228ebcf0ecfd5513324ace337ae19c0007daf128c4cde4acd85921f",
+    "stable-basket-report.md": "03ce37a7f1b32e667ba8ab688ab5c49275dc2f0e69c6e89f56b08b69040f19e2"
+  },
+  "workflows": [
+    {
+      "id": 35510938477,
+      "name": "Signals Worker Deploy",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "835c4864c118a4956ec1666987f9612252b7b834",
+      "html_url": "https://github.com/chiduwa/frontiercapitalsignals/actions/runs/35510938477",
+      "updated_at": "2026-09-20T12:35:47Z"
+    },
+    {
+      "id": 35510956428,
+      "name": "Signals Session and Stablecoin Research",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "835c4864c118a4956ec1666987f9612252b7b834",
+      "html_url": "https://github.com/chiduwa/frontiercapitalsignals/actions/runs/35510956428",
+      "updated_at": "2026-09-20T12:42:33Z"
+    },
+    {
+      "id": 35486684309,
+      "name": "Signals Tracked Asset Audit",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "dbe95449cf08b1e6029e6a8b1a9999ba17afbf02",
+      "html_url": "https://github.com/chiduwa/frontiercapitalsignals/actions/runs/35486684309",
+      "updated_at": "2026-09-20T03:30:14Z"
+    }
+  ]
+}

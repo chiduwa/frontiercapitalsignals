@@ -1,6 +1,6 @@
 # FCS tracked-asset prediction and data audit — 2026-09-19
 
-> **Collector recovery, 2026-09-20 03:20 UTC:** the owner replaced the Cloudflare credential. D1 authentication and both data collectors now work. The funding service completed successfully at 02:11:59 UTC; all seven favorites have completed-day records through September 19. HBAR was excluded by the default top-40 OI ranking, so a tested, narrowly scoped watchlist change was installed on Oracle and only `fcs-oi-sampler.service` was restarted. All seven then had samples about 20–21 seconds old and zero invalid recent contract/price rows. The default list still contains at most 40 assets, with all seven favorites pinned. No trading service or model release was performed. Full historical funding repair and the broader research rollout remain pending. [Verification](research-2026-09-19/collector-restoration-2026-09-20.json).
+> **Release update, 2026-09-20:** the broader worker, data-integrity fixes, research workflows and four research/explanation panels are deployed. Migrations 0043–0045 are applied; Oracle funding/OI writes are restored, all seven favorites are pinned in the OI sampler, and 14,630 canonical funding days were backfilled; settlement spot-checks passed for each asset. New model candidates remain research-only. See [release verification and remaining limits](RELEASE_VERIFICATION_2026_09_20.md).
 
 
 The seven always-tracked assets are BTC, ETH, SOL, XLM, XRP, HYPE and HBAR.

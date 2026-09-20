@@ -1,0 +1,61 @@
+{
+  "checkedAt": "2026-09-20T03:30:42.421Z",
+  "checks": [
+    {
+      "symbol": "BTC",
+      "day": "2026-09-18",
+      "sourceSettlements": 3,
+      "storedSettlements": 3,
+      "rateSum": 0.00022525,
+      "passed": true
+    },
+    {
+      "symbol": "ETH",
+      "day": "2026-09-18",
+      "sourceSettlements": 3,
+      "storedSettlements": 3,
+      "rateSum": 0.00021457000000000003,
+      "passed": true
+    },
+    {
+      "symbol": "SOL",
+      "day": "2026-09-18",
+      "sourceSettlements": 3,
+      "storedSettlements": 3,
+      "rateSum": 0.00030000000000000003,
+      "passed": true
+    },
+    {
+      "symbol": "XLM",
+      "day": "2026-09-18",
+      "sourceSettlements": 3,
+      "storedSettlements": 3,
+      "rateSum": 0.00030000000000000003,
+      "passed": true
+    },
+    {
+      "symbol": "XRP",
+      "day": "2026-09-18",
+      "sourceSettlements": 3,
+      "storedSettlements": 3,
+      "rateSum": 0.00011986000000000001,
+      "passed": true
+    },
+    {
+      "symbol": "HYPE",
+      "day": "2026-09-18",
+      "sourceSettlements": 6,
+      "storedSettlements": 6,
+      "rateSum": 0.00030000000000000003,
+      "passed": true
+    },
+    {
+      "symbol": "HBAR",
+      "day": "2026-09-18",
+      "sourceSettlements": 3,
+      "storedSettlements": 3,
+      "rateSum": 0.00019835000000000002,
+      "passed": true
+    }
+  ]
+}

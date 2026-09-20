@@ -1,6 +1,6 @@
 # Prediction research handoff and rollout
 
-> **Collector recovery, 2026-09-20 03:20 UTC:** the owner replaced the Cloudflare credential. D1 authentication and both data collectors now work. The funding service completed successfully at 02:11:59 UTC; all seven favorites have completed-day records through September 19. HBAR was excluded by the default top-40 OI ranking, so a tested, narrowly scoped watchlist change was installed on Oracle and only `fcs-oi-sampler.service` was restarted. All seven then had samples about 20–21 seconds old and zero invalid recent contract/price rows. The default list still contains at most 40 assets, with all seven favorites pinned. No trading service or model release was performed. Full historical funding repair and the broader research rollout remain pending. [Verification](research-2026-09-19/collector-restoration-2026-09-20.json).
+> **Release update, 2026-09-20:** the broader worker, data-integrity fixes, research workflows and four research/explanation panels are deployed. Migrations 0043–0045 are applied; Oracle funding/OI writes are restored, all seven favorites are pinned in the OI sampler, and 14,630 canonical funding days were backfilled; settlement spot-checks passed for each asset. New model candidates remain research-only. See [release verification and remaining limits](RELEASE_VERIFICATION_2026_09_20.md).
 
 
 Start with [the September 19 audit](TRACKED_ASSET_AUDIT_2026_09_19.md).
@@ -35,10 +35,12 @@ Replace `--as-of` with the desired cutoff; never compare changed histories as
 though they were the same experiment. Credentials are handled by Wrangler's
 existing login or the standard D1 environment variables; do not print them.
 
-## 1. Release the implemented fixes as one coherent change
+## 1. Completed release and follow-up monitoring
 
-Local changes have **not been deployed**. Do not assume the live site, Actions
-checkout or Oracle collector already uses them.
+The release and one-off funding repair below were executed September 20;
+see the release verification for evidence. Preserve these instructions for
+reproduction. Two normal daily and weekly cycles still need observation;
+one successful manual run does not establish long-term feed reliability.
 
 1. Run the verification commands below and release the corresponding worker,
    scripts, tests and workflows together through the repository's normal path.
@@ -47,11 +49,10 @@ checkout or Oracle collector already uses them.
    `0044_session_flow_research.sql` before the new collector
    runs. Existing deployment workflow applies migrations before worker deploy;
    `schema.sql` and the fresh-database migration baseline are also updated.
-3. Refresh the Oracle host's `/opt/fcs` checkout using its existing procedure.
-   This host's endpoint reachability was documented by earlier deployments;
-   it was not accessed or revalidated during this audit. Obtain its actual
-   host/access details from the operator if unavailable. Do not reroute around
-   a provider's access restrictions.
+3. Oracle received the narrowly scoped funding collector and OI-watchlist
+   changes with backups. Both services and Binance/D1 reachability were
+   revalidated. Future deployments must preserve the trading service and
+   existing runtime lock; do not replace the whole checkout indiscriminately.
 4. Verify `fcs-binance-collector.timer` and its service are active, inspect recent
    success/failure logs, then run the controlled backfill below under the existing
    runtime lock. Do not change orders or stop the trading service for research.
@@ -67,10 +68,10 @@ fresh prices/derivatives, canonical funding counts, coherent source units and
 visible per-asset warnings for any remaining gaps. An HTTP success or green
 workflow alone is not acceptance.
 
-## 2. Repair and validate funding first
+## 2. Canonical funding repaired; retain source-isolation rules
 
-The current archive is not clean enough to conclude which funding features
-work. `funding_rate_daily` contains snapshots and settlement means, and some
+The seven-asset canonical history was repaired September 20. Legacy history
+remains unsuitable for pooling indiscriminately across measurement types. `funding_rate_daily` contains snapshots and settlement means, and some
 Binance-labeled values were overwritten by snapshots. Never multiply the old
 mean by three and call it daily carry; cadence can change.
 
@@ -284,8 +285,8 @@ historical stability.
    Funding cadence normalization is still required for comparisons across
    contracts or cadence changes; storing a provider rate does not solve that.
 6. Inspect two completed weekly artifacts and two normal daily collections
-   before calling the ongoing path operational. None of these release steps
-   was executed against production in this local audit.
+   before declaring sustained collection reliability. The release steps were
+   executed September 20; the two-cycle observation period remains open.
 
 ### Next experiments, in priority order
 

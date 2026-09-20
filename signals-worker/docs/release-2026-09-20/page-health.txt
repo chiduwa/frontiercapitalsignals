@@ -1,0 +1,23 @@
+health check scope=page origin=https://frontiercapitalsignals.com
+
+  ok    page-status
+  ok    page-content-type
+  ok    page-security-headers
+  ok    page-scripts-parse
+  ok    page-structured-data
+  ok    page-canonical
+  ok    page-disclaimer
+  ok    render-no-errors
+  ok    render-rows
+  ok    render-chain-complete
+  ok    render-controls
+  ok    render-freshness-strip
+  ok    render-gate
+  ok    site/
+  ok    site/intelligence
+  ok    site/signals/api/feed
+  ok    deploy-freshness
+  ok    deploy-reached-production
+
+18 ok, 0 warning(s), 0 failure(s)
+HEALTH OK

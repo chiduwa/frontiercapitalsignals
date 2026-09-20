@@ -1,0 +1,102 @@
+{
+  "checkedAt": "2026-09-20T12:47:30.270Z",
+  "writes": [
+    {
+      "category": "snapshots",
+      "latest": "2026-09-20T07:59:11.903Z",
+      "n": 265
+    },
+    {
+      "category": "flows",
+      "latest": "2026-09-20T12:40:07.410Z",
+      "n": 207
+    },
+    {
+      "category": "forecast_versions",
+      "latest": "2026-09-20T12:40:07.410Z",
+      "n": 10
+    }
+  ],
+  "research": [
+    {
+      "version": "calendar-extremes-v1",
+      "latest": "2026-09-20",
+      "n": 2
+    },
+    {
+      "version": "session-flow-v1",
+      "latest": "2026-09-20",
+      "n": 2
+    },
+    {
+      "version": "stable-basket-v1",
+      "latest": "2026-09-20",
+      "n": 2
+    }
+  ],
+  "priceFlags": [
+    {
+      "symbol": "HBAR",
+      "date": "2026-08-23",
+      "open": null,
+      "high": 0.07813018560409546,
+      "low": 0.07693551480770111,
+      "close": 0.07673999667167664,
+      "source": "yahoo"
+    },
+    {
+      "symbol": "HBAR",
+      "date": "2026-09-05",
+      "open": 0.07828982919454575,
+      "high": 0.07975244522094727,
+      "low": 0.07828982919454575,
+      "close": 0.07986000180244446,
+      "source": "yahoo"
+    },
+    {
+      "symbol": "XLM",
+      "date": "2026-08-02",
+      "open": null,
+      "high": 0.17647551000118256,
+      "low": 0.17049282789230347,
+      "close": 0.1766660064458847,
+      "source": "yahoo"
+    },
+    {
+      "symbol": "XLM",
+      "date": "2026-08-20",
+      "open": null,
+      "high": 0.17273876070976257,
+      "low": 0.16859596967697144,
+      "close": 0.16763600707054138,
+      "source": "yahoo"
+    },
+    {
+      "symbol": "XLM",
+      "date": "2026-08-23",
+      "open": null,
+      "high": 0.19937026500701904,
+      "low": 0.19440725445747375,
+      "close": 0.19407400488853455,
+      "source": "yahoo"
+    },
+    {
+      "symbol": "XLM",
+      "date": "2026-09-05",
+      "open": 0.17949917912483215,
+      "high": 0.18286941945552826,
+      "low": 0.17874711751937866,
+      "close": 0.18325099349021912,
+      "source": "yahoo"
+    },
+    {
+      "symbol": "XRP",
+      "date": "2026-08-30",
+      "open": 1.3966861963272095,
+      "high": 1.4295456409454346,
+      "low": 1.385711669921875,
+      "close": 1.3839999437332153,
+      "source": "yahoo"
+    }
+  ]
+}

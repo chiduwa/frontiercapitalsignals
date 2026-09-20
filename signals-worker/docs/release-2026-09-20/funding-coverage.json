@@ -1,0 +1,73 @@
+[
+  {
+    "results": [
+      {
+        "symbol": "BTC",
+        "first_date": "2019-09-10",
+        "last_date": "2026-09-19",
+        "days": 2567,
+        "settlements": 7700
+      },
+      {
+        "symbol": "ETH",
+        "first_date": "2019-11-27",
+        "last_date": "2026-09-19",
+        "days": 2489,
+        "settlements": 7466
+      },
+      {
+        "symbol": "HBAR",
+        "first_date": "2021-03-17",
+        "last_date": "2026-09-19",
+        "days": 2013,
+        "settlements": 6038
+      },
+      {
+        "symbol": "HYPE",
+        "first_date": "2025-05-30",
+        "last_date": "2026-09-19",
+        "days": 478,
+        "settlements": 2864
+      },
+      {
+        "symbol": "SOL",
+        "first_date": "2020-09-13",
+        "last_date": "2026-09-19",
+        "days": 2198,
+        "settlements": 6667
+      },
+      {
+        "symbol": "XLM",
+        "first_date": "2020-01-19",
+        "last_date": "2026-09-19",
+        "days": 2436,
+        "settlements": 7306
+      },
+      {
+        "symbol": "XRP",
+        "first_date": "2020-01-06",
+        "last_date": "2026-09-19",
+        "days": 2449,
+        "settlements": 7346
+      }
+    ],
+    "success": true,
+    "meta": {
+      "served_by": "v3-prod",
+      "served_by_region": "ENAM",
+      "served_by_colo": "IAD",
+      "served_by_primary": true,
+      "timings": {
+        "sql_duration_ms": 11.0933
+      },
+      "duration": 11.0933,
+      "changes": 0,
+      "last_row_id": 424427,
+      "changed_db": false,
+      "size_after": 1712238592,
+      "rows_read": 14630,
+      "rows_written": 0,
+      "total_attempts": 1
+    }
+  }
+]

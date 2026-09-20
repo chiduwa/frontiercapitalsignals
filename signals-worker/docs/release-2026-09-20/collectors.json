@@ -1,0 +1,84 @@
+{
+  "checkedAt": "2026-09-20T12:47:04.961Z",
+  "d1": "authenticated",
+  "invalidRecentOiRows": 0,
+  "assets": [
+    {
+      "symbol": "BTC",
+      "lastOiAt": "2026-09-20T12:46:52.745Z",
+      "oiAgeSeconds": 12,
+      "recentSamples": 30,
+      "funding": {
+        "symbol": "BTC",
+        "last_completed_date": "2026-09-19",
+        "days": 2567
+      }
+    },
+    {
+      "symbol": "ETH",
+      "lastOiAt": "2026-09-20T12:46:55.090Z",
+      "oiAgeSeconds": 10,
+      "recentSamples": 30,
+      "funding": {
+        "symbol": "ETH",
+        "last_completed_date": "2026-09-19",
+        "days": 2489
+      }
+    },
+    {
+      "symbol": "SOL",
+      "lastOiAt": "2026-09-20T12:46:56.080Z",
+      "oiAgeSeconds": 9,
+      "recentSamples": 30,
+      "funding": {
+        "symbol": "SOL",
+        "last_completed_date": "2026-09-19",
+        "days": 2198
+      }
+    },
+    {
+      "symbol": "XLM",
+      "lastOiAt": "2026-09-20T12:46:54.976Z",
+      "oiAgeSeconds": 10,
+      "recentSamples": 30,
+      "funding": {
+        "symbol": "XLM",
+        "last_completed_date": "2026-09-19",
+        "days": 2436
+      }
+    },
+    {
+      "symbol": "XRP",
+      "lastOiAt": "2026-09-20T12:46:55.588Z",
+      "oiAgeSeconds": 9,
+      "recentSamples": 30,
+      "funding": {
+        "symbol": "XRP",
+        "last_completed_date": "2026-09-19",
+        "days": 2449
+      }
+    },
+    {
+      "symbol": "HYPE",
+      "lastOiAt": "2026-09-20T12:46:57.431Z",
+      "oiAgeSeconds": 8,
+      "recentSamples": 30,
+      "funding": {
+        "symbol": "HYPE",
+        "last_completed_date": "2026-09-19",
+        "days": 478
+      }
+    },
+    {
+      "symbol": "HBAR",
+      "lastOiAt": "2026-09-20T12:46:47.858Z",
+      "oiAgeSeconds": 17,
+      "recentSamples": 30,
+      "funding": {
+        "symbol": "HBAR",
+        "last_completed_date": "2026-09-19",
+        "days": 2013
+      }
+    }
+  ]
+}

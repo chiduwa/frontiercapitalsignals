@@ -1,0 +1,33 @@
+{
+  "checkedAt": "2026-09-20T12:51:05.147Z",
+  "model": "confluence-v9 (source-isolated funding, independent outcomes, calibrated abstention)",
+  "generatedAt": "2026-09-20T12:49:18.586Z",
+  "research": {
+    "session": "2026-09-20",
+    "calendar": "2026-09-20",
+    "stableBasket": "2026-09-20"
+  },
+  "errors": [],
+  "checks": {
+    "sessionResearch": {
+      "exists": true,
+      "textLength": 3650,
+      "details": 0
+    },
+    "calendarResearch": {
+      "exists": true,
+      "textLength": 9476,
+      "details": 7
+    },
+    "stableBasketResearch": {
+      "exists": true,
+      "textLength": 2535,
+      "details": 0
+    },
+    "marketExplanations": {
+      "exists": true,
+      "textLength": 8606,
+      "details": 7
+    }
+  }
+}

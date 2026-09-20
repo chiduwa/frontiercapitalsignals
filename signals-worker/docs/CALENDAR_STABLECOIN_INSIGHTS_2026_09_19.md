@@ -1,13 +1,12 @@
 # Calendar, stablecoin and move-explanation extension — 2026-09-19
 
-> **Collector recovery, 2026-09-20 03:20 UTC:** the owner replaced the Cloudflare credential. D1 authentication and both data collectors now work. The funding service completed successfully at 02:11:59 UTC; all seven favorites have completed-day records through September 19. HBAR was excluded by the default top-40 OI ranking, so a tested, narrowly scoped watchlist change was installed on Oracle and only `fcs-oi-sampler.service` was restarted. All seven then had samples about 20–21 seconds old and zero invalid recent contract/price rows. The default list still contains at most 40 assets, with all seven favorites pinned. No trading service or model release was performed. Full historical funding repair and the broader research rollout remain pending. [Verification](research-2026-09-19/collector-restoration-2026-09-20.json).
+> **Release update, 2026-09-20:** the broader worker, data-integrity fixes, research workflows and four research/explanation panels are deployed. Migrations 0043–0045 are applied; Oracle funding/OI writes are restored, all seven favorites are pinned in the OI sampler, and 14,630 canonical funding days were backfilled; settlement spot-checks passed for each asset. New model candidates remain research-only. See [release verification and remaining limits](RELEASE_VERIFICATION_2026_09_20.md).
 
 
-Implemented and tested locally for BTC, ETH, SOL, XLM, XRP, HYPE and HBAR.
+Implemented, tested and released for BTC, ETH, SOL, XLM, XRP, HYPE and HBAR.
 These additions are research and explanatory context, not new trading signals.
-Production code, database migrations and scheduled workflows have not been
-released. The Oracle services were inspected read-only; their authentication
-failure remains unresolved pending a valid credential.
+The numerical study below preserves the September 19 frozen experiment;
+subsequent scheduled reports carry their own cutoff, versions and input hashes.
 
 ## What the timing evidence supports
 
@@ -152,7 +151,10 @@ They cannot reconstruct liquidation levels or prove momentum persistence. A
 later event study needs high-frequency forced-order data, exchange coverage,
 aligned spot imbalance/depth, subsequent returns and prospective validation.
 
-## Operational incident and release status
+## September 19 incident history (resolved September 20)
+
+The following incident description records the original audit. The current
+collector and release status is in the linked release verification above.
 
 Read-only SSH inspection succeeded on Oracle instance `fcs-trading-bot`.
 `fcs-binance-collector.timer` and `fcs-oi-sampler.timer` are active, and Binance
@@ -203,6 +205,6 @@ these retrospective results.
   syntax/diff checks pass, and compressed artifact and research-code hashes match.
 - Production D1 was queried read-only to test explanation withholding. Oracle
   timers, service definitions, errors and token validity were inspected read-only.
-  Authenticated CMC liquidations and the repaired collector write path still need
-  valid credentials and an actual rollout; local test success does not establish
-  that those live paths are operational.
+  The subsequent release verified the repaired collector write path against
+  production and Binance. Authenticated CMC liquidations remain unconfigured;
+  local parser tests do not establish that live feed is operational.
