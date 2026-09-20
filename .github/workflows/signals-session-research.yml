@@ -49,6 +49,15 @@ jobs:
         run: |
           python scripts/session-research.py --input reports/sessions/panel.json --context reports/sessions/stable-context.json --output reports/sessions/results
           python scripts/calendar-research.py --input reports/sessions/panel.json --output reports/sessions/results
+      - name: Store completed timing summaries independently of the volume feed
+        working-directory: signals-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+        run: |
+          node scripts/session-context.mjs publish reports/sessions/results/session-report.json
+          node scripts/session-context.mjs publish reports/sessions/results/calendar-report.json
       - name: Collect the named stablecoin basket and CMC100 benchmark
         working-directory: signals-worker
         run: |
@@ -59,16 +68,13 @@ jobs:
         env:
           OPENBLAS_NUM_THREADS: '1'
         run: python scripts/stable-basket-research.py --input reports/stable-basket/current/panel.json --cmc reports/stable-basket/current/cmc100-series.json --hourly reports/sessions/panel.json --output reports/stable-basket/results
-      - name: Store non-actionable dashboard summary
+      - name: Store complete non-actionable stablecoin summary
         working-directory: signals-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
-        run: |
-          node scripts/session-context.mjs publish reports/sessions/results/session-report.json
-          node scripts/session-context.mjs publish reports/sessions/results/calendar-report.json
-          node scripts/session-context.mjs publish reports/stable-basket/results/stable-basket-report.json
+        run: node scripts/session-context.mjs publish reports/stable-basket/results/stable-basket-report.json
       - name: Preserve evidence and data manifest
         if: always()
         uses: actions/upload-artifact@v7

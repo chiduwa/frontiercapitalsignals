@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
-import {parseGlobalHistory,STABLE_IDS} from './scripts/stable-basket-data.mjs';
+import {parseGlobalHistory,STABLE_IDS,fetchGlobalHistory} from './scripts/stable-basket-data.mjs';
 import {cmcRequest,parseLiquidations,loadCmcLiquidations} from './scripts/cmc-research.mjs';
 import {alignedOiWindow,historicalLevels,explainAssetMove,persistLiquidations,buildMarketExplanations} from './scripts/market-explanations.mjs';
 import {researchSupplement,persistResearchSupplement,loadSessionHealth} from './scripts/session-health.mjs';
@@ -56,4 +56,12 @@ test('D1 liquidation writes are idempotent; supplemental summaries retain distin
 test('provider failure and absent OI remain explicit unknowns',async()=>{
  const r=await buildMarketExplanations({}, {nowMs:now,query:async()=>[],liquidationsLoader:async()=>{throw Error('not entitled')}});
  assert.equal(r.liquidationProviderStatus,'unavailable');assert.equal(Object.keys(r.assets).length,7);assert.ok(Object.values(r.assets).every(a=>a.status==='insufficient-live-data'&&a.liquidations===null));
+});
+
+test('global volume collection survives shared-IP throttling and respects Retry-After',async()=>{
+ let n=0;const waits=[];
+ const r=await fetchGlobalHistory('https://api.coingecko.com/example',{wait:async ms=>waits.push(ms),fetcher:async()=>++n<5?new Response('{}',{status:429,headers:{'Retry-After':'45'}}):new Response('{"prices":[]}')});
+ assert.equal(n,5);assert.deepEqual(waits,[45000,45000,60000,120000]);assert.equal(r.sha256.length,64);
+ let count=0;await assert.rejects(()=>fetchGlobalHistory('https://api.coingecko.com/example',{wait:async()=>{},fetcher:async()=>{count++;return new Response('{}',{status:404});}}),/HTTP 404/);assert.equal(count,1);
+ count=0;await assert.rejects(()=>fetchGlobalHistory('https://api.coingecko.com/example',{wait:async()=>{},fetcher:async()=>{count++;return new Response('{}',{status:429});}}),/HTTP 429/);assert.equal(count,6);
 });

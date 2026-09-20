@@ -23,6 +23,28 @@ export function parseGlobalHistory(raw,{asOf}){
   assumedAvailableAt:t+600000
  }));
 }
+// Public API quotas can be shared by unrelated jobs on the same runner IP.
+// Retry transient failures with bounded backoff; never substitute an incomplete basket.
+export async function fetchGlobalHistory(url,{fetcher=fetch,wait=ms=>new Promise(r=>setTimeout(r,ms)),attempts=6}={}){
+ let lastError;
+ for(let n=0;n<attempts;n++){
+  let response;
+  try{
+   response=await fetcher(url,{signal:AbortSignal.timeout(25000)});
+   if(response.ok){
+    const raw=await response.text();return {url,retrievedAt:new Date().toISOString(),sha256:createHash('sha256').update(raw).digest('hex'),data:JSON.parse(raw)};
+   }
+   lastError=Error('HTTP '+response.status);
+   if(![408,429].includes(response.status)&&response.status<500)throw Object.assign(lastError,{permanent:true});
+  }catch(e){if(e.permanent)throw e;lastError=e;}
+  if(n+1<attempts){
+   const retry=response?.headers?.get('retry-after');
+   const indicated=retry==null?0:/^\d+(\.\d+)?$/.test(retry)?Number(retry)*1000:Date.parse(retry)-Date.now();
+   await wait(Math.min(120000,Math.max(15000*2**n,Number.isFinite(indicated)?indicated:0)));
+  }
+ }
+ throw lastError||Error('History request exhausted');
+}
 export async function collectStableBasket({asOf,output,fetcher=fetch,wait=ms=>new Promise(r=>setTimeout(r,ms)),log=console.log}){
  validateCutoff(asOf);await mkdir(output,{recursive:true});
  const result={version:'stable-basket-input-v1',asOf,provider:'coingecko',volumeUnit:'USD rolling 24h per asset; trade attribution overlaps',
@@ -30,17 +52,14 @@ export async function collectStableBasket({asOf,output,fetcher=fetch,wait=ms=>ne
  for(const [symbol,id] of Object.entries({...STABLE_IDS,...CRYPTO_IDS})){
   const url=`https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=usd&days=365&interval=daily`;
   const cache=resolve(output,id+'.json');let record;
-  try{record=JSON.parse(await readFile(cache,'utf8'));}catch{
-   for(let n=0;n<3;n++){
-    try{
-     const r=await fetcher(url,{signal:AbortSignal.timeout(25000)});
-     if(r.status===429&&n<2){await wait(30000);continue;}
-     if(!r.ok)throw Error('HTTP '+r.status);
-     const raw=await r.text();record={url,retrievedAt:new Date().toISOString(),sha256:createHash('sha256').update(raw).digest('hex'),data:JSON.parse(raw)};
-     await writeFile(cache,JSON.stringify(record));break;
-    }catch(e){if(n===2)result.failures.push({symbol,error:e.message});else await wait(5000);}
-   }
-   await wait(2300);
+  try{
+   record=JSON.parse(await readFile(cache,'utf8'));
+   if(record.asOf!==asOf||record.url!==url)throw Error('Cached observation belongs to another run date');
+  }catch{
+   record=null;
+   try{record={...await fetchGlobalHistory(url,{fetcher,wait}),asOf};await writeFile(cache,JSON.stringify(record));}
+   catch(e){result.failures.push({symbol,error:e.message});log(`${symbol}: collection failed (${e.message})`);}
+   await wait(6500);
   }
   if(!record)continue;
   const rows=parseGlobalHistory(record.data,{asOf});result.assets[symbol]=rows;
