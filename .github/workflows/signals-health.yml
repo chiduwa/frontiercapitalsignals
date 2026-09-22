@@ -54,9 +54,15 @@ jobs:
 
       # jsdom only — the probe renders the live page to prove it actually
       # draws, rather than trusting that the HTML contains the right strings.
+      # `npm ci` and a committed lockfile, NOT `npm install`. On 2026-09-22 this
+      # step resolved undici fresh, picked up 8.11.0 published 23 minutes
+      # earlier as a transitive dependency of jsdom, and the probe started
+      # reporting six false failures with no commit behind them. The code is
+      # immune to that particular hijack now; this is what makes any future
+      # dependency change a reviewable commit instead of a surprise at 07:20.
       - name: Install probe dependencies
         working-directory: signals-worker
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       # The checker's own logic is tested first. A monitor that cannot detect
       # is worse than no monitor: it converts an outage into a false all-clear.

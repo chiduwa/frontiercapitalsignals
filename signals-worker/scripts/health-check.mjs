@@ -32,9 +32,72 @@
 // Optional env: NTFY_TOPIC (alerting), FCS_HEALTH_ORIGIN (defaults to prod).
 import { JSDOM, VirtualConsole } from 'jsdom';
 
+// ---- take back the fetch that jsdom quietly took over ----------------------
+//
+// THE 2026-09-22 INCIDENT, and the reason this runs before anything else here.
+//
+// jsdom bundles its own copy of undici. Merely IMPORTING it registers that copy
+// as the process-wide HTTP dispatcher, on the well-known global symbol
+// `undici.globalDispatcher.1` — and Node's BUILT-IN fetch reads that very same
+// symbol. So from the import above onwards, every fetch in this file was being
+// dispatched through jsdom's undici instead of Node's, and undici 8.11.0
+// (published 06:57 UTC that morning) hands Node's fetch back a response it
+// cannot read: `res.headers` is EMPTY and the body is never content-decoded.
+//
+// What that looked like from the outside was not a transport fault at all. The
+// probe read raw brotli as text and reported, in order: content-type null, the
+// risk disclaimer missing, the canonical link missing, the signals API
+// "unreachable", the price feed empty and the sitemap unreadable. Five failures
+// and two warnings, every one of them false — the site was serving perfectly to
+// every other client throughout. The run at 06:45 was green and the 07:20 one
+// was not, with no commit in between, because `npm install` here is resolved
+// fresh on every run and undici had moved underneath it.
+//
+// The symbol is non-configurable, so it cannot be deleted — but it IS writable.
+// Clearing it makes Node's fetch lazily re-install its own Agent on the next
+// call, which is exactly the state this file needs. Constructing and using a
+// JSDOM afterwards does not re-take it, so once is enough; probeFetch re-asserts
+// it anyway, because being wrong about that costs another silent outage.
+const UNDICI_GLOBAL_DISPATCHER = Symbol.for('undici.globalDispatcher.1');
+
+export function reclaimFetchDispatcher() {
+  const held = globalThis[UNDICI_GLOBAL_DISPATCHER];
+  // Node's own dispatcher is an `Agent`; jsdom's is a `Dispatcher1Wrapper`
+  // around undici's v2 Agent. Anything that is not Node's own gets cleared.
+  if (held && held.constructor?.name !== 'Agent') {
+    globalThis[UNDICI_GLOBAL_DISPATCHER] = undefined;
+    return true;
+  }
+  return false;
+}
+
+// Runs at module load, i.e. immediately after the hoisted jsdom import above
+// and before any request this file makes.
+reclaimFetchDispatcher();
+
 const ORIGIN = process.env.FCS_HEALTH_ORIGIN || 'https://frontiercapitalsignals.com';
 const { NTFY_TOPIC } = process.env;
 const SIGNALS = `${ORIGIN}/signals/`;
+
+// Every live request goes through here: one identifiable user-agent, and the
+// dispatcher re-asserted each time so that nothing imported later can take the
+// fetch back without this file noticing.
+export function probeFetch(url, opts = {}, fetchImpl = fetch) {
+  reclaimFetchDispatcher();
+  return fetchImpl(url, { ...opts, headers: { 'User-Agent': 'fcs-health-check', ...(opts.headers || {}) } });
+}
+
+// A body that arrived without being content-decoded reads as replacement
+// characters and control bytes from its very first byte; real HTML, JSON and
+// XML carry neither. Only the head is examined, so one stray character deep
+// inside an article cannot be mistaken for this.
+export function looksUndecoded(text) {
+  if (typeof text !== 'string' || text === '') return false;
+  const head = text.slice(0, 2048);
+  if (head.includes('\uFFFD') || head.includes('\u0000')) return true;
+  const control = (head.match(/[\u0001-\u0008\u000B\u000C\u000E-\u001F]/g) || []).length;
+  return control / head.length > 0.02;
+}
 
 // ---- thresholds, each tied to a mechanism rather than a feeling -------------
 export const THRESHOLDS = Object.freeze({
@@ -199,10 +262,21 @@ export function checkPageResponse(status, contentType, headers, html) {
   const out = [];
   out.push(result('page-status', 'fail', status === 200, `GET /signals/ returned ${status}`));
   out.push(result('page-content-type', 'fail', String(contentType || '').includes('text/html'), `content-type was ${contentType}`));
+  // Establish that the body is READABLE before anything reads it. Every
+  // assertion below asks whether some string is present, and a body that was
+  // never decoded answers "no" to all of them — which is how one hijacked
+  // dispatcher impersonated four separate content faults on 2026-09-22.
+  const undecoded = looksUndecoded(html);
+  out.push(result('page-body-decoded', 'fail', !undecoded,
+    'the page body is not decodable text, so it was never content-decoded: a TRANSPORT fault, '
+    + 'not missing content. Check what owns the global fetch dispatcher in this process '
+    + '(see reclaimFetchDispatcher) before looking at the page itself'));
   out.push(result('page-security-headers', 'warn',
     !!headers['content-security-policy'] && headers['x-content-type-options'] === 'nosniff' && headers['x-frame-options'] === 'DENY',
     'CSP / nosniff / frame-options missing from the live response'));
-  if (!html) return out;
+  // A body nobody can read cannot be interrogated for content. Reporting the
+  // derived checks anyway is what turned one fault into six alerts.
+  if (!html || undecoded) return out;
 
   // The whole dashboard is one inline script. A parse error there takes the
   // entire page down and every other layer stays silent about it — the reason
@@ -316,7 +390,7 @@ export function checkDeployFreshness(newestLiveISO, newestRepoISO, now = Date.no
 // has. Read from the sitemap rather than the rendered page because it is a
 // build artifact, so it cannot be kept warm by the Worker's cron.
 export async function readNewestLiveContentDate(fetchImpl = fetch) {
-  const res = await fetchImpl(`${ORIGIN}/sitemap.xml`, { redirect: 'follow' });
+  const res = await probeFetch(`${ORIGIN}/sitemap.xml`, { redirect: 'follow' }, fetchImpl);
   if (!res.ok) return null;
   const stamps = [...(await res.text()).matchAll(/<lastmod>([^<]+)<\/lastmod>/g)]
     .map((m) => Date.parse(m[1])).filter(Number.isFinite);
@@ -340,7 +414,7 @@ export async function checkSitePages(fetchImpl = fetch) {
   const out = [];
   for (const path of paths) {
     try {
-      const res = await fetchImpl(ORIGIN + path, { redirect: 'follow' });
+      const res = await probeFetch(ORIGIN + path, { redirect: 'follow' }, fetchImpl);
       out.push(result(`site${path}`, 'fail', res.ok, `GET ${path} returned ${res.status}`));
     } catch (e) {
       out.push(result(`site${path}`, 'fail', false, `GET ${path} failed: ${e.message}`));
@@ -393,19 +467,24 @@ async function readPreviousRun() {
   const workflow = process.env.GITHUB_WORKFLOW_REF; // owner/repo/.github/workflows/x.yml@ref
   if (!repo || !runId || !workflow) return null;    // not running in Actions
   const file = workflow.split('/').pop().split('@')[0];
-  const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'fcs-health-check' };
+  const headers = { Accept: 'application/vnd.github+json' };
   try {
-    const list = await (await fetch(`https://api.github.com/repos/${repo}/actions/workflows/${file}/runs?per_page=10`, { headers })).json();
+    // Through probeFetch like everything else. On 2026-09-22 these three reads
+    // were hijacked along with the rest, so every JSON.parse here threw, the
+    // dedup silently concluded "no previous run", and one unchanged failing set
+    // paged four times in two hours — the exact behaviour the fingerprint was
+    // built to prevent.
+    const list = await (await probeFetch(`https://api.github.com/repos/${repo}/actions/workflows/${file}/runs?per_page=10`, { headers })).json();
     const previous = (list.workflow_runs || [])
       .filter((r) => String(r.id) !== String(runId) && r.status === 'completed')
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
     if (!previous) return null;
     // Read the marker whatever the conclusion was: a run can end green and
     // still have had warnings worth not repeating.
-    const jobs = await (await fetch(`https://api.github.com/repos/${repo}/actions/runs/${previous.id}/jobs`, { headers })).json();
+    const jobs = await (await probeFetch(`https://api.github.com/repos/${repo}/actions/runs/${previous.id}/jobs`, { headers })).json();
     let fingerprint = '';
     for (const job of jobs.jobs || []) {
-      const annotations = await (await fetch(`${job.check_run_url}/annotations`, { headers })).json();
+      const annotations = await (await probeFetch(`${job.check_run_url}/annotations`, { headers })).json();
       const marker = (annotations || []).find((a) => a.title === FINGERPRINT_TITLE);
       if (marker) { fingerprint = marker.message; break; }
     }
@@ -419,7 +498,7 @@ async function readPreviousRun() {
 async function notify(title, body, priority) {
   if (!NTFY_TOPIC) return;
   try {
-    await fetch(`https://ntfy.sh/${NTFY_TOPIC}`, {
+    await probeFetch(`https://ntfy.sh/${NTFY_TOPIC}`, {
       method: 'POST', headers: { Title: title, Priority: priority, Tags: 'rotating_light' }, body
     });
   } catch (e) { console.error('health alert could not be sent:', e.message); }
@@ -441,6 +520,28 @@ function requestedScope() {
   return scope;
 }
 
+// Reads JSON and, when the answer is not JSON, says what actually arrived.
+// The old message was "the signals API is unreachable", which on 2026-09-22 was
+// wrong in both halves: it was reachable, and it answered 200. Working out what
+// had really happened took byte archaeology against the raw text of an ntfy
+// alert, so the facts that separate transport from content are reported here.
+async function readJson(url) {
+  const res = await probeFetch(url);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const body = new TextDecoder().decode(bytes);
+  try {
+    return JSON.parse(body);
+  } catch (e) {
+    if (looksUndecoded(body)) {
+      const hex = [...bytes.slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join(' ');
+      throw new Error(`HTTP ${res.status}, content-type=${res.headers.get('content-type') ?? 'none'}, `
+        + `${[...res.headers].length} response header(s), body begins ${hex} — that is not text, so the `
+        + 'response was never content-decoded. This is a transport fault in THIS process, not a site fault');
+    }
+    throw new Error(`HTTP ${res.status}: ${e.message}`);
+  }
+}
+
 async function main() {
   const now = Date.now();
   const scope = requestedScope();
@@ -451,7 +552,7 @@ async function main() {
 
   let html = null;
   try {
-    const res = await fetch(SIGNALS, { headers: { 'User-Agent': 'fcs-health-check' } });
+    const res = await probeFetch(SIGNALS);
     html = res.ok ? await res.text() : null;
     const headers = Object.fromEntries([...res.headers].map(([k, v]) => [k.toLowerCase(), v]));
     if (wantPage) checks.push(...checkPageResponse(res.status, res.headers.get('content-type'), headers, html));
@@ -461,10 +562,10 @@ async function main() {
 
   let payload = null;
   let prices = null;
-  try { payload = await (await fetch(`${ORIGIN}/signals/api/signals`)).json(); } catch (e) {
-    checks.push(result('payload-fetch', 'fail', false, `the signals API is unreachable: ${e.message}`));
+  try { payload = await readJson(`${ORIGIN}/signals/api/signals`); } catch (e) {
+    checks.push(result('payload-fetch', 'fail', false, `the signals API did not return usable JSON: ${e.message}`));
   }
-  try { prices = await (await fetch(`${ORIGIN}/signals/api/prices`)).json(); } catch { prices = null; }
+  try { prices = await readJson(`${ORIGIN}/signals/api/prices`); } catch { prices = null; }
   if (wantData) checks.push(result('prices-endpoint', 'fail', !!prices && (!!prices.crypto || !!prices.stocks), 'the live price endpoint returned nothing usable'));
 
   if (wantData && payload) checks.push(...checkPayload(payload, now));

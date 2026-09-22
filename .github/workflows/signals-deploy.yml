@@ -62,9 +62,15 @@ jobs:
       # rows, or the withholding gate failing to be reached at runtime. It
       # needs a DOM, so it installs jsdom rather than carrying it in the site's
       # own dependency tree.
+      # `npm ci` and a committed lockfile, NOT `npm install`. On 2026-09-22 this
+      # step resolved undici fresh, picked up 8.11.0 published 23 minutes
+      # earlier as a transitive dependency of jsdom, and the probe started
+      # reporting six false failures with no commit behind them. The code is
+      # immune to that particular hijack now; this is what makes any future
+      # dependency change a reviewable commit instead of a surprise at 07:20.
       - name: Install dashboard test dependencies
         working-directory: signals-worker
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Test the rendered dashboard and the health checker
         working-directory: signals-worker

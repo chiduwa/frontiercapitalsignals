@@ -6,7 +6,8 @@
 // 2026-09-11..15 Discovery outage reproduced exactly: a payload that is healthy
 // in every other respect while the learning loop has been dead for five days.
 import assert from 'node:assert/strict';
-import { checkPayload, checkPageResponse, THRESHOLDS, shouldNotify, fingerprintOf, checkDeployFreshness } from './scripts/health-check.mjs';
+import { checkPayload, checkPageResponse, THRESHOLDS, shouldNotify, fingerprintOf, checkDeployFreshness,
+  looksUndecoded, probeFetch, reclaimFetchDispatcher } from './scripts/health-check.mjs';
 
 const NOW = Date.parse('2026-09-15T12:00:00Z');
 const ago = (ms) => new Date(NOW - ms).toISOString();
@@ -231,3 +232,89 @@ assert.ok(failing(healthy({marketExplanations:staleOi})).includes('oi-collector-
 assert.equal(failing(healthy({marketExplanations:{assets:{}}})).filter(s=>s.startsWith('oi-collector-')).length,7);
 assert.ok(notOk(healthy({sessionResearch:{status:'unavailable'}})).includes('research-fresh-stable-basket'));
 console.log('COLLECTOR / RESEARCH HEALTH OK');
+
+
+// ---- THE HIJACKED-DISPATCHER INCIDENT (2026-09-22) --------------------------
+//
+// Runs #319-#322 failed with exactly this set:
+//   fail: deploy-sitemap, page-content-type, page-disclaimer, payload-fetch,
+//         prices-endpoint   warn: page-canonical, page-security-headers
+// Five failures, every one of them false. The site was serving correctly to
+// every other client the whole time. What had changed was undici 8.11.0,
+// published at 06:57 UTC that morning and pulled in fresh by `npm install` as
+// a transitive dependency of jsdom: importing jsdom registers ITS undici as the
+// process-wide dispatcher on a global symbol that Node's own fetch also reads,
+// so every response arrived with no headers and no content-decoding.
+//
+// These assertions are the tripwire. They run in CI BEFORE the live probe, so
+// the next dependency that does this fails a test with a named cause instead of
+// paging at 07:20 with six wrong answers.
+const UNDICI_GLOBAL_DISPATCHER = Symbol.for('undici.globalDispatcher.1');
+
+// Importing the module above imports jsdom. By the time we get here the module
+// must already have taken the dispatcher back.
+const holder = globalThis[UNDICI_GLOBAL_DISPATCHER];
+assert.ok(!holder || holder.constructor?.name === 'Agent',
+  `importing health-check.mjs must leave Node's own fetch dispatcher in place, `
+  + `but found ${holder?.constructor?.name} — global fetch is hijacked and every live check will lie`);
+
+// And the reclaim itself must actually bite when something takes it again.
+class Dispatcher1Wrapper { }                       // what undici 8.11.0 installs
+globalThis[UNDICI_GLOBAL_DISPATCHER] = new Dispatcher1Wrapper();
+assert.equal(reclaimFetchDispatcher(), true, 'a foreign dispatcher must be detected and cleared');
+assert.equal(globalThis[UNDICI_GLOBAL_DISPATCHER], undefined,
+  'clearing it is what makes Node re-install its own Agent on the next fetch');
+assert.equal(reclaimFetchDispatcher(), false, 'with nothing to reclaim it must report no change');
+
+// It must not throw away a dispatcher that is already Node's own.
+class Agent { }
+const nodesOwn = new Agent();
+globalThis[UNDICI_GLOBAL_DISPATCHER] = nodesOwn;
+assert.equal(reclaimFetchDispatcher(), false, "Node's own Agent must be left alone");
+assert.equal(globalThis[UNDICI_GLOBAL_DISPATCHER], nodesOwn, 'reclaiming must not disturb a healthy dispatcher');
+globalThis[UNDICI_GLOBAL_DISPATCHER] = undefined;
+
+// probeFetch re-asserts it on every request, so a later import cannot take it
+// back between two checks in the same run.
+globalThis[UNDICI_GLOBAL_DISPATCHER] = new Dispatcher1Wrapper();
+let sent = null;
+await probeFetch('https://example.invalid/x', { redirect: 'follow' }, async (_u, o) => { sent = o; return { ok: true, status: 200 }; });
+assert.equal(globalThis[UNDICI_GLOBAL_DISPATCHER], undefined,
+  'probeFetch must reclaim the dispatcher before it issues the request');
+assert.equal(sent.headers['User-Agent'], 'fcs-health-check', 'the probe must stay identifiable in logs');
+assert.equal(sent.redirect, 'follow', 'probeFetch must not swallow caller options');
+
+// ---- one transport fault must report as ONE transport fault -----------------
+// Real bytes: the live brotli stream of /signals/ begins 8b ff 0f 00 e4 cf 96 d6.
+const undecodedBody = new TextDecoder().decode(
+  new Uint8Array([0x8b, 0xff, 0x0f, 0x00, 0xe4, 0xcf, 0x96, 0xd6, 0x1b, 0x24, 0x0b, 0x00, 0xe4, 0xd2, 0x66, 0x15]));
+
+assert.ok(looksUndecoded(undecodedBody), 'the real undecoded stream must be recognised');
+assert.ok(!looksUndecoded(goodHtml), 'real HTML must never be mistaken for an undecoded body');
+assert.ok(!looksUndecoded(JSON.stringify({ crypto: { BTC: { price: 1 } } })), 'real JSON must not trip the detector');
+assert.ok(!looksUndecoded('<?xml version="1.0"?><urlset><url><loc>x</loc></url></urlset>'), 'real XML must not trip it');
+assert.ok(!looksUndecoded(''), 'an empty body is a different failure and must not be reported as this one');
+assert.ok(!looksUndecoded('<html><body>' + 'x'.repeat(4000) + '�</body></html>'),
+  'a stray replacement character past the head must not be read as an undecoded body');
+
+// The incident, replayed through the page checks exactly as it arrived:
+// status 200, no headers at all, a body of raw compressed bytes.
+const incident = checkPageResponse(200, null, {}, undecodedBody);
+const incidentFail = incident.filter((c) => !c.ok && c.level === 'fail').map((c) => c.id);
+assert.ok(incidentFail.includes('page-body-decoded'),
+  'an undecoded body must be named as such — the check the incident had no way to produce');
+for (const derived of ['page-disclaimer', 'page-canonical', 'page-scripts-parse', 'page-structured-data']) {
+  assert.ok(!incident.some((c) => c.id === derived),
+    `${derived} must not be reported when the body never decoded — asserting on unreadable bytes manufactured the false alarms`);
+}
+assert.ok(incidentFail.includes('page-content-type'), 'a genuinely absent content-type must still fail');
+assert.ok(fingerprintOf(incident).split(',').filter((f) => f.startsWith('fail:')).length < 5,
+  'the incident must no longer produce five separate failures');
+
+// ---- and a healthy page must be entirely undisturbed ------------------------
+const healthyPage = checkPageResponse(200, 'text/html; charset=utf-8', okHeaders, goodHtml);
+assert.deepEqual(healthyPage.filter((c) => !c.ok), [], 'adding the transport check must not disturb a page that is fine');
+assert.ok(healthyPage.some((c) => c.id === 'page-body-decoded' && c.ok),
+  'the healthy page must actively PASS the transport check, not skip it');
+
+console.log('TRANSPORT / DISPATCHER HEALTH OK');
