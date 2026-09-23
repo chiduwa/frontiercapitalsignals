@@ -2284,6 +2284,88 @@ export function scoreSurgeCast(dir, entryPrice, exitPrice, deadbandPct = 1) {
   return { outcome: moved === dir ? 'correct' : 'wrong', pct };
 }
 
+// The market over the same window (2026-09-24). A directional call is only
+// informative if it beats what every scanned coin did over the same hours.
+// Judged against a coin flip, two long-side configurations graduated during
+// the September 2026 rally and notified 431 times: 72% of scanned coins rose
+// more than 1% over their typical window anyway, and matched against that
+// they trailed the market (-1.06% and -0.64% per cast in their called
+// direction). Exhaustion, the one proven at discovery, beat it by +4.56%
+// (t = 2.10). See docs/MISSED_MOVES.md.
+//
+// Equal-weighted over every scanned symbol with a close on the cast bar and
+// a price now -- the same "now" the cast itself is scored at.
+export function marketWindow(closesBySymbol, castAt, priceNow, dir, { minSymbols = 30, deadbandPct = 1 } = {}) {
+  const t = new Date(castAt).toISOString();
+  const moves = [];
+  for (const [sym, closes] of Object.entries(closesBySymbol || {})) {
+    const a = closes instanceof Map ? closes.get(t) : closes?.[t];
+    const b = priceNow?.[sym];
+    if (a > 0 && b > 0) moves.push((b / a - 1) * 100);
+  }
+  if (moves.length < minSymbols) return null;
+  const decided = moves.filter((m) => Math.abs(m) >= deadbandPct);
+  return {
+    marketMovePct: moves.reduce((x, y) => x + y, 0) / moves.length,
+    baseRate: decided.length ? decided.filter((m) => Math.sign(m) === dir).length / decided.length : null,
+    n: moves.length
+  };
+}
+
+// A configuration's live edge OVER the market in its called direction,
+// clustered by cast day: casts on one day share one market move, so counting
+// them as independent would overstate the evidence.
+export function surgeExcessRecord(rows) {
+  const days = new Map();
+  let casts = 0, hits = 0, hitBase = 0, decided = 0;
+  for (const r of rows || []) {
+    const move = Number(r.move_pct), market = Number(r.market_move_pct);
+    if (r.market_move_pct == null || r.move_pct == null || !Number.isFinite(move) || !Number.isFinite(market)) continue;
+    const day = String(r.cast_at).slice(0, 10);
+    if (!days.has(day)) days.set(day, []);
+    days.get(day).push(Number(r.dir) * (move - market));
+    casts++;
+    if ((r.outcome === 'correct' || r.outcome === 'wrong') && Number.isFinite(Number(r.base_rate))) {
+      decided++; hits += r.outcome === 'correct' ? 1 : 0; hitBase += Number(r.base_rate);
+    }
+  }
+  const means = [...days.values()].map((v) => v.reduce((x, y) => x + y, 0) / v.length);
+  const n = means.length;
+  const m = n ? means.reduce((x, y) => x + y, 0) / n : null;
+  const sd = n > 1 ? Math.sqrt(means.reduce((x, y) => x + (y - m) ** 2, 0) / (n - 1)) : null;
+  return {
+    casts, days: n, meanExcessPct: m,
+    t: sd > 0 ? m / (sd / Math.sqrt(n)) : null,
+    hitRate: decided ? hits / decided : null,
+    baseRate: decided ? hitBase / decided : null
+  };
+}
+
+export const SURGE_MIN_BASELINE_CASTS = 30;
+export const SURGE_MIN_BASELINE_DAYS = 10;
+export const SURGE_EXCESS_T = 2;
+
+// Who may interrupt the user. An unproven configuration graduates only by
+// beating the same-window market in its called direction (day-clustered
+// t >= 2 over >= 30 casts and >= 10 days). A proven one keeps notifying
+// until its live record says it trails the market (t <= -2), then goes quiet.
+export function surgeNotifyGate(cfg, excess) {
+  const pct = (x) => `${x >= 0 ? '+' : ''}${x.toFixed(2)}%`;
+  const enough = excess && excess.casts >= SURGE_MIN_BASELINE_CASTS && excess.days >= SURGE_MIN_BASELINE_DAYS
+    && Number.isFinite(excess.t);
+  const record = enough ? `${pct(excess.meanExcessPct)} per cast vs the same-window market (t=${excess.t.toFixed(2)}, ${excess.days} days, ${excess.casts} casts)` : null;
+  if (cfg.proven) {
+    if (enough && excess.t <= -SURGE_EXCESS_T) return { allowed: false, why: `demoted: proven at discovery, but live it trails the market: ${record}` };
+    return { allowed: true, why: enough ? `proven at discovery; live: ${record}`
+      : `proven at discovery (significant and consistent across both chronological halves); live market comparison still accumulating (${excess?.casts || 0}/${SURGE_MIN_BASELINE_CASTS} casts, ${excess?.days || 0}/${SURGE_MIN_BASELINE_DAYS} days)` };
+  }
+  if (!enough) {
+    return { allowed: false, why: `still proving itself against the market: ${excess?.casts || 0}/${SURGE_MIN_BASELINE_CASTS} casts, ${excess?.days || 0}/${SURGE_MIN_BASELINE_DAYS} days` };
+  }
+  if (excess.meanExcessPct > 0 && excess.t >= SURGE_EXCESS_T) return { allowed: true, why: `graduated: beats the market ${record}` };
+  return { allowed: false, why: `does not beat the market: ${record}` };
+}
+
 // --------------------- RETROSPECTIVE / MISS ANALYSIS -------------------------
 // User-requested 2026-08-31, from a specific observation: "arb and a couple
 // of cryptos jumped in the past couple of hours, examine that to figure out

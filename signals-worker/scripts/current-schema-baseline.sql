@@ -62,4 +62,5 @@ INSERT OR IGNORE INTO d1_migrations (name) VALUES
   ('0045_liquidation_observations.sql'),
   ('0046_session_rule_freezes.sql'),
   ('0047_long_term_rank.sql'),
-  ('0048_model_tournament.sql');
+  ('0048_model_tournament.sql'),
+  ('0049_surge_market_baseline.sql');

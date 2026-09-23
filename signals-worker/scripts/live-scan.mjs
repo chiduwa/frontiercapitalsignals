@@ -16,19 +16,25 @@
 // honestly: a candidate earns the right to interrupt you, it is not
 // granted it because a backtest liked it.
 //
-// Notification gate, in order:
-//   proven at discovery                  -> notifies
-//   >= MIN_LIVE_SAMPLES live casts and
-//     Wilson lower bound > flat-rate      -> notifies (graduated)
+// Notification gate (surgeNotifyGate, worker.js), in order:
+//   proven at discovery                  -> notifies, until its live record
+//                                           trails the same-window market
+//                                           (day-clustered t <= -2)
+//   beats the same-window market in its
+//     called direction, t >= 2 over >= 30
+//     casts and >= 10 days               -> notifies (graduated)
 //   otherwise                             -> logged, silent
+// Until 2026-09-24 the bar was a coin flip, which a rally clears for any
+// long call: two configurations graduated on market drift (MISSED_MOVES.md).
 //
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID
 // Optional env: NTFY_TOPIC, LIVE_SCAN_SYMBOLS, LIVE_SCAN_MAX_ALERTS
 // Invoked hourly by .github/workflows/signals-live-scan.yml.
-import { d1, chunk, forEachConcurrent } from './d1-client.mjs';
+import { d1, chunk, forEachConcurrent, readAllRows } from './d1-client.mjs';
 import {
   binanceGlobalTradablePairs, binanceGlobalKlines,
-  SURGE_CONFIGS, scanSurgeConfigs, scoreSurgeCast, lowerConfidenceBound
+  SURGE_CONFIGS, scanSurgeConfigs, scoreSurgeCast, lowerConfidenceBound,
+  marketWindow, surgeExcessRecord, surgeNotifyGate
 } from '../worker.js';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, NTFY_TOPIC } = process.env;
@@ -47,9 +53,7 @@ const MAX_SYMBOLS = Number(process.env.LIVE_SCAN_SYMBOLS || 250);
 // blowoff could light up many symbols at once, and forty pushes in a
 // minute is indistinguishable from no alerting at all.
 const MAX_ALERTS = Number(process.env.LIVE_SCAN_MAX_ALERTS || 6);
-// Before a candidate may graduate to notifying. Matches the project's
-// existing MIN_RELIABILITY_SAMPLES discipline.
-const MIN_LIVE_SAMPLES = 30;
+// Graduation thresholds live with the gate: SURGE_MIN_BASELINE_* in worker.js.
 const PACING_MS = 120;
 
 async function notify({ title, message, priority = 'default', tags = [] }) {
@@ -76,7 +80,7 @@ async function notify({ title, message, priority = 'default', tags = [] }) {
 // Score every cast whose horizon has elapsed, against the price now. Runs
 // before casting so a config's record is as current as possible when the
 // notification gate reads it.
-async function scoreMatured(nowIso, priceBySymbol) {
+async function scoreMatured(nowIso, priceBySymbol, closesBySymbol) {
   const due = await d1(env, `
     SELECT id, config_id, symbol, dir, cast_at, entry_price, horizon_hours
       FROM surge_signal_log
@@ -93,8 +97,12 @@ async function scoreMatured(nowIso, priceBySymbol) {
       if (!exit) continue;
       const r = scoreSurgeCast(row.dir, row.entry_price, exit, 1);
       if (!r) continue;
-      await d1(env, 'UPDATE surge_signal_log SET outcome = ?, exit_price = ?, move_pct = ?, scored_at = ? WHERE id = ?',
-        [r.outcome, exit, r.pct, nowIso, row.id]);
+      // What every scanned coin did over the same hours: the bar a call has
+      // to beat, not a coin flip.
+      const mw = marketWindow(closesBySymbol, row.cast_at, priceBySymbol, row.dir);
+      await d1(env, `UPDATE surge_signal_log SET outcome = ?, exit_price = ?, move_pct = ?, scored_at = ?,
+          market_move_pct = ?, base_rate = ?, market_n = ? WHERE id = ?`,
+        [r.outcome, exit, r.pct, nowIso, mw?.marketMovePct ?? null, mw?.baseRate ?? null, mw?.n ?? null, row.id]);
       scored++;
     }
   });
@@ -115,6 +123,8 @@ async function loadLiveRecords() {
       FROM surge_signal_log
      WHERE outcome IS NOT NULL
      GROUP BY config_id`);
+  const scored = await readAllRows(env, `SELECT config_id, dir, move_pct, market_move_pct, base_rate, outcome, cast_at
+      FROM surge_signal_log WHERE outcome IS NOT NULL ORDER BY id`);
   const out = {};
   for (const r of rows) {
     const decided = (r.correct || 0) + (r.wrong || 0);
@@ -125,21 +135,15 @@ async function loadLiveRecords() {
       // The project's existing one-sided Wilson lower bound, reused rather
       // than reimplemented — the same "prove it, do not merely look good"
       // test assetPredictionScore already applies to every other call.
-      lowerBound: decided ? lowerConfidenceBound(r.correct, decided) : null
+      lowerBound: decided ? lowerConfidenceBound(r.correct, decided) : null,
+      excess: surgeExcessRecord(scored.filter((x) => x.config_id === r.config_id))
     };
   }
   return out;
 }
 
 function mayNotify(cfg, rec) {
-  if (cfg.proven) return { allowed: true, why: 'proven at discovery (significant and consistent across both chronological halves)' };
-  if (!rec || rec.decided < MIN_LIVE_SAMPLES) {
-    return { allowed: false, why: `still proving itself — ${rec ? rec.decided : 0}/${MIN_LIVE_SAMPLES} scored casts` };
-  }
-  if (rec.lowerBound != null && rec.lowerBound > 0.5) {
-    return { allowed: true, why: `graduated on live evidence — ${(rec.accuracy * 100).toFixed(0)}% over ${rec.decided} scored casts, lower bound ${(rec.lowerBound * 100).toFixed(0)}%` };
-  }
-  return { allowed: false, why: `live record does not clear a coin flip — ${(rec.accuracy * 100).toFixed(0)}% over ${rec.decided}, lower bound ${(rec.lowerBound * 100).toFixed(0)}%` };
+  return surgeNotifyGate(cfg, rec?.excess);
 }
 
 async function main() {
@@ -150,6 +154,7 @@ async function main() {
   console.log(`live-scan: ${pairs.length} symbols on Binance global`);
 
   const priceBySymbol = {};
+  const closesBySymbol = {};
   const fired = [];
   let scanned = 0;
   for (const sym of pairs) {
@@ -157,13 +162,14 @@ async function main() {
     try { bars = await binanceGlobalKlines(sym, '1h', 200); }
     catch { await new Promise((r) => setTimeout(r, PACING_MS)); continue; }
     if (bars.length) priceBySymbol[sym] = bars[bars.length - 1].close;
+    closesBySymbol[sym] = new Map(bars.map((b) => [b.openTime, b.close]));
     scanned++;
     for (const hit of scanSurgeConfigs(bars)) fired.push({ symbol: sym, ...hit });
     await new Promise((r) => setTimeout(r, PACING_MS));
   }
   console.log(`live-scan: scanned ${scanned}, ${fired.length} configuration hit(s)`);
 
-  await scoreMatured(nowIso, priceBySymbol);
+  await scoreMatured(nowIso, priceBySymbol, closesBySymbol);
   const records = await loadLiveRecords();
 
   // Log every cast, proven or not. This IS the learning loop — an unproven
@@ -224,18 +230,21 @@ async function main() {
     const gate = mayNotify(cfg, r);
     await d1(env, `
       INSERT INTO surge_config_status
-        (config_id, label, dir, horizon_hours, proven_at_discovery, correct, wrong, flat, decided, accuracy, lower_bound, avg_move_pct, notifying, status_note, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        (config_id, label, dir, horizon_hours, proven_at_discovery, correct, wrong, flat, decided, accuracy, lower_bound, avg_move_pct, notifying, status_note, updated_at,
+         excess_pct, excess_t, excess_days, base_rate)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(config_id) DO UPDATE SET
         label=excluded.label, dir=excluded.dir, horizon_hours=excluded.horizon_hours,
         proven_at_discovery=excluded.proven_at_discovery, correct=excluded.correct, wrong=excluded.wrong,
         flat=excluded.flat, decided=excluded.decided, accuracy=excluded.accuracy, lower_bound=excluded.lower_bound,
         avg_move_pct=excluded.avg_move_pct, notifying=excluded.notifying, status_note=excluded.status_note,
-        updated_at=excluded.updated_at`,
+        updated_at=excluded.updated_at, excess_pct=excluded.excess_pct, excess_t=excluded.excess_t,
+        excess_days=excluded.excess_days, base_rate=excluded.base_rate`,
       [cfg.id, cfg.label, cfg.dir, cfg.horizonHours, cfg.proven ? 1 : 0,
        r ? r.correct : 0, r ? r.wrong : 0, r ? r.flat : 0, r ? r.decided : 0,
        r ? r.accuracy : null, r ? r.lowerBound : null, r ? r.avgMove : null,
-       gate.allowed ? 1 : 0, gate.why, nowIso]);
+       gate.allowed ? 1 : 0, gate.why, nowIso,
+       r?.excess?.meanExcessPct ?? null, r?.excess?.t ?? null, r?.excess?.days ?? null, r?.excess?.baseRate ?? null]);
   }
 
   console.log(`\nlive-scan: ${fired.length} cast(s) logged, ${sent} notification(s) sent`);

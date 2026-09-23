@@ -1559,6 +1559,10 @@ CREATE TABLE IF NOT EXISTS surge_signal_log (
   move_pct REAL,
   scored_at TEXT,
   notified INTEGER NOT NULL DEFAULT 0,
+  -- What every scanned coin did over the same window (migration 0049).
+  market_move_pct REAL,
+  base_rate REAL,
+  market_n INTEGER,
   UNIQUE (config_id, symbol, cast_at)
 );
 
@@ -1587,7 +1591,12 @@ CREATE TABLE IF NOT EXISTS surge_config_status (
   avg_move_pct REAL,
   notifying INTEGER NOT NULL DEFAULT 0,
   status_note TEXT,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  -- The live edge over the same-window market (migration 0049).
+  excess_pct REAL,
+  excess_t REAL,
+  excess_days INTEGER,
+  base_rate REAL
 );
 
 -- Spot accumulation bot state and fill ledger.

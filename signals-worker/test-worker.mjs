@@ -3638,6 +3638,45 @@ check('the forming final bar is not scanned', mod.scanSurgeConfigs(mkSurgeBars(8
 check('a 30x spike on a flat bar does NOT fire exhaustion', mod.scanSurgeConfigs(mkSurgeBars(80, { spikeAt: 78, spikeBarPct: 0.2 })).every((h) => h.config.id !== 'exhaustion20'));
 check('an ordinary quiet series fires nothing', mod.scanSurgeConfigs(mkSurgeBars(80)).length === 0);
 
+console.log('\n== surge alerts are judged against the same-window market, not a coin flip (2026-09-24) ==');
+{
+  const t0 = '2026-09-10T12:00:00.000Z';
+  // 40 coins over one window: 30 rose ~5%, 10 fell ~2%.
+  const closes = {}, now = {};
+  for (let i = 0; i < 40; i++) { closes[`C${i}`] = new Map([[t0, 100]]); now[`C${i}`] = i < 30 ? 105 : 98; }
+  const mw = mod.marketWindow(closes, t0, now, 1);
+  check('the market window is the equal-weighted move of every coin with both prices', mw && Math.abs(mw.marketMovePct - (30 * 5 - 10 * 2) / 40) < 1e-9 && mw.n === 40);
+  check('and the base rate is the share that went the called way beyond the deadband', Math.abs(mw.baseRate - 0.75) < 1e-9 && Math.abs(mod.marketWindow(closes, t0, now, -1).baseRate - 0.25) < 1e-9);
+  check('too few coins, no baseline', mod.marketWindow({ A: new Map([[t0, 1]]) }, t0, { A: 2 }, 1) === null);
+
+  // A rally: a long call that is "right" 75% of the time while the market rose
+  // just as much must not graduate -- the September 2026 failure.
+  const rally = [], exhaust = [];
+  for (let d = 0; d < 20; d++) {
+    const day = `2026-09-${String(d + 1).padStart(2, '0')}T10:00:00Z`;
+    for (let k = 0; k < 3; k++) {
+      const move = (k + d) % 4 === 0 ? -2 : 5;
+      rally.push({ dir: 1, move_pct: move + ((d % 3) - 1) * 0.3, market_move_pct: 3.25, base_rate: 0.74, outcome: move > 0 ? 'correct' : 'wrong', cast_at: day });
+      exhaust.push({ dir: -1, move_pct: -1 + ((k + d) % 3 - 1), market_move_pct: 3, base_rate: 0.3, outcome: 'correct', cast_at: day });
+    }
+  }
+  const drift = mod.surgeExcessRecord(rally);
+  const longCfg = { id: 'accum_quiet', dir: 1, proven: false };
+  check('a long call that only matches a rising market has no excess', drift.days === 20 && drift.hitRate > 0.7 && Math.abs(drift.meanExcessPct) < 0.5, JSON.stringify(drift));
+  check('and does not graduate, however high its raw hit rate', mod.surgeNotifyGate(longCfg, drift).allowed === false && /does not beat the market/.test(mod.surgeNotifyGate(longCfg, drift).why));
+  const beats = mod.surgeExcessRecord(rally.map((r) => ({ ...r, move_pct: r.move_pct + 3 + (r.cast_at.charCodeAt(9) % 3) * 0.2 })));
+  check('one that beats the same-window market in its direction does graduate', mod.surgeNotifyGate(longCfg, beats).allowed === true, JSON.stringify(beats));
+  const exh = mod.surgeExcessRecord(exhaust);
+  check('a weakness warning that falls while the market rises beats it', exh.meanExcessPct > 3 && mod.surgeNotifyGate(exhaustionCfg, exh).allowed === true);
+  const turned = mod.surgeExcessRecord(exhaust.map((r) => ({ ...r, move_pct: 6 + (r.cast_at.charCodeAt(9) % 3) * 0.3 })));
+  check('a proven configuration whose live record trails the market is demoted', mod.surgeNotifyGate(exhaustionCfg, turned).allowed === false && /demoted/.test(mod.surgeNotifyGate(exhaustionCfg, turned).why));
+  check('casts on one day count as one observation, not many', mod.surgeExcessRecord(rally.slice(0, 3)).days === 1);
+  check('too little data: unproven stays silent, proven keeps notifying',
+    mod.surgeNotifyGate(longCfg, mod.surgeExcessRecord(rally.slice(0, 9))).allowed === false
+    && mod.surgeNotifyGate(exhaustionCfg, mod.surgeExcessRecord(exhaust.slice(0, 9))).allowed === true);
+  check('casts scored before the baseline existed are ignored, not counted as zero', mod.surgeExcessRecord([{ ...rally[0], market_move_pct: null }]).casts === 0);
+}
+
 // Abstain rather than assume when the venue reports no trade counts.
 const noTrades = mkSurgeBars(80, { spikeAt: 78 }).map((b) => ({ ...b, trades: null }));
 check('a missing trade count abstains instead of passing the test', mod.scanSurgeConfigs(noTrades).every((h) => h.config.id !== 'exhaustion20'));
