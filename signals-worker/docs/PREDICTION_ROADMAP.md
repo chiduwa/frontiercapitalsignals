@@ -197,6 +197,12 @@ choices, costs, decision rules and test families **before** collecting the next
 forward period. Store issued predictions with input hash, as-of time and model
 version. Never reconstruct a supposedly live forecast from a later revision.
 
+**Built 2026-09-23:** [MODEL_TOURNAMENT](MODEL_TOURNAMENT.md) is this forward
+experiment, per asset. It has an insert-only forecast ledger with input hash,
+as-of and code version; a predeclared promotion rule (anytime-valid e-process,
+alpha spent across challengers); and demotion on decay. The bullets below
+remain the menu its generator can grow into.
+
 - Direction: logistic baseline, simple regularized returns, calibrated boosted
   trees as a bounded nonlinear challenger; probability calibration measured on
   earlier validation only. Brier/log loss, balance, abstention and coverage.

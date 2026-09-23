@@ -24,6 +24,7 @@ import { loadLatestFundamentals } from './fundamentals-panel.mjs';
 import { d1 } from './d1-client.mjs';
 import { loadAdaptiveHealth } from './adaptive-research.mjs';
 import { loadHierarchicalHealth } from './hierarchical-research.mjs';
+import { loadTournamentHealth } from './model-tournament-io.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES, GITHUB_EVENT_NAME, FORCE_REFRESH, NTFY_TOPIC } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID })) {
@@ -244,6 +245,14 @@ if (FCS_D1_DATABASE_ID) {
   } catch (error) {
     payload.hierarchicalResearch = { status: 'unavailable', actionable: false };
     console.error('hierarchical research health unavailable:', error.message);
+  }
+  // Per-asset forward-tested models. A slot is actionable only once its
+  // incumbent was promoted on forecasts logged before their outcomes.
+  try {
+    payload.modelTournament = await loadTournamentHealth(env);
+  } catch (error) {
+    payload.modelTournament = { status: 'unavailable', actionable: false };
+    console.error('model tournament unavailable:', error.message);
   }
   try {
     payload.sessionResearch = await loadSessionHealth(env);

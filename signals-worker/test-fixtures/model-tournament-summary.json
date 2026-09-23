@@ -1,0 +1,2558 @@
+{
+"version": "model-tournament-v1",
+"asOf": "2026-09-22",
+"generatedAt": "2026-09-23T16:52:47Z",
+"assets": {
+"*": {
+"direction:1": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": null,
+"challengers": []
+},
+"direction:7": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": null,
+"challengers": []
+},
+"magnitude:1": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": null,
+"challengers": [
+{
+"model": "magnitude:scale:05f25355",
+"label": "EWMA",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:b2cbc295",
+"label": "GARCH + weekday",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a93c0f3c",
+"label": "HAR regression + calendar",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:0c557d28",
+"label": "GARCH + weekday, calibrated",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:0aef0576",
+"label": "EWMA, calibrated",
+"eValue": null,
+"threshold": 822,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a9704d03",
+"label": "HAR regression + volume",
+"eValue": null,
+"threshold": 1184,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"magnitude:7": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": null,
+"challengers": [
+{
+"model": "magnitude:harx:034c8c29",
+"label": "HAR regression + derivatives, funding",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:b2cbc295",
+"label": "GARCH + weekday",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:fba99bb8",
+"label": "GARCH",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a9704d03",
+"label": "HAR regression + volume",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a93c0f3c",
+"label": "HAR regression + calendar",
+"eValue": null,
+"threshold": 822,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:e820f265",
+"label": "HAR regression + volatility",
+"eValue": null,
+"threshold": 1184,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"timing:2": {
+"incumbent": "timing:uniform:d69ed9cf",
+"incumbentLabel": "no firing preferred",
+"promoted": false,
+"championSince": null,
+"forecast": null,
+"challengers": [
+{
+"model": "timing:firingFrequency:16ed7dd4",
+"label": "cheapest-firing frequency, 365 days",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:d06623c9",
+"label": "cheapest-firing frequency, 90 days",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:73330812",
+"label": "cheapest-firing frequency, 365 days, by weekday",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+}
+},
+"BTC": {
+"direction:1": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"pUp": 0.4959016393442623
+},
+"challengers": []
+},
+"direction:7": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"pUp": 0.5300546448087432
+},
+"challengers": []
+},
+"magnitude:1": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"sigma": 0.024964194053368874
+},
+"challengers": [
+{
+"model": "magnitude:scale:0c557d28",
+"label": "GARCH + weekday, calibrated",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:b2cbc295",
+"label": "GARCH + weekday",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a93c0f3c",
+"label": "HAR regression + calendar",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:62d256c9",
+"label": "GARCH, calibrated",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a9704d03",
+"label": "HAR regression + volume",
+"eValue": null,
+"threshold": 822,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:05f25355",
+"label": "EWMA",
+"eValue": null,
+"threshold": 1184,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"magnitude:7": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"sigma": 0.06604904914637155
+},
+"challengers": [
+{
+"model": "magnitude:harx:a93c0f3c",
+"label": "HAR regression + calendar",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:b016db7f",
+"label": "HAR regression + market",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a3e8b61d",
+"label": "HAR regression",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a9704d03",
+"label": "HAR regression + volume",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:62d256c9",
+"label": "GARCH, calibrated",
+"eValue": null,
+"threshold": 822,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:e820f265",
+"label": "HAR regression + volatility",
+"eValue": null,
+"threshold": 1184,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"timing:2": {
+"incumbent": "timing:uniform:d69ed9cf",
+"incumbentLabel": "no firing preferred",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"probs": [
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666
+]
+},
+"challengers": [
+{
+"model": "timing:firingFrequency:16ed7dd4",
+"label": "cheapest-firing frequency, 365 days",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:d06623c9",
+"label": "cheapest-firing frequency, 90 days",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:73330812",
+"label": "cheapest-firing frequency, 365 days, by weekday",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+}
+},
+"ETH": {
+"direction:1": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"pUp": 0.5081967213114754
+},
+"challengers": [
+{
+"model": "direction:logistic:b2d169ad",
+"label": "logistic on derivatives, funding (strong shrinkage)",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "direction:logistic:aee36104",
+"label": "logistic on derivatives, funding (light shrinkage)",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "direction:lightgbm:3d1de39e",
+"label": "boosted trees on momentum, volatility, volume",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "direction:logistic:a45003e8",
+"label": "logistic on momentum, calendar (strong shrinkage)",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"direction:7": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"pUp": 0.5081967213114754
+},
+"challengers": [
+{
+"model": "direction:logistic:b4383437",
+"label": "logistic on lags, calendar (strong shrinkage)",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "direction:logistic:0140135b",
+"label": "logistic on lags, calendar (light shrinkage)",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"magnitude:1": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"sigma": 0.03174480252870007
+},
+"challengers": [
+{
+"model": "magnitude:scale:05f25355",
+"label": "EWMA",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:b2cbc295",
+"label": "GARCH + weekday",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a93c0f3c",
+"label": "HAR regression + calendar",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:0c557d28",
+"label": "GARCH + weekday, calibrated",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:0aef0576",
+"label": "EWMA, calibrated",
+"eValue": null,
+"threshold": 822,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"magnitude:7": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"sigma": 0.08398885290979476
+},
+"challengers": [
+{
+"model": "magnitude:harx:034c8c29",
+"label": "HAR regression + derivatives, funding",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:fba99bb8",
+"label": "GARCH",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a93c0f3c",
+"label": "HAR regression + calendar",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:b2cbc295",
+"label": "GARCH + weekday",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a3e8b61d",
+"label": "HAR regression",
+"eValue": null,
+"threshold": 822,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a9704d03",
+"label": "HAR regression + volume",
+"eValue": null,
+"threshold": 1184,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"timing:2": {
+"incumbent": "timing:uniform:d69ed9cf",
+"incumbentLabel": "no firing preferred",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"probs": [
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666
+]
+},
+"challengers": [
+{
+"model": "timing:firingFrequency:16ed7dd4",
+"label": "cheapest-firing frequency, 365 days",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:d06623c9",
+"label": "cheapest-firing frequency, 90 days",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:73330812",
+"label": "cheapest-firing frequency, 365 days, by weekday",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+}
+},
+"SOL": {
+"direction:1": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"pUp": 0.48360655737704916
+},
+"challengers": []
+},
+"direction:7": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"pUp": 0.48360655737704916
+},
+"challengers": [
+{
+"model": "direction:logistic:b4383437",
+"label": "logistic on lags, calendar (strong shrinkage)",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "direction:logistic:0140135b",
+"label": "logistic on lags, calendar (light shrinkage)",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "direction:logistic:88c69bbb",
+"label": "logistic on leaders (light shrinkage)",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "direction:logistic:b981ad21",
+"label": "logistic on leaders (strong shrinkage)",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"magnitude:1": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"sigma": 0.03380676548073091
+},
+"challengers": [
+{
+"model": "magnitude:harx:034c8c29",
+"label": "HAR regression + derivatives, funding",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:0c557d28",
+"label": "GARCH + weekday, calibrated",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:05f25355",
+"label": "EWMA",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:0aef0576",
+"label": "EWMA, calibrated",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:62d256c9",
+"label": "GARCH, calibrated",
+"eValue": null,
+"threshold": 822,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:b2cbc295",
+"label": "GARCH + weekday",
+"eValue": null,
+"threshold": 1184,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"magnitude:7": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"sigma": 0.08944429409349695
+},
+"challengers": [
+{
+"model": "magnitude:harx:034c8c29",
+"label": "HAR regression + derivatives, funding",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:0c557d28",
+"label": "GARCH + weekday, calibrated",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:62d256c9",
+"label": "GARCH, calibrated",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:b2cbc295",
+"label": "GARCH + weekday",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:fba99bb8",
+"label": "GARCH",
+"eValue": null,
+"threshold": 822,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:e820f265",
+"label": "HAR regression + volatility",
+"eValue": null,
+"threshold": 1184,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"timing:2": {
+"incumbent": "timing:uniform:d69ed9cf",
+"incumbentLabel": "no firing preferred",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"probs": [
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666
+]
+},
+"challengers": [
+{
+"model": "timing:firingFrequency:16ed7dd4",
+"label": "cheapest-firing frequency, 365 days",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:d06623c9",
+"label": "cheapest-firing frequency, 90 days",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:73330812",
+"label": "cheapest-firing frequency, 365 days, by weekday",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:dc7edb1f",
+"label": "cheapest-firing frequency, 90 days, by weekday",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+}
+},
+"XLM": {
+"direction:1": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"pUp": 0.4644808743169399
+},
+"challengers": []
+},
+"direction:7": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"pUp": 0.40437158469945356
+},
+"challengers": []
+},
+"magnitude:1": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"sigma": 0.03758100158830735
+},
+"challengers": [
+{
+"model": "magnitude:scale:b2cbc295",
+"label": "GARCH + weekday",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:fba99bb8",
+"label": "GARCH",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:05f25355",
+"label": "EWMA",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:62d256c9",
+"label": "GARCH, calibrated",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a93c0f3c",
+"label": "HAR regression + calendar",
+"eValue": null,
+"threshold": 822,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:0c557d28",
+"label": "GARCH + weekday, calibrated",
+"eValue": null,
+"threshold": 1184,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"magnitude:7": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"sigma": 0.09942998422338464
+},
+"challengers": [
+{
+"model": "magnitude:scale:daa6bd2c",
+"label": "HAR",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:bfc16a7f",
+"label": "seasonal HAR",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:05f25355",
+"label": "EWMA",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:fba99bb8",
+"label": "GARCH",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:b2cbc295",
+"label": "GARCH + weekday",
+"eValue": null,
+"threshold": 822,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"timing:2": {
+"incumbent": "timing:uniform:d69ed9cf",
+"incumbentLabel": "no firing preferred",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"probs": [
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666
+]
+},
+"challengers": [
+{
+"model": "timing:firingFrequency:16ed7dd4",
+"label": "cheapest-firing frequency, 365 days",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:d06623c9",
+"label": "cheapest-firing frequency, 90 days",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:73330812",
+"label": "cheapest-firing frequency, 365 days, by weekday",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+}
+},
+"XRP": {
+"direction:1": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"pUp": 0.476775956284153
+},
+"challengers": [
+{
+"model": "direction:logistic:b2d169ad",
+"label": "logistic on derivatives, funding (strong shrinkage)",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "direction:logistic:aee36104",
+"label": "logistic on derivatives, funding (light shrinkage)",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "direction:lightgbm:14a34c17",
+"label": "boosted trees on every input group",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "direction:logistic:b981ad21",
+"label": "logistic on leaders (strong shrinkage)",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "direction:logistic:88c69bbb",
+"label": "logistic on leaders (light shrinkage)",
+"eValue": null,
+"threshold": 822,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"direction:7": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"pUp": 0.44808743169398907
+},
+"challengers": [
+{
+"model": "direction:logistic:b4383437",
+"label": "logistic on lags, calendar (strong shrinkage)",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "direction:logistic:0140135b",
+"label": "logistic on lags, calendar (light shrinkage)",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "direction:logistic:b981ad21",
+"label": "logistic on leaders (strong shrinkage)",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"magnitude:1": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"sigma": 0.04638732923932242
+},
+"challengers": [
+{
+"model": "magnitude:harx:034c8c29",
+"label": "HAR regression + derivatives, funding",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:05f25355",
+"label": "EWMA",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a93c0f3c",
+"label": "HAR regression + calendar",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:b2cbc295",
+"label": "GARCH + weekday",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:e820f265",
+"label": "HAR regression + volatility",
+"eValue": null,
+"threshold": 822,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:0c557d28",
+"label": "GARCH + weekday, calibrated",
+"eValue": null,
+"threshold": 1184,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"magnitude:7": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"sigma": 0.12272933715172211
+},
+"challengers": [
+{
+"model": "magnitude:harx:a9704d03",
+"label": "HAR regression + volume",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:034c8c29",
+"label": "HAR regression + derivatives, funding",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:e820f265",
+"label": "HAR regression + volatility",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a93c0f3c",
+"label": "HAR regression + calendar",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:bfc16a7f",
+"label": "seasonal HAR",
+"eValue": null,
+"threshold": 822,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:daa6bd2c",
+"label": "HAR",
+"eValue": null,
+"threshold": 1184,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"timing:2": {
+"incumbent": "timing:uniform:d69ed9cf",
+"incumbentLabel": "no firing preferred",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"probs": [
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666
+]
+},
+"challengers": [
+{
+"model": "timing:firingFrequency:16ed7dd4",
+"label": "cheapest-firing frequency, 365 days",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:d06623c9",
+"label": "cheapest-firing frequency, 90 days",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:73330812",
+"label": "cheapest-firing frequency, 365 days, by weekday",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:dc7edb1f",
+"label": "cheapest-firing frequency, 90 days, by weekday",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+}
+},
+"HYPE": {
+"direction:1": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"pUp": 0.514792899408284
+},
+"challengers": []
+},
+"direction:7": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"pUp": 0.5060240963855421
+},
+"challengers": [
+{
+"model": "direction:logistic:af21ddbe",
+"label": "logistic on momentum, volume, volatility (strong shrinkage)",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "direction:lightgbm:3d1de39e",
+"label": "boosted trees on momentum, volatility, volume",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"magnitude:1": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"sigma": 0.039772399766987085
+},
+"challengers": [
+{
+"model": "magnitude:scale:05f25355",
+"label": "EWMA",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:0aef0576",
+"label": "EWMA, calibrated",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:bfc16a7f",
+"label": "seasonal HAR",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:8b9aef5a",
+"label": "seasonal HAR, calibrated",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:86df6a60",
+"label": "HAR, calibrated",
+"eValue": null,
+"threshold": 822,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:daa6bd2c",
+"label": "HAR",
+"eValue": null,
+"threshold": 1184,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"magnitude:7": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"sigma": 0.10522787882769111
+},
+"challengers": [
+{
+"model": "magnitude:harx:b016db7f",
+"label": "HAR regression + market",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:e820f265",
+"label": "HAR regression + volatility",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a3e8b61d",
+"label": "HAR regression",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a9704d03",
+"label": "HAR regression + volume",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:b2cbc295",
+"label": "GARCH + weekday",
+"eValue": null,
+"threshold": 822,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:fba99bb8",
+"label": "GARCH",
+"eValue": null,
+"threshold": 1184,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+}
+},
+"HBAR": {
+"direction:1": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"pUp": 0.47540983606557374
+},
+"challengers": []
+},
+"direction:7": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"pUp": 0.4275956284153005
+},
+"challengers": [
+{
+"model": "direction:lightgbm:14a34c17",
+"label": "boosted trees on every input group",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "direction:logistic:8034e2f2",
+"label": "logistic on derivatives, funding, momentum (strong shrinkage)",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"magnitude:1": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"sigma": 0.02949161215565916
+},
+"challengers": [
+{
+"model": "magnitude:scale:05f25355",
+"label": "EWMA",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"magnitude:7": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"sigma": 0.07802747152624365
+},
+"challengers": [
+{
+"model": "magnitude:scale:bfc16a7f",
+"label": "seasonal HAR",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:daa6bd2c",
+"label": "HAR",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:05f25355",
+"label": "EWMA",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"timing:2": {
+"incumbent": "timing:uniform:d69ed9cf",
+"incumbentLabel": "no firing preferred",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"probs": [
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666
+]
+},
+"challengers": [
+{
+"model": "timing:firingFrequency:16ed7dd4",
+"label": "cheapest-firing frequency, 365 days",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:d06623c9",
+"label": "cheapest-firing frequency, 90 days",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:73330812",
+"label": "cheapest-firing frequency, 365 days, by weekday",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:ba1b6379",
+"label": "cheapest-firing frequency, 30 days",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:dc7edb1f",
+"label": "cheapest-firing frequency, 90 days, by weekday",
+"eValue": null,
+"threshold": 822,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+}
+},
+"ARB": {
+"direction:1": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": null,
+"challengers": []
+},
+"direction:7": {
+"incumbent": "direction:baseRate:7df30028",
+"incumbentLabel": "base rate (no skill)",
+"promoted": false,
+"championSince": null,
+"forecast": null,
+"challengers": [
+{
+"model": "direction:logistic:b2d169ad",
+"label": "logistic on derivatives, funding (strong shrinkage)",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"magnitude:1": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": null,
+"challengers": [
+{
+"model": "magnitude:harx:a93c0f3c",
+"label": "HAR regression + calendar",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"magnitude:7": {
+"incumbent": "magnitude:scale:5b34dcf5",
+"incumbentLabel": "trailing volatility (production)",
+"promoted": false,
+"championSince": null,
+"forecast": null,
+"challengers": [
+{
+"model": "magnitude:harx:034c8c29",
+"label": "HAR regression + derivatives, funding",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:b2cbc295",
+"label": "GARCH + weekday",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:fba99bb8",
+"label": "GARCH",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a3e8b61d",
+"label": "HAR regression",
+"eValue": null,
+"threshold": 526,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:harx:a9704d03",
+"label": "HAR regression + volume",
+"eValue": null,
+"threshold": 822,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "magnitude:scale:0c557d28",
+"label": "GARCH + weekday, calibrated",
+"eValue": null,
+"threshold": 1184,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+},
+"timing:2": {
+"incumbent": "timing:uniform:d69ed9cf",
+"incumbentLabel": "no firing preferred",
+"promoted": false,
+"championSince": null,
+"forecast": {
+"probs": [
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666,
+0.16666666666666666
+]
+},
+"challengers": [
+{
+"model": "timing:firingFrequency:16ed7dd4",
+"label": "cheapest-firing frequency, 365 days",
+"eValue": null,
+"threshold": 33,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:d06623c9",
+"label": "cheapest-firing frequency, 90 days",
+"eValue": null,
+"threshold": 132,
+"forwardN": 0,
+"meanDiff": null
+},
+{
+"model": "timing:firingFrequency:73330812",
+"label": "cheapest-firing frequency, 365 days, by weekday",
+"eValue": null,
+"threshold": 296,
+"forwardN": 0,
+"meanDiff": null
+}
+]
+}
+}
+},
+"weights": {
+"BTC": {
+"direction:1": {
+"probe": "direction:logistic:80dad52e",
+"refits": 13,
+"groupShare": {
+"leaders": 0.1999,
+"momentum": 0.1937,
+"lags": 0.1766,
+"volatility": 0.1404,
+"derivatives": 0.1026,
+"calendar": 0.0849,
+"liquidity": 0.0395,
+"volume": 0.0325,
+"market": 0.0168,
+"funding": 0.0074,
+"supply": 0.0058
+},
+"top": [
+{
+"feature": "return60",
+"weight": 0.5758,
+"signStability": 1.0
+},
+{
+"feature": "downsideShare",
+"weight": 0.5394,
+"signStability": 1.0
+},
+{
+"feature": "drawdownFromHigh",
+"weight": 0.3565,
+"signStability": 0.69
+},
+{
+"feature": "returnLag0",
+"weight": -0.2514,
+"signStability": 1.0
+},
+{
+"feature": "oiPercentile",
+"weight": -0.2489,
+"signStability": 1.0
+},
+{
+"feature": "returnLag1",
+"weight": -0.2244,
+"signStability": 0.69
+}
+]
+},
+"magnitude:1": {
+"probe": "magnitude:harx:840c95c9",
+"refits": 13,
+"groupShare": {
+"derivatives": 0.2605,
+"lags": 0.1999,
+"momentum": 0.1838,
+"calendar": 0.1758,
+"volatility": 0.0527,
+"volume": 0.0484,
+"market": 0.0374,
+"har": 0.0165,
+"liquidity": 0.0135,
+"funding": 0.0095,
+"supply": 0.002
+},
+"top": [
+{
+"feature": "oiChange1",
+"weight": 1.0475,
+"signStability": 0.15
+},
+{
+"feature": "oiQuantityChange1",
+"weight": -0.7404,
+"signStability": 0.15
+},
+{
+"feature": "weekday:5",
+"weight": -0.6217,
+"signStability": 1.0
+},
+{
+"feature": "returnLag1",
+"weight": -0.5684,
+"signStability": 0.15
+},
+{
+"feature": "trendGap",
+"weight": 0.4163,
+"signStability": 0.92
+},
+{
+"feature": "rangePosition",
+"weight": 0.383,
+"signStability": 0.85
+}
+]
+}
+},
+"ETH": {
+"direction:1": {
+"probe": "direction:logistic:80dad52e",
+"refits": 13,
+"groupShare": {
+"momentum": 0.1764,
+"volatility": 0.1598,
+"leaders": 0.1522,
+"derivatives": 0.136,
+"calendar": 0.1177,
+"lags": 0.1137,
+"market": 0.0833,
+"volume": 0.0352,
+"supply": 0.0116,
+"liquidity": 0.0075,
+"funding": 0.0067
+},
+"top": [
+{
+"feature": "downsideShare",
+"weight": 0.8194,
+"signStability": 1.0
+},
+{
+"feature": "oiPercentile",
+"weight": 0.5579,
+"signStability": 1.0
+},
+{
+"feature": "return60",
+"weight": 0.4849,
+"signStability": 1.0
+},
+{
+"feature": "rangePosition",
+"weight": -0.4209,
+"signStability": 1.0
+},
+{
+"feature": "volOfVol",
+"weight": -0.365,
+"signStability": 1.0
+},
+{
+"feature": "market5",
+"weight": 0.3232,
+"signStability": 0.92
+}
+]
+},
+"magnitude:1": {
+"probe": "magnitude:harx:840c95c9",
+"refits": 13,
+"groupShare": {
+"momentum": 0.2673,
+"lags": 0.1817,
+"volatility": 0.1378,
+"calendar": 0.1281,
+"derivatives": 0.1088,
+"market": 0.067,
+"volume": 0.0588,
+"liquidity": 0.0221,
+"har": 0.0181,
+"supply": 0.0091,
+"funding": 0.0012
+},
+"top": [
+{
+"feature": "drawdownFromHigh",
+"weight": 0.6431,
+"signStability": 1.0
+},
+{
+"feature": "trendGap",
+"weight": 0.6416,
+"signStability": 1.0
+},
+{
+"feature": "dailyVol",
+"weight": -0.5019,
+"signStability": 1.0
+},
+{
+"feature": "weekday:5",
+"weight": -0.3897,
+"signStability": 1.0
+},
+{
+"feature": "returnLag0",
+"weight": 0.3717,
+"signStability": 1.0
+},
+{
+"feature": "volumeRatio",
+"weight": 0.3707,
+"signStability": 1.0
+}
+]
+}
+},
+"SOL": {
+"direction:1": {
+"probe": "direction:logistic:80dad52e",
+"refits": 13,
+"groupShare": {
+"leaders": 0.2513,
+"momentum": 0.1732,
+"lags": 0.1421,
+"volatility": 0.1042,
+"derivatives": 0.0946,
+"calendar": 0.0893,
+"market": 0.0568,
+"volume": 0.0399,
+"liquidity": 0.0358,
+"funding": 0.0083,
+"supply": 0.0045
+},
+"top": [
+{
+"feature": "rangePosition",
+"weight": -0.5257,
+"signStability": 1.0
+},
+{
+"feature": "month:sin",
+"weight": -0.3561,
+"signStability": 1.0
+},
+{
+"feature": "returnLag0",
+"weight": -0.3265,
+"signStability": 1.0
+},
+{
+"feature": "leader_XLM_1",
+"weight": 0.2884,
+"signStability": 1.0
+},
+{
+"feature": "downsideShare",
+"weight": 0.2747,
+"signStability": 1.0
+},
+{
+"feature": "returnLag1",
+"weight": -0.2688,
+"signStability": 1.0
+}
+]
+},
+"magnitude:1": {
+"probe": "magnitude:harx:840c95c9",
+"refits": 13,
+"groupShare": {
+"momentum": 0.2813,
+"volatility": 0.1805,
+"lags": 0.1677,
+"calendar": 0.147,
+"derivatives": 0.081,
+"market": 0.0689,
+"volume": 0.0214,
+"supply": 0.0149,
+"har": 0.0145,
+"liquidity": 0.0132,
+"funding": 0.0096
+},
+"top": [
+{
+"feature": "trendGap",
+"weight": 0.5254,
+"signStability": 1.0
+},
+{
+"feature": "dailyVol",
+"weight": -0.5007,
+"signStability": 1.0
+},
+{
+"feature": "return1",
+"weight": -0.4054,
+"signStability": 1.0
+},
+{
+"feature": "return60",
+"weight": -0.3984,
+"signStability": 1.0
+},
+{
+"feature": "returnLag0",
+"weight": 0.3651,
+"signStability": 1.0
+},
+{
+"feature": "weekday:5",
+"weight": -0.3221,
+"signStability": 1.0
+}
+]
+}
+},
+"XLM": {
+"direction:1": {
+"probe": "direction:logistic:80dad52e",
+"refits": 13,
+"groupShare": {
+"leaders": 0.1711,
+"calendar": 0.1709,
+"derivatives": 0.1377,
+"volatility": 0.1341,
+"lags": 0.1197,
+"momentum": 0.1189,
+"funding": 0.0439,
+"market": 0.0435,
+"liquidity": 0.0274,
+"volume": 0.0202,
+"supply": 0.0125
+},
+"top": [
+{
+"feature": "month:sin",
+"weight": -0.4532,
+"signStability": 0.92
+},
+{
+"feature": "dailyVol",
+"weight": 0.3408,
+"signStability": 0.54
+},
+{
+"feature": "fundingRank",
+"weight": -0.2923,
+"signStability": 1.0
+},
+{
+"feature": "downsideShare",
+"weight": 0.2691,
+"signStability": 1.0
+},
+{
+"feature": "leader_SOL_1",
+"weight": -0.2314,
+"signStability": 1.0
+},
+{
+"feature": "oiChange7",
+"weight": 0.229,
+"signStability": 1.0
+}
+]
+},
+"magnitude:1": {
+"probe": "magnitude:harx:840c95c9",
+"refits": 13,
+"groupShare": {
+"derivatives": 0.2775,
+"lags": 0.2059,
+"momentum": 0.1229,
+"calendar": 0.1046,
+"volatility": 0.0836,
+"volume": 0.07,
+"market": 0.045,
+"har": 0.0446,
+"liquidity": 0.0327,
+"supply": 0.0094,
+"funding": 0.0037
+},
+"top": [
+{
+"feature": "oiChange1",
+"weight": 1.225,
+"signStability": 1.0
+},
+{
+"feature": "oiQuantityChange1",
+"weight": -0.8214,
+"signStability": 1.0
+},
+{
+"feature": "returnLag1",
+"weight": -0.7183,
+"signStability": 0.69
+},
+{
+"feature": "rangePosition",
+"weight": 0.434,
+"signStability": 0.92
+},
+{
+"feature": "volumeRatio",
+"weight": 0.4053,
+"signStability": 1.0
+},
+{
+"feature": "returnLag2",
+"weight": -0.3665,
+"signStability": 1.0
+}
+]
+}
+},
+"XRP": {
+"direction:1": {
+"probe": "direction:logistic:80dad52e",
+"refits": 13,
+"groupShare": {
+"leaders": 0.3098,
+"derivatives": 0.1264,
+"volatility": 0.1167,
+"calendar": 0.1137,
+"momentum": 0.1099,
+"lags": 0.0912,
+"volume": 0.0558,
+"market": 0.0291,
+"funding": 0.0173,
+"liquidity": 0.0171,
+"supply": 0.013
+},
+"top": [
+{
+"feature": "drawdownFromHigh",
+"weight": -0.4674,
+"signStability": 1.0
+},
+{
+"feature": "dailyVol",
+"weight": 0.3928,
+"signStability": 1.0
+},
+{
+"feature": "leader_ARB_1",
+"weight": -0.3664,
+"signStability": 1.0
+},
+{
+"feature": "downsideShare",
+"weight": 0.3294,
+"signStability": 1.0
+},
+{
+"feature": "month:sin",
+"weight": -0.2989,
+"signStability": 1.0
+},
+{
+"feature": "volumeRatio",
+"weight": 0.2907,
+"signStability": 1.0
+}
+]
+},
+"magnitude:1": {
+"probe": "magnitude:harx:840c95c9",
+"refits": 13,
+"groupShare": {
+"momentum": 0.2689,
+"lags": 0.1658,
+"volatility": 0.1481,
+"calendar": 0.143,
+"derivatives": 0.0997,
+"market": 0.0837,
+"har": 0.0315,
+"volume": 0.0233,
+"liquidity": 0.023,
+"funding": 0.009,
+"supply": 0.004
+},
+"top": [
+{
+"feature": "rangePosition",
+"weight": 0.9778,
+"signStability": 1.0
+},
+{
+"feature": "month:cos",
+"weight": 0.4895,
+"signStability": 0.77
+},
+{
+"feature": "dailyVol",
+"weight": -0.4591,
+"signStability": 0.54
+},
+{
+"feature": "returnLag1",
+"weight": -0.4408,
+"signStability": 0.23
+},
+{
+"feature": "return1",
+"weight": -0.4153,
+"signStability": 0.92
+},
+{
+"feature": "weekday:5",
+"weight": -0.3857,
+"signStability": 1.0
+}
+]
+}
+},
+"HYPE": {
+"direction:1": {
+"probe": "direction:logistic:80dad52e",
+"refits": 7,
+"groupShare": {
+"leaders": 0.2144,
+"lags": 0.1385,
+"calendar": 0.1341,
+"volatility": 0.1223,
+"momentum": 0.106,
+"market": 0.0941,
+"derivatives": 0.0797,
+"volume": 0.0419,
+"liquidity": 0.036,
+"funding": 0.021,
+"supply": 0.012
+},
+"top": [
+{
+"feature": "month:cos",
+"weight": -0.5936,
+"signStability": 1.0
+},
+{
+"feature": "downsideShare",
+"weight": 0.479,
+"signStability": 1.0
+},
+{
+"feature": "leader_HBAR_1",
+"weight": 0.4502,
+"signStability": 1.0
+},
+{
+"feature": "dwellShare",
+"weight": 0.436,
+"signStability": 1.0
+},
+{
+"feature": "beta60",
+"weight": -0.413,
+"signStability": 1.0
+},
+{
+"feature": "leader_SOL_1",
+"weight": -0.3763,
+"signStability": 1.0
+}
+]
+},
+"magnitude:1": {
+"probe": "magnitude:harx:840c95c9",
+"refits": 7,
+"groupShare": {
+"momentum": 0.2611,
+"lags": 0.2002,
+"derivatives": 0.1677,
+"calendar": 0.1151,
+"market": 0.0789,
+"volatility": 0.0691,
+"volume": 0.0432,
+"liquidity": 0.0346,
+"har": 0.0152,
+"supply": 0.0082,
+"funding": 0.0067
+},
+"top": [
+{
+"feature": "oiChange1",
+"weight": -0.9315,
+"signStability": 1.0
+},
+{
+"feature": "drawdownFromHigh",
+"weight": -0.7799,
+"signStability": 1.0
+},
+{
+"feature": "return60",
+"weight": -0.5522,
+"signStability": 0.71
+},
+{
+"feature": "returnLag1",
+"weight": 0.508,
+"signStability": 0.86
+},
+{
+"feature": "return1",
+"weight": -0.4585,
+"signStability": 1.0
+},
+{
+"feature": "returnLag3",
+"weight": -0.4441,
+"signStability": 1.0
+}
+]
+}
+},
+"HBAR": {
+"direction:1": {
+"probe": "direction:logistic:80dad52e",
+"refits": 13,
+"groupShare": {
+"momentum": 0.1887,
+"leaders": 0.1875,
+"volatility": 0.1469,
+"lags": 0.135,
+"derivatives": 0.1122,
+"volume": 0.0678,
+"calendar": 0.0666,
+"liquidity": 0.0295,
+"funding": 0.0246,
+"market": 0.0244,
+"supply": 0.0167
+},
+"top": [
+{
+"feature": "drawdownFromHigh",
+"weight": -0.4858,
+"signStability": 0.85
+},
+{
+"feature": "downsideShare",
+"weight": 0.4493,
+"signStability": 1.0
+},
+{
+"feature": "volOfVol",
+"weight": 0.3332,
+"signStability": 1.0
+},
+{
+"feature": "leader_SOL_3",
+"weight": -0.3278,
+"signStability": 1.0
+},
+{
+"feature": "trendGap",
+"weight": 0.3125,
+"signStability": 1.0
+},
+{
+"feature": "volumeTrend",
+"weight": 0.2486,
+"signStability": 1.0
+}
+]
+},
+"magnitude:1": {
+"probe": "magnitude:harx:840c95c9",
+"refits": 13,
+"groupShare": {
+"derivatives": 0.2264,
+"momentum": 0.1741,
+"lags": 0.1713,
+"volume": 0.1293,
+"calendar": 0.1172,
+"volatility": 0.0553,
+"market": 0.0539,
+"har": 0.038,
+"liquidity": 0.0204,
+"funding": 0.0136,
+"supply": 0.0005
+},
+"top": [
+{
+"feature": "rangePosition",
+"weight": 0.6276,
+"signStability": 1.0
+},
+{
+"feature": "oiChange1",
+"weight": 0.6066,
+"signStability": 1.0
+},
+{
+"feature": "volumeRatio",
+"weight": 0.5918,
+"signStability": 1.0
+},
+{
+"feature": "returnLag1",
+"weight": -0.5619,
+"signStability": 1.0
+},
+{
+"feature": "oiQuantityChange1",
+"weight": -0.4572,
+"signStability": 1.0
+},
+{
+"feature": "volumeTrend",
+"weight": 0.4505,
+"signStability": 1.0
+}
+]
+}
+},
+"ARB": {
+"direction:1": {
+"probe": "direction:logistic:80dad52e",
+"refits": 13,
+"groupShare": {
+"derivatives": 0.2021,
+"leaders": 0.185,
+"lags": 0.132,
+"momentum": 0.1283,
+"calendar": 0.1065,
+"volatility": 0.0958,
+"liquidity": 0.0792,
+"market": 0.0564,
+"volume": 0.0102,
+"supply": 0.004,
+"funding": 0.0007
+},
+"top": [
+{
+"feature": "logDepth",
+"weight": -0.5199,
+"signStability": 1.0
+},
+{
+"feature": "topTraderPosition",
+"weight": -0.385,
+"signStability": 1.0
+},
+{
+"feature": "dailyVol",
+"weight": 0.372,
+"signStability": 0.69
+},
+{
+"feature": "leader_XLM_1",
+"weight": 0.321,
+"signStability": 1.0
+},
+{
+"feature": "oiPercentile",
+"weight": 0.2568,
+"signStability": 1.0
+},
+{
+"feature": "oiChange7",
+"weight": 0.2487,
+"signStability": 0.38
+}
+]
+},
+"magnitude:1": {
+"probe": "magnitude:harx:840c95c9",
+"refits": 13,
+"groupShare": {
+"momentum": 0.2754,
+"lags": 0.2104,
+"market": 0.1158,
+"derivatives": 0.1017,
+"calendar": 0.097,
+"volatility": 0.0658,
+"liquidity": 0.0528,
+"har": 0.0349,
+"volume": 0.0311,
+"funding": 0.0117,
+"supply": 0.0033
+},
+"top": [
+{
+"feature": "trendGap",
+"weight": 0.7016,
+"signStability": 1.0
+},
+{
+"feature": "return20",
+"weight": -0.5147,
+"signStability": 1.0
+},
+{
+"feature": "return5",
+"weight": -0.4089,
+"signStability": 1.0
+},
+{
+"feature": "returnLag4",
+"weight": 0.3573,
+"signStability": 1.0
+},
+{
+"feature": "logDepth",
+"weight": 0.3464,
+"signStability": 0.77
+},
+{
+"feature": "relative5",
+"weight": -0.3361,
+"signStability": 0.85
+}
+]
+}
+}
+},
+"transitions": [
+{
+"model_id": "magnitude:harx:a93c0f3c",
+"symbol": "XRP",
+"horizon": 1,
+"from_status": null,
+"to_status": "challenger",
+"at": "2026-09-23T16:52:47Z",
+"reason": "admitted: history ranked it +0.010 vs magnitude:scale:5b34dcf5",
+"e_value": null,
+"forward_n": 0
+},
+{
+"model_id": "magnitude:scale:b2cbc295",
+"symbol": "XRP",
+"horizon": 1,
+"from_status": null,
+"to_status": "challenger",
+"at": "2026-09-23T16:52:47Z",
+"reason": "admitted: history ranked it +0.010 vs magnitude:scale:5b34dcf5",
+"e_value": null,
+"forward_n": 0
+},
+{
+"model_id": "magnitude:harx:e820f265",
+"symbol": "XRP",
+"horizon": 1,
+"from_status": null,
+"to_status": "challenger",
+"at": "2026-09-23T16:52:47Z",
+"reason": "admitted: history ranked it +0.009 vs magnitude:scale:5b34dcf5",
+"e_value": null,
+"forward_n": 0
+},
+{
+"model_id": "magnitude:scale:0c557d28",
+"symbol": "XRP",
+"horizon": 1,
+"from_status": null,
+"to_status": "challenger",
+"at": "2026-09-23T16:52:47Z",
+"reason": "admitted: history ranked it +0.007 vs magnitude:scale:5b34dcf5",
+"e_value": null,
+"forward_n": 0
+},
+{
+"model_id": "magnitude:harx:a9704d03",
+"symbol": "XRP",
+"horizon": 7,
+"from_status": null,
+"to_status": "challenger",
+"at": "2026-09-23T16:52:47Z",
+"reason": "admitted: history ranked it +0.075 vs magnitude:scale:5b34dcf5",
+"e_value": null,
+"forward_n": 0
+}
+],
+"counts": {
+"forecasts": 193,
+"scored": 0,
+"champions": 0,
+"challengers": 144
+},
+"rules": {
+"alpha": 0.05,
+"demoteE": 20.0,
+"retireE": 20.0,
+"minForward": {
+"1": 60,
+"7": 20,
+"2": 60
+},
+"liveChallengers": 6
+}
+}

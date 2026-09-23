@@ -483,6 +483,47 @@ console.log('\n== the time-series panel publishes a volatility band and nothing 
   failedView.dom.window.close();
 }
 
+// ============ per-asset model tournament: forward-tested, never a call ========
+// The summary is the real output of scripts/model-tournament.py on the tracked
+// panel (2026-09-23 seeding run), passed through the real payload loader.
+console.log('\n== the model-tournament panel shows who is in force and what is being tested ==');
+{
+  const { loadTournamentHealth } = await import('./scripts/model-tournament-io.mjs');
+  const summary = JSON.parse(readFileSync(new URL('./test-fixtures/model-tournament-summary.json', import.meta.url), 'utf8'));
+  // One slot promoted, to see the promoted rendering; the rest as seeded.
+  summary.assets.BTC['magnitude:1'] = { ...summary.assets.BTC['magnitude:1'], promoted: true,
+    incumbentLabel: 'GARCH + weekday, calibrated', championSince: '2026-11-02T15:20:00Z' };
+  const created = '2026-09-23T15:30:00Z';
+  const query = async () => [{ created_at: created, summary_json: JSON.stringify(summary) }];
+  const tournament = await loadTournamentHealth({}, Date.parse('2026-09-23T18:00:00Z'), query);
+  const mtView = await render({ ...payload(), modelTournament: tournament }, { settleMs: 1200 });
+  const el = mtView.doc.getElementById('panel-modelTournament');
+  const text = el?.textContent || '';
+  check('the tournament panel renders without disrupting the page', mtView.pageErrors.length === 0 && Boolean(el), JSON.stringify(mtView.pageErrors));
+  check('it sits in the timing view', Boolean(el?.closest('[data-dashboard-view="timing"]')));
+  check('every always-tracked asset and the pooled slot get a row',
+    ['*', 'BTC', 'ETH', 'SOL', 'XLM', 'XRP', 'HYPE', 'HBAR', 'ARB'].every(sym => el.querySelector(`[data-mt="${sym}"]`)));
+  check('the rule is stated: promotion only on forecasts logged before their outcomes, research only',
+    text.includes('only on forecasts it logged before their outcomes existed') && text.includes('Research only; nothing here places a trade'));
+  check('a promoted slot says so, with its date', /GARCH \+ weekday, calibrated promoted on forward evidence 2026-11-02/.test(el.querySelector('[data-mt="BTC"]').textContent));
+  check('an unpromoted slot shows the current method and its challengers\' progress',
+    /base rate \(no skill\) current method/.test(text) && /challengers? logging forecasts; leader .*% of the way to promotion/.test(text));
+  check('forecasts render in plain units', /P\(up\) \d+%/.test(text) && /typical move ±\d/.test(text) && /likeliest cheapest firing \d\d:00 UTC/.test(text));
+  check('each asset shows how its models weigh the inputs, and whether the weights held',
+    /direction .*%/.test(el.querySelector('[data-mt="ETH"]').textContent) && /sign held across \d+ refits|no top weight held its sign/.test(text));
+  check('no direction arrow or trade verb inside the panel',
+    el.querySelectorAll('.dir-arrow, .dir-up, .dir-down').length === 0 && !/\bBUY\b|\bSELL\b|\bLONG\b|\bSHORT\b/.test(text));
+  check('only the promoted slot is actionable', tournament.assets.BTC['magnitude:1'].actionable === true
+    && tournament.assets.ETH['direction:1'].actionable === false && tournament.actionable === true);
+  mtView.dom.window.close();
+
+  const firstView = await render({ ...payload(), modelTournament: { status: 'awaiting-first-run', actionable: false } }, { settleMs: 1200 });
+  const firstText = firstView.doc.getElementById('panel-modelTournament')?.textContent || '';
+  check('before the first run the panel says the current methods stand', firstView.pageErrors.length === 0
+    && firstText.includes('has not published a run yet (awaiting-first-run)') && firstText.includes('current methods stand'));
+  firstView.dom.window.close();
+}
+
 [withheld, proven, ui, clocks, stale].forEach((r) => r.dom.window.close());
 
 console.log(`\n${passed} passed, ${failed} failed`);

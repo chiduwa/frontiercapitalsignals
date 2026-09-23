@@ -7103,6 +7103,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
 
   #panel-sessionResearch .bh-cell,#panel-calendarResearch .bh-cell,#panel-stableBasketResearch .bh-cell{display:block;line-height:1.7}
   #panel-timeSeriesResearch .bh-cell{display:block;line-height:1.7}
+  #panel-modelTournament .bh-cell{display:block;line-height:1.7}
+  @media(min-width:721px){#panel-modelTournament .bh-head,#panel-modelTournament .bh-row{grid-template-columns:minmax(80px,.45fr) minmax(200px,1.2fr) minmax(200px,1.2fr) minmax(170px,1fr) minmax(190px,1.1fr)}}
   @media(min-width:721px){#panel-timeSeriesResearch .bh-head,#panel-timeSeriesResearch .bh-row{grid-template-columns:minmax(96px,.6fr) minmax(170px,1fr) minmax(230px,1.5fr) minmax(230px,1.5fr)}}
   .ts-bars{display:inline-flex;align-items:flex-end;gap:2px;height:14px;vertical-align:-2px;margin-right:7px}
   .ts-bars i{display:block;width:5px;background:var(--amber);opacity:.8;border-radius:1px}
@@ -8318,6 +8320,73 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     } else if(tsr&&tsr.status){
       timing+=panelStart({id:'timeSeriesResearch',tone:'timing',open:false,eyebrow:'TIME-SERIES MODEL',title:'Trend, seasonality, cycles, volatility and irregular moves',meta:esc(tsr.status)})
         +'<div class="dr-note">The time-series readings are unavailable this run ('+esc(tsr.status)+'). No value is inferred.</div>'+PANEL_END;
+    }
+
+    // Per-asset model tournament (scripts/model-tournament.py). Each slot names
+    // the method in force and how far its challengers are toward the
+    // forward-evidence bar. A model changes what is shown here only once it
+    // has been promoted on forecasts it logged before their outcomes; until
+    // then the current method stands, and nothing here is a trade call.
+    var mt=d.modelTournament;
+    if(mt&&mt.assets&&Object.keys(mt.assets).length){
+      var mtPct=function(x){return typeof x==='number'&&isFinite(x)?(x*100).toFixed(0)+'%':'—';};
+      // Evidence on a log scale: 0% at e=1 (no evidence), 100% at the promotion bar.
+      var mtProgress=function(c){return c&&c.eValue>1&&c.threshold>1?Math.max(0,Math.min(1,Math.log(c.eValue)/Math.log(c.threshold))):0;};
+      var mtFirings=['00:00','04:00','08:00','12:00','16:00','20:00'];
+      var mtForecast=function(key,f){
+        if(!f)return '';
+        if(key.indexOf('direction')===0&&typeof f.pUp==='number')return 'P(up) '+mtPct(f.pUp);
+        if(key.indexOf('magnitude')===0&&typeof f.sigma==='number')return 'typical move ±'+(Math.expm1(f.sigma)*100).toFixed(1)+'%';
+        if(key.indexOf('timing')===0&&f.probs&&f.probs.length===6){
+          var top=f.probs.indexOf(Math.max.apply(null,f.probs));
+          return 'likeliest cheapest firing '+mtFirings[top]+' UTC ('+mtPct(f.probs[top])+')';
+        }
+        return '';
+      };
+      var mtSlot=function(key,s){
+        if(!s)return '<small>not tracked</small>';
+        var h=key.split(':')[1];
+        var when=key.indexOf('timing')===0?'':(h==='1'?'1 day':h+' days')+': ';
+        var name=esc(s.incumbentLabel||s.incumbent);
+        var head=when+(s.promoted
+          ?'<b class="up">'+name+'</b> <small>promoted on forward evidence'+(s.championSince?' '+esc(String(s.championSince).slice(0,10)):'')+'</small>'
+          :name+' <small>current method</small>');
+        var fc=mtForecast(key,s.forecast);
+        var ch=s.challengers||[],lead=ch[0];
+        var testing=ch.length
+          ?ch.length+' challenger'+(ch.length===1?'':'s')+' logging forecasts; leader '+esc(lead.label||lead.model)+', '
+            +Math.round(mtProgress(lead)*100)+'% of the way to promotion ('+(lead.forwardN||0)+' scored)'
+          :'no challenger has beaten it on history yet';
+        return head+(fc?' · '+fc:'')+'<br><small>'+testing+'</small>';
+      };
+      var mtWeights=function(w){
+        if(!w)return '<small>not fitted</small>';
+        var groups=Object.keys(w.groupShare||{}).slice(0,3).map(function(k){return esc(k)+' '+mtPct(w.groupShare[k]);}).join(', ');
+        var stable=(w.top||[]).filter(function(t){return t.signStability>=0.9;}).slice(0,2)
+          .map(function(t){return esc(t.feature)+' '+(t.weight>0?'+':'−');}).join(', ');
+        return groups+'<br><small>'+(stable?'sign held across '+(w.refits||0)+' refits: '+stable:'no top weight held its sign across refits')+'</small>';
+      };
+      var mtSyms=Object.keys(mt.assets).sort(function(a,b){return a==='*'?-1:b==='*'?1:0;});
+      var mtRows=mtSyms.map(function(sym){
+        var a=mt.assets[sym]||{},w=(mt.weights||{})[sym]||{};
+        return '<div class="bh-row" data-mt="'+esc(sym)+'"><span class="bh-sym">'+(sym==='*'?'All tracked <small>pooled</small>':esc(sym))+'</span>'
+          +'<span class="bh-cell" data-l="Direction">'+mtSlot('direction:1',a['direction:1'])+'<br>'+mtSlot('direction:7',a['direction:7'])+'</span>'
+          +'<span class="bh-cell" data-l="Move size">'+mtSlot('magnitude:1',a['magnitude:1'])+'<br>'+mtSlot('magnitude:7',a['magnitude:7'])+'</span>'
+          +'<span class="bh-cell" data-l="Cheapest buy time">'+mtSlot('timing:2',a['timing:2'])+'</span>'
+          +'<span class="bh-cell" data-l="What its models weigh">'+(sym==='*'?'<small>weighted per asset, below</small>'
+            :'<b>direction</b> '+mtWeights(w['direction:1'])+'<br><b>size</b> '+mtWeights(w['magnitude:1']))+'</span></div>';
+      }).join('');
+      var mtc=mt.counts||{};
+      timing+=panelStart({id:'modelTournament',tone:'timing',open:false,
+          eyebrow:'PER-ASSET MODELS &middot; <b>FORWARD-TESTED</b>',
+          title:'Models that have to earn their place, asset by asset',
+          meta:esc(mt.asOf||'')+(mt.status==='stale'?' · <span class="amber-t">stale</span>':'')+' · '+(mtc.champions||0)+' promoted · '+(mtc.challengers||0)+' testing'})
+        +'<div class="dr-note">Every always-tracked asset has its own models for direction, move size and the cheapest of the spot bot’s six daily buying times (4-hour firings, for the day after the latest close). Each is fitted to that asset alone, so it learns that asset’s own weights for momentum, volatility, volume, derivatives, funding, calendar and the other tracked coins. New challengers are proposed weekly from history, but <b>a challenger replaces the current method only on forecasts it logged before their outcomes existed</b>, through a test that stays valid however often it is read; one that later falls behind is demoted the same way. Weights describe what a fitted model leans on, not proof that it helps. <b>Research only; nothing here places a trade.</b></div>'
+        +'<div class="bh-list"><div class="bh-head"><span>Asset</span><span>Direction</span><span>Move size</span><span>Cheapest buy time</span><span>What its models weigh</span></div>'+mtRows+'</div>'
+        +PANEL_END;
+    } else if(mt&&mt.status){
+      timing+=panelStart({id:'modelTournament',tone:'timing',open:false,eyebrow:'PER-ASSET MODELS',title:'Models that have to earn their place, asset by asset',meta:esc(mt.status)})
+        +'<div class="dr-note">The per-asset model tournament has not published a run yet ('+esc(mt.status)+'). The current methods stand.</div>'+PANEL_END;
     }
 
     var bh = d.bestHours || {};

@@ -706,6 +706,18 @@ beats the asset's base rate on direction or GARCH + weekday on size, for any
 of the 8, so none is used. Results and the handoff for the other tracked
 assets: [docs/SEQUENCE_MODELS.md](docs/SEQUENCE_MODELS.md).
 
+**Per-asset model tournament** (`scripts/model-tournament.py`, daily in
+`signals-model-tournament.yml`). Every always-tracked asset has its own models
+for direction, move size and the cheapest of the spot bot's daily buying
+times, each fitted to that asset alone so it learns that asset's weights. New
+challengers are proposed weekly from history. One replaces the method in
+force only on forecasts it logged before their outcomes (`model_forecasts`),
+through a betting e-process that stays valid however often it is read, with
+alpha spent across challengers. A champion that falls behind is demoted the
+same way. The dashboard shows the method in force per asset, challengers'
+progress and how each asset's models weigh their inputs. Rules, timelines
+and what is not wired yet: [docs/MODEL_TOURNAMENT.md](docs/MODEL_TOURNAMENT.md).
+
 **ARB is always tracked** (`FAVORITE_SYMBOLS`). The list is written down in
 fifteen places across the Worker, the Oracle-host collectors, Python research
 and a workflow argument; `test-tracked-assets.mjs` fails if any copy

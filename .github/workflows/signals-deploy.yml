@@ -57,6 +57,7 @@ jobs:
           node --test test-tracked-assets.mjs
           node --test test-archive-sources.mjs
           node --test test-lead-lag.mjs
+          node --test test-model-tournament-io.mjs
           node --test test-model-zoo.mjs
           node --test test-time-series.mjs
           node --test ../account-journal/test/*.test.mjs

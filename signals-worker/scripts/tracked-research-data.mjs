@@ -15,7 +15,11 @@ const logRatio = (a,b) => a > 0 && b > 0 ? Math.log(a/b) : null;
 
 // `sequence` adds the 30-day return/volume window per row (~35 MB for the
 // tracked panel); only the weekly sequence lane reads it.
-export function researchRows(panel, { symbols = TRACKED, sequence: withSequence = false } = {}) {
+// `tournament` (scripts/model-tournament.py) adds the plain-GARCH and
+// seasonal-HAR scales and, for the newest dates, OPEN rows: features known at
+// that close, target still unknown (target: null). Those are the rows a live
+// forecast is issued from. Off by default so research inputs stay byte-stable.
+export function researchRows(panel, { symbols = TRACKED, sequence: withSequence = false, tournament = false } = {}) {
   const assets = panel.assets.filter(a => a.assetClass === 'crypto' && symbols.includes(a.symbol));
   const bars = new Map(assets.map(a => [a.symbol, sanitizeBars(a.bars, { asOf: panel.asOf })]));
   const byDate = new Map([...bars].map(([s,bs]) => [s,new Map(bs.map(b=>[b.date,b]))]));
@@ -94,27 +98,34 @@ export function researchRows(panel, { symbols = TRACKED, sequence: withSequence 
       }
       for (const horizon of [1,7]) {
         const end=bs[i+horizon];
-        if (!end || end.date!==offset(date,horizon)) continue;
+        const pct=v=>Number.isFinite(v)?Math.expm1(v)*100:null;
+        const paths=garch.get(date);
+        const scales=tournament ? { garchPct:pct(paths?.garchVol?.[horizon]), harWeekdayPct:pct(paths?.harWeekdayVol?.[horizon]) } : {};
+        if (!end || end.date!==offset(date,horizon)) {
+          // Only the tail is open; a hole inside history is simply unusable.
+          if (tournament && i+horizon>=bs.length) result.rows.push({symbol,date,targetDate:offset(date,horizon),horizon,target:null,values,
+            garchWeekdayPct:pct(paths?.garchWeekdayVol?.[horizon]),...scales});
+          continue;
+        }
         const target=Math.expm1(Math.log(end.close/b.close))*100;
-        const g=garch.get(date)?.garchWeekdayVol?.[horizon];
         result.rows.push({symbol,date,targetDate:end.date,horizon,target,values,sequence,
-          garchWeekdayPct:Number.isFinite(g)?Math.expm1(g)*100:null});
+          garchWeekdayPct:pct(paths?.garchWeekdayVol?.[horizon]),...scales});
       }
     }
   }
   for (const symbol of symbols) {
-    const recent=result.rows.filter(r=>r.symbol===symbol && r.horizon===1 && Date.parse(panel.asOf)-Date.parse(r.date)<=180*DAY);
+    const recent=result.rows.filter(r=>r.symbol===symbol && r.horizon===1 && r.target!==null && Date.parse(panel.asOf)-Date.parse(r.date)<=180*DAY);
     if (result.coverage[symbol]) result.coverage[symbol].recentFeatureCoverage=Object.fromEntries(
       [...new Set(recent.flatMap(r=>Object.keys(r.values)))].map(name=>[name,{measured:recent.filter(r=>Number.isFinite(r.values[name])).length,total:recent.length}]));
   }
   return result;
 }
 if (process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
-  // node tracked-research-data.mjs <panel> <rows> [--sequence] [--symbols A,B]
+  // node tracked-research-data.mjs <panel> <rows> [--sequence] [--tournament] [--symbols A,B]
   const args = process.argv.slice(2), at = args.indexOf('--symbols');
   const symbols = at >= 0 ? args[at + 1].split(',').filter(Boolean) : TRACKED;
   const flagValue = at >= 0 ? at + 1 : -1;
   const [input, output] = args.filter((a, i) => i !== flagValue && !a.startsWith('--'));
   const panel=JSON.parse(await readFile(input,'utf8'));
-  await writeFile(output,JSON.stringify(researchRows(panel, { symbols, sequence: args.includes('--sequence') })));
+  await writeFile(output,JSON.stringify(researchRows(panel, { symbols, sequence: args.includes('--sequence'), tournament: args.includes('--tournament') })));
 }

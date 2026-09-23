@@ -62,7 +62,9 @@ test('the provider-id maps cover every tracked asset', () => {
 test('the Python research lanes and the workflow read the same list', () => {
   assert.deepEqual(sorted(listIn(source('./scripts/session-research.py'), /^SYMBOLS=(\[[^\]]*\])/m)), canonical,
     'session-research.py SYMBOLS');
-  const wf = source('../.github/workflows/signals-tracked-research.yml').match(/--symbols ([A-Z0-9,]+)/);
-  assert.ok(wf, 'tracked-research workflow --symbols not found');
-  assert.deepEqual(sorted(wf[1].split(',')), canonical, 'signals-tracked-research.yml --symbols');
+  for (const file of ['signals-tracked-research.yml', 'signals-sequence-research.yml', 'signals-model-tournament.yml']) {
+    const wf = source(`../.github/workflows/${file}`).match(/--symbols ([A-Z0-9,]+)/);
+    assert.ok(wf, `${file} --symbols not found`);
+    assert.deepEqual(sorted(wf[1].split(',')), canonical, `${file} --symbols`);
+  }
 });

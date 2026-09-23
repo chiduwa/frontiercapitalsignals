@@ -53,6 +53,7 @@ next-env.d.ts
 
 /signals-worker/reports/tracked/
 /signals-worker/reports/sequence/
+/signals-worker/reports/tournament/
 /signals-worker/__pycache__/
 /signals-worker/scripts/__pycache__/
 
