@@ -430,14 +430,16 @@ export async function fearGreedHistory(limit = 0) {
 // schema.sql) ride the SAME call this was already making for
 // sentiment_votes_up_percentage/categories — zero new fetches, just a
 // bigger response.
-export async function coingeckoSentiment(id) {
+export async function coingeckoSentiment(id, { key = process.env.COINGECKO_API_KEY || '' } = {}) {
   const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}`
     + '?localization=false&tickers=false&market_data=false&community_data=true&developer_data=true&sparkline=false';
   const backoffsMs = [3000, 6000];
   let lastErr;
   for (let attempt = 0; attempt <= backoffsMs.length; attempt++) {
     try {
-      const j = await fetchJson(url);
+      // The Demo key when present: anonymous calls from a shared Actions IP
+      // lost 31 of 100 coins to HTTP 429 on 2026-09-23.
+      const j = await fetchJson(url, key ? { 'x-cg-demo-api-key': key } : {});
       const up = Number(j && j.sentiment_votes_up_percentage);
       const categories = Array.isArray(j && j.categories) ? j.categories : [];
       const dev = j && j.developer_data;

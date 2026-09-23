@@ -53,7 +53,16 @@ async function main() {
   const today = new Date().toISOString().slice(0, 10);
   console.log(`daily-refresh starting for ${today}`);
 
-  const cryptoRaw = await getCryptoMarkets();
+  // Every stage below is guarded so one failure costs only its own output.
+  // These two were not: on 2026-09-23 a D1 write that hung past the client's
+  // 30s timeout threw an uncaught AbortError out of main() and took every
+  // later stage -- lows, lead/lag, daily ranges, hack alerts -- down with it.
+  let cryptoRaw = [];
+  try {
+    cryptoRaw = await getCryptoMarkets();
+  } catch (e) {
+    console.error('crypto markets fetch failed -- sentiment and hack matching run on an empty universe:', e.message);
+  }
   const fullUniverse = cryptoRaw
     .filter((c) => !CRYPTO_BLOCKLIST.has((c.symbol || '').toLowerCase()))
     .filter((c) => !hasCrossClassTickerCollision(c.symbol))
@@ -111,8 +120,12 @@ async function main() {
   if (CRYPTOPANIC_API_TOKEN) console.log(`CryptoPanic: ${cpOk} ok, ${cpFailed} failed`);
 
   if (rows.length) {
-    const written = await upsertAssetSentiment(env, today, rows);
-    console.log(`wrote per-asset sentiment for ${rows.length} symbols (${written} rows attempted)`);
+    try {
+      const written = await upsertAssetSentiment(env, today, rows);
+      console.log(`wrote per-asset sentiment for ${rows.length} symbols (${written} rows attempted)`);
+    } catch (e) {
+      console.error('per-asset sentiment write failed:', e.message);
+    }
   }
 
   if (CMC_API_KEY) {
