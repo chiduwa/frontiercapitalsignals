@@ -15,6 +15,11 @@ on:
         required: false
         default: false
         type: boolean
+      full_audit:
+        description: "Re-check every symbol now, as the Sunday run does (repairs CoinGecko/Binance seams and interior gaps)"
+        required: false
+        default: false
+        type: boolean
       row_budget:
         description: "Max price-bar rows to write this run"
         required: false
@@ -57,3 +62,4 @@ jobs:
           BINANCE_ROW_BUDGET: ${{ inputs.binance_row_budget }}
           BINANCE_PER_SYMBOL_ROW_CAP: ${{ inputs.binance_per_symbol_row_cap }}
           BACKFILL_OPEN: ${{ inputs.backfill_open && '1' || '' }}
+          BACKFILL_FULL_AUDIT: ${{ inputs.full_audit && '1' || '' }}

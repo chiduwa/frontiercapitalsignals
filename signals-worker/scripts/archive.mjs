@@ -172,6 +172,60 @@ export function withoutCoinGeckoSeam(bars, coingeckoDates) {
     && !coingeckoDates.has(b.date));
 }
 
+/**
+ * Binance bars that should REPLACE stored CoinGecko rows, not sit beside them.
+ *
+ * Keeping CoinGecko history (above) costs one close at every CoinGecko ->
+ * Binance join: CoinGecko's slot D holds D-1's close, so the true close of the
+ * last CoinGecko date has no free (symbol, date) slot. One missing day voids
+ * every 60-day crypto feature window that spans it, and the day the Binance
+ * tier shipped (2026-09-23) 32 coins, ARB among them, lost their latest two
+ * months of research rows that way. Writing Binance's close for each
+ * CoinGecko date into that date's slot removes the hole when Binance covers
+ * the whole span; when Binance listed later, the hole moves back to the
+ * listing, out of the recent windows. n slots cannot hold n+1 closes.
+ *
+ * Refused (returns []) unless the two agree on price where they overlap: a
+ * shared ticker is not proof of a shared asset.
+ */
+export function coinGeckoReplacement(binanceBars, storedCoinGecko, { nowMs = Date.now(), maxMedianGap = 0.03 } = {}) {
+  if (!storedCoinGecko?.length) return [];
+  const byDate = new Map(completedDailyBars(binanceBars, nowMs).map(b => [b.date, b]));
+  const dayBefore = d => new Date(Date.parse(`${d}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  const gaps = [];
+  for (const row of storedCoinGecko) {
+    const sameClose = byDate.get(dayBefore(row.date));
+    if (sameClose && row.close > 0) gaps.push(Math.abs(Math.log(row.close / sameClose.close)));
+  }
+  if (gaps.length < Math.min(20, storedCoinGecko.length)) return [];
+  gaps.sort((x, y) => x - y);
+  if (gaps[Math.floor(gaps.length / 2)] > maxMedianGap) return [];
+  return storedCoinGecko.map(row => byDate.get(row.date)).filter(Boolean);
+}
+
+// Rewrites only rows still marked coingecko: a Yahoo or Binance close stays
+// exactly as archived whatever this is handed, and a re-run is a no-op.
+export async function replaceCoinGeckoBars(env, rows, { batch = d1Batch } = {}) {
+  const statements = chunk(rows, 9).map((group) => ({
+    sql: `
+      INSERT INTO asset_daily_bars (symbol, asset_class, date, open, close, high, low, volume, source)
+      VALUES ${group.map(() => '(?,?,?,?,?,?,?,?,?)').join(',')}
+      ON CONFLICT (symbol, date) DO UPDATE SET
+        open = excluded.open, close = excluded.close, high = excluded.high, low = excluded.low,
+        volume = excluded.volume, source = excluded.source
+      WHERE asset_daily_bars.source = 'coingecko'
+    `,
+    params: group.flatMap((b) => [b.symbol, b.assetClass, b.date, b.open ?? null, b.close, b.high ?? null, b.low ?? null, b.volume ?? null, b.source]),
+    rows: group.length
+  }));
+  let attempted = 0;
+  for (const group of chunk(statements, D1_STATEMENTS_PER_BATCH)) {
+    await batch(env, group);
+    for (const s of group) attempted += s.rows;
+  }
+  return attempted;
+}
+
 // CoinGecko fallback for the ~29% of the crypto universe Yahoo doesn't
 // carry (measured during planning) — same 365-day free-tier ceiling as
 // worker.js's getCryptoDailyHistory, but this variant keeps the real

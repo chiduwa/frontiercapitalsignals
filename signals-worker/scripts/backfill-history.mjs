@@ -18,7 +18,7 @@ import {
   yahooHourlyBars, computeSwingTimeTallies, replaceSwingTimeBootstrap, getSwingTimeCoverage,
   replaceTimeOfDayBootstrap, getTimeOfDayCoverage, getOpenCoverage,
   binanceUsExchangeInfo, binanceUsKlines, getExistingHourlyCoverage, upsertHourlyBars,
-  isYahooCryptoDataTrustworthy, binanceDailyBars, withoutCoinGeckoSeam
+  isYahooCryptoDataTrustworthy, binanceDailyBars, withoutCoinGeckoSeam, coinGeckoReplacement, replaceCoinGeckoBars
 } from './archive.mjs';
 import { selectIntradayWatchlist } from './intraday.mjs';
 import { d1 } from './d1-client.mjs';
@@ -91,6 +91,9 @@ const BINANCE_ROW_BUDGET = Number(process.env.BINANCE_ROW_BUDGET || 120000);
 // fully draining the budget on the single largest one.
 const BINANCE_PER_SYMBOL_ROW_CAP = Number(process.env.BINANCE_PER_SYMBOL_ROW_CAP || 20000);
 const BINANCE_US_FLOOR_MS = new Date('2019-09-23T00:00:00Z').getTime();
+// The Sunday deep-history/gap audit (needsDailyRefresh), on demand: re-checks
+// every symbol, so seam repairs and interior gaps land today, not next Sunday.
+const fullAudit = process.env.BACKFILL_FULL_AUDIT === '1';
 let rowsWrittenThisRun = 0;
 let priceRowsWritten = 0;
 const priceBudgetLeft = () => PRICE_ROW_BUDGET - priceRowsWritten;
@@ -160,7 +163,7 @@ async function main() {
     // side: no point re-downloading a multi-year Yahoo response just to
     // discard nearly all of it as already-stored.
     const needsOpen = backfillOpen && !(openCoverage[a.symbol] > 0);
-    if (!needsDailyRefresh(existing, Date.now(), needsOpen)) continue;
+    if (!fullAudit && !needsDailyRefresh(existing, Date.now(), needsOpen)) continue;
 
     let bars = null, source = null;
     try {
@@ -199,10 +202,20 @@ async function main() {
     }
     if (bars && bars.length) {
       if (existing) {
-        const stored = await d1(env, 'SELECT date, source FROM asset_daily_bars WHERE symbol = ?', [a.symbol]);
+        const stored = await d1(env, 'SELECT date, source, close FROM asset_daily_bars WHERE symbol = ?', [a.symbol]);
         existing.existingDates = stored.map(r => r.date);
         if (source === 'binance') {
-          bars = withoutCoinGeckoSeam(bars, new Set(stored.filter(r => r.source === 'coingecko').map(r => r.date)));
+          const coingecko = stored.filter(r => r.source === 'coingecko');
+          const replacement = coinGeckoReplacement(bars, coingecko);
+          if (replacement.length && replacement.length <= priceBudgetLeft()) {
+            const written = await replaceCoinGeckoBars(env, replacement.map(b => ({ symbol: a.symbol, assetClass: a.assetClass, ...b, source })));
+            priceRowsWritten += written;
+            rowsWrittenThisRun += written;
+            const replaced = new Set(replacement.map(b => b.date));
+            for (const r of coingecko) if (replaced.has(r.date)) r.source = source;
+            console.log(`${a.symbol}: ${written} CoinGecko rows replaced by Binance true closes, ${coingecko.length - replaced.size} kept (before the Binance listing)`);
+          }
+          bars = withoutCoinGeckoSeam(bars, new Set(coingecko.filter(r => r.source === 'coingecko').map(r => r.date)));
         }
       }
       const minExisting = existing ? existing.minDate : null;
