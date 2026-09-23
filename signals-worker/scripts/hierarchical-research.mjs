@@ -21,6 +21,8 @@ import { promisify } from 'node:util';
 import { d1, d1Batch, chunk } from './d1-client.mjs';
 import { buildQuarantineIndex, cleanBars } from './bar-quarantine.mjs';
 import { buildZooSection, ZOO_VERSION } from './model-zoo.mjs';
+import { buildTimeSeriesSection } from './time-series-research.mjs';
+import { TIME_SERIES_VERSION } from './time-series.mjs';
 import {
   HIERARCHICAL_VERSION, buildAssetSample, fitAssetRegression, poolAcrossAssets, walkForwardPanel
 } from './hierarchical-model.mjs';
@@ -274,6 +276,16 @@ export function buildHierarchicalReport(panel, {
 } = {}) {
   const inference = runInference(panel, { asOf, log });
   const prediction = runPrediction(panel, { asOf, costBps, refitEvery, log });
+  // Trend, seasonality, cycles, variations and irregularities for the market
+  // and the always-tracked assets, judged against the same run's zoo. It rides
+  // on this job because the panel is already loaded; it must never be able to
+  // fail the regression research it rides with.
+  let timeSeries;
+  try {
+    timeSeries = buildTimeSeriesSection(panel, { asOf, prediction });
+  } catch (error) {
+    timeSeries = { version: TIME_SERIES_VERSION, status: 'failed', actionable: false, error: String(error?.message || error) };
+  }
   const inputHash = hash(panel);
   const summary = {
     modelVersion: HIERARCHICAL_VERSION, asOf, generatedAt: now,
@@ -302,9 +314,12 @@ export function buildHierarchicalReport(panel, {
         learnedFeatures: learnedFeatures(v.prior)
       },
       // The candidate field, always cohort-split. A number here that appears
-      // only under `recent` is survivorship until shown otherwise.
-      zoo: v.zoo ?? null
+      // only under `recent` is survivorship until shown otherwise. The public
+      // summary carries the headline of each time-series comparison; every
+      // half-by-half detail stays in report.json, which the workflow keeps.
+      zoo: compactZoo(v.zoo)
     }])),
+    timeSeries,
     limitations: [
       'Walk-forward research over archived daily closes. Daily closes are not executable issue-time quotes, so none of this is a live track record.',
       'The inference pass uses the FULL sample by design. Its coefficients describe the history; they are not out-of-sample evidence.',
@@ -313,8 +328,25 @@ export function buildHierarchicalReport(panel, {
       'No automatic promotion. Publication still requires clearing the existing evidence gate on unseen forward outcomes.'
     ]
   };
-  return { runId: hash({ version: HIERARCHICAL_VERSION, asOf, costBps, refitEvery, inputHash }),
+  // The zoo and time-series versions are in the id because persistence is
+  // INSERT OR IGNORE: without them, a rerun carrying new candidate code on an
+  // unchanged panel hashes to the same id and its summary is silently dropped.
+  return { runId: hash({ version: HIERARCHICAL_VERSION, zoo: ZOO_VERSION, timeSeries: TIME_SERIES_VERSION, asOf, costBps, refitEvery, inputHash }),
     inputHash, summary, inference, prediction };
+}
+
+/** The zoo as the public payload needs it: head-to-head headlines, not every sub-table. */
+export function compactZoo(zoo) {
+  if (!zoo?.timeSeries?.headToHead) return zoo ?? null;
+  const headline = h => (!h || h.status ? h ?? null : {
+    forecasts: h.forecasts, spearmanCandidate: h.spearmanCandidate, spearmanIncumbent: h.spearmanIncumbent,
+    maeT: h.maeT, qlikeT: h.qlikeT, qlikeTFirstHalf: h.firstHalf?.qlikeT ?? null, qlikeTSecondHalf: h.secondHalf?.qlikeT ?? null
+  });
+  const headToHead = Object.fromEntries(Object.entries(zoo.timeSeries.headToHead).map(([k, v]) => [k, {
+    candidate: v.candidate, incumbent: v.incumbent,
+    byCohort: Object.fromEntries(Object.entries(v.byCohort || {}).map(([c, h]) => [c, headline(h)]))
+  }]));
+  return { ...zoo, timeSeries: { ...zoo.timeSeries, headToHead } };
 }
 
 /**

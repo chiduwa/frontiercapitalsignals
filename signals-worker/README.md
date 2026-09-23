@@ -674,3 +674,35 @@ collection require migration 0044 and the coordinated v9 release described in
 the roadmap. These local changes have not been deployed.
 
 The [calendar, eight-stablecoin and explanatory-context extension](docs/CALENDAR_STABLECOIN_INSIGHTS_2026_09_19.md) documents the completed local studies, optional CMC integration, collector authentication incident, and release dependencies.
+
+### Time-series models, and ARB joins the always-tracked set (2026-09-23)
+
+Four classical time-series families now sit in the candidate field
+(`scripts/time-series.mjs`, `time-series-v1`; zoo `model-zoo-v2`): GARCH(1,1),
+a weekday seasonal factor on volatility, ARIMA(p,1,0) by BIC, and a structural
+model (trend + weekly seasonal + cycle + irregular, Kalman filter). They are
+scored daily by the same walk-forward, cohort-split zoo as everything else.
+**The size of the next move is forecastable and its direction is not**: GARCH
+with the weekday factor beats the production volatility scale out of sample in
+both halves of history at one day, for crypto and equities, and halves the
+weekday-to-weekday calibration error of the 80% band; ARIMA and the structural
+model have no direction skill after costs in any lane. Measurements, method
+and limits: [docs/TIME_SERIES_EVIDENCE.md](docs/TIME_SERIES_EVIDENCE.md).
+
+The dashboard's timing zone gains **Trend, seasonality, cycles, volatility and
+irregular moves** for the crypto market, the US stock market and every
+always-tracked asset (`scripts/time-series-research.mjs`, built inside the
+daily hierarchical job). Only the volatility band is a forecast; every other
+reading is descriptive, carries its own test, and is Holm-corrected across the
+series shown. A cycle is claimed only if a periodicity in standardized returns
+survives that correction -- smoothing a random walk manufactures cycles.
+
+**ARB is always tracked** (`FAVORITE_SYMBOLS`). The list is written down in
+fifteen places across the Worker, the Oracle-host collectors, Python research
+and a workflow argument; `test-tracked-assets.mjs` fails if any copy
+disagrees. ARB's archive had stopped on 2026-09-06: Yahoo's `ARB-USD` is a
+different token, and the anonymous CoinGecko fallback had stopped answering
+(55 CoinGecko-sourced coins were 3+ days stale). `backfill-history.mjs` now
+tries Binance's public klines before CoinGecko -- full history, true UTC closes,
+quote volume -- and passes the existing `COINGECKO_API_KEY` secret, which the
+archive step had never received.

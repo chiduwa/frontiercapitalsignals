@@ -404,6 +404,81 @@ check('unproven flow rules stay descriptive',basketText.includes('Direction: unc
 check('missing OI and liquidations cannot render fabricated causal explanations',insightText.includes('insufficient-live-data')&&insightText.includes('Missing reports are not zero')&&insightText.includes('cannot be confirmed'));
 newResearch.dom.window.close();
 
+// ============ time-series panel: a size forecast, never a direction ==========
+// The section is built by the real builder on synthetic series, so what is
+// asserted is what the daily job would actually publish: a planted weekend
+// effect is found, a stale series says so, a missing one is reported rather
+// than skipped, and the panel never renders anything that reads as a call.
+console.log('\n== the time-series panel publishes a volatility band and nothing directional ==');
+{
+  const { buildTimeSeriesSection } = await import('./scripts/time-series-research.mjs');
+  const tsDay = i => new Date(Date.UTC(2023, 0, 1 + i)).toISOString().slice(0, 10);
+  const seeded = seed => { let x = seed >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return (x + 0.5) / 4294967296; }; };
+  const series = (seed, n, weekend) => {
+    const r = seeded(seed); let price = 100, s2 = 4e-4; const bars = [{ date: tsDay(0), close: price }];
+    for (let t = 1; t <= n; t++) {
+      const wd = new Date(Date.parse(tsDay(t) + 'T00:00:00Z')).getUTCDay();
+      const e = Math.sqrt(s2) * Math.sqrt(-2 * Math.log(r())) * Math.cos(2 * Math.PI * r());
+      price *= Math.exp(e * (weekend && (wd === 0 || wd === 6) ? 0.5 : 1));
+      s2 = 4e-4 * 0.02 + 0.08 * e * e + 0.9 * s2;
+      bars.push({ date: tsDay(t), close: price });
+    }
+    return bars;
+  };
+  const tracked = ['BTC', 'ETH', 'SOL', 'XLM', 'XRP', 'HYPE', 'HBAR', 'ARB'];
+  const assets = tracked.map((symbol, i) => ({ symbol, assetClass: 'crypto', bars: series(60 + i, symbol === 'HYPE' ? 700 : 720, i < 2) }));
+  assets.push({ symbol: 'MCAP:BROAD', assetClass: 'market', bars: series(99, 720, true) });
+  const asOf = tsDay(721);
+  const lane = (qlikeT) => ({ zoo: {
+    byCohort: { established: { field: {
+      arima: { direction: { hitRate: 0.4997, netPct: -0.179, netT: -1.72, forecasts: 209346 } },
+      structural: { direction: { hitRate: 0.5031, netPct: -0.074, netT: -0.70, forecasts: 209116 } } } } },
+    timeSeries: {
+      headToHead: { garchWeekdayVol_vs_trailingVol: { byCohort: { established: {
+        forecasts: 209346, qlikeT, firstHalf: { qlikeT: qlikeT + 0.2 }, secondHalf: { qlikeT: qlikeT + 0.4 },
+        spearmanCandidate: 0.308, spearmanIncumbent: 0.273 } } } },
+      intervals: { established: { models: {
+        trailingVol: { coverage: 0.791, meanWidthPct: 11.0, weekdayCoverageSpread: 0.103 },
+        garchWeekdayVol: { coverage: 0.794, meanWidthPct: 10.59, weekdayCoverageSpread: 0.057 } } } } } } });
+  const section = buildTimeSeriesSection({ asOf, assets }, { asOf,
+    prediction: { 'crypto|1': lane(-5.36), 'crypto|7': lane(-2.81), 'stock|1': lane(-7.64), 'stock|5': lane(1.01) } });
+  const tsView = await render({ ...payload(), hierarchicalResearch: { status: 'shadow', actionable: false, timeSeries: section } }, { settleMs: 1200 });
+  const panelEl = tsView.doc.getElementById('panel-timeSeriesResearch');
+  const text = panelEl?.textContent || '';
+  check('the time-series panel renders without disrupting the page', tsView.pageErrors.length === 0 && Boolean(panelEl), JSON.stringify(tsView.pageErrors));
+  check('it sits in the timing view, not on a board', Boolean(panelEl?.closest('[data-dashboard-view="timing"]')));
+  check('every tracked asset and both markets get a row',
+    [...tracked, 'Crypto market', 'US stock market'].every(label => text.includes(label)), text.slice(0, 200));
+  check('ARB, the newest always-tracked asset, is measured like the rest',
+    Boolean(panelEl?.querySelector('[data-ts="ARB"]')) && /80% band for/.test(panelEl.querySelector('[data-ts="ARB"]').textContent));
+  check('the panel states that only the band is a forecast, and of size only',
+    text.includes('Only the 80% band is a forecast') && text.includes('never which way') && text.includes('no trade call'));
+  check('no direction arrow or trade verb is rendered inside the panel',
+    panelEl.querySelectorAll('.dir-arrow, .dir-up, .dir-down').length === 0 && !/\bBUY\b|\bSELL\b|\bLONG\b|\bSHORT\b/.test(text));
+  check('a planted weekend effect is reported with its corrected p-value',
+    /BTC[\s\S]*Move size varies by weekday: (Sat|Sun)/.test(text) && text.includes('adj. p'));
+  check('series without the effect say so instead of inventing one', text.includes('No confirmed weekday effect on move size'));
+  check('cycles are only claimed when they survive correction', text.includes('No cycle detected') && !text.includes('Candidate ~'));
+  check('a missing series is reported, not silently dropped', text.includes('No archived daily bars for this series.'));
+  const hypeRow = panelEl.querySelector('[data-ts="HYPE"]')?.textContent || '';
+  check('an old archive is marked stale next to its last close', /stale · last close/.test(hypeRow), hypeRow.slice(0, 120));
+  check('and a stale series gets no band: a k-step forecast dated to a closed session is not current',
+    hypeRow.includes('80% band withheld') && !/80% band for/.test(hypeRow));
+  check('the evidence line carries the measured verdicts, not adjectives',
+    text.includes('beat the production volatility scale (QLIKE t=-5.36') && text.includes('no clear difference from the production scale (QLIKE t=1.01')
+    && text.includes('no skill after costs (ARIMA net t=-1.72, structural net t=-0.70)'));
+  check('phones get labelled cells rather than a four-column grid',
+    panelEl.querySelectorAll('.bh-cell[data-l="Trend"]').length >= 8);
+  tsView.dom.window.close();
+
+  const failedView = await render({ ...payload(), hierarchicalResearch: { status: 'shadow', actionable: false,
+    timeSeries: { status: 'failed', actionable: false, error: 'boom' } } }, { settleMs: 1200 });
+  const failedText = failedView.doc.getElementById('panel-timeSeriesResearch')?.textContent || '';
+  check('a failed run renders as unavailable, inferring nothing', failedView.pageErrors.length === 0
+    && failedText.includes('unavailable this run (failed)') && !failedText.includes('80% band'));
+  failedView.dom.window.close();
+}
+
 [withheld, proven, ui, clocks, stale].forEach((r) => r.dom.window.close());
 
 console.log(`\n${passed} passed, ${failed} failed`);

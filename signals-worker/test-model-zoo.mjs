@@ -184,3 +184,101 @@ test('scoreField covers every declared model and never invents a skill', () => {
     if (!model.skills.includes('magnitude')) assert.equal(field[name].magnitude, null);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Time-series candidates (2026-09-23)
+// ---------------------------------------------------------------------------
+import {
+  qlike, magnitudeHeadToHead, intervalComparison, medianDollarVolume as dollarVolume,
+  TIME_SERIES_COMPARISONS, INTERVAL_SCALES
+} from './scripts/model-zoo.mjs';
+import { compactZoo } from './scripts/hierarchical-research.mjs';
+
+test('the time-series candidates declare the skills they are scored on', () => {
+  for (const m of ['garchVol', 'garchWeekdayVol', 'harWeekdayVol']) assert.deepEqual(MODELS[m].skills, ['magnitude']);
+  for (const m of ['arima', 'structural']) assert.deepEqual(MODELS[m].skills, ['direction']);
+  // A missing time-series forecast is "no forecast", never a zero-size or a flat call.
+  assert.equal(MODELS.garchVol.magnitude({}), null);
+  assert.equal(MODELS.arima.direction({}), 0);
+  for (const [candidate, incumbent] of TIME_SERIES_COMPARISONS) assert.ok(MODELS[candidate] && MODELS[incumbent]);
+  assert.ok(INTERVAL_SCALES.includes('trailingVol'), 'the band test must include the production scale');
+});
+
+test('QLIKE is minimised by the true variance and punishes under-forecasting hardest', () => {
+  const r = rng(3), sigma = 2;
+  const draws = Array.from({ length: 20000 }, () => sigma * normal(r));
+  const loss = s => mean(draws.map(a => qlike(s, a)));
+  assert.ok(loss(sigma) < loss(sigma * 0.8) && loss(sigma) < loss(sigma * 1.25));
+  assert.ok(loss(sigma * 0.5) - loss(sigma) > loss(sigma * 2) - loss(sigma), 'halving must cost more than doubling');
+  assert.equal(qlike(0, 1), null, 'a zero variance forecast has no QLIKE');
+});
+
+test('head-to-head scores both models on the SAME rows only, clustered by date', () => {
+  const r = rng(8), rows = [];
+  for (let d = 0; d < 60; d++) {
+    for (let a = 0; a < 20; a++) {
+      const vol = 1 + (a % 5);
+      rows.push({ date: day(d), actual: vol * normal(r), good: vol, bad: 1,
+        // The candidate is missing on a third of rows; those rows must not count.
+        sparse: a % 3 ? vol : null });
+    }
+  }
+  const good = { skills: ['magnitude'], magnitude: x => x.good };
+  const bad = { skills: ['magnitude'], magnitude: x => x.bad };
+  const sparse = { skills: ['magnitude'], magnitude: x => x.sparse };
+  const h = magnitudeHeadToHead(rows, good, bad);
+  assert.ok(h.qlikeDifference < 0 && h.qlikeT < -3, `good must beat bad: ${h.qlikeT}`);
+  assert.ok(h.spearmanCandidate > h.spearmanIncumbent);
+  assert.ok(h.firstHalf.clusters + h.secondHalf.clusters === h.clusters, 'halves partition the dates');
+  const s = magnitudeHeadToHead(rows, sparse, bad);
+  assert.equal(s.forecasts, rows.filter(x => x.sparse != null).length, 'only rows where both forecast');
+  assert.equal(magnitudeHeadToHead(rows.slice(0, 10), good, bad).status, 'insufficient');
+});
+
+test('the band test hits its nominal coverage and exposes a weekday-blind scale', () => {
+  // True vol is half as large on Saturday and Sunday. A scale that knows this
+  // covers every weekday evenly; one that does not over-covers weekends.
+  const r = rng(12), rows = [];
+  for (let a = 0; a < 8; a++) {
+    for (let d = 0; d < 700; d++) {
+      const date = day(d);
+      const next = new Date(Date.parse(date + 'T00:00:00Z') + 86400000).getUTCDay();
+      const vol = (next === 0 || next === 6) ? 1 : 2;
+      rows.push({ symbol: 'A' + a, date, horizon: 1, actual: vol * normal(r), aware: vol, blind: 1.7 });
+    }
+  }
+  const models = {
+    aware: { skills: ['magnitude'], magnitude: x => x.aware },
+    blind: { skills: ['magnitude'], magnitude: x => x.blind }
+  };
+  const out = intervalComparison(rows, ['aware', 'blind'], { models });
+  for (const m of ['aware', 'blind']) assert.ok(Math.abs(out.models[m].coverage - 0.8) < 0.02, `${m} coverage ${out.models[m].coverage}`);
+  assert.ok(out.models.aware.weekdayCoverageSpread < 0.05, `aware spread ${out.models.aware.weekdayCoverageSpread}`);
+  assert.ok(out.models.blind.weekdayCoverageSpread > 0.1, `blind spread ${out.models.blind.weekdayCoverageSpread}`);
+  // What the weekday factor buys is CONDITIONAL coverage. For a scale mixture
+  // the average width barely moves (2 x 1.28 x E[sigma] against the blind
+  // band's mixture quantile), so the claim is "calibrated at no extra width",
+  // not "narrower" -- which is also what the archive showed.
+  assert.ok(out.models.aware.meanWidthPct <= out.models.blind.meanWidthPct * 1.03,
+    `aware ${out.models.aware.meanWidthPct} vs blind ${out.models.blind.meanWidthPct}`);
+});
+
+test('dollar volume: equity volume is shares, crypto volume is already dollars', () => {
+  const bars = Array.from({ length: 60 }, (_, i) => ({ date: day(i), close: 80000, volume: 2e10 }));
+  assert.equal(dollarVolume(bars, 400, { quoteDenominated: true }), 2e10, 'BTC trades ~$20B/day, not 1.6e15');
+  assert.equal(dollarVolume(bars), 1.6e15, 'the share convention multiplies by price');
+  assert.equal(liquidityTier(dollarVolume(bars, 400, { quoteDenominated: true })), 'deep');
+});
+
+test('the public summary keeps each comparison headline and drops the half-by-half detail', () => {
+  const detail = { forecasts: 9, clusters: 9, spearmanCandidate: 0.3, spearmanIncumbent: 0.2, maeDifference: -0.1, maeT: -1,
+    qlikeDifference: -0.2, qlikeT: -3, firstHalf: { qlikeT: -2, maeT: 0 }, secondHalf: { qlikeT: -2.5, maeT: 0 }, note: 'x' };
+  const zoo = { byCohort: {}, timeSeries: { version: 'v', intervals: { established: {} },
+    headToHead: { a_vs_b: { candidate: 'a', incumbent: 'b', question: 'q', byCohort: { established: detail, recent: { status: 'insufficient' } } } } } };
+  const c = compactZoo(zoo);
+  assert.deepEqual(c.timeSeries.headToHead.a_vs_b.byCohort.established,
+    { forecasts: 9, spearmanCandidate: 0.3, spearmanIncumbent: 0.2, maeT: -1, qlikeT: -3, qlikeTFirstHalf: -2, qlikeTSecondHalf: -2.5 });
+  assert.deepEqual(c.timeSeries.headToHead.a_vs_b.byCohort.recent, { status: 'insufficient' });
+  assert.ok(c.timeSeries.intervals, 'the band test is kept whole');
+  assert.equal(compactZoo(null), null);
+});

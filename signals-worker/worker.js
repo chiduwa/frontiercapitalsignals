@@ -7042,6 +7042,11 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .dr-why{color:var(--dim);font-size:10.5px;font-family:var(--disp);line-height:1.45}
 
   #panel-sessionResearch .bh-cell,#panel-calendarResearch .bh-cell,#panel-stableBasketResearch .bh-cell{display:block;line-height:1.7}
+  #panel-timeSeriesResearch .bh-cell{display:block;line-height:1.7}
+  @media(min-width:721px){#panel-timeSeriesResearch .bh-head,#panel-timeSeriesResearch .bh-row{grid-template-columns:minmax(96px,.6fr) minmax(170px,1fr) minmax(230px,1.5fr) minmax(230px,1.5fr)}}
+  .ts-bars{display:inline-flex;align-items:flex-end;gap:2px;height:14px;vertical-align:-2px;margin-right:7px}
+  .ts-bars i{display:block;width:5px;background:var(--amber);opacity:.8;border-radius:1px}
+  .ts-detail{margin:0;padding:0 12px 8px;background:var(--ink-1);max-width:none}
   .bh-list{display:flex;flex-direction:column;gap:1px;background:var(--line);border:1px solid var(--line)}
   .bh-head,.bh-row{display:grid;grid-template-columns:minmax(90px,.7fr) minmax(200px,1.4fr) minmax(200px,1.4fr);gap:12px;align-items:baseline;padding:8px 12px;font-family:var(--mono);font-size:11.5px;background:var(--ink-1)}
   .bh-head{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
@@ -8164,6 +8169,92 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     // the foot of the page and start collapsed behind summaries that state
     // their own headline.
     var timing='';
+
+    // Trend, seasonality, cycles, variations and irregular moves for the
+    // market and every always-tracked asset (scripts/time-series-research.mjs).
+    // Only the volatility band is a forecast -- of the SIZE of the next move --
+    // and the panel says so in its own text; nothing here renders a direction.
+    var tsr=d.hierarchicalResearch&&d.hierarchicalResearch.timeSeries;
+    if(tsr&&tsr.assets&&Object.keys(tsr.assets).length){
+      var tsNum=function(x,dg){return typeof x==='number'&&isFinite(x)?x.toFixed(dg==null?1:dg):'—';};
+      var tsSigned=function(x,dg){return typeof x==='number'&&isFinite(x)?(x>0?'+':'')+x.toFixed(dg==null?1:dg)+'%':'—';};
+      var tsP=function(p){return typeof p!=='number'||!isFinite(p)?'no test':p<0.001?'adj. p&lt;0.001':'adj. p='+p.toFixed(p<0.1?3:2);};
+      var tsWindow=function(w){return w.days===365?'1y':w.days+'d';};
+      var tsDays=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+      var tsBars=function(sizes){
+        var keys=tsDays.filter(function(k){return sizes&&typeof sizes[k]==='number'&&isFinite(sizes[k]);});
+        if(!keys.length)return '';
+        var top=Math.max.apply(null,keys.map(function(k){return sizes[k];}));
+        return '<span class="ts-bars" role="img" aria-label="Relative move size by weekday">'+keys.map(function(k){
+          return '<i style="height:'+Math.max(10,Math.round(sizes[k]/top*100))+'%" title="'+k+' '+sizes[k].toFixed(2)+'x"></i>';}).join('')+'</span>';
+      };
+      var tsSize=function(sizes){return tsDays.filter(function(k){return sizes&&typeof sizes[k]==='number';}).map(function(k){return k+' '+sizes[k].toFixed(2)+'×';}).join(' · ');};
+      var tsRows=Object.keys(tsr.assets).map(function(sym){
+        var a=tsr.assets[sym]||{};
+        var head='<span class="bh-sym">'+esc(a.label||sym)+(a.label&&a.label!==sym?' <small>'+esc(sym)+'</small>':'')
+          +(a.lastBar?'<br><small class="'+(a.status==='stale'?'amber-t':'')+'">'+(a.status==='stale'?'stale · ':'')+'last close '+esc(a.lastBar)+'</small>':'')+'</span>';
+        if(a.status!=='measured'&&a.status!=='stale'){
+          var why=a.status==='insufficient-history'?'Not enough daily history yet ('+(a.observations||0)+' daily returns; the models need 250).'
+            :a.status==='no-archive'?'No archived daily bars for this series.':'Unavailable this run; no value is inferred.';
+          return '<div class="bh-row" data-ts="'+esc(sym)+'">'+head+'<span class="bh-cell" data-l="Status">'+esc(why)+'</span><span class="bh-cell"></span><span class="bh-cell"></span></div>';
+        }
+        var windows=a.trend&&a.trend.windows||[];
+        var clears=windows.filter(function(w){return w.distinguishable;});
+        var trend=windows.map(function(w){return tsWindow(w)+' '+tsSigned(w.changePct);}).join(' · ')+'<br>'
+          +(clears.length?clears.map(function(w){return tsWindow(w)+' drift clears noise ('+esc(w.direction)+', t='+tsNum(w.tStatistic,2)+', '+tsP(w.adjustedP)+')';}).join('; ')
+            :'No window’s drift is distinguishable from noise after correction.');
+        var v=a.variations||{},band=v.band||{},sv=(a.seasonality&&a.seasonality.volatility)||{},sd=a.seasonality&&a.seasonality.direction;
+        var seasonal=typeof sv.adjustedP==='number'&&sv.adjustedP<0.05
+          ?'Move size varies by weekday: '+esc(sv.calmest)+' '+tsNum(sv.calmestRelative,2)+'×, '+esc(sv.busiest)+' '+tsNum(sv.busiestRelative,2)+'× ('+tsP(sv.adjustedP)+')'
+          :'No confirmed weekday effect on move size ('+tsP(sv.adjustedP)+')';
+        var vol=(v.band?'80% band for '+esc(v.nextSession||'the next session')+': '+tsSigned(band.lowerPct,2)+' to '+tsSigned(band.upperPct,2)
+            :'80% band withheld: the daily archive is behind, so no current forecast exists')
+          +'<br>Volatility '+esc(v.regime||'unmeasured')+' ('+tsNum((v.percentileOfYear||0)*100,0)+'th percentile of the past year); shocks fade by half in '+tsNum(v.halfLifeDays,1)+' days'
+          +'<br>'+tsBars(sv.relativeMoveSize)+seasonal;
+        var c=a.cycles||{},vr=c.varianceRatio20||{},ir=a.irregular||{},big=ir.largestLast90;
+        var cycles=(typeof c.adjustedP==='number'&&c.adjustedP<0.05
+            ?'Candidate ~'+tsNum(c.dominantPeriodDays,0)+'-day cycle ('+tsP(c.adjustedP)+')'
+            :'No cycle detected (strongest period ~'+tsNum(c.dominantPeriodDays,0)+' days, '+tsP(c.adjustedP)+')')
+          +'<br>'+(typeof vr.adjustedP==='number'&&vr.adjustedP<0.05
+            ?(vr.ratio<1?'Multi-day swings tend to reverse':'Multi-day swings tend to persist')+' ('+tsP(vr.adjustedP)+')'
+            :'Multi-day swings behave like a random walk (20-session variance ratio '+tsNum(vr.ratio,2)+')')
+          +'<br>Irregular: '+(ir.shocksLast90||0)+' move'+(ir.shocksLast90===1?'':'s')+' beyond 3σ in 90 sessions'
+          +(big?'; largest '+tsSigned(big.returnPct,1)+' on '+esc(big.date)+' ('+tsNum(Math.abs(big.z),1)+'σ)':'')
+          +(sd?'<br>'+(typeof sd.adjustedP==='number'&&sd.adjustedP<0.05?'Weekday direction: candidate pattern only':'No weekday effect on direction')+' ('+tsP(sd.adjustedP)+')':'');
+        return '<div class="bh-row" data-ts="'+esc(sym)+'">'+head
+          +'<span class="bh-cell" data-l="Trend">'+trend+'</span>'
+          +'<span class="bh-cell" data-l="Volatility &amp; seasonality">'+vol+'</span>'
+          +'<span class="bh-cell" data-l="Cycles &amp; irregular moves">'+cycles+'</span></div>'
+          +(sv.relativeMoveSize?'<div class="dr-note ts-detail">'+esc(a.label||sym)+' move size by weekday: '+esc(tsSize(sv.relativeMoveSize))+'</div>':'');
+      }).join('');
+      var ev=tsr.evidence||{};
+      var tsEvidence=function(label,e){
+        if(!e||e.status)return '<b>'+esc(label)+'</b>: not computed this run.';
+        var m=e.magnitude||{},bd=e.band||{},tv=bd.trailingVol||{},gw=bd.garchWeekdayVol||{},dr=e.direction||{};
+        var size=m.verdict==='improves'?'GARCH with a weekday factor beat the production volatility scale (QLIKE t='+tsNum(m.qlikeT,2)+'; each half '+tsNum(m.qlikeTFirstHalf,2)+' / '+tsNum(m.qlikeTSecondHalf,2)+')'
+          :m.verdict==='worse'?'GARCH with a weekday factor did worse than the production scale (QLIKE t='+tsNum(m.qlikeT,2)+')'
+            :m.verdict==='no-clear-difference'?'no clear difference from the production scale (QLIKE t='+tsNum(m.qlikeT,2)+')':'insufficient data';
+        var width=(typeof gw.coverage==='number'&&typeof tv.coverage==='number')
+          ?'; its 80% band was '+tsNum(gw.meanWidthPct,2)+'% wide at '+tsNum(gw.coverage*100,1)+'% coverage vs '+tsNum(tv.meanWidthPct,2)+'% at '+tsNum(tv.coverage*100,1)+'%'
+            +(typeof gw.weekdayCoverageSpread==='number'&&typeof tv.weekdayCoverageSpread==='number'?', weekday-to-weekday coverage gap '+tsNum(gw.weekdayCoverageSpread*100,1)+' vs '+tsNum(tv.weekdayCoverageSpread*100,1)+' points':''):'';
+        var dir=dr.verdict==='candidate'?'a direction candidate appeared; it would still need the evidence gate'
+          :'no skill after costs (ARIMA net t='+tsNum(dr.arima&&dr.arima.netT,2)+', structural net t='+tsNum(dr.structural&&dr.structural.netT,2)+')';
+        return '<b>'+esc(label)+'</b>: move size — '+size+width+'. Direction — '+dir+'.';
+      };
+      timing+=panelStart({id:'timeSeriesResearch',tone:'timing',open:false,
+          eyebrow:'TIME-SERIES MODEL &middot; <b>MARKET &amp; TRACKED</b>',
+          title:'Trend, seasonality, cycles, volatility and irregular moves',
+          meta:esc(tsr.asOf||'')+' · move-size forecast only'})
+        +'<div class="dr-note">Five readings per series. <b>Only the 80% band is a forecast</b>, and it forecasts how large the next session’s move may be, never which way: GARCH(1,1) with a weekday factor, sized by a conformal radius. Trend, cycle and weekday-direction readings describe the past; the time-series direction models showed no skill after costs. Every p-value is Holm-adjusted across the '+Object.keys(tsr.assets).length+' series shown. The crypto market line is an equal-weighted composite of coins that survived to today, so its drift reads high. <b>Research only; no trade call.</b></div>'
+        +'<div class="bh-list"><div class="bh-head"><span>Series</span><span>Trend · change over window</span><span>Volatility &amp; seasonality</span><span>Cycles &amp; irregular moves</span></div>'+tsRows+'</div>'
+        +'<div class="dr-note"><b>What the out-of-sample test found</b> (walk-forward; assets listed before the test window)<br>'
+          +tsEvidence('Crypto, 1 day',ev.crypto1d)+'<br>'+tsEvidence('US stocks, 1 day',ev.stock1d)+'<br>'
+          +tsEvidence('Crypto, 7 days',ev.crypto7d)+'<br>'+tsEvidence('US stocks, 5 days',ev.stock5d)+'</div>'
+        +PANEL_END;
+    } else if(tsr&&tsr.status){
+      timing+=panelStart({id:'timeSeriesResearch',tone:'timing',open:false,eyebrow:'TIME-SERIES MODEL',title:'Trend, seasonality, cycles, volatility and irregular moves',meta:esc(tsr.status)})
+        +'<div class="dr-note">The time-series readings are unavailable this run ('+esc(tsr.status)+'). No value is inferred.</div>'+PANEL_END;
+    }
 
     var bh = d.bestHours || {};
     var bhKeys = Object.keys(bh);

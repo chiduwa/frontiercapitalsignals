@@ -149,5 +149,44 @@ winner, and why HAR was added as a candidate rather than as a replacement.
   registered hypothesis for the existing evidence gate to judge on unseen
   forward outcomes.
 
-Related: [[PER_ASSET_REGRESSION]], [[PREDICTION_WEIGHTS_EVIDENCE]],
+## v2 (2026-09-23): time-series candidates, and two corrections to v1's tables
+
+`model-zoo-v2` adds five candidates from `scripts/time-series.mjs` —
+`garchVol`, `garchWeekdayVol`, `harWeekdayVol` (magnitude) and `arima`,
+`structural` (direction) — plus two reports every run: a paired head-to-head
+on common rows (`timeSeries.headToHead`) and the band test
+(`timeSeries.intervals`). Results and method: [[TIME_SERIES_EVIDENCE]].
+
+**Compare magnitude models on common rows only.** The per-model table scores
+each model on every row it has a forecast for, and the GARCH family skips a
+250-return warm-up that covered the volatile first half of 2021. On its own
+rows `harWeekdayVol` showed MAE 3.008 against `harVol`'s 3.186; on the rows
+both forecast, the difference is +0.003 (t=0.48) — nothing. Read
+`headToHead`, not the field table, before calling one volatility model better.
+
+**Raw MAE on |move| rewards a model for being biased low.** Every candidate
+forecasts a standard deviation, but the MAE-optimal forecast of |move| is its
+median, about 0.5σ for these fat-tailed returns. A model whose level happens to
+sit lower "wins" MAE without ranking or sizing anything better. With one scale
+per model fitted on the first half of dates and scored on the second, crypto
+1d's calibrated MAE is EWMA 2.291, harVol 2.320, trailingVol 2.325: HAR's raw
+MAE lead over EWMA above (3.186 vs 3.616) is the level, not skill. Spearman
+(ranking) and QLIKE (variance, Patton 2011) are the fair magnitude tests; the
+head-to-head reports both.
+
+**The liquidity tiers were mislabelled for crypto.** `medianDollarVolume`
+multiplied `volume` by `close`, but crypto volume in the archive is already in
+USD (Yahoo, CoinGecko and Binance quote volume), so BTC's "dollar volume" read
+1.7e15 and every coin's tier sorted by its price. Fixed with
+`quoteDenominated`. The `liquid` and `deep` rows of the survivorship table at
+the top of this file were cut on the mislabelled tier and should be re-derived
+before being quoted; the `established` row does not depend on it.
+
+**Scales are now read from aligned bars.** `volatilityScales` keyed on raw
+dates, and a CoinGecko row dated D is D-1's close, so for those assets the
+incumbents' scale at a decision date was a day stale (never ahead). It now
+reads the same `sanitizeBars` output `featureRow` does. The v1 tables above
+were computed before this; the effect is confined to CoinGecko-sourced assets.
+
+Related: [[PER_ASSET_REGRESSION]], [[PREDICTION_WEIGHTS_EVIDENCE]], [[TIME_SERIES_EVIDENCE]],
 [[CROSS_SECTIONAL_EVIDENCE]]

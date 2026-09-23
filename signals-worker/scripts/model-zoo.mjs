@@ -31,6 +31,9 @@
 // looks good becomes a REGISTERED HYPOTHESIS for the existing evidence gate to
 // judge on unseen forward outcomes -- it does not become a forecast.
 
+import { timeSeriesPaths, TIME_SERIES_VERSION } from './time-series.mjs';
+import { sanitizeBars } from './panel-features.mjs';
+
 const DAY = 86400000;
 const dateMs = d => Date.parse(`${d}T00:00:00Z`);
 export const mean = xs => (xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null);
@@ -39,7 +42,7 @@ const sd = xs => {
   return m == null ? null : Math.sqrt(mean(xs.map(v => (v - m) ** 2)));
 };
 
-export const ZOO_VERSION = 'model-zoo-v1';
+export const ZOO_VERSION = 'model-zoo-v2';
 
 // ---------------------------------------------------------------------------
 // Rank statistics. Spearman is the magnitude metric because |move| is heavily
@@ -184,8 +187,41 @@ export const MODELS = {
     describe: 'Adaptive ridge shrunk toward zero, 9 features.',
     direction: ctx => Math.sign(ctx.adap ?? 0),
     magnitude: ctx => Math.abs(ctx.adap ?? 0)
+  },
+  // -- Classical time-series candidates (time-series.mjs). Each forecast is
+  // made from bars up to and including the decision close, with parameters
+  // re-estimated on a fixed cadence and held in between.
+  garchVol: {
+    skills: ['magnitude'],
+    describe: 'GARCH(1,1), variance-targeted quasi-MLE, refit every 21 bars on up to 1000 returns.',
+    magnitude: ctx => logVolPct(ctx.garchLogVol)
+  },
+  garchWeekdayVol: {
+    skills: ['magnitude'],
+    describe: 'GARCH(1,1) on weekday-deseasonalized returns, reseasonalized for the target sessions.',
+    magnitude: ctx => logVolPct(ctx.garchWeekdayLogVol)
+  },
+  harWeekdayVol: {
+    skills: ['magnitude'],
+    describe: 'The harVol blend on weekday-deseasonalized returns, reseasonalized for the target sessions.',
+    magnitude: ctx => logVolPct(ctx.harWeekdayLogVol)
+  },
+  arima: {
+    skills: ['direction'],
+    describe: 'ARIMA(p,1,0) with drift: AR(p) on daily log returns, p <= 5 by BIC, refit every 21 bars.',
+    direction: ctx => Math.sign(ctx.arima ?? 0)
+  },
+  structural: {
+    skills: ['direction'],
+    describe: 'Structural model: trend + weekly seasonal + cycle + irregular, Kalman filter, refit every 126 sessions.',
+    direction: ctx => Math.sign(ctx.structural ?? 0)
   }
 };
+
+/** A cumulative log-scale volatility, as an expected move in percent. */
+function logVolPct(v) {
+  return Number.isFinite(v) ? Math.expm1(v) * 100 : null;
+}
 
 // ---------------------------------------------------------------------------
 // Cohorts
@@ -366,7 +402,10 @@ export function volatilityScales(assets) {
   // so `trailingVol` in the field is the scale production actually runs on.
   const trailing = new Map();
   for (const a of assets) {
-    const bars = a.bars;
+    // Aligned exactly as featureRow aligns them, so the scale at a decision
+    // date is the one production had at that close -- for a CoinGecko asset
+    // the raw row dated D is D-1's close, and keying on it read a day stale.
+    const bars = sanitizeBars(a.bars);
     if (!bars || bars.length < 25) continue;
     const returns = [];
     let v = null;
@@ -394,36 +433,190 @@ export function volatilityScales(assets) {
   return { ewma, har, trailing, lastReturn, return5 };
 }
 
-/** Median dollar volume over the trailing window, as a liquidity proxy. */
-export function medianDollarVolume(bars, lookback = 400) {
+/**
+ * Median dollar volume over the trailing window, as a liquidity proxy.
+ *
+ * The archive does not store volume in one unit. Equity bars carry SHARES
+ * (Yahoo), so dollars are volume x close. Crypto bars from Yahoo, CoinGecko
+ * and Binance's quote volume are already in USD, and multiplying them by price
+ * again -- what this function did until 2026-09-23 -- made BTC's "dollar
+ * volume" 1.7e15 and sorted every coin's liquidity tier by its PRICE. Callers
+ * pass `quoteDenominated` for crypto.
+ */
+export function medianDollarVolume(bars, lookback = 400, { quoteDenominated = false } = {}) {
   const v = (bars || []).filter(b => b.volume > 0 && b.close > 0)
-    .slice(-lookback).map(b => b.volume * b.close);
+    .slice(-lookback).map(b => (quoteDenominated ? b.volume : b.volume * b.close));
   if (v.length <= 50) return null;
   v.sort((a, b) => a - b);
   return v[Math.floor(v.length / 2)];
 }
 
+// ---------------------------------------------------------------------------
+// Head-to-head: a candidate against the model it would replace
+// ---------------------------------------------------------------------------
+
+/**
+ * QLIKE, the volatility-forecast loss that stays consistent when the squared
+ * return is a noisy stand-in for the true variance (Patton, 2011). Lower is
+ * better; differences are what matter, the level is not interpretable.
+ */
+export function qlike(predictedPct, actualPct) {
+  const s = Math.log1p(predictedPct / 100), r = Math.log1p(actualPct / 100);
+  const h = s * s;
+  return h > 0 && Number.isFinite(r) ? Math.log(h) + (r * r) / h : null;
+}
+
+/**
+ * Two magnitude models on EXACTLY the same rows -- the rows where both have a
+ * forecast -- so a model is never flattered by being scored on a friendlier
+ * subset. The paired loss difference is clustered by date (a market-wide day
+ * is one trial) and reported for each chronological half as well, because an
+ * advantage that exists in only one half is a regime, not a model.
+ */
+export function magnitudeHeadToHead(rows, candidate, incumbent, { minClusters = 10 } = {}) {
+  const common = [];
+  for (const r of rows) {
+    const a = candidate.magnitude(r), b = incumbent.magnitude(r);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || !(a > 0) || !(b > 0)) continue;
+    const qa = qlike(a, r.actual), qb = qlike(b, r.actual);
+    if (!Number.isFinite(qa) || !Number.isFinite(qb)) continue;
+    common.push({ date: r.date, a, b, act: Math.abs(r.actual), qa, qb });
+  }
+  if (common.length < 30) return { forecasts: common.length, status: 'insufficient' };
+  const summarize = rs => {
+    const mae = clusteredT(rs, x => Math.abs(x.a - x.act) - Math.abs(x.b - x.act), { minClusters });
+    const ql = clusteredT(rs, x => x.qa - x.qb, { minClusters });
+    return {
+      forecasts: rs.length, clusters: ql.clusters,
+      spearmanCandidate: spearman(rs.map(x => x.a), rs.map(x => x.act)),
+      spearmanIncumbent: spearman(rs.map(x => x.b), rs.map(x => x.act)),
+      maeDifference: mae.mean, maeT: mae.t,
+      qlikeDifference: ql.mean, qlikeT: ql.t
+    };
+  };
+  const sorted = common.slice().sort((x, y) => x.date.localeCompare(y.date));
+  const dates = [...new Set(sorted.map(x => x.date))];
+  const cut = dates[Math.floor(dates.length / 2)];
+  return {
+    ...summarize(common),
+    firstHalf: summarize(sorted.filter(x => x.date < cut)),
+    secondHalf: summarize(sorted.filter(x => x.date >= cut)),
+    // Negative is better for the candidate on both losses.
+    note: 'Differences are candidate minus incumbent; negative favours the candidate.'
+  };
+}
+
+/** Scales entered in the band test: production's, and the two GARCH forms. */
+export const INTERVAL_SCALES = ['trailingVol', 'garchVol', 'garchWeekdayVol'];
+
+/** The comparisons the time-series candidates were added to answer. */
+export const TIME_SERIES_COMPARISONS = [
+  ['garchVol', 'ewmaVol', 'Is GARCH better than the fixed-decay EWMA it generalizes?'],
+  ['garchVol', 'harVol', 'Does GARCH beat the incumbent magnitude winner?'],
+  ['garchVol', 'trailingVol', 'Does GARCH beat the scale production runs on?'],
+  ['garchWeekdayVol', 'garchVol', 'Does weekday seasonality add to GARCH?'],
+  ['garchWeekdayVol', 'trailingVol', 'Does the seasonal GARCH band scale beat the scale production runs on?'],
+  ['harWeekdayVol', 'harVol', 'Does weekday seasonality add to HAR?'],
+  ['harWeekdayVol', 'trailingVol', 'Does seasonal HAR beat the scale production runs on?']
+];
+
+export function timeSeriesHeadToHead(rows, { models = MODELS } = {}) {
+  const groups = new Map();
+  for (const r of rows) {
+    const k = r.cohort || 'unknown';
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  }
+  const out = {};
+  for (const [candidate, incumbent, question] of TIME_SERIES_COMPARISONS) {
+    if (!models[candidate] || !models[incumbent]) continue;
+    const byCohort = {};
+    for (const [k, rs] of groups) byCohort[k] = magnitudeHeadToHead(rs, models[candidate], models[incumbent]);
+    out[`${candidate}_vs_${incumbent}`] = { candidate, incumbent, question, byCohort };
+  }
+  return out;
+}
+
+/**
+ * The band test: an 80% interval built exactly the way production builds one
+ * (per asset, radius = the 80th percentile of that asset's last 180 matured
+ * |standardized errors|), with each candidate volatility as the scale. A scale
+ * earns its place by a NARROWER band at the same coverage, and -- the part a
+ * weekday-blind scale cannot deliver -- by coverage that holds on every
+ * weekday rather than averaging an over-covered Saturday with an
+ * under-covered Monday.
+ */
+export function intervalComparison(rows, modelNames, {
+  models = MODELS, coverage = 0.8, calibration = 180, warmup = 60, calendar = 'calendar'
+} = {}) {
+  const usable = rows.filter(r => Number.isFinite(r.actual) && r.actual > -100
+    && modelNames.every(m => { const v = models[m].magnitude(r); return Number.isFinite(v) && v > 0; }));
+  const bySymbol = new Map();
+  for (const r of usable) {
+    if (!bySymbol.has(r.symbol)) bySymbol.set(r.symbol, []);
+    bySymbol.get(r.symbol).push(r);
+  }
+  for (const list of bySymbol.values()) list.sort((a, b) => a.date.localeCompare(b.date));
+  const targetWeekday = date => {
+    const t = new Date(dateMs(date));
+    do { t.setUTCDate(t.getUTCDate() + 1); } while (calendar === 'business' && (t.getUTCDay() === 0 || t.getUTCDay() === 6));
+    return t.getUTCDay();
+  };
+  const out = {};
+  for (const name of modelNames) {
+    let n = 0, covered = 0, width = 0;
+    const byDay = Array.from({ length: 7 }, () => [0, 0]);
+    for (const list of bySymbol.values()) {
+      const history = [];
+      for (const r of list) {
+        const scale = Math.log1p(models[name].magnitude(r) / 100);
+        const z = Math.log1p(r.actual / 100) / scale;
+        if (history.length >= warmup) {
+          const recent = history.slice(-calibration).map(Math.abs).sort((a, b) => a - b);
+          const radius = recent[Math.ceil(coverage * recent.length) - 1];
+          const hit = Math.abs(z) <= radius ? 1 : 0;
+          n++; covered += hit;
+          width += (Math.expm1(radius * scale) - Math.expm1(-radius * scale)) * 100;
+          if (r.horizon === 1) { const d = byDay[targetWeekday(r.date)]; d[0]++; d[1] += hit; }
+        }
+        history.push(z);
+      }
+    }
+    const daily = byDay.filter(d => d[0] >= 30).map(d => d[1] / d[0]);
+    out[name] = {
+      forecasts: n, coverage: n ? covered / n : null, meanWidthPct: n ? width / n : null,
+      // Only meaningful at a one-session horizon; a multi-day window spans
+      // several weekdays and has no single "target weekday".
+      weekdayCoverageSpread: daily.length >= 2 ? Math.max(...daily) - Math.min(...daily) : null
+    };
+  }
+  return { nominalCoverage: coverage, calibrationForecasts: calibration, models: out };
+}
+
 /**
  * Attach cohort, liquidity tier and the volatility candidates to each scored
- * forecast, then score the whole field split by cohort.
- *
- * `outcomes` are walk-forward rows carrying `symbol`, `asOf`, `actualPct` and
- * `predictedPct`. `adaptiveBySymbolDate` is optional; when absent the adaptive
- * model simply reports insufficient data rather than being silently skipped.
+ * forecast. Exported so the research harness scores the identical rows the
+ * daily job does.
  */
-export function buildZooSection(assets, outcomes, {
-  horizon = 1, costPct = 0.20, adaptiveBySymbolDate = null
-} = {}) {
-  if (!outcomes?.length) return { zooVersion: ZOO_VERSION, actionable: false, status: 'no-outcomes' };
+export function buildZooRows(assets, outcomes, { horizon = 1, adaptiveBySymbolDate = null, timeSeries = true, log = null } = {}) {
   const windowOpen = outcomes.reduce((m, r) => (r.asOf < m ? r.asOf : m), outcomes[0].asOf);
   const scales = volatilityScales(assets);
-  const firstBar = new Map(), tier = new Map();
+  const firstBar = new Map(), tier = new Map(), paths = new Map();
+  const failures = [];
   for (const a of assets) {
-    if (a.bars?.length) firstBar.set(a.symbol, a.bars[0].date);
-    tier.set(a.symbol, liquidityTier(medianDollarVolume(a.bars)));
+    const aligned = sanitizeBars(a.bars);
+    if (aligned.length) firstBar.set(a.symbol, aligned[0].date);
+    tier.set(a.symbol, liquidityTier(medianDollarVolume(a.bars, 400,
+      { quoteDenominated: !['stock', 'benchmark'].includes(a.assetClass) })));
+    if (!timeSeries) continue;
+    // One asset's model failing to fit must never fail the field; it simply
+    // has no time-series forecasts, and that is counted.
+    try { paths.set(a.symbol, timeSeriesPaths(a)); } catch (error) { failures.push({ symbol: a.symbol, error: String(error?.message || error) }); }
   }
+  if (log && failures.length) log(`[zoo] time-series paths failed for ${failures.length} assets`);
   const rows = outcomes.map(o => {
     const key = `${o.symbol}|${o.asOf}`;
+    const ts = paths.get(o.symbol)?.get(o.asOf);
     return {
       symbol: o.symbol, date: o.asOf, actual: o.actualPct, hier: o.predictedPct,
       adap: adaptiveBySymbolDate?.get(key) ?? null,
@@ -435,12 +628,42 @@ export function buildZooSection(assets, outcomes, {
       cohort: cohortOf(firstBar.get(o.symbol), windowOpen),
       tier: tier.get(o.symbol) ?? 'unknown',
       ewmaDailyVol: scales.ewma.get(key), harDailyVol: scales.har.get(key),
-      return1: scales.lastReturn.get(key), return5: scales.return5.get(key)
+      return1: scales.lastReturn.get(key), return5: scales.return5.get(key),
+      garchLogVol: ts?.garchVol?.[horizon] ?? null,
+      garchWeekdayLogVol: ts?.garchWeekdayVol?.[horizon] ?? null,
+      harWeekdayLogVol: ts?.harWeekdayVol?.[horizon] ?? null,
+      arima: ts?.arima?.[horizon] ?? null,
+      structural: ts?.structural?.[horizon] ?? null
     };
   });
+  return { rows, windowOpen, timeSeriesFailures: failures };
+}
+
+/**
+ * Attach cohort, liquidity tier and the volatility candidates to each scored
+ * forecast, then score the whole field split by cohort.
+ *
+ * `outcomes` are walk-forward rows carrying `symbol`, `asOf`, `actualPct` and
+ * `predictedPct`. `adaptiveBySymbolDate` is optional; when absent the adaptive
+ * model simply reports insufficient data rather than being silently skipped.
+ */
+export function buildZooSection(assets, outcomes, {
+  horizon = 1, costPct = 0.20, adaptiveBySymbolDate = null, timeSeries = true, log = null
+} = {}) {
+  if (!outcomes?.length) return { zooVersion: ZOO_VERSION, actionable: false, status: 'no-outcomes' };
+  const { rows, windowOpen, timeSeriesFailures } = buildZooRows(assets, outcomes,
+    { horizon, adaptiveBySymbolDate, timeSeries, log });
+  const intervalCalendar = assets.some(a => ['stock', 'benchmark'].includes(a.assetClass)) ? 'business' : 'calendar';
   const scored = scoreByCohort(rows, { costPct });
   return {
     ...scored, horizon, windowOpen,
+    timeSeries: timeSeries ? {
+      version: TIME_SERIES_VERSION,
+      failedAssets: timeSeriesFailures.length,
+      headToHead: timeSeriesHeadToHead(rows),
+      intervals: Object.fromEntries(['established', 'recent'].map(cohort => [cohort,
+        intervalComparison(rows.filter(r => r.cohort === cohort), INTERVAL_SCALES, { calendar: intervalCalendar })]))
+    } : { status: 'not-computed' },
     selection: {
       // Per-asset selection is reported, never applied. Three separate methods
       // have now put the direction version of this at a rank correlation
@@ -454,7 +677,10 @@ export function buildZooSection(assets, outcomes, {
         ? selectionPersistence(rows, MODELS.hierarchical, MODELS.adaptive, 'direction', { costPct })
         : { status: 'not-computed', reason: 'no adaptive forecasts supplied', selectable: false },
       harVsEwmaMagnitude: selectionPersistence(rows, MODELS.harVol, MODELS.ewmaVol, 'magnitude', { costPct }),
-      harVsTrailingMagnitude: selectionPersistence(rows, MODELS.harVol, MODELS.trailingVol, 'magnitude', { costPct })
+      harVsTrailingMagnitude: selectionPersistence(rows, MODELS.harVol, MODELS.trailingVol, 'magnitude', { costPct }),
+      harWeekdayVsHarMagnitude: timeSeries
+        ? selectionPersistence(rows, MODELS.harWeekdayVol, MODELS.harVol, 'magnitude', { costPct })
+        : { status: 'not-computed', selectable: false }
     }
   };
 }
