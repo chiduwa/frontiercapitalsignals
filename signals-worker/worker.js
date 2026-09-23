@@ -8180,6 +8180,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       var tsSigned=function(x,dg){return typeof x==='number'&&isFinite(x)?(x>0?'+':'')+x.toFixed(dg==null?1:dg)+'%':'—';};
       var tsP=function(p){return typeof p!=='number'||!isFinite(p)?'no test':p<0.001?'adj. p&lt;0.001':'adj. p='+p.toFixed(p<0.1?3:2);};
       var tsWindow=function(w){return w.days===365?'1y':w.days+'d';};
+      var tsOrdinal=function(n){var v=n%100;return n+(v>=11&&v<=13?'th':({1:'st',2:'nd',3:'rd'})[n%10]||'th');};
       var tsDays=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
       var tsBars=function(sizes){
         var keys=tsDays.filter(function(k){return sizes&&typeof sizes[k]==='number'&&isFinite(sizes[k]);});
@@ -8209,7 +8210,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           :'No confirmed weekday effect on move size ('+tsP(sv.adjustedP)+')';
         var vol=(v.band?'80% band for '+esc(v.nextSession||'the next session')+': '+tsSigned(band.lowerPct,2)+' to '+tsSigned(band.upperPct,2)
             :'80% band withheld: the daily archive is behind, so no current forecast exists')
-          +'<br>Volatility '+esc(v.regime||'unmeasured')+' ('+tsNum((v.percentileOfYear||0)*100,0)+'th percentile of the past year); shocks fade by half in '+tsNum(v.halfLifeDays,1)+' days'
+          +'<br>Volatility '+esc(v.regime||'unmeasured')+' ('+tsOrdinal(Math.round((v.percentileOfYear||0)*100))+' percentile of the past year); shocks fade by half in '+tsNum(v.halfLifeDays,1)+' days'
           +'<br>'+tsBars(sv.relativeMoveSize)+seasonal;
         var c=a.cycles||{},vr=c.varianceRatio20||{},ir=a.irregular||{},big=ir.largestLast90;
         var cycles=(typeof c.adjustedP==='number'&&c.adjustedP<0.05
@@ -8234,6 +8235,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var size=m.verdict==='improves'?'GARCH with a weekday factor beat the production volatility scale (QLIKE t='+tsNum(m.qlikeT,2)+'; each half '+tsNum(m.qlikeTFirstHalf,2)+' / '+tsNum(m.qlikeTSecondHalf,2)+')'
           :m.verdict==='worse'?'GARCH with a weekday factor did worse than the production scale (QLIKE t='+tsNum(m.qlikeT,2)+')'
             :m.verdict==='no-clear-difference'?'no clear difference from the production scale (QLIKE t='+tsNum(m.qlikeT,2)+')':'insufficient data';
+        // A lower QLIKE with a band that under-covers is half a win; say so in
+        // the same sentence rather than leave it to the numbers after it.
+        if(m.verdict==='improves'&&typeof gw.coverage==='number'&&gw.coverage<0.785)size+=', but its band under-covers';
         var width=(typeof gw.coverage==='number'&&typeof tv.coverage==='number')
           ?'; its 80% band was '+tsNum(gw.meanWidthPct,2)+'% wide at '+tsNum(gw.coverage*100,1)+'% coverage vs '+tsNum(tv.meanWidthPct,2)+'% at '+tsNum(tv.coverage*100,1)+'%'
             +(typeof gw.weekdayCoverageSpread==='number'&&typeof tv.weekdayCoverageSpread==='number'?', weekday-to-weekday coverage gap '+tsNum(gw.weekdayCoverageSpread*100,1)+' vs '+tsNum(tv.weekdayCoverageSpread*100,1)+' points':''):'';

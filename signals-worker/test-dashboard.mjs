@@ -429,7 +429,7 @@ console.log('\n== the time-series panel publishes a volatility band and nothing 
   const assets = tracked.map((symbol, i) => ({ symbol, assetClass: 'crypto', bars: series(60 + i, symbol === 'HYPE' ? 700 : 720, i < 2) }));
   assets.push({ symbol: 'MCAP:BROAD', assetClass: 'market', bars: series(99, 720, true) });
   const asOf = tsDay(721);
-  const lane = (qlikeT) => ({ zoo: {
+  const lane = (qlikeT, bandCoverage = 0.794) => ({ zoo: {
     byCohort: { established: { field: {
       arima: { direction: { hitRate: 0.4997, netPct: -0.179, netT: -1.72, forecasts: 209346 } },
       structural: { direction: { hitRate: 0.5031, netPct: -0.074, netT: -0.70, forecasts: 209116 } } } } },
@@ -439,9 +439,9 @@ console.log('\n== the time-series panel publishes a volatility band and nothing 
         spearmanCandidate: 0.308, spearmanIncumbent: 0.273 } } } },
       intervals: { established: { models: {
         trailingVol: { coverage: 0.791, meanWidthPct: 11.0, weekdayCoverageSpread: 0.103 },
-        garchWeekdayVol: { coverage: 0.794, meanWidthPct: 10.59, weekdayCoverageSpread: 0.057 } } } } } } });
+        garchWeekdayVol: { coverage: bandCoverage, meanWidthPct: 10.59, weekdayCoverageSpread: 0.057 } } } } } } });
   const section = buildTimeSeriesSection({ asOf, assets }, { asOf,
-    prediction: { 'crypto|1': lane(-5.36), 'crypto|7': lane(-2.81), 'stock|1': lane(-7.64), 'stock|5': lane(1.01) } });
+    prediction: { 'crypto|1': lane(-5.36), 'crypto|7': lane(-2.81, 0.773), 'stock|1': lane(-7.64), 'stock|5': lane(1.01) } });
   const tsView = await render({ ...payload(), hierarchicalResearch: { status: 'shadow', actionable: false, timeSeries: section } }, { settleMs: 1200 });
   const panelEl = tsView.doc.getElementById('panel-timeSeriesResearch');
   const text = panelEl?.textContent || '';
@@ -467,6 +467,10 @@ console.log('\n== the time-series panel publishes a volatility band and nothing 
   check('the evidence line carries the measured verdicts, not adjectives',
     text.includes('beat the production volatility scale (QLIKE t=-5.36') && text.includes('no clear difference from the production scale (QLIKE t=1.01')
     && text.includes('no skill after costs (ARIMA net t=-1.72, structural net t=-0.70)'));
+  check('a lower loss with an under-covering band is not reported as a plain win',
+    /Crypto, 7 days: move size — GARCH with a weekday factor beat the production volatility scale \(QLIKE t=-2\.81[^)]*\), but its band under-covers/.test(text)
+    && !/Crypto, 1 day: [^.]*under-covers/.test(text));
+  check('percentiles read as English ordinals', !/\d(1|2|3)th percentile/.test(text.replace(/1[123]th/g, '')) && /\d+(st|nd|rd|th) percentile/.test(text));
   check('phones get labelled cells rather than a four-column grid',
     panelEl.querySelectorAll('.bh-cell[data-l="Trend"]').length >= 8);
   tsView.dom.window.close();
