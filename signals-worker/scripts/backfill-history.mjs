@@ -324,7 +324,14 @@ async function main() {
     let swingOk = 0, swingSkipped = 0, todBootstrapped = 0, todSkipped = 0, equityHourlyWritten = 0;
     // Guard on THIS table's coverage, not another's — the mistake that let the
     // time-of-day bootstrap re-run indefinitely.
-    const hourlyCoverage = await getExistingHourlyCoverage(env);
+    // Called without its symbol list from 2026-08-31 to 2026-09-23, this threw
+    // before the loop every night ("reading 'length'"), so no swing-time or
+    // time-of-day bootstrap ran and no equity hourly bar was ever persisted.
+    const hourlyCoverage = await getExistingHourlyCoverage(env, universe.map((a) => a.symbol));
+    // Equities only, as the persistence was built for: crypto hourly bars come
+    // from Binance.US below, and a Yahoo crypto ticker can be another asset
+    // (ARB-USD is), which this path would never check.
+    const needsEquityHourly = (a) => a.assetClass === 'stock' && !(hourlyCoverage[a.symbol]?.count > 0);
     const swingFailed = [];
     for (const a of universe) {
       if (a.assetClass === 'benchmark') continue; // no swing-timing story for macro benchmarks — nothing trades them directly
@@ -333,12 +340,20 @@ async function main() {
       const swingTarget = a.assetClass === 'stock' ? 300 : 600;
       const needsSwing = (swingCoverage[coverageKey] || 0) < swingTarget;
       const needsTod = (todCoverage[coverageKey] || 0) < TOD_BOOTSTRAP_COVERAGE_TARGET;
-      const needsHourlyArchive = !(hourlyCoverage[a.symbol] > 0);
+      const needsHourlyArchive = needsEquityHourly(a);
       if (!needsSwing) swingSkipped++;
       if (!needsTod) todSkipped++;
       if (!needsSwing && !needsTod && !needsHourlyArchive) continue;
       try {
         const bars = await yahooHourlyBars(a.yahooTicker);
+        // The daily path's same-asset test, applied before any tally: a Yahoo
+        // crypto ticker can name another token, and its hours would be
+        // summed into this symbol's running time-of-day counts for good.
+        const lastHour = bars[bars.length - 1];
+        if (a.assetClass === 'crypto' && !isYahooCryptoDataTrustworthy([{ date: lastHour.ts.slice(0, 10), close: lastHour.close }], a.refPrice, Date.now())) {
+          swingFailed.push(`${a.symbol} (Yahoo ${a.yahooTicker} is stale or another asset; not tallied)`);
+          continue;
+        }
 
         // Persist these bars into asset_hourly_bars as well. They were already
         // being fetched here for swing-timing and then thrown away, which left
@@ -353,7 +368,7 @@ async function main() {
         // re-walked, and bounded by the shared row budget so a first run
         // spreads across several rather than blowing the cap.
         const equityHourlyLeft = () => EQUITY_HOURLY_ROW_BUDGET - equityHourlyWritten;
-        if (!(hourlyCoverage[a.symbol] > 0) && bars.length && equityHourlyLeft() > 0) {
+        if (needsEquityHourly(a) && bars.length && equityHourlyLeft() > 0) {
           const hourlyRows = bars.slice(-Math.min(bars.length, equityHourlyLeft())).map((b) => ({
             symbol: a.symbol, assetClass: a.assetClass, bar_at: b.ts,
             close: b.close, high: b.high, low: b.low, volume: b.volume, source: 'yahoo'
