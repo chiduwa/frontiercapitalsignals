@@ -1741,6 +1741,10 @@ check('price has already rallied well away from the low: no longer qualifies (th
 
 check('not enough history yet to judge a full lookback window: no crash, null', mod.detectPossibleLongTermBottom(ltpQualifyingBars.slice(0, 50), 100, 10, 20) === null);
 check('empty history: no crash, null', mod.detectPossibleLongTermBottom([], 100, 10, 20) === null);
+const ltpFlatBars = Array.from({ length: 100 }, (_, i) => ({ date: ltpDate(i), close: 0.001039 * (1 + (i % 3) * 0.001) }));
+check('a series that never moved (a dead feed or a peg) has no low to report, however long ago its minimum was: XCN, live 2026-09-23', mod.detectPossibleLongTermBottom(ltpFlatBars, 100, 10, 20) === null);
+const ltpShallowBars = ltpQualifyingBars.map(b => ({ ...b, close: 20 + (b.close - 20) * 0.04 }));
+check('the same shape at 5.4% total range still qualifies: the guard only removes inert series', mod.detectPossibleLongTermBottom(ltpShallowBars, 100, 10, 20) !== null, JSON.stringify(mod.detectPossibleLongTermBottom(ltpShallowBars, 100, 10, 20)));
 check('a qualifying low also reports how deep the fall from the window high was', ltpQualifying && ltpQualifying.drawdownPct < 0 && ltpQualifying.highClose >= ltpQualifying.lowClose
   && Math.abs(ltpQualifying.drawdownPct - (ltpQualifying.lowClose / ltpQualifying.highClose - 1) * 100) < 1e-9, JSON.stringify(ltpQualifying));
 
@@ -3424,6 +3428,8 @@ check('too few points abstains rather than guessing', mod.pegBehaviour(flatSerie
 // through for months.
 const usdg = { symbol: 'USDG', id: 'global-dollar', name: 'Global Dollar' };
 check('USDG is caught (it is now on the known list)', mod.isStableValueAsset(usdg));
+check('a yen stablecoin is a stable-value asset, not a crypto low (JPYC ranked 4th on 2026-09-23)', mod.isStableValueAsset({ symbol: 'JPYC', id: 'jpyc', name: 'JPYC' }) && mod.isStableValueAsset({ symbol: 'EURCV', id: 'societe-generale-forge-eurcv', name: 'EUR CoinVertible' }));
+check('the fiat list matches whole symbols only: JUP, EURO-named tokens and BRETT are untouched', !mod.isStableValueAsset({ symbol: 'JUP', name: 'Jupiter' }) && !mod.isStableValueAsset({ symbol: 'BRETT', name: 'Brett' }) && !mod.isStableValueAsset({ symbol: 'EUROC2', name: 'Euro Coin 2' }));
 check('an UNKNOWN peg is still caught, by behaviour alone', mod.isNonDirectionalAsset({ symbol: 'NEWPEG', id: 'newpeg', name: 'Frontier Reserve Unit' }, flatSeries));
 check('an unknown peg with no history is NOT guessed at', !mod.isNonDirectionalAsset({ symbol: 'NEWPEG', id: 'newpeg', name: 'Frontier Reserve Unit' }, []));
 

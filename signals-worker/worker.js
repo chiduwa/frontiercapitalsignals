@@ -387,6 +387,11 @@ export function isStableValueAsset(asset) {
   const name = String(asset?.name || '').toLowerCase();
   if (CRYPTO_BLOCKLIST.has(symbol)) return true;
   if (/^(usd|usdt|usdc|usde|usds|dai|fdusd|pyusd|tusd|usdp|gusd|frax|lusd|susd|usdd|usdy|usd0|usdtb|rlusd|eurc|eurt|bfusd|gho|usd1|usdg|usdgo|ausd|usdf|usdl|usdo|usdb|usdn|deusd)$/.test(symbol)) return true;
+  // Pegged to another fiat currency: their moves are that currency against
+  // the dollar, not a crypto view. JPYC ranked 4th among "possible
+  // multi-month lows" (2026-09-23) on the yen's year; its series is also too
+  // noisy for pegBehaviour to call it pegged, so it needs naming.
+  if (/^(jpyc|gyen|xsgd|eurcv|eurs|eure|eurq|eurr|euri|aeur|veur|zchf|xchf|tryb|cadc|idrt|bidr|brz)$/.test(symbol)) return true;
   if (/(stablecoin|usd coin|usd institutional|tether|dai stablecoin|frax usd|pax dollar|trueusd|gemini dollar|usdd)/.test(name)) return true;
   if (/(^|-)usd-?stable/.test(id)) return true;
   return false;
@@ -2716,6 +2721,12 @@ export function detectPossibleLongTermBottom(bars, lookbackDays = 365, minDaysSi
   if (daysSinceLow < minDaysSinceLow || pctAboveLow > nearLowPct) return null;
   let highClose = lowClose;
   for (const b of window) if (b.close != null && b.close > highClose) highClose = b.close;
+  // A series that never moved has no fall to bottom from. Found live
+  // 2026-09-23: XCN's Yahoo feed had printed one price for a year, so its
+  // "low" was 251 days old with the price still on it, and it ranked 10th.
+  // No traded stock or coin spends a year inside a 5% range; pegs and dead
+  // feeds do.
+  if (highClose / lowClose < 1.05) return null;
   // drawdownPct: how far the low sits below the window's highest close --
   // the "depth" half of rankLongTermCandidates.
   return { lowClose, lowDate: window[lowIdx].date, daysSinceLow, currentClose: current, pctAboveLow,
