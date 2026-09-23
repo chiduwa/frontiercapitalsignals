@@ -524,6 +524,36 @@ console.log('\n== the model-tournament panel shows who is in force and what is b
   firstView.dom.window.close();
 }
 
+// ============ big-move watch: size, never direction ============================
+// The summary is the real output of scripts/big-move-watch.py on the archive
+// (2026-09-23), as the payload loader returns it.
+console.log('\n== the big-move watch lists the likeliest movers and says direction is unknown ==');
+{
+  const summary = JSON.parse(readFileSync(new URL('./test-fixtures/big-move-watch-summary.json', import.meta.url), 'utf8'));
+  const view = await render({ ...payload(), bigMoveWatch: { ...summary, status: 'live', ageHours: 3 } }, { settleMs: 1200 });
+  const el = view.doc.getElementById('panel-bigMoveWatch');
+  const text = el?.textContent || '';
+  check('the watch renders without disrupting the page', view.pageErrors.length === 0 && Boolean(el), JSON.stringify(view.pageErrors));
+  check('it sits with the watchlists, open', Boolean(el?.closest('[data-dashboard-view="watchlists"]')) && el.open === true);
+  check('every watched coin gets a row with its chance of a 12%+ move',
+    summary.watch.every(w => el.querySelector(`[data-bmw="${w.symbol}"]`)) && /\d+%/.test(el.querySelector('[data-bmw]').textContent));
+  check('it states size, not direction, and that it is not advice',
+    text.includes('either way') && text.includes('Size, not direction') && text.includes('not financial advice'));
+  check('no direction arrow or trade verb inside the panel',
+    el.querySelectorAll('.dir-arrow, .dir-up, .dir-down').length === 0 && !/\bBUY\b|\bSELL\b|\bLONG\b|\bSHORT\b/.test(text));
+  check('a missing value renders as a dash, not NaN', !/NaN|undefined/.test(text));
+  check('before any day is scored, the live record says it starts with this list', text.includes('starts with this list'));
+  view.dom.window.close();
+  const scored = await render({ ...payload(), bigMoveWatch: { ...summary, status: 'live', live: { days: 12, hitRate: 0.41, baseRate: 0.09, t: 4.2 }, recall: 0.22 } }, { settleMs: 1200 });
+  const st = scored.doc.getElementById('panel-bigMoveWatch')?.textContent || '';
+  check('once scored, it reports its hit rate against all coins and its recall',
+    /41% of watched coins moved 12%\+ within two days, against 9% of all coins/.test(st) && /22% of all 12%\+ movers/.test(st));
+  scored.dom.window.close();
+  const first = await render({ ...payload(), bigMoveWatch: { status: 'awaiting-first-run' } }, { settleMs: 1200 });
+  check('before the first run it says so', (first.doc.getElementById('panel-bigMoveWatch')?.textContent || '').includes('has not published a list yet'));
+  first.dom.window.close();
+}
+
 [withheld, proven, ui, clocks, stale].forEach((r) => r.dom.window.close());
 
 console.log(`\n${passed} passed, ${failed} failed`);

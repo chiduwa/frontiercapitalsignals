@@ -1,0 +1,76 @@
+name: Signals Big-Move Watch
+
+# Daily, after the archive is current: rank every archived coin by its chance
+# of a >= 12% move either way over the next two days, log the top 10 before
+# those days happen, score earlier days against what every coin did, and push
+# one digest. See signals-worker/docs/MISSED_MOVES.md. Places nothing.
+on:
+  workflow_run:
+    workflows: [Signals Daily]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: '47 17 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signals-big-move-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install pinned model libraries
+        run: python -m pip install -r signals-worker/scripts/sequence-research-requirements.txt
+      - name: Test the watch before it touches D1
+        working-directory: signals-worker
+        env:
+          OPENBLAS_NUM_THREADS: '1'
+        run: |
+          python test-big-move-watch.py
+          node --test test-big-move-watch-io.mjs
+      - name: Read every crypto series and the watch's open rows
+        working-directory: signals-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+        run: |
+          mkdir -p reports/big-move
+          node scripts/big-move-watch-io.mjs series reports/big-move/series.json
+          node scripts/big-move-watch-io.mjs export reports/big-move/state.json
+      - name: Score, rank and write today's watch
+        working-directory: signals-worker
+        env:
+          OPENBLAS_NUM_THREADS: '1'
+        run: python scripts/big-move-watch.py --series reports/big-move/series.json --state reports/big-move/state.json --output reports/big-move/results.json
+      - name: Write to D1 and push the digest
+        working-directory: signals-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: node scripts/big-move-watch-io.mjs import reports/big-move/results.json
+      - name: Preserve results, including failed runs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: big-move-watch-${{ github.run_id }}
+          path: signals-worker/reports/big-move/results.json
+          retention-days: 90
+          if-no-files-found: warn

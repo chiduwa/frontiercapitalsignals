@@ -7186,6 +7186,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   #panel-sessionResearch .bh-cell,#panel-calendarResearch .bh-cell,#panel-stableBasketResearch .bh-cell{display:block;line-height:1.7}
   #panel-timeSeriesResearch .bh-cell{display:block;line-height:1.7}
   #panel-modelTournament .bh-cell{display:block;line-height:1.7}
+  @media(min-width:721px){#panel-bigMoveWatch .bh-head,#panel-bigMoveWatch .bh-row{grid-template-columns:minmax(110px,.9fr) repeat(5,minmax(90px,1fr))}}
   @media(min-width:721px){#panel-modelTournament .bh-head,#panel-modelTournament .bh-row{grid-template-columns:minmax(80px,.45fr) minmax(200px,1.2fr) minmax(200px,1.2fr) minmax(170px,1fr) minmax(190px,1.1fr)}}
   @media(min-width:721px){#panel-timeSeriesResearch .bh-head,#panel-timeSeriesResearch .bh-row{grid-template-columns:minmax(96px,.6fr) minmax(170px,1fr) minmax(230px,1.5fr) minmax(230px,1.5fr)}}
   .ts-bars{display:inline-flex;align-items:flex-end;gap:2px;height:14px;vertical-align:-2px;margin-right:7px}
@@ -8294,6 +8295,37 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     // long-term-potential boards are descriptive history, so they start shut
     // and carry their disclaimer inside, where the rows are.
     var watch='';
+    // Big-move watch (scripts/big-move-watch.py): the coins most likely to
+    // move >= 12% either way in the next two days, across every archived coin
+    // -- including the ones outside the ranked universe, where half of all
+    // missed moves were. Direction is not forecastable and the panel says so.
+    var bmw=d.bigMoveWatch;
+    if(bmw&&bmw.watch&&bmw.watch.length){
+      var bmPct=function(x,signed){return typeof x==='number'&&isFinite(x)?(signed&&x>=0?'+':'')+x.toFixed(1)+'%':'—';};
+      var bmRows=bmw.watch.map(function(r){
+        return '<div class="bh-row" data-bmw="'+esc(r.symbol)+'"><span class="bh-sym">'+r.rank+'. '+esc(r.symbol)+'</span>'
+          +'<span class="bh-cell" data-l="Chance of a 12%+ move">'+Math.round(r.p*100)+'%</span>'
+          +'<span class="bh-cell" data-l="Last day">'+bmPct(r.move_today_pct,true)+'</span>'
+          +'<span class="bh-cell" data-l="5 days">'+bmPct(r.r5_pct,true)+'</span>'
+          +'<span class="bh-cell" data-l="Daily volatility">'+bmPct(r.vol20_pct)+'</span>'
+          +'<span class="bh-cell" data-l="Volume vs usual">'+(typeof r.volume_ratio==='number'?r.volume_ratio.toFixed(1)+'×':'—')+'</span></div>';
+      }).join('');
+      var lv=bmw.live||{};
+      var liveLine=lv.days?'<b>Live record</b>: '+Math.round((lv.hitRate||0)*100)+'% of watched coins moved 12%+ within two days, against '+Math.round((lv.baseRate||0)*100)+'% of all coins on the same days ('+lv.days+' day'+(lv.days===1?'':'s')+(typeof lv.t==='number'?', t='+lv.t.toFixed(2):'')+').'
+        +(typeof bmw.recall==='number'?' '+Math.round(bmw.recall*100)+'% of all 12%+ movers on those days were on the watch the day before.':'')
+        :'<b>Live record</b>: starts with this list; each day is scored against every coin once its two days are over.';
+      watch+=panelStart({id:'bigMoveWatch',tone:'watch',open:true,
+          eyebrow:'CRYPTO &middot; <b>BIG-MOVE WATCH</b>',
+          title:'Most likely to move 12%+ in the next two days',
+          meta:'from the '+esc(bmw.asOf||'')+' close · direction unknown'+(bmw.status==='stale'?' · <span class="amber-t">stale</span>':'')})
+        +'<div class="xp-banner" role="note"><b>Size, not direction.</b> These coins are the likeliest of every archived coin to move 12% or more <b>either way</b> over the next two days. Studied on 330,100 coin-days and walked forward over nine half-years, the daily top 10 did so 30% of the time against 8.6% for a typical coin; which way they move is not forecastable (52% of the flagged movers rose). Not a buy or sell signal, not financial advice.</div>'
+        +'<div class="bh-list"><div class="bh-head"><span>Coin</span><span>Chance of a 12%+ move</span><span>Last day</span><span>5 days</span><span>Daily volatility</span><span>Volume vs usual</span></div>'+bmRows+'</div>'
+        +'<div class="dr-note">'+liveLine+' '+esc(bmw.statusNote||'')+'</div>'
+        +PANEL_END;
+    } else if(bmw&&bmw.status&&bmw.status!=='live'){
+      watch+=panelStart({id:'bigMoveWatch',tone:'watch',open:false,eyebrow:'CRYPTO &middot; BIG-MOVE WATCH',title:'Most likely to move 12%+ in the next two days',meta:esc(bmw.status)})
+        +'<div class="dr-note">The big-move watch has not published a list yet ('+esc(bmw.status)+').</div>'+PANEL_END;
+    }
     if(d.crypto.favorites && d.crypto.favorites.length){
       watch+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-favorites', eyebrow:'CRYPTO &middot; <b>FAVORITES</b>', title:'Always tracked', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.favorites, d.crypto.favorites.length);
     }

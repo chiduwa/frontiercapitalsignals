@@ -1,0 +1,147 @@
+{
+"version": "big-move-watch-v1",
+"asOf": "2026-09-21",
+"generatedAt": "2026-09-23T20:42:00Z",
+"horizonDays": 2,
+"threshold": 0.12,
+"watch": [
+{
+"as_of": "2026-09-21",
+"symbol": "AIOZ",
+"rank": 1,
+"p": 0.4917349781872708,
+"close": 0.14120100438594818,
+"vol20_pct": 11.090134829387141,
+"move_today_pct": 56.42247662124351,
+"r5_pct": 113.52035384231627,
+"volume_ratio": 7.9527281720554965
+},
+{
+"as_of": "2026-09-21",
+"symbol": "MUBARAK",
+"rank": 2,
+"p": 0.4495712393122017,
+"close": 0.043719999492168427,
+"vol20_pct": 8.805754821889042,
+"move_today_pct": 30.784644480449135,
+"r5_pct": 51.43747883394412,
+"volume_ratio": 7.644488941576781
+},
+{
+"as_of": "2026-09-21",
+"symbol": "ALCH",
+"rank": 3,
+"p": 0.42887044030897425,
+"close": 0.05206499993801117,
+"vol20_pct": 11.823493575282914,
+"move_today_pct": 33.626769770985895,
+"r5_pct": 50.576969093892686,
+"volume_ratio": 3.4356911492303497
+},
+{
+"as_of": "2026-09-21",
+"symbol": "AKE",
+"rank": 4,
+"p": 0.41187817882322497,
+"close": 0.057486001402139664,
+"vol20_pct": 28.307960334822834,
+"move_today_pct": -2.7424785461919834,
+"r5_pct": 176.89418343497388,
+"volume_ratio": 2.0205735990461813
+},
+{
+"as_of": "2026-09-21",
+"symbol": "ZETA",
+"rank": 5,
+"p": 0.3587235311855492,
+"close": 0.05643099918961525,
+"vol20_pct": 8.415455994506607,
+"move_today_pct": 41.97191449152668,
+"r5_pct": 68.07946383514721,
+"volume_ratio": 44.33332935179396
+},
+{
+"as_of": "2026-09-21",
+"symbol": "NOCK",
+"rank": 6,
+"p": 0.3510556379468849,
+"close": 0.040780000388622284,
+"vol20_pct": 17.129542361131243,
+"move_today_pct": 6.098452302549519,
+"r5_pct": 9.148328206015854,
+"volume_ratio": 1.2023229704023555
+},
+{
+"as_of": "2026-09-21",
+"symbol": "SN53",
+"rank": 7,
+"p": 0.34674111446196154,
+"close": 9.619953155517578,
+"vol20_pct": 8.664740409346852,
+"move_today_pct": 26.389513804078955,
+"r5_pct": 52.92033090726622,
+"volume_ratio": 1.4579054654263806
+},
+{
+"as_of": "2026-09-21",
+"symbol": "STRK",
+"rank": 8,
+"p": 0.3205474067301307,
+"close": 0.04377700015902519,
+"vol20_pct": 11.150867873467659,
+"move_today_pct": -9.695321874078317,
+"r5_pct": 58.50320188283686,
+"volume_ratio": null
+},
+{
+"as_of": "2026-09-21",
+"symbol": "PIEVERSE",
+"rank": 9,
+"p": 0.32021869170789885,
+"close": 1.8471180200576782,
+"vol20_pct": 8.544390207979047,
+"move_today_pct": 12.520058050978685,
+"r5_pct": 57.1225054180003,
+"volume_ratio": 15.67071458136986
+},
+{
+"as_of": "2026-09-21",
+"symbol": "SN3",
+"rank": 10,
+"p": 0.312755440672438,
+"close": 9.85512924194336,
+"vol20_pct": 6.207781606863199,
+"move_today_pct": 19.36096270026222,
+"r5_pct": 44.54861446965781,
+"volume_ratio": 3.227599740607764
+}
+],
+"model": {
+"trainRows": 330100,
+"baseRate": 0.10328991214783399,
+"coins": 187,
+"gainShare": {
+"btcVol20": 0.1156,
+"vol60": 0.1143,
+"vol20": 0.1001,
+"btcR5": 0.0999,
+"range10": 0.0882,
+"bigDays20": 0.0834,
+"breadth5": 0.0806,
+"marketTurbulence": 0.0762
+}
+},
+"live": {
+"days": 0,
+"rows": 0,
+"hitRate": null,
+"baseRate": null,
+"excess": null,
+"t": null
+},
+"recall": null,
+"movers": 0,
+"notifying": true,
+"statusNote": "proven at discovery: walk-forward over 9 half-years, the daily top 10 moved >= 12% in 2 days 30% of the time vs an 8.6% base; live record accumulating (0/30 days)",
+"direction": "unknown: 52% of flagged movers rose in the walk-forward; no direction model held up"
+}

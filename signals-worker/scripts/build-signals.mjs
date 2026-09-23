@@ -25,6 +25,7 @@ import { d1 } from './d1-client.mjs';
 import { loadAdaptiveHealth } from './adaptive-research.mjs';
 import { loadHierarchicalHealth } from './hierarchical-research.mjs';
 import { loadTournamentHealth } from './model-tournament-io.mjs';
+import { loadBigMoveWatch } from './big-move-watch-io.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES, GITHUB_EVENT_NAME, FORCE_REFRESH, NTFY_TOPIC } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID })) {
@@ -253,6 +254,14 @@ if (FCS_D1_DATABASE_ID) {
   } catch (error) {
     payload.modelTournament = { status: 'unavailable', actionable: false };
     console.error('model tournament unavailable:', error.message);
+  }
+  // The coins most likely to move >= 12% either way in two days; direction
+  // unknown, and the panel says so.
+  try {
+    payload.bigMoveWatch = await loadBigMoveWatch(env);
+  } catch (error) {
+    payload.bigMoveWatch = { status: 'unavailable' };
+    console.error('big-move watch unavailable:', error.message);
   }
   try {
     payload.sessionResearch = await loadSessionHealth(env);

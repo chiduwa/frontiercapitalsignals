@@ -718,6 +718,18 @@ same way. The dashboard shows the method in force per asset, challengers'
 progress and how each asset's models weigh their inputs. Rules, timelines
 and what is not wired yet: [docs/MODEL_TOURNAMENT.md](docs/MODEL_TOURNAMENT.md).
 
+**Missed moves, and the big-move watch.** Of 364 moves of 12%+ in 48 h
+that the retrospective logged in September 2026, 49% were in coins outside
+the ranked universe and 51 sat on a board with direction withheld or wrong.
+Studied with controls on 330,100 coin-days, what comes before a big move is
+recent volatility, range, a big last day and a volume surge, and none of it
+says which way. `scripts/big-move-watch.py` ranks every archived coin daily.
+Walked forward, its top 10 moved 12%+ in two days 30% of the time against
+8.6%. It pushes one digest a day and heads the Watchlists view. Surge alerts
+are now judged against the same-window market, not a coin flip; two
+long-side alerts that had graduated on the rally are silent again.
+[docs/MISSED_MOVES.md](docs/MISSED_MOVES.md).
+
 **ARB is always tracked** (`FAVORITE_SYMBOLS`). The list is written down in
 fifteen places across the Worker, the Oracle-host collectors, Python research
 and a workflow argument; `test-tracked-assets.mjs` fails if any copy
