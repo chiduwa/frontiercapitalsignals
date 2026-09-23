@@ -12,7 +12,7 @@ import numpy as np
 spec=importlib.util.spec_from_file_location('tracked',Path(__file__).with_name('tracked-research.py'))
 model=importlib.util.module_from_spec(spec);spec.loader.exec_module(model)
 VERSION='session-flow-v1'
-SYMBOLS=['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR']
+SYMBOLS=['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR','ARB']
 SPLIT='2026-01-01'
 UTC=timezone.utc
 WINDOWS=[('NY midnight','America/New_York',0,2),('NY morning','America/New_York',8,10),

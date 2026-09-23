@@ -62,6 +62,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+          # Optional. Unset, CoinGecko is called anonymously exactly as before.
+          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
           # Sized for this account's confirmed Workers Paid D1 allowance, not
           # the free tier the original values assumed — see the budget
           # constants' own docs in backfill-history.mjs. Repo variables still

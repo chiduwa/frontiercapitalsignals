@@ -224,12 +224,12 @@ assert.ok(dFailing(null, '2026-09-18T00:00:00.000Z').includes('deploy-sitemap'),
 console.log('health-check tests passed');
 
 // Reproduce the Oracle token failure despite an otherwise fresh dashboard.
-const symbols=['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR'];
+const symbols=['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR','ARB'];
 const freshOi={asOf:ago(20*60000),assets:Object.fromEntries(symbols.map(s=>[s,{lastOiAt:ago(21*60000)}]))};
 assert.deepEqual(failing(healthy({marketExplanations:freshOi})),[]);
 const staleOi={...freshOi,assets:{...freshOi.assets,BTC:{lastOiAt:ago(5*24*H)}}};
 assert.ok(failing(healthy({marketExplanations:staleOi})).includes('oi-collector-BTC'));
-assert.equal(failing(healthy({marketExplanations:{assets:{}}})).filter(s=>s.startsWith('oi-collector-')).length,7);
+assert.equal(failing(healthy({marketExplanations:{assets:{}}})).filter(s=>s.startsWith('oi-collector-')).length,8);
 assert.ok(notOk(healthy({sessionResearch:{status:'unavailable'}})).includes('research-fresh-stable-basket'));
 console.log('COLLECTOR / RESEARCH HEALTH OK');
 

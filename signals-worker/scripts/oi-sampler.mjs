@@ -340,7 +340,7 @@ export function shouldAlert(last, move, nowMs, { cooldownMin = ALERT_COOLDOWN_MI
 
 // Always-tracked assets must retain continuous coverage even when they leave
 // the highest-OI ranking. Keep the existing request budget for the default list.
-export const ALWAYS_TRACKED_OI = Object.freeze(['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR']);
+export const ALWAYS_TRACKED_OI = Object.freeze(['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR','ARB']);
 export function selectOiWatchlist(rankedSymbols, limit = 40) {
   const cap = Math.max(ALWAYS_TRACKED_OI.length, Number.isFinite(limit) ? Math.floor(limit) : 40);
   return [...new Set([...ALWAYS_TRACKED_OI, ...rankedSymbols])].slice(0, cap);

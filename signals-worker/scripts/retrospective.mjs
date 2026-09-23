@@ -155,7 +155,8 @@ const FAVORITE_COINGECKO_IDS = new Map([
   ['XLM', 'stellar'],
   ['XRP', 'ripple'],
   ['HYPE', 'hyperliquid'],
-  ['HBAR', 'hedera-hashgraph']
+  ['HBAR', 'hedera-hashgraph'],
+  ['ARB', 'arbitrum']
 ]);
 
 function validateConfig() {

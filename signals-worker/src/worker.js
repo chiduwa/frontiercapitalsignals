@@ -248,7 +248,7 @@ const CRYPTO_HISTORY_DELAY_MS = 3000;
 // earned a call. Pinned means always measured and always visible, never
 // always called. See buildPayload's rescue pass for the fetch-side half of
 // keeping that promise.
-export const FAVORITE_SYMBOLS = new Set(['BTC', 'ETH', 'SOL', 'XLM', 'XRP', 'HYPE', 'HBAR']);
+export const FAVORITE_SYMBOLS = new Set(['BTC', 'ETH', 'SOL', 'XLM', 'XRP', 'HYPE', 'HBAR', 'ARB']);
 
 export const CRYPTO_BLOCKLIST = new Set([
   'usdt','usdc','usds','usde','dai','fdusd','pyusd','tusd','usdp','gusd','frax',
@@ -8283,7 +8283,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           +'<br>Corrected comparisons passing: '+(a.supported&&a.supported.length||0)+'<br>Conditional percentages are descriptive.</span></div>';
       }).join('');
       timing+=panelStart({id:'stableBasketResearch',tone:'timing',open:false,eyebrow:'STABLECOIN HYPOTHESIS',title:'Do stablecoin volumes lead crypto declines?',meta:esc(basket.asOf)+' · '+esc(basket.status||'research-only')})
-        +'<div class="dr-note">USDT, USDC, USDe, DAI, USD1, USDG, PYUSD and RLUSD tested individually and together, with 1/3/7-day changes and additional delays. These global rolling volumes overlap across trades and do not identify investors cashing out. The displayed rule uses a full-day delay after the snapshot, then the next 24-hour return. CMC100 is the broad-market benchmark; TRACKED_MEDIAN is the majority direction of the seven tracked assets. '+basket.testFamilySize+' corrected comparisons; research only.</div>'
+        +'<div class="dr-note">USDT, USDC, USDe, DAI, USD1, USDG, PYUSD and RLUSD tested individually and together, with 1/3/7-day changes and additional delays. These global rolling volumes overlap across trades and do not identify investors cashing out. The displayed rule uses a full-day delay after the snapshot, then the next 24-hour return. CMC100 is the broad-market benchmark; TRACKED_MEDIAN is the majority direction of the always-tracked assets. '+basket.testFamilySize+' corrected comparisons; research only.</div>'
         +'<div class="bh-list"><div class="bh-head"><span>Asset / market</span><span>Conditional history</span><span>Out-of-sample evidence</span></div>'+basketRows+'</div>'+PANEL_END;
     }
     var explanations=d.marketExplanations;

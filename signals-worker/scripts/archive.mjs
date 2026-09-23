@@ -33,11 +33,11 @@ const UA = 'Mozilla/5.0 (compatible; FrontierCapitalSignals/2.0)';
 // it for comparably-sized fetches today.
 const FETCH_TIMEOUT_MS = 9000;
 
-async function fetchJson(url) {
+async function fetchJson(url, extraHeaders = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json,text/plain,*/*' }, signal: ctrl.signal });
+    const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json,text/plain,*/*', ...extraHeaders }, signal: ctrl.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } finally {
@@ -118,16 +118,75 @@ export function isYahooCryptoDataTrustworthy(bars, refPrice, nowMs, maxStaleDays
   return ratio >= 0.1 && ratio <= 10;
 }
 
+// Binance's public market-data mirror, for a coin whose Yahoo ticker is a
+// different asset: ARB-USD on Yahoo is "ARbit" at ~$0.0006, not Arbitrum at
+// ~$0.25, so the Yahoo guard (correctly) rejects it and ARB fell through to
+// CoinGecko -- which kept only 365 days and then stopped updating on
+// 2026-09-06. Binance serves the pair from its listing, with real OHLC and a
+// true UTC-day close, at no cost and with no key.
+//
+// `volume` is the QUOTE volume (USDT), because every other crypto source in
+// this archive stores dollars, not coins. Pages forward from `startMs` 1,000
+// days at a time; a pair listed later simply starts at its listing.
+export const BINANCE_KLINES_URL = 'https://data-api.binance.vision/api/v3/klines';
+export async function binanceDailyBars(baseSymbol, refPrice, {
+  nowMs = Date.now(), startMs = Date.UTC(2017, 0, 1), fetcher = fetchJson, maxPages = 12
+} = {}) {
+  const pair = `${String(baseSymbol).toUpperCase()}USDT`;
+  const rows = [];
+  let from = startMs;
+  for (let page = 0; page < maxPages; page++) {
+    const j = await fetcher(`${BINANCE_KLINES_URL}?symbol=${encodeURIComponent(pair)}&interval=1d&startTime=${from}&limit=1000`);
+    if (!Array.isArray(j) || !j.length) break;
+    rows.push(...j);
+    const lastOpen = Number(j[j.length - 1][0]);
+    if (j.length < 1000 || !Number.isFinite(lastOpen)) break;
+    from = lastOpen + 86400000;
+  }
+  const byDate = new Map();
+  for (const k of rows) {
+    const bar = { date: new Date(Number(k[0])).toISOString().slice(0, 10),
+      open: Number(k[1]), high: Number(k[2]), low: Number(k[3]), close: Number(k[4]), volume: Number(k[7]) };
+    if ([bar.open, bar.high, bar.low, bar.close].every(v => Number.isFinite(v) && v > 0)) byDate.set(bar.date, bar);
+  }
+  const bars = completedDailyBars([...byDate.values()].sort((x, y) => x.date.localeCompare(y.date)), nowMs);
+  if (bars.length < 30) throw new Error(`thin history (${bars.length} bars)`);
+  // The same two tests the Yahoo path applies: a ticker is not a globally
+  // unique asset, so the series must be recent AND within an order of
+  // magnitude of the spot price we already hold for this coin.
+  if (!isYahooCryptoDataTrustworthy(bars, refPrice, nowMs, 3)) {
+    throw new Error(`Binance ${pair} is stale or a different asset (last ${bars[bars.length - 1].close} vs reference ${refPrice})`);
+  }
+  return bars;
+}
+
+/**
+ * Binance bars that can join an archive already holding CoinGecko rows. A
+ * CoinGecko row dated D is a midnight sample -- the close of D-1 -- and the
+ * research readers shift it back a day. A Binance bar dated D-1 would then
+ * duplicate it, so it is left out; the CoinGecko row stays, as history does.
+ */
+export function withoutCoinGeckoSeam(bars, coingeckoDates) {
+  if (!coingeckoDates?.size) return bars;
+  return bars.filter(b => !coingeckoDates.has(new Date(Date.parse(`${b.date}T00:00:00Z`) + 86400000).toISOString().slice(0, 10))
+    && !coingeckoDates.has(b.date));
+}
+
 // CoinGecko fallback for the ~29% of the crypto universe Yahoo doesn't
 // carry (measured during planning) — same 365-day free-tier ceiling as
 // worker.js's getCryptoDailyHistory, but this variant keeps the real
 // per-point timestamp (getCryptoDailyHistory discards it, since the hourly
 // job only ever needs a plain closes[] array) since the archive table needs
 // a real calendar date per row.
-export async function coingeckoDailyBars(id, days = 365) {
+//
+// Sends the Demo key when COINGECKO_API_KEY is set. Anonymous calls from a
+// shared Actions IP were throttled to nothing -- 55 CoinGecko-sourced coins
+// had gone 3+ days without a bar by 2026-09-23, 14 of them 12+ days -- and a
+// missing secret substitutes an empty string, which this treats as no key.
+export async function coingeckoDailyBars(id, days = 365, { key = process.env.COINGECKO_API_KEY || '' } = {}) {
   const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(id)}/market_chart`
     + `?vs_currency=usd&days=${days}&interval=daily`;
-  const j = await fetchJson(url);
+  const j = await fetchJson(url, key ? { 'x-cg-demo-api-key': key } : {});
   const prices = (j && j.prices) || [];
   const volByTs = new Map(((j && j.total_volumes) || []).map(([t, v]) => [t, v]));
   const byDate = new Map();

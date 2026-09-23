@@ -4,7 +4,7 @@ import {d1,chunk} from './d1-client.mjs';
 import {alignDailyResearchBars} from './archive-policy.mjs';
 import {loadCmcLiquidations} from './cmc-research.mjs';
 export const INSIGHT_VERSION='market-explanation-v1';
-export const CMC_TRACKED_IDS={BTC:1,ETH:1027,SOL:5426,XLM:512,XRP:52,HYPE:32196,HBAR:4642};
+export const CMC_TRACKED_IDS={BTC:1,ETH:1027,SOL:5426,XLM:512,XRP:52,HYPE:32196,HBAR:4642,ARB:11841};
 const SYMBOLS=Object.keys(CMC_TRACKED_IDS),DAY=86400000;
 const finite=x=>typeof x==='number'&&Number.isFinite(x);
 const pct=(a,b)=>100*(b/a-1);

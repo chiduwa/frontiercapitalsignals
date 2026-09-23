@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import {parseGlobalHistory,STABLE_IDS,fetchGlobalHistory} from './scripts/stable-basket-data.mjs';
 import {cmcRequest,parseLiquidations,loadCmcLiquidations} from './scripts/cmc-research.mjs';
-import {alignedOiWindow,historicalLevels,explainAssetMove,persistLiquidations,buildMarketExplanations} from './scripts/market-explanations.mjs';
+import {alignedOiWindow,historicalLevels,explainAssetMove,persistLiquidations,buildMarketExplanations,CMC_TRACKED_IDS} from './scripts/market-explanations.mjs';
 import {researchSupplement,persistResearchSupplement,loadSessionHealth} from './scripts/session-health.mjs';
 const now=Date.parse('2026-09-19T12:00:00Z'),DAY=86400000;
 const ticks=Array.from({length:61},(_,i)=>({ts:now-3600000+i*60000,oi_contracts:1000-i,mark_price:100+i/10}));
@@ -55,7 +55,7 @@ test('D1 liquidation writes are idempotent; supplemental summaries retain distin
 });
 test('provider failure and absent OI remain explicit unknowns',async()=>{
  const r=await buildMarketExplanations({}, {nowMs:now,query:async()=>[],liquidationsLoader:async()=>{throw Error('not entitled')}});
- assert.equal(r.liquidationProviderStatus,'unavailable');assert.equal(Object.keys(r.assets).length,7);assert.ok(Object.values(r.assets).every(a=>a.status==='insufficient-live-data'&&a.liquidations===null));
+ assert.equal(r.liquidationProviderStatus,'unavailable');assert.deepEqual(Object.keys(r.assets).sort(),Object.keys(CMC_TRACKED_IDS).sort());assert.ok(r.assets.ARB,'ARB, added 2026-09-23, is explained like every other tracked asset');assert.ok(Object.values(r.assets).every(a=>a.status==='insufficient-live-data'&&a.liquidations===null));
 });
 
 test('global volume collection survives shared-IP throttling and respects Retry-After',async()=>{

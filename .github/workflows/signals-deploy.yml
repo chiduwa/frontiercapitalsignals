@@ -54,6 +54,8 @@ jobs:
           node --test test-session-data.mjs
           node --test test-market-insights.mjs
           node --test test-oi-watchlist.mjs
+          node --test test-tracked-assets.mjs
+          node --test test-archive-sources.mjs
           node --test ../account-journal/test/*.test.mjs
 
       # The dashboard is RENDERED and interrogated, not string-matched. This is

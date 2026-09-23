@@ -10,7 +10,7 @@
 //   account's Workers Paid D1 allowance, see the constant's own docs;
 //   raise once Workers Paid is confirmed active, see the plan),
 //   BINANCE_ROW_BUDGET (default 120000, same reasoning)
-import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, BENCHMARK_SYMBOLS, ARCHIVED_OVERVIEW_SYMBOLS, computeTimeOfDayTallies, hasCrossClassTickerCollision } from '../worker.js';
+import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, BENCHMARK_SYMBOLS, ARCHIVED_OVERVIEW_SYMBOLS, computeTimeOfDayTallies, hasCrossClassTickerCollision, binanceGlobalTradablePairs } from '../worker.js';
 import {
   yahooFullHistory, coingeckoDailyBars, getExistingCoverage,
   upsertDailyBars, fundingSnapshotToRows, upsertFundingDaily,
@@ -18,7 +18,7 @@ import {
   yahooHourlyBars, computeSwingTimeTallies, replaceSwingTimeBootstrap, getSwingTimeCoverage,
   replaceTimeOfDayBootstrap, getTimeOfDayCoverage, getOpenCoverage,
   binanceUsExchangeInfo, binanceUsKlines, getExistingHourlyCoverage, upsertHourlyBars,
-  isYahooCryptoDataTrustworthy
+  isYahooCryptoDataTrustworthy, binanceDailyBars, withoutCoinGeckoSeam
 } from './archive.mjs';
 import { selectIntradayWatchlist } from './intraday.mjs';
 import { d1 } from './d1-client.mjs';
@@ -144,8 +144,12 @@ async function main() {
     console.log(`BACKFILL_OPEN set: ${missing} of ${universe.length} symbols have no open price yet and will be re-pulled`);
   }
 
-  let yahooOk = 0, cgFallback = 0;
+  let yahooOk = 0, binanceFallback = 0, cgFallback = 0;
   const priceFailed = [];
+  // Which coins Binance lists, asked once. An empty set (a failed discovery
+  // call) just means every Yahoo failure goes straight to CoinGecko, as before.
+  let binancePairs = new Set();
+  try { binancePairs = await binanceGlobalTradablePairs(); } catch (e) { console.warn(`Binance pair discovery failed (${e.message}); CoinGecko remains the only fallback this run`); }
   const deferredHistory = [];
   for (const a of universe) {
     if (priceBudgetLeft() <= 0) { console.log('price budget exhausted — stopping price backfill early, resume next run'); break; }
@@ -169,12 +173,25 @@ async function main() {
       yahooOk++;
     } catch (e) {
       if (a.assetClass === 'crypto') {
-        try {
-          bars = await coingeckoDailyBars(a.id, 365);
-          source = 'coingecko';
-          cgFallback++;
-        } catch (e2) {
-          priceFailed.push(`${a.symbol} (yahoo: ${e.message}; coingecko: ${e2.message})`);
+        const errors = [`yahoo: ${e.message}`];
+        // Binance before CoinGecko: full history, true UTC closes and no rate
+        // limiter, where CoinGecko is a paced, 365-day, midnight-sampled queue.
+        if (binancePairs.has(a.symbol)) {
+          try {
+            bars = await binanceDailyBars(a.symbol, a.refPrice);
+            source = 'binance';
+            binanceFallback++;
+          } catch (e2) { errors.push(`binance: ${e2.message}`); }
+        }
+        if (!bars) {
+          try {
+            bars = await coingeckoDailyBars(a.id, 365);
+            source = 'coingecko';
+            cgFallback++;
+          } catch (e3) {
+            errors.push(`coingecko: ${e3.message}`);
+            priceFailed.push(`${a.symbol} (${errors.join('; ')})`);
+          }
         }
       } else {
         priceFailed.push(`${a.symbol} (yahoo: ${e.message})`);
@@ -182,8 +199,11 @@ async function main() {
     }
     if (bars && bars.length) {
       if (existing) {
-        const stored = await d1(env, 'SELECT date FROM asset_daily_bars WHERE symbol = ?', [a.symbol]);
+        const stored = await d1(env, 'SELECT date, source FROM asset_daily_bars WHERE symbol = ?', [a.symbol]);
         existing.existingDates = stored.map(r => r.date);
+        if (source === 'binance') {
+          bars = withoutCoinGeckoSeam(bars, new Set(stored.filter(r => r.source === 'coingecko').map(r => r.date)));
+        }
       }
       const minExisting = existing ? existing.minDate : null;
       const maxExisting = existing ? existing.maxDate : null;
@@ -220,7 +240,7 @@ async function main() {
     priceRowsWritten += written;
     rowsWrittenThisRun += written;
   }
-  console.log(`price backfill: yahoo ${yahooOk}, coingecko fallback ${cgFallback}, failed ${priceFailed.length}`);
+  console.log(`price backfill: yahoo ${yahooOk}, binance fallback ${binanceFallback}, coingecko fallback ${cgFallback}, failed ${priceFailed.length}`);
   if (priceFailed.length) console.log(`  failures: ${priceFailed.join('; ')}`);
   console.log(`price rows written: ${priceRowsWritten}/${PRICE_ROW_BUDGET}`);
 

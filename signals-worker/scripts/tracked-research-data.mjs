@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { featureRow, sanitizeBars } from './panel-features.mjs';
 import { ewmaVol, harComponents } from './model-zoo.mjs';
-export const TRACKED = ['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR'];
+export const TRACKED = ['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR','ARB'];
 const DAY = 86400000;
 const offset = (d,n) => new Date(Date.parse(d+'T00:00:00Z')+n*DAY).toISOString().slice(0,10);
 const logRatio = (a,b) => a > 0 && b > 0 ? Math.log(a/b) : null;

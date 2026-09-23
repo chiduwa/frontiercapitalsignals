@@ -11,6 +11,8 @@ export function validateCutoff(asOf) {
 }
 export const INSTRUMENTS=[
   ...['BTC','ETH','SOL','XLM','XRP','HBAR'].map(symbol=>({symbol,venueSymbol:symbol+'USDT',market:'spot',start:'2023-01'})),
+  // Listed on Binance spot 2023-03-23; earlier months have no archive to fetch.
+  {symbol:'ARB',venueSymbol:'ARBUSDT',market:'spot',start:'2023-03'},
   {symbol:'HYPE',venueSymbol:'HYPEUSDT',market:'futures/um',start:'2025-05'},
   ...['USDC','TUSD','FDUSD','DAI'].map(symbol=>({symbol,venueSymbol:symbol+'USDT',market:'spot',start:symbol==='FDUSD'?'2023-07':'2023-01'}))
 ];

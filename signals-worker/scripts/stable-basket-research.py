@@ -159,7 +159,7 @@ def study(panel,cmc,hourly):
         'Unsigned volume does not identify investors selling crypto: each trade has a buyer and seller, and stablecoin/crypto volume attribution overlaps.',
         'Global stablecoin USD volume is distinct from disjoint venue pair turnover. No splicing with the earlier USDC/USDT study.',
         '364 midnight observations are retrospective revised history, not first-seen vintages. One full-day embargo reduces timing risk without solving revisions.',
-        'CMC100 is a provider market index; TRACKED_MEDIAN tests the majority direction among the seven tracked assets, not every listed coin.',
+        'CMC100 is a provider market index; TRACKED_MEDIAN tests the majority direction among the always-tracked assets, not every listed coin.',
         'Baseline controls own returns/volatility, major-crypto volume changes, and available Binance BTC/ETH/SOL net aggressive selling.',
         'Test candidates use volume growth over 1/3/7 days, additional lags 0/1/3/7, volume ratio and turnover controls; per-asset selection uses earlier validation only.',
         'Descriptive correlations and full-sample coefficients do not establish causal flows or forecasting value.',

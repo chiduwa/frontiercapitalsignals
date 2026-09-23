@@ -1,7 +1,7 @@
 // Read-only coverage checks, independent of model performance. A green HTTP
 // request is not proof of a fresh, complete, consistently measured input.
 import { alignDailyResearchBars } from './archive-policy.mjs';
-export const ALWAYS_TRACKED = Object.freeze(['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR']);
+export const ALWAYS_TRACKED = Object.freeze(['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR','ARB']);
 const DAY = 86400000;
 const age = (asOf, date) => date ? (Date.parse(asOf)-Date.parse(date))/DAY : null;
 export function assessTrackedPanel(panel, symbols = ALWAYS_TRACKED) {

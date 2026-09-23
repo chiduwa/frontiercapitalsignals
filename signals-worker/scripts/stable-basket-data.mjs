@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {validateCutoff} from './session-data.mjs';
 export const STABLE_IDS={USDT:'tether',USDC:'usd-coin',USDE:'ethena-usde',DAI:'dai',USD1:'usd1-wlfi',USDG:'global-dollar',PYUSD:'paypal-usd',RLUSD:'ripple-usd'};
-export const CRYPTO_IDS={BTC:'bitcoin',ETH:'ethereum',SOL:'solana',XLM:'stellar',XRP:'ripple',HYPE:'hyperliquid',HBAR:'hedera-hashgraph',BNB:'binancecoin',DOGE:'dogecoin',ADA:'cardano',TRX:'tron'};
+export const CRYPTO_IDS={BTC:'bitcoin',ETH:'ethereum',SOL:'solana',XLM:'stellar',XRP:'ripple',HYPE:'hyperliquid',HBAR:'hedera-hashgraph',ARB:'arbitrum',BNB:'binancecoin',DOGE:'dogecoin',ADA:'cardano',TRX:'tron'};
 export function parseGlobalHistory(raw,{asOf}){
  validateCutoff(asOf);const cutoff=Date.parse(asOf+'T00:00:00Z'),fields={};
  for(const name of ['prices','total_volumes','market_caps']){

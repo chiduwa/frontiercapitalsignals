@@ -132,7 +132,7 @@ async function main() {
 
   // Favorites first, then oldest watermark first, so a time budget cannot
   // repeatedly starve the tail of the alphabet.
-  const favorites = new Set(['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR']);
+  const favorites = new Set(['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR','ARB']);
   symbols.sort((a,b) => Number(favorites.has(b))-Number(favorites.has(a))
     || String(existing.get(a)?.hi || '').localeCompare(String(existing.get(b)?.hi || '')));
   let done = 0, written = 0, skipped = 0;

@@ -57,7 +57,7 @@ export function parseLiquidations(j,nowMs=Date.now()){
 export async function loadCmcLiquidations(env,nowMs=Date.now(),request=cmcRequest){
  const key=env.CMC_API_KEY||env.COINMARKETCAP_API_KEY;
  if(!key)return {status:'not-configured',assets:{},note:'OI changes alone do not confirm liquidations.'};
- const ids='1,1027,5426,512,52,32196,4642';
+ const ids='1,1027,5426,512,52,32196,4642,11841';
  const r=await request('/v5/derivatives/liquidations/cryptocurrency/list/latest',{crypto_id:ids,convert:'USD',limit:'20'},{key});
  return {status:'available',retrievedAt:r.retrievedAt,assets:parseLiquidations(r.data,nowMs),sourceHash:r.sha256};
 }

@@ -204,7 +204,7 @@ export function checkPayload(payload, now = Date.now()) {
   if (payload.marketExplanations) {
     const assets = payload.marketExplanations.assets || {};
     const clock = Date.parse(payload.marketExplanations.asOf || payload.generated_at);
-    for (const symbol of ['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR']) {
+    for (const symbol of ['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR','ARB']) {
       const last = Date.parse(assets[symbol]?.lastOiAt);
       const age = minutes(clock-last);
       push('oi-collector-'+symbol, 'fail', Number.isFinite(age) && age>=-1 && age<=15,
