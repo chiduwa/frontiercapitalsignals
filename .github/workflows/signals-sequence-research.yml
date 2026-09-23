@@ -1,0 +1,72 @@
+name: Signals Sequence Model Research
+
+# Weekly re-measurement of the sequence-, time- and momentum-aware model
+# families (LSTM, SARIMA/SARIMAX, LightGBM, XGBoost, SVR, logistic regression)
+# on the always-tracked assets. Research only: writes artifacts, never D1,
+# never an order. See signals-worker/docs/SEQUENCE_MODELS.md.
+on:
+  schedule:
+    - cron: '43 10 * * 0'
+  workflow_dispatch:
+    inputs:
+      test_days:
+        description: "Length of the untouched test window, in days"
+        required: false
+        default: '360'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signals-sequence-research
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install pinned model libraries (PyTorch from the CPU index)
+        run: |
+          python -m pip install -r signals-worker/scripts/sequence-research-requirements.txt
+          python -m pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
+      - name: Test the protocol before it is allowed near the archive
+        working-directory: signals-worker
+        env:
+          OPENBLAS_NUM_THREADS: '1'
+        run: |
+          node --test test-data-quality.mjs
+          python test-tracked-sequence-research.py
+      - name: Read bounded always-tracked panel
+        working-directory: signals-worker
+        run: |
+          mkdir -p reports/sequence
+          node scripts/hierarchical-research.mjs --dry-run --symbols BTC,ETH,SOL,XLM,XRP,HYPE,HBAR,ARB --save-input reports/sequence/panel.json --load-only
+          node scripts/tracked-research-data.mjs reports/sequence/panel.json reports/sequence/rows.json --sequence
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+      - name: Score every family per asset, Holm-corrected
+        working-directory: signals-worker
+        env:
+          OPENBLAS_NUM_THREADS: '1'
+          OMP_NUM_THREADS: '1'
+        run: python scripts/tracked-sequence-research.py --input reports/sequence/rows.json --output reports/sequence/results --test-days ${{ inputs.test_days || '360' }}
+      - name: Preserve inputs and evidence, including failed runs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sequence-research-${{ github.run_id }}
+          path: signals-worker/reports/sequence/
+          retention-days: 90
+          if-no-files-found: warn

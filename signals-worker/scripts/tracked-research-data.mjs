@@ -4,12 +4,18 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { featureRow, sanitizeBars } from './panel-features.mjs';
 import { ewmaVol, harComponents } from './model-zoo.mjs';
+import { timeSeriesPaths } from './time-series.mjs';
+
+// Sequence window handed to the sequence models (tracked-sequence-research.py).
+export const SEQUENCE_DAYS = 30;
 export const TRACKED = ['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR','ARB'];
 const DAY = 86400000;
 const offset = (d,n) => new Date(Date.parse(d+'T00:00:00Z')+n*DAY).toISOString().slice(0,10);
 const logRatio = (a,b) => a > 0 && b > 0 ? Math.log(a/b) : null;
 
-export function researchRows(panel, { symbols = TRACKED } = {}) {
+// `sequence` adds the 30-day return/volume window per row (~35 MB for the
+// tracked panel); only the weekly sequence lane reads it.
+export function researchRows(panel, { symbols = TRACKED, sequence: withSequence = false } = {}) {
   const assets = panel.assets.filter(a => a.assetClass === 'crypto' && symbols.includes(a.symbol));
   const bars = new Map(assets.map(a => [a.symbol, sanitizeBars(a.bars, { asOf: panel.asOf })]));
   const byDate = new Map([...bars].map(([s,bs]) => [s,new Map(bs.map(b=>[b.date,b]))]));
@@ -35,6 +41,15 @@ export function researchRows(panel, { symbols = TRACKED } = {}) {
       liquidity: liq.size, supply: (panel.supply?.[symbol]||[]).length,
       warnings: ['Date-only archives lack original availability timestamps; optional lanes delayed one UTC day.',
         ...(fsource.some(s=>s!=='binance-fapi-direct') ? ['Legacy funding provenance can be overwritten; this ablation is diagnostic until canonical settlement backfill.'] : [])] };
+    // GARCH(1,1) with the weekday factor -- the magnitude model that beat the
+    // production scale out of sample (docs/TIME_SERIES_EVIDENCE.md) -- as the
+    // benchmark the sequence models' magnitude forecasts must clear.
+    const garch = timeSeriesPaths({ symbol, assetClass: 'crypto', bars: bs }, { structural: false });
+    const dailyLog = bs.map((x, j) => (j && bs[j - 1].close > 0 && x.close > 0 ? Math.log(x.close / bs[j - 1].close) : null));
+    const logVolume = bs.map((x, j) => {
+      const prior = bs.slice(Math.max(0, j - 20), j).map(y => y.volume).filter(v => v > 0);
+      return x.volume > 0 && prior.length >= 10 ? Math.log(x.volume / (prior.reduce((a, v) => a + v, 0) / prior.length)) : null;
+    });
     for (let i=60;i<bs.length;i++) {
       const b=bs[i], date=b.date, previous=offset(date,-1);
       // Portal files and vendor snapshots do not prove same-close availability.
@@ -58,6 +73,16 @@ export function researchRows(panel, { symbols = TRACKED } = {}) {
       const history=funding.filter(r=>r.date<=previous && r.source===fr?.source && Number.isFinite(r.funding_rate)).slice(-252);
       // Percentile is invariant to vendor rate units. No mixed-provider history.
       values.fundingRank=fr && history.length>=30 ? history.filter(r=>r.funding_rate<=fr.funding_rate).length/history.length-.5:null;
+      // Sequence, time and momentum inputs (2026-09-23). All known at this
+      // close: returns through today, the calendar, and trailing momentum.
+      for (let k = 0; k < 10; k++) values[`returnLag${k}`] = dailyLog[i - k];
+      values.weekday = new Date(Date.parse(date + 'T00:00:00Z')).getUTCDay();
+      values.month = new Date(Date.parse(date + 'T00:00:00Z')).getUTCMonth() + 1;
+      // return5/20/60 are already volatility-normalized z-scores (featureRow),
+      // so acceleration is the short-horizon z less the 20-day one.
+      values.momentumAcceleration = Number.isFinite(f.raw.return5) && Number.isFinite(f.raw.return20) ? f.raw.return5 - f.raw.return20 : null;
+      const sequence = withSequence ? [] : undefined;
+      if (withSequence) for (let k = i - SEQUENCE_DAYS + 1; k <= i; k++) sequence.push([dailyLog[k] ?? null, logVolume[k] ?? null]);
       for (const leader of symbols) {
         if (leader===symbol) continue;
         const bm=byDate.get(leader);
@@ -71,7 +96,9 @@ export function researchRows(panel, { symbols = TRACKED } = {}) {
         const end=bs[i+horizon];
         if (!end || end.date!==offset(date,horizon)) continue;
         const target=Math.expm1(Math.log(end.close/b.close))*100;
-        result.rows.push({symbol,date,targetDate:end.date,horizon,target,values});
+        const g=garch.get(date)?.garchWeekdayVol?.[horizon];
+        result.rows.push({symbol,date,targetDate:end.date,horizon,target,values,sequence,
+          garchWeekdayPct:Number.isFinite(g)?Math.expm1(g)*100:null});
       }
     }
   }
@@ -83,6 +110,11 @@ export function researchRows(panel, { symbols = TRACKED } = {}) {
   return result;
 }
 if (process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
-  const panel=JSON.parse(await readFile(process.argv[2],'utf8'));
-  await writeFile(process.argv[3],JSON.stringify(researchRows(panel)));
+  // node tracked-research-data.mjs <panel> <rows> [--sequence] [--symbols A,B]
+  const args = process.argv.slice(2), at = args.indexOf('--symbols');
+  const symbols = at >= 0 ? args[at + 1].split(',').filter(Boolean) : TRACKED;
+  const flagValue = at >= 0 ? at + 1 : -1;
+  const [input, output] = args.filter((a, i) => i !== flagValue && !a.startsWith('--'));
+  const panel=JSON.parse(await readFile(input,'utf8'));
+  await writeFile(output,JSON.stringify(researchRows(panel, { symbols, sequence: args.includes('--sequence') })));
 }

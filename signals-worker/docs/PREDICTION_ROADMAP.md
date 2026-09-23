@@ -229,8 +229,10 @@ fixed p-value threshold needs a sequential-testing policy or predeclared dates.
 ## 5. Extend beyond favorites without repeating the whole investigation
 
 1. Add a configurable symbol universe to `tracked-research-data.mjs` and its
-   caller, keeping identity and asset-class scope explicit. The current script
-   intentionally exports only the seven favorites.
+   caller, keeping identity and asset-class scope explicit. **Done for crypto
+   (2026-09-23):** `--symbols A,B` on the row builder; the default is still
+   the always-tracked 8. Stocks need session-aware horizons first; see
+   [SEQUENCE_MODELS](SEQUENCE_MODELS.md), which also has the batch commands.
 2. Audit coverage first and group by usable lane/horizon, never impute an absent
    asset's funding/OI from another asset. Preserve per-asset missingness.
 3. Load by small symbol batches; D1 result-size limits have caused past silent

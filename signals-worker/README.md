@@ -697,6 +697,15 @@ reading is descriptive, carries its own test, and is Holm-corrected across the
 series shown. A cycle is claimed only if a periodicity in standardized returns
 survives that correction -- smoothing a random walk manufactures cycles.
 
+**Sequence, time and momentum models** were tested per always-tracked asset
+(`scripts/tracked-sequence-research.py`, weekly in
+`signals-sequence-research.yml`, research only): an LSTM on a 30-day window,
+SARIMA/SARIMAX, LightGBM, XGBoost, SVR and logistic regression, given return
+lags, weekday/month and momentum acceleration. After correction none of them
+beats the asset's base rate on direction or GARCH + weekday on size, for any
+of the 8, so none is used. Results and the handoff for the other tracked
+assets: [docs/SEQUENCE_MODELS.md](docs/SEQUENCE_MODELS.md).
+
 **ARB is always tracked** (`FAVORITE_SYMBOLS`). The list is written down in
 fifteen places across the Worker, the Oracle-host collectors, Python research
 and a workflow argument; `test-tracked-assets.mjs` fails if any copy
