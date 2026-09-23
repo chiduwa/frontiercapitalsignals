@@ -265,6 +265,33 @@ no service restart or timer change is needed. Verify `bot_entry_risk`,
 resting order is not proof of a fill. This release does not change the server's
 activation settings automatically.
 
+## Tournament-promoted per-asset models (2026-09-24)
+
+A third authorized source, `tournament-v1`, switched on by the operator with
+`TOURNAMENT_TRADING=true`. It trades a coin only after that coin's 7-day
+direction model has been **promoted in the model tournament**
+(`signals-worker/docs/MODEL_TOURNAMENT.md`), which happens only on forecasts
+the model logged before their outcomes, under a test that stays valid however
+often it is read. A demoted model stops trading at the next cycle. On
+2026-09-24 no model had been promoted, so this trades nothing yet; the
+tournament's own simulations put a real, moderate edge months away from
+promotion.
+
+- **7-day slots only.** The tournament publishes about 15.5 h after the close
+  its forecast is dated from, so a 1-day window is mostly spent; the bot holds
+  for what remains of the 7-day window, never longer.
+- **No trade within `TOURNAMENT_MIN_EDGE` (0.03) of even** P(up).
+- **Floor size and floor leverage**, like confirmed research: a forward record
+  of forecast skill is not a record of trading P&L after costs.
+- **Stop at `TOURNAMENT_STOP_SIGMAS` (2) x the published move-size forecast**
+  for the same coin and horizon, never looser than the generic per-trade stop.
+- **Own exposure cap**, `MAX_TOURNAMENT_EXPOSURE_PCT` (10%).
+- It passes every other gate unchanged: the fresh published reference price,
+  mark deviation, funding, cooldown, circuit breaker and total exposure. An
+  engine call on the same coin in the opposite direction makes both abstain.
+- Recorded in `futures_limit_entry_intents` and the model's own forecast
+  ledger. The shadow ledger's CHECK admits only the two original sources.
+
 ## Evidence-only contract
 
 This bot does not have its own opinion about direction. It reads the same

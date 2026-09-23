@@ -5,8 +5,9 @@
 // live Binance connection.
 import { config } from './config.mjs';
 import { activeExecutionEligible } from './active-limit.mjs';
+import { TOURNAMENT_SOURCE } from './contract.mjs';
 import {
-  conservativeEdge, sizePosition, wouldExceedExposure, wouldExceedResearchExposure,
+  conservativeEdge, sizePosition, wouldExceedExposure, wouldExceedResearchExposure, wouldExceedTournamentExposure,
   circuitBreakerTripped, dailyLossLimitHit, inCooldown, fundingUnfavorable,
   signalReferenceIssue
 } from './risk.mjs';
@@ -73,6 +74,9 @@ export function evaluateCandidate(candidate, ctx) {
   if (wouldExceedExposure(openPositions, balance, positionPct)) return { action: 'SKIP', reason: 'would exceed max total exposure' };
   if (candidate.source === 'research-confirmed' && wouldExceedResearchExposure(openPositions, balance, positionPct)) {
     return { action: 'SKIP', reason: `would exceed the ${config.maxResearchExposurePct * 100}% cap on research-sourced exposure` };
+  }
+  if (candidate.source === TOURNAMENT_SOURCE && wouldExceedTournamentExposure(openPositions, balance, positionPct)) {
+    return { action: 'SKIP', reason: `would exceed the ${config.maxTournamentExposurePct * 100}% cap on tournament-sourced exposure` };
   }
 
   // Last gate, deliberately last: everything above is the bot's own risk

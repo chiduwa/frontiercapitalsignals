@@ -12,6 +12,7 @@
 import { d1 } from '../../signals-worker/scripts/d1-client.mjs';
 import { config } from './config.mjs';
 import { timeExitAfterMs } from './risk.mjs';
+import { TOURNAMENT_SOURCE } from './contract.mjs';
 
 const env = {
   CLOUDFLARE_API_TOKEN: config.cloudflareApiToken,
@@ -34,6 +35,11 @@ export async function loadOpenShadowTrades() {
 // `mode` is the provenance of this row, never pooled with the others:
 // shadow (engine had not authorized), dry (authorized, DRY_RUN on), live.
 export async function recordEntry({ mode, candidate, decision, entryPrice, stopPrice, targetPrice, openedAt }) {
+  // This table's CHECK admits only the two original sources, and rebuilding a
+  // table the bot writes every cycle is not worth the risk. A tournament
+  // trade is recorded by its entry intent (futures_limit_entry_intents, free
+  // source) and its model's own forward ledger (model_forecasts).
+  if (candidate.source === TOURNAMENT_SOURCE) return;
   const holding = candidate.holding || null;
   await d1(env, `
     INSERT INTO trading_bot_shadow_trades

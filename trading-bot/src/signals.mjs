@@ -6,7 +6,7 @@
 // All gate logic lives in contract.mjs (pure, unit-tested). This file is the
 // I/O boundary plus the mapping from payload shapes to candidate objects.
 import { config } from './config.mjs';
-import { authorizeRow, authorizeResearch, classAuthorized, holdingFor, dayRangePosition } from './contract.mjs';
+import { authorizeRow, authorizeResearch, authorizeTournament, TOURNAMENT_SOURCE, classAuthorized, holdingFor, dayRangePosition } from './contract.mjs';
 import { activePolicyCandidate, isActivePolicyCandidate } from './active-limit.mjs';
 
 async function getJson(path) {
@@ -135,6 +135,51 @@ export function buildCandidates(signals, scalp) {
       funding: 0,
       drivers: auth.ok ? [`confirmed research: ${row.family}`] : []
     });
+  }
+
+  // Third authorized source: per-asset models promoted in the model
+  // tournament. Built only while the operator switch is on, and only for a
+  // slot whose model WAS promoted -- an unpromoted slot is not a candidate at
+  // all. The reference price is the favorites row's published analysis
+  // price, so the same freshness and mark-deviation gates apply as for any
+  // engine call.
+  if (config.tournamentTrading) {
+    const tournament = signals.modelTournament;
+    const favorites = new Map((signals.crypto?.favorites || []).map((r) => [r.symbol, r]));
+    for (const sym of Object.keys(tournament?.assets || {})) {
+      if (sym === '*' || tournament.assets[sym]?.['direction:7']?.promoted !== true) continue;
+      const auth = authorizeTournament(tournament, sym, 7, { minEdge: config.tournamentMinEdge });
+      const row = favorites.get(sym);
+      const reference = Number(row?.analysis?.reference_price);
+      candidates.push({
+        source: TOURNAMENT_SOURCE,
+        assetClass: 'crypto',
+        signalGeneratedAt: signals.generated_at ?? null,
+        signalPriceAt: row?.analysis?.analyzed_at ?? null,
+        signalSymbol: sym,
+        symbol: toBinanceSymbol(sym),
+        side: auth.ok ? auth.side : null,
+        authorized: auth.ok,
+        unauthorizedReason: auth.ok ? null : auth.reason,
+        price: row?.price ?? null,
+        signalPrice: Number.isFinite(reference) && reference > 0 ? reference : null,
+        rangePos: row?.rangePos ?? null,
+        rangeBounds: row?.rangeBounds || null,
+        range: null,
+        horizonHours: auth.ok ? auth.horizonHours : null,
+        confidence: null,
+        edge: 0,
+        holding: null,
+        tournamentSigma: auth.ok ? auth.sigma : null,
+        tournamentModel: auth.ok ? auth.model : null,
+        medianAbsDailyMovePct: Number(row?.dailyMoves?.medianAbsPct),
+        dailyMoveSamples: Number(row?.dailyMoves?.samples),
+        currentMovePct: Number(row?.chg24h),
+        dayRangePos: dayRangePosition(scalp, sym),
+        funding: row?.funding ?? null,
+        drivers: auth.ok ? [`promoted per-asset model: ${auth.label} (P(up) ${auth.pUp.toFixed(2)}, 7 days)`] : []
+      });
+    }
   }
 
   // One candidate per symbol. A symbol can sit on more than one board — seen

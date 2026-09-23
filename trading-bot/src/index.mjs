@@ -38,13 +38,14 @@ import {
 import { fetchSignals, fetchScalp, buildCandidates, getFearGreed } from './signals.mjs';
 import { decideEntries } from './strategy.mjs';
 import {
-  stopLossPrice, stopLossPriceForResearch, takeProfitPrice, timeExitAfterMs,
+  stopLossPrice, stopLossPriceForResearch, stopLossPriceForTournament, takeProfitPrice, timeExitAfterMs,
   entryOffsetPlan, entryLimitPrice, entryOrderExpiryMs, signalReferenceIssue,
   fundingUnfavorable
 } from './risk.mjs';
 import { positionOrigin, positionQuantitiesMatch, assessRisk } from './positions.mjs';
 import { summarizeExactRoundTrip } from './outcome.mjs';
 import { ACTIVE_LIMIT_SOURCE, activeExecutionEligible, activeExitGeometry } from './active-limit.mjs';
+import { TOURNAMENT_SOURCE } from './contract.mjs';
 import { assessBotEntryRisk, entryCapitalIssue } from './bot-risk.mjs';
 import { baselineExitPolicy, roiExitGeometry, leveragePlan } from './trade-policy.mjs';
 import { managePolicyExits } from './managed-exits.mjs';
@@ -76,7 +77,9 @@ function exitGeometry(candidate, decision, entryPrice) {
   }
   const stop = candidate.source === 'research-confirmed'
     ? stopLossPriceForResearch(entryPrice, decision.side, decision.leverage, candidate.worstTradePct)
-    : stopLossPrice(entryPrice, decision.side, decision.leverage);
+    : candidate.source === TOURNAMENT_SOURCE
+      ? stopLossPriceForTournament(entryPrice, decision.side, decision.leverage, candidate.tournamentSigma)
+      : stopLossPrice(entryPrice, decision.side, decision.leverage);
   const target = takeProfitPrice(decision.side, entryPrice, candidate.range, candidate.holding);
   const timeExit = timeExitAfterMs(candidate.holding, candidate.horizonHours, decision.extremeBoost);
   return { stop, target, timeExit };
@@ -912,7 +915,9 @@ export async function reconcilePendingEntries(state) {
       } else {
         record.stopPrice = record.source === 'research-confirmed'
           ? stopLossPriceForResearch(record.entryPrice, record.side, record.leverage, record.worstTradePct)
-          : stopLossPrice(record.entryPrice, record.side, record.leverage);
+          : record.source === TOURNAMENT_SOURCE
+            ? stopLossPriceForTournament(record.entryPrice, record.side, record.leverage, record.tournamentSigma)
+            : stopLossPrice(record.entryPrice, record.side, record.leverage);
         record.targetPrice = takeProfitPrice(record.side, record.entryPrice, record.range, holding);
       }
       changed = true;
@@ -1172,6 +1177,7 @@ async function executeOpen(decision, state, nowIso) {
       holdingMaePct: candidate.holding?.maePct ?? null,
       holdingHoursToPeak: candidate.holding?.hoursToPeak ?? null,
       worstTradePct: candidate.worstTradePct ?? null,
+      tournamentSigma: candidate.tournamentSigma ?? null,
       extremeBoost: !!extremeBoost, equityAtOpen: balance,
       entryClientOrderId: entryIntentClientOrderId, entryExecutedQty: 0,
       entryRequestedQty: quantity, entryOrderPending: true,
@@ -1388,6 +1394,7 @@ async function executeOpen(decision, state, nowIso) {
       holdingMaePct: candidate.holding?.maePct ?? null,
       holdingHoursToPeak: candidate.holding?.hoursToPeak ?? null,
       worstTradePct: candidate.worstTradePct ?? null,
+      tournamentSigma: candidate.tournamentSigma ?? null,
       extremeBoost: !!extremeBoost, equityAtOpen: balance,
       entryClientOrderId, entryExecutedQty: executedQty, entryOriginalQty: executedQty,
       entryRequestedQty: quantity, entryOrderPending: false,

@@ -118,6 +118,7 @@ export async function saveState(state) {
           assetClass: o.assetClass ?? null,
           activePolicy: o.activePolicy ?? null,
           worstTradePct: o.worstTradePct ?? null,
+          tournamentSigma: o.tournamentSigma ?? null,
           timeExitClientOrderId: o.timeExitClientOrderId ?? null,
           timeExitRequestedQty: o.timeExitRequestedQty ?? null,
           timeExitPositionBefore: o.timeExitPositionBefore ?? null,

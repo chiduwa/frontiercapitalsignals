@@ -144,6 +144,52 @@ export function authorizeResearch(row) {
   };
 }
 
+// Third authorized source (2026-09-24, operator decision): a per-asset model
+// that earned its place in the model tournament
+// (signals-worker/docs/MODEL_TOURNAMENT.md). It was promoted only on forecasts
+// it logged before their outcomes, under a test that stays valid however
+// often it is read, and it is demoted the same way; the payload marks a slot
+// actionable only while promoted and fresh.
+//
+// Only 7-day direction slots trade. The tournament publishes about 15.5 hours
+// after the close its forecast is dated from: that leaves most of a 1-day
+// window already spent, but about 6.3 of 7 days still ahead. The traded
+// window is therefore the remainder of the validated one, never more.
+export const TOURNAMENT_SOURCE = 'tournament-v1';
+export const TOURNAMENT_HORIZONS = [7];
+export function authorizeTournament(tournament, symbol, horizon, { minEdge = 0.03, nowMs = Date.now() } = {}) {
+  if (!TOURNAMENT_HORIZONS.includes(horizon)) {
+    return { ok: false, reason: `the tournament's ${horizon}-day window is mostly spent by the time it publishes` };
+  }
+  if (!tournament || tournament.status !== 'live') {
+    return { ok: false, reason: `model tournament is ${tournament?.status || 'absent'}` };
+  }
+  const slots = tournament.assets?.[symbol];
+  const slot = slots?.[`direction:${horizon}`];
+  if (!slot) return { ok: false, reason: `no ${horizon}-day direction slot for ${symbol}` };
+  if (slot.promoted !== true || slot.actionable !== true) {
+    return { ok: false, reason: `no model promoted on forward evidence for ${symbol} ${horizon}d` };
+  }
+  const p = Number(slot.forecast?.pUp);
+  if (!(p > 0 && p < 1)) return { ok: false, reason: 'the promoted model issued no forecast this run' };
+  if (Math.abs(p - 0.5) < minEdge) {
+    return { ok: false, reason: `P(up) ${p.toFixed(3)} is within ${minEdge} of even` };
+  }
+  // The window closes at the END of targetDate's UTC day.
+  const end = Date.parse(`${slot.targetDate}T00:00:00Z`) + 86_400_000;
+  const hoursLeft = (end - nowMs) / 3_600_000;
+  if (!(hoursLeft >= 24)) {
+    return { ok: false, reason: `the forecast window ends in ${Number.isFinite(hoursLeft) ? hoursLeft.toFixed(1) : '?'} h` };
+  }
+  const sigma = Number(slots[`magnitude:${horizon}`]?.forecast?.sigma);
+  if (!(sigma > 0)) return { ok: false, reason: 'no move-size forecast to size the stop against' };
+  return {
+    ok: true, side: p > 0.5 ? 'BUY' : 'SELL', pUp: p, sigma,
+    horizonHours: Math.floor(hoursLeft),
+    model: slot.incumbent, label: slot.incumbentLabel || slot.incumbent
+  };
+}
+
 // Measured path shape for this exact asset, side and horizon — the
 // holdingEvidence section written by build-signals.mjs. Returns null rather
 // than a partial record when the asset has not accumulated enough

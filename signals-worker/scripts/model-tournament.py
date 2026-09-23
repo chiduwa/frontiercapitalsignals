@@ -705,6 +705,10 @@ class Tournament:
                     'promoted': bool(champ) or (sym != POOLED and bool(self.champion(POOLED, target, h))),
                     'championSince': champ['status_changed_at'] if champ else None,
                     'forecast': json.loads(latest['forecast_json']) if latest else None,
+                    # The window a forecast covers: from the close of forecastAsOf to
+                    # the close of targetDate. A reader must not act on a spent window.
+                    'forecastAsOf': latest['as_of'] if latest else None,
+                    'targetDate': latest['target_date'] if latest else None,
                     'challengers': [{'model': m['model_id'], 'label': describe(self.spec(m)), 'eValue': round(m['e_value'], 3) if m.get('e_value') else None,
                                      'threshold': round(1 / alpha_for(m['alpha_index'])), 'forwardN': m.get('forward_n') or 0,
                                      'meanDiff': m.get('forward_mean_diff')} for m in ch]}

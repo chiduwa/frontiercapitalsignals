@@ -4,7 +4,7 @@
 // index.mjs (which does the actual I/O) so the risk math itself is easy to
 // read and reason about in one place.
 import { config } from './config.mjs';
-import { ENGINE } from './contract.mjs';
+import { ENGINE, TOURNAMENT_SOURCE } from './contract.mjs';
 import { ACTIVE_LIMIT_SOURCE } from './active-limit.mjs';
 import { leveragePlan } from './trade-policy.mjs';
 
@@ -38,7 +38,7 @@ export function sizePosition(candidate, extremeBoost) {
   // Installation must not silently activate the new live risk policy.
   // Keep the existing sizing behavior until either new mode is selected.
   if (!config.roiExitPolicy && !config.activeLimitMode && candidate.source !== ACTIVE_LIMIT_SOURCE) {
-    if (candidate.source === 'research-confirmed') return {
+    if (candidate.source === 'research-confirmed' || candidate.source === TOURNAMENT_SOURCE) return {
       positionPct: config.minPositionPct, leverage: config.legacyMinLeverage
     };
     const edge = conservativeEdge(candidate);
@@ -65,6 +65,11 @@ export function sizePosition(candidate, extremeBoost) {
   // at this moment is well calibrated. So it always takes the floor size and
   // the floor leverage, regardless of how good its backtest looks.
   if (candidate.source === 'research-confirmed') {
+    return { positionPct: config.minPositionPct, leverage: config.minLeverage };
+  }
+  // A tournament champion's evidence is a forward record of forecast skill,
+  // not of trading P&L after costs, so it also takes the floor.
+  if (candidate.source === TOURNAMENT_SOURCE) {
     return { positionPct: config.minPositionPct, leverage: config.minLeverage };
   }
   const edge = conservativeEdge(candidate);
@@ -240,6 +245,11 @@ export function wouldExceedExposure(openPositions, balance, newPositionPct) {
 // Research-sourced positions get their own, much lower ceiling on top of the
 // global one. Their evidence is thinner in kind, so a run of confirmed
 // strategies must not be able to consume the whole exposure budget.
+export function wouldExceedTournamentExposure(openPositions, balance, newPositionPct) {
+  const tournament = openPositions.filter((p) => p.source === TOURNAMENT_SOURCE);
+  return currentExposurePct(tournament, balance) + newPositionPct > config.maxTournamentExposurePct;
+}
+
 export function wouldExceedResearchExposure(openPositions, balance, newPositionPct) {
   const research = openPositions.filter((p) => p.source === 'research-confirmed');
   return currentExposurePct(research, balance) + newPositionPct > config.maxResearchExposurePct;
@@ -306,6 +316,17 @@ export function stopLossPriceForResearch(entryPrice, side, leverage, worstTradeP
   const moveFraction = Math.abs(worstTradePct) / 100 * config.researchStopWidening;
   const measured = side === 'BUY' ? entryPrice * (1 - moveFraction) : entryPrice * (1 + moveFraction);
   // Whichever is TIGHTER in loss terms — never risk more than the generic cap.
+  return side === 'BUY' ? Math.max(generic, measured) : Math.min(generic, measured);
+}
+
+// A tournament trade's stop: k x the published move-size forecast for the
+// same asset and horizon (the size model in force for it), bounded by the
+// generic per-trade cap so it can never risk more than any other trade.
+export function stopLossPriceForTournament(entryPrice, side, leverage, sigma) {
+  const generic = stopLossPrice(entryPrice, side, leverage);
+  if (!Number.isFinite(sigma) || sigma <= 0) return generic;
+  const moveFraction = Math.expm1(config.tournamentStopSigmas * sigma);
+  const measured = side === 'BUY' ? entryPrice * (1 - moveFraction) : entryPrice * (1 + moveFraction);
   return side === 'BUY' ? Math.max(generic, measured) : Math.min(generic, measured);
 }
 

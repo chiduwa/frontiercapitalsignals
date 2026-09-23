@@ -86,6 +86,14 @@ export const config = {
   // calibrated per-asset forecast record — real, but a different kind — so
   // they may never consume the whole exposure budget.
   maxResearchExposurePct: num(process.env.MAX_RESEARCH_EXPOSURE_PCT, 0.15),
+  // Tournament-promoted per-asset models (contract.mjs authorizeTournament).
+  // Off unless the operator turns it on; floor size and leverage like
+  // confirmed research, their own exposure cap, a stop at k x the published
+  // move-size forecast, and no trade within `tournamentMinEdge` of even.
+  tournamentTrading: parseBoolean('TOURNAMENT_TRADING', process.env.TOURNAMENT_TRADING, false),
+  tournamentMinEdge: num(process.env.TOURNAMENT_MIN_EDGE, 0.03),
+  maxTournamentExposurePct: num(process.env.MAX_TOURNAMENT_EXPOSURE_PCT, 0.10),
+  tournamentStopSigmas: num(process.env.TOURNAMENT_STOP_SIGMAS, 2),
   // Multiple of a confirmed strategy's own measured worst trade to place its
   // stop beyond. A stop tighter than the drawdown the rule is KNOWN to
   // produce would cut exactly the trades its expectancy depends on.

@@ -8,6 +8,7 @@ process.env.CLOUDFLARE_ACCOUNT_ID = 'test';
 process.env.FCS_D1_DATABASE_ID = 'test';
 process.env.ACTIVE_LIMIT_MODE = 'false';
 process.env.ROI_EXIT_POLICY = 'true'; // exercise the opt-in policy without exchange IO
+process.env.TOURNAMENT_TRADING = 'true'; // the operator switch, on in production since 2026-09-24
 await import('./test-policy-replay.mjs');
 await import('./test-policy-history.mjs');
 
@@ -25,11 +26,11 @@ const { entryIntentMatches, loadBotLossSummary } = await import('./src/state.mjs
 const { DatabaseSync } = await import('node:sqlite');
 const { ACTIVE_LIMIT_SOURCE, activePolicyCandidate, activeExecutionEligible, activeExitGeometry } = await import('./src/active-limit.mjs');
 const { assessBotEntryRisk, entryCapitalIssue } = await import('./src/bot-risk.mjs');
-const { ENGINE, authorizeRow, authorizeResearch, classAuthorized, holdingFor, dayRangePosition } = await import('./src/contract.mjs');
+const { ENGINE, authorizeRow, authorizeResearch, authorizeTournament, TOURNAMENT_SOURCE, classAuthorized, holdingFor, dayRangePosition } = await import('./src/contract.mjs');
 const {
   conservativeEdge, sizePosition, currentExposurePct, wouldExceedExposure,
-  wouldExceedResearchExposure, circuitBreakerTripped, dailyLossLimitHit, inCooldown,
-  fundingUnfavorable, stopLossPrice, stopLossPriceForResearch, takeProfitPrice,
+  wouldExceedResearchExposure, wouldExceedTournamentExposure, circuitBreakerTripped, dailyLossLimitHit, inCooldown,
+  fundingUnfavorable, stopLossPrice, stopLossPriceForResearch, stopLossPriceForTournament, takeProfitPrice,
   timeExitAfterMs, patienceUnmet, entryOffsetPlan, entryLimitPrice,
   entryOrderTtlMs, entryOrderExpiryMs, signalReferenceIssue
 } = await import('./src/risk.mjs');
@@ -1022,6 +1023,60 @@ for (const scenario of ['filled', 'timeout', 'manual', 'save-failed']) {
       submissions === 1 && amount === 5 && s.openOrders.SOLUSDT.entryExecutedQty === 5
         && s.openOrders.SOLUSDT.entryOriginalQty === 10 && s.openOrders.SOLUSDT.firstProfitComplete);
   } else check(`${scenario}: no managed order is submitted`, submissions === 0);
+}
+
+// ============ tournament-promoted per-asset models (operator decision 2026-09-24) ======
+console.log('\n== contract/signals/risk: a tournament model trades only once promoted, and only small ==');
+{
+  const now = Date.parse('2026-10-01T16:00:00Z');
+  const slot = (over = {}) => ({ incumbent: 'direction:logistic:ab12', incumbentLabel: 'logistic on momentum (light shrinkage)',
+    promoted: true, actionable: true, forecast: { pUp: 0.58 }, forecastAsOf: '2026-09-30', targetDate: '2026-10-07', ...over });
+  const tournament = (dir = {}, top = {}) => ({ status: 'live', assets: { SOL: {
+    'direction:7': slot(dir), 'direction:1': slot({ targetDate: '2026-10-01' }),
+    'magnitude:7': { incumbent: 'magnitude:scale:x', promoted: false, actionable: false, forecast: { sigma: 0.09 } } } }, ...top });
+  const ok = authorizeTournament(tournament(), 'SOL', 7, { nowMs: now });
+  check('a promoted, fresh 7-day model with a clear lean may trade', ok.ok && ok.side === 'BUY' && ok.sigma === 0.09, JSON.stringify(ok));
+  check('it holds only for what is left of the validated window (to the close of targetDate)',
+    ok.horizonHours === Math.floor((Date.parse('2026-10-08T00:00:00Z') - now) / 3600000));
+  check('a lean below even maps to SELL', authorizeTournament(tournament({ forecast: { pUp: 0.4 } }), 'SOL', 7, { nowMs: now }).side === 'SELL');
+  check('an unpromoted slot may not trade', !authorizeTournament(tournament({ promoted: false, actionable: false }), 'SOL', 7, { nowMs: now }).ok);
+  check('a promoted slot from a stale run may not trade', !authorizeTournament(tournament({ actionable: false }), 'SOL', 7, { nowMs: now }).ok
+    && !authorizeTournament(tournament({}, { status: 'stale' }), 'SOL', 7, { nowMs: now }).ok);
+  check('the 1-day slot never trades: its window is mostly spent by publication', !authorizeTournament(tournament(), 'SOL', 1, { nowMs: now }).ok);
+  check('a forecast within the minimum edge of even may not trade', /of even/.test(authorizeTournament(tournament({ forecast: { pUp: 0.52 } }), 'SOL', 7, { nowMs: now }).reason));
+  check('a spent window may not trade', /window ends/.test(authorizeTournament(tournament(), 'SOL', 7, { nowMs: Date.parse('2026-10-07T12:00:00Z') }).reason));
+  check('no size forecast, no stop, no trade', !authorizeTournament({ status: 'live', assets: { SOL: { 'direction:7': slot() } } }, 'SOL', 7, { nowMs: now }).ok);
+
+  const payload = { generated_at: '2026-10-01T15:40:00Z', modelTournament: tournament(),
+    crypto: { favorites: [{ symbol: 'SOL', price: 210, analysis: { reference_price: 210, analyzed_at: '2026-10-01T15:40:00Z' } }] } };
+  const realNow = Date.now; Date.now = () => now;
+  const [c] = buildCandidates(payload, null);
+  check('a promoted slot becomes an authorized tournament candidate carrying its published reference price',
+    c && c.source === TOURNAMENT_SOURCE && c.authorized === true && c.signalPrice === 210 && c.tournamentSigma === 0.09 && c.side === 'BUY', JSON.stringify(c));
+  check('an unpromoted slot is not a candidate at all',
+    buildCandidates({ ...payload, modelTournament: tournament({ promoted: false, actionable: false }) }, null).length === 0);
+  config.tournamentTrading = false;
+  check('with the operator switch off, nothing is built', buildCandidates(payload, null).length === 0);
+  config.tournamentTrading = true;
+  const conflict = dedupeBySymbol([c, { ...c, source: 'confluence-v7', side: 'SELL' }]);
+  check('an engine call on the same coin in the opposite direction makes both abstain', conflict.length === 1 && conflict[0].authorized === false);
+  Date.now = realNow;
+
+  const size = sizePosition({ source: TOURNAMENT_SOURCE, edge: 0 }, true);
+  check('a tournament trade takes the floor size and floor leverage, extreme boost or not',
+    size.positionPct === config.minPositionPct && size.leverage === config.minLeverage, JSON.stringify(size));
+  const buyStop = stopLossPriceForTournament(100, 'BUY', 5, 0.02), sellStop = stopLossPriceForTournament(100, 'SELL', 5, 0.02);
+  check('the stop sits k x the size forecast away when that is inside the generic cap',
+    Math.abs(buyStop - 100 * (1 - Math.expm1(config.tournamentStopSigmas * 0.02))) < 1e-9 && sellStop > 100);
+  check('and never risks more than the generic per-trade stop',
+    stopLossPriceForTournament(100, 'BUY', 5, 0.5) === stopLossPrice(100, 'BUY', 5));
+  check('tournament exposure has its own cap',
+    wouldExceedTournamentExposure([{ notional: 400, leverage: 5, source: TOURNAMENT_SOURCE }], 1000, 0.05) === (0.08 + 0.05 > config.maxTournamentExposurePct));
+  const tCand = { ...authorizedCandidate, source: TOURNAMENT_SOURCE, range: null, edge: 0, tournamentSigma: 0.05, horizonHours: 150 };
+  check('an authorized tournament candidate passes the same risk gates and opens', evaluateCandidate(tCand, baseCtx).action === 'OPEN',
+    JSON.stringify(evaluateCandidate(tCand, baseCtx)));
+  check('and is skipped once tournament exposure is full',
+    /tournament-sourced exposure/.test(evaluateCandidate(tCand, { ...baseCtx, openPositions: [{ notional: 500, leverage: 5, source: TOURNAMENT_SOURCE, symbol: 'XUSDT' }] }).reason || ''));
 }
 
 console.log(failures === 0 ? '\nTRADING BOT OK\n' : `\n${failures} CHECK(S) FAILED\n`);
