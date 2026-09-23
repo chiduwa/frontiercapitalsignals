@@ -269,28 +269,6 @@ async function main() {
     console.error('shared archive read failed — lead/lag and support/resistance will each fall back to their own read:', e.message);
   }
 
-  try {
-    const started = Date.now();
-    const signals = await computeLeadLag(env, sharedDailyBarsRows);
-    const written = await replaceLeadLagSignals(env, signals, new Date().toISOString());
-    console.log(`lead/lag: ${written} significant relationships registered (recomputed in ${Date.now() - started}ms)`);
-  } catch (e) {
-    console.error('lead/lag recompute failed:', e.message);
-  }
-
-  // Independent of everything else in this file besides the shared read
-  // above — writes its own two tables, so a failure here can't take down
-  // sentiment/sectors/lead-lag or vice versa.
-  try {
-    const started = Date.now();
-    const { levelsBySymbol, breaks } = await computeSrLevelsAndBreaks(env, sharedDailyBarsRows);
-    const levelsWritten = await replaceSrLevels(env, levelsBySymbol);
-    const statsWritten = await replaceSrBreakStats(env, breaks);
-    console.log(`support/resistance: ${Object.keys(levelsBySymbol).length} symbols with a key level, ${levelsWritten} levels, ${breaks.length} historical break events -> ${statsWritten} calibration buckets (${Date.now() - started}ms)`);
-  } catch (e) {
-    console.error('support/resistance computation failed:', e.message);
-  }
-
   // Median daily range per asset — the denominator for the day-trading
   // "has it moved enough today?" read. Reuses the same shared bars read as
   // lead/lag and support/resistance above, so it costs no extra D1 rows.
@@ -373,6 +351,37 @@ async function main() {
     console.log(`stock ATM IV: ${ivOk} ok, ${ivFailed} failed (of ${STOCK_WATCHLIST.length})`);
   } catch (e) {
     console.error('stock ATM IV pass failed (crumb handshake):', e.message);
+  }
+
+  // THE TWO FULL-ARCHIVE PASSES RUN LAST. From about 2026-09-08 the shared
+  // read reached 2.8M rows and computeLeadLag stopped finishing inside the
+  // job's 120-minute limit: the log shows the read at 08:26 and nothing more
+  // until the runner was cancelled at 09:55, every day. Because it ran first,
+  // every stage below it -- daily ranges (frozen at 2026-09-08), time-of-day
+  // edges, swing times, hack alerts, DVOL, stock IV -- silently stopped too.
+  // None of them reads lead/lag or support/resistance output, so they now run
+  // before both. This does not make lead/lag finish; it stops it taking the
+  // rest of the job down with it.
+  // Independent of everything else in this file besides the shared read
+  // above -- writes its own two tables, so a failure here can't take down
+  // sentiment/sectors/lead-lag or vice versa.
+  try {
+    const started = Date.now();
+    const { levelsBySymbol, breaks } = await computeSrLevelsAndBreaks(env, sharedDailyBarsRows);
+    const levelsWritten = await replaceSrLevels(env, levelsBySymbol);
+    const statsWritten = await replaceSrBreakStats(env, breaks);
+    console.log(`support/resistance: ${Object.keys(levelsBySymbol).length} symbols with a key level, ${levelsWritten} levels, ${breaks.length} historical break events -> ${statsWritten} calibration buckets (${Date.now() - started}ms)`);
+  } catch (e) {
+    console.error('support/resistance computation failed:', e.message);
+  }
+
+  try {
+    const started = Date.now();
+    const signals = await computeLeadLag(env, sharedDailyBarsRows);
+    const written = await replaceLeadLagSignals(env, signals, new Date().toISOString());
+    console.log(`lead/lag: ${written} significant relationships registered (recomputed in ${Date.now() - started}ms)`);
+  } catch (e) {
+    console.error('lead/lag recompute failed:', e.message);
   }
 
   console.log('daily-refresh complete');
