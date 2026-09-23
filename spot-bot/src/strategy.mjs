@@ -249,6 +249,26 @@ export function periodsElapsed(lastTrancheAt, nowMs, opts = {}) {
   return Math.floor((nowMs - last) / period);
 }
 
+// Calendar weeks, Monday 00:00 UTC -- the same boundary Binance's weekly
+// candles use, so "this week" means the week the weekly profile is building.
+const WEEK_MS = 7 * 86400000;
+export function weekStartMs(ms) {
+  const d = new Date(ms);
+  const sinceMonday = (d.getUTCDay() + 6) % 7;
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - sinceMonday);
+}
+export function boughtThisWeek(lastTrancheAt, nowMs) {
+  const last = Date.parse(lastTrancheAt || '');
+  return Number.isFinite(last) && weekStartMs(last) === weekStartMs(nowMs);
+}
+// The last scheduled firing before the week closes: the one that lands within
+// one firing interval of Monday 00:00 UTC. If that firing is missed, the week
+// simply goes unbought and the next week's pool carries it (tranchePool).
+export function isFinalFiringOfWeek(nowMs, firingIntervalHours) {
+  const remaining = weekStartMs(nowMs) + WEEK_MS - nowMs;
+  return remaining > 0 && remaining <= firingIntervalHours * 3600000;
+}
+
 // Is this cycle a tranche cycle? Driven by elapsed days rather than a cron
 // expression so a missed firing delays the tranche instead of skipping it.
 export function trancheDue(lastTrancheAt, nowMs, opts = {}) {

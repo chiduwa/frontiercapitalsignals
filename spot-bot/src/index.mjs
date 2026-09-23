@@ -16,7 +16,7 @@ import {
   getExchangeInfo, getFreeBalance, getPrice, getWeeklyKlines, makeClientOrderId,
   marketBuyReconciled, roundQuantity, terminalSpotOrder
 } from './binance-spot.mjs';
-import { selectAssets, weeklyProfile, evaluateTrigger, tranchePool, trancheDue, periodsElapsed, allocate } from './strategy.mjs';
+import { selectAssets, weeklyProfile, evaluateTrigger, tranchePool, trancheDue, periodsElapsed, allocate, boughtThisWeek, isFinalFiringOfWeek } from './strategy.mjs';
 import {
   acquireExecutionLease, releaseExecutionLease, loadState, saveState,
   recordFill, recordSkip, costBasis, logValuation
@@ -111,7 +111,10 @@ async function runCycle() {
   let trancheIntent = state.lastTrancheAt || 'initial-tranche';
 
   const periods = periodsElapsed(state.lastTrancheAt, nowMs);
-  const due = trancheDue(state.lastTrancheAt, nowMs);
+  // Weekly guarantee: due whenever this calendar week has no buy yet.
+  const due = config.weeklyGuarantee
+    ? !boughtThisWeek(state.lastTrancheAt, nowMs)
+    : trancheDue(state.lastTrancheAt, nowMs);
   const freeQuote = await getFreeBalance(config.quoteAsset);
   const { base, carryTranches, pool } = tranchePool(freeQuote, periods);
 
@@ -125,7 +128,9 @@ async function runCycle() {
 
   if (!due) {
     const days = config.tranchePeriodDays;
-    log('not_a_tranche_cycle', { reason: `next tranche ${days} days after ${state.lastTrancheAt}` });
+    log('not_a_tranche_cycle', { reason: config.weeklyGuarantee
+      ? `this week's tranche was already bought at ${state.lastTrancheAt}`
+      : `next tranche ${days} days after ${state.lastTrancheAt}` });
     return;
   }
   if (!(pool > 0)) {
@@ -149,6 +154,7 @@ async function runCycle() {
   // Pass 1: measure every selected asset and record who triggered. No money is
   // committed here, so the allocation in pass 2 can see the full picture.
   const triggered = [];
+  const measured = [];
   let spentTotal = 0;
   let deferredTotal = 0;
   let quarantineTranche = false;
@@ -160,6 +166,7 @@ async function runCycle() {
         getWeeklyKlines(asset.symbol, config.klineWeeks)
       ]);
       const profile = weeklyProfile(klines);
+      if (profile.ok && price > 0) measured.push({ ...asset, price, profile });
       const trigger = evaluateTrigger(price, profile);
       if (!trigger.buy) {
         log('skip', { symbol: asset.symbol, sleeve: asset.sleeve, price, reason: trigger.reason });
@@ -174,6 +181,13 @@ async function runCycle() {
 
   if (!triggered.length) {
     log('no_triggers', { checked: selected.length, reason: 'no asset met its own measured bar this cycle' });
+    // The week is about to close without a dip: buy its tranche anyway, in
+    // the same rank order, rather than sit out a rising market entirely.
+    if (config.weeklyGuarantee && isFinalFiringOfWeek(nowMs, config.firingIntervalHours) && measured.length) {
+      const reason = 'no dip this week; buying the weekly tranche before the week closes';
+      for (const asset of measured) triggered.push({ ...asset, trigger: { buy: true, trigger: 'week-end-guarantee', reason } });
+      log('week_end_guarantee', { assets: measured.map((a) => a.symbol), pool: Number(pool.toFixed(2)), reason });
+    }
   }
 
   // Pass 2: fund as many of them as the pool can actually cover at or above

@@ -11,7 +11,7 @@ const {
   isExecutionOutcomeUnknown, makeClientOrderId,
   MAX_SPOT_ORDER_GENERATIONS, terminalSpotOrder
 } = await import('./src/binance-spot.mjs');
-const { selectAssets, weeklyProfile, evaluateTrigger, tranchePool, trancheDue, periodsElapsed, allocate } = await import('./src/strategy.mjs');
+const { selectAssets, weeklyProfile, evaluateTrigger, tranchePool, trancheDue, periodsElapsed, allocate, weekStartMs, boughtThisWeek, isFinalFiringOfWeek } = await import('./src/strategy.mjs');
 
 let failures = 0;
 const check = (name, cond, detail) => {
@@ -250,6 +250,23 @@ check('a normal malformed spot request is a definite rejection',
 check('strict boolean parsing accepts an explicit false', parseBoolean('SPOT_DRY_RUN', '0', true) === false);
 check('strict boolean parsing rejects ambiguous live-mode text', (() => {
   try { parseBoolean('SPOT_DRY_RUN', 'no', true); return false; } catch { return true; }
+})());
+
+console.log('\n== weekly guarantee: a calendar week never ends without a buy (2026-09-23) ==');
+check('the weekly guarantee is on by default', config.weeklyGuarantee === true && config.firingIntervalHours === 4);
+const mon = Date.UTC(2026, 8, 21), sun2011 = Date.UTC(2026, 8, 27, 20, 11), sun1611 = Date.UTC(2026, 8, 27, 16, 11);
+check('weeks start Monday 00:00 UTC, like Binance weekly candles',
+  weekStartMs(Date.UTC(2026, 8, 23, 14)) === mon && weekStartMs(sun2011) === mon && weekStartMs(Date.UTC(2026, 8, 28, 0, 5)) === Date.UTC(2026, 8, 28));
+check('a buy earlier this week means nothing is due; last week does not count',
+  boughtThisWeek(new Date(Date.UTC(2026, 8, 22, 8)).toISOString(), Date.UTC(2026, 8, 25))
+  && !boughtThisWeek(new Date(Date.UTC(2026, 8, 20, 20)).toISOString(), Date.UTC(2026, 8, 25))
+  && !boughtThisWeek(null, Date.UTC(2026, 8, 25)));
+check('only the firing inside the last 4 hours of the week is the final one',
+  isFinalFiringOfWeek(sun2011, 4) && !isFinalFiringOfWeek(sun1611, 4) && !isFinalFiringOfWeek(mon, 4));
+check('exactly one of the six daily firings (00:11 .. 20:11) is final each week', (() => {
+  let finals = 0;
+  for (let d = 0; d < 7; d++) for (const h of [0, 4, 8, 12, 16, 20]) if (isFinalFiringOfWeek(mon + d * 86400000 + h * 3600000 + 11 * 60000, 4)) finals++;
+  return finals === 1;
 })());
 
 console.log(failures === 0 ? '\nSPOT BOT OK\n' : `\n${failures} CHECK(S) FAILED\n`);

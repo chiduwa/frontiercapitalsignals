@@ -101,6 +101,28 @@ not an oversight — but it is a real tradeoff, and it is why every skip is
 written to `spot_bot_skips` with its reason and price. Without that record
 there would be no way to judge later whether the waiting actually paid.
 
+## The weekly guarantee (2026-09-23)
+
+The conditional rule above did exactly what that paragraph warned: between
+2026-09-10 and 2026-09-23 it bought once while its coins rallied, and the
+deferred pool sat unspent. Backtested on 4-hour Binance prices for eight core
+coins (BTC ETH SOL XRP HBAR XLM ADA DOGE), September 2024 to September 2026:
+
+| rule | buys in 104 weeks | average cost vs plain weekly DCA | end value of $1,000 |
+| --- | ---: | ---: | ---: |
+| dips only (the rule above) | 39 | 9.7% worse | $741 |
+| plain weekly DCA | 77 | — | $816 |
+| **dips first, but never a week without a buy** | 83 | 0.7% better | **$818** |
+| dips first, forced after 14 days without one | 60 | 1.2% worse | $800 |
+
+Dips-only waits out every rally and then buys at higher prices (XLM +53%
+cost, XRP +15%); it only wins in steady declines (SOL, ADA -6%). So a tranche
+is now due whenever the current calendar week (Monday 00:00 UTC, the weekly
+candle boundary) has no buy. A dip inside the week is still bought first; if
+none comes, the final firing before the week closes buys the tranche anyway,
+logged as `week-end-guarantee`. `SPOT_WEEKLY_GUARANTEE=false` restores
+dips-only.
+
 ## Sell side
 
 There isn't one, and `sellEnabled` is a hard `false`. An exit needs either a

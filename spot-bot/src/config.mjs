@@ -91,5 +91,15 @@ export const config = {
   // directional or valuation call, and the engine withholds both. Wiring one
   // now would mean inventing thresholds, which is the practice the v7 audit
   // removed. Kept as an explicit flag so the absence is a decision on record.
+  // A calendar week never ends without a buy (2026-09-23). Dips inside the
+  // week are still bought first; on the final firing before Monday 00:00 UTC
+  // an undipped week buys its tranche anyway. Backtested on 4h Binance prices
+  // for eight core coins, Sep 2024 - Sep 2026: dips-only bought in 39 of 104
+  // weeks at a 9.7% WORSE average cost than plain weekly DCA; this rule bought
+  // every week at 0.7% better. Set false to restore dips-only.
+  weeklyGuarantee: parseBoolean('SPOT_WEEKLY_GUARANTEE', process.env.SPOT_WEEKLY_GUARANTEE, true),
+  // The timer's firing interval: the "final firing of the week" is the one
+  // that lands inside this many hours of the week's close.
+  firingIntervalHours: num(process.env.SPOT_FIRING_INTERVAL_HOURS, 4),
   sellEnabled: false
 };
