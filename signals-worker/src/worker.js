@@ -2714,7 +2714,50 @@ export function detectPossibleLongTermBottom(bars, lookbackDays = 365, minDaysSi
   const daysSinceLow = window.length - 1 - lowIdx;
   const pctAboveLow = ((current / lowClose) - 1) * 100;
   if (daysSinceLow < minDaysSinceLow || pctAboveLow > nearLowPct) return null;
-  return { lowClose, lowDate: window[lowIdx].date, daysSinceLow, currentClose: current, pctAboveLow };
+  let highClose = lowClose;
+  for (const b of window) if (b.close != null && b.close > highClose) highClose = b.close;
+  // drawdownPct: how far the low sits below the window's highest close --
+  // the "depth" half of rankLongTermCandidates.
+  return { lowClose, lowDate: window[lowIdx].date, daysSinceLow, currentClose: current, pctAboveLow,
+    highClose, drawdownPct: (lowClose / highClose - 1) * 100 };
+}
+
+// The boards list at most this many candidates per asset class
+// (user-requested 2026-09-23: "limit it to a maximum of 20 ... rank them and
+// choose the best 20").
+export const LONG_TERM_POTENTIAL_MAX = 20;
+
+// Rank candidates by the mean of two percentiles within their class: how
+// deep the fall from the 52-week high was, and how long the low has held.
+// Chosen on the archive (2016-2025, monthly, top 20 vs all candidates, median
+// forward return) as the ONLY criterion positive in all eight half-periods
+// -- stocks and crypto, 6 and 12 months, early and late: stocks +2.1% (6m)
+// and +2.7% (12m), crypto +3.7% and +1.3%. Depth alone was larger for stocks
+// but flipped sign for crypto at 12 months; nothing cleared a corrected
+// significance bar, and the archive holds only survivors. It is how 20 are
+// chosen, not a forecast that they will recover.
+export function rankLongTermCandidates(candidates, max = LONG_TERM_POTENTIAL_MAX) {
+  const pct = (key, sign) => {
+    const values = candidates.map(c => c.status?.[key]).filter(Number.isFinite).map(v => sign * v).sort((a, b) => a - b);
+    return c => {
+      const v = c.status?.[key];
+      if (!Number.isFinite(v) || !values.length) return null;
+      let k = 0;
+      while (k < values.length && values[k] <= sign * v) k++;
+      return k / values.length;
+    };
+  };
+  const depth = pct('drawdownPct', -1), base = pct('daysSinceLow', 1);
+  return candidates
+    .map(c => {
+      const parts = [depth(c), base(c)].filter(v => v != null);
+      return { ...c, rankScore: parts.length ? parts.reduce((a, b) => a + b, 0) / parts.length : 0 };
+    })
+    .sort((a, b) => (b.rankScore - a.rankScore)
+      || ((a.status?.drawdownPct ?? 0) - (b.status?.drawdownPct ?? 0))
+      || String(a.symbol).localeCompare(String(b.symbol)))
+    .slice(0, max)
+    .map((c, i) => ({ ...c, rank: i + 1 }));
 }
 
 // The level change over lookbackDays index-positions, ending at the latest
@@ -5779,10 +5822,16 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
   // enough immediate confluence score to make breakout/breakdown at all,
   // but that's exactly the point of this list. Crypto only, same
   // reasoning as favorites (longTermBottomStatus is crypto-only).
+  // Ranked and capped per class; see rankLongTermCandidates.
   const longTermPotential = longTermBottomStatus
-    ? scored
+    ? rankLongTermCandidates(scored
         .filter(x => longTermBottomStatus[x.m.symbol])
-        .map(x => entry(x, x.c.long >= x.c.short ? 'long' : 'short'))
+        .map(x => ({ symbol: x.m.symbol, x, status: longTermBottomStatus[x.m.symbol] })))
+        .map(({ x, rank, rankScore }) => {
+          const e = entry(x, x.c.long >= x.c.short ? 'long' : 'short');
+          if (e.longTermPotential) e.longTermPotential = { ...e.longTermPotential, rank, rankScore };
+          return e;
+        })
     : [];
   return { breakout: sortSide('long'), breakdown: sortSide('short'), universe: metrics.length, votesLog, priceLog, rangeLog, xsLog, allSymbols, favorites, longTermPotential };
 }
@@ -8001,7 +8050,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var ltpNote = '';
         if(r.longTermPotential){
           var ltp = r.longTermPotential;
-          ltpNote = '<span class="ltp-note" title="Currently near a fresh multi-month/year low ('+ltp.daysSinceLow+' days since the low, '+ltp.pctAboveLow.toFixed(0)+'% above it). Historically, a genuine isolated low like this has gone on to 10x or more within about 3 years roughly 38% of the time (56 of 146 real cases studied) -- but no tested signal reliably predicts WHICH specific ones will. This is descriptive history only, not a prediction for this asset, not guaranteed, and not financial advice.">💎 Long-term potential ('+ltp.daysSinceLow+'d since low)</span>';
+          ltpNote = '<span class="ltp-note" title="'+(ltp.rank?'Ranked #'+ltp.rank+' of the top '+'20 by depth of the fall'+(typeof ltp.drawdownPct==='number'?' ('+ltp.drawdownPct.toFixed(0)+'% below the 52-week high)':'')+' and how long the low has held. ':'')+'Currently near a fresh multi-month/year low ('+ltp.daysSinceLow+' days since the low, '+ltp.pctAboveLow.toFixed(0)+'% above it). Historically, a genuine isolated low like this has gone on to 10x or more within about 3 years roughly 38% of the time (56 of 146 real cases studied) -- but no tested signal reliably predicts WHICH specific ones will. This is descriptive history only, not a prediction for this asset, not guaranteed, and not financial advice.">💎 Long-term potential ('+ltp.daysSinceLow+'d since low)</span>';
         }
         var moves = r.dailyMoves;
         var moveNote = moves
@@ -8153,8 +8202,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     if(d.crypto.favorites && d.crypto.favorites.length){
       watch+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-favorites', eyebrow:'CRYPTO &middot; <b>FAVORITES</b>', title:'Always tracked', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.favorites, d.crypto.favorites.length);
     }
-    var ltpNoteCrypto='<div class="xp-banner" role="note"><b>Not a recommendation, not guaranteed, not financial advice.</b> Long-term candidates are descriptive historical lows only; no tested signal reliably predicts which specific asset will recover.</div>';
-    var ltpNoteStock='<div class="xp-banner" role="note"><b>Historical context only.</b> These equities are near a fresh long-term low; the list is not a recovery forecast or recommendation.</div>';
+    var ltpNoteCrypto='<div class="xp-banner" role="note"><b>Not a recommendation, not guaranteed, not financial advice.</b> Long-term candidates are descriptive historical lows only; no tested signal reliably predicts which specific asset will recover. At most 20 are shown, ranked by how deep the fall was and how long the low has held.</div>';
+    var ltpNoteStock='<div class="xp-banner" role="note"><b>Historical context only.</b> These equities are near a fresh long-term low; the list is not a recovery forecast or recommendation. At most 20 are shown, ranked by how deep the fall was and how long the low has held.</div>';
     if(d.crypto.longTermPotential && d.crypto.longTermPotential.length){
       watch+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-ltp', open:false, note:ltpNoteCrypto, eyebrow:'CRYPTO &middot; <b>LONG-TERM POTENTIAL</b>', title:'Possible multi-month/year lows', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.longTermPotential, d.crypto.longTermPotential.length);
     }

@@ -15,7 +15,7 @@
 // two are genuinely the same need either way: "what's in the universe" and
 // "what's each coin's live funding right now."
 import { chunk, d1, d1Batch, readAllDailyBars } from './d1-client.mjs';
-import { completedDailyBars } from './archive-policy.mjs';
+import { completedDailyBars, alignDailyResearchBars } from './archive-policy.mjs';
 import { laggedCorrelation, slotsForTimestamp, computeSectorCompositeSeries, computeSpreadSeries, levelChangeBefore, detectOutperformanceRotation, detectPossibleLongTermBottom, isNonDirectionalAsset } from '../worker.js';
 
 const UA = 'Mozilla/5.0 (compatible; FrontierCapitalSignals/2.0)';
@@ -644,17 +644,22 @@ export function barsRowsToReturnsBySymbol(rows) {
 // and this reads exactly as it always did — fully backward compatible,
 // nothing about the default path changed.
 export async function computeLeadLag(env, preloadedRows) {
-  const rows = preloadedRows || await readAllDailyBars(env, 'symbol, date, close');
-  const returnsBySymbol = barsRowsToReturnsBySymbol(rows);
+  const rows = preloadedRows || await readAllDailyBars(env, 'symbol, date, close, source');
+  const returnsBySymbol = barsRowsToReturnsBySymbol(alignRowsByTrueClose(rows));
+  const dense = denseReturnsBySymbol(returnsBySymbol);
 
-  const symbols = Object.keys(returnsBySymbol);
+  const symbols = [...dense.keys()];
   const signals = [];
   for (const leader of symbols) {
+    const a = dense.get(leader);
     for (const follower of symbols) {
       if (leader === follower) continue;
+      const b = dense.get(follower);
+      // Cheap exit: the two histories cannot share LEAD_LAG_MIN_SAMPLES days.
+      if (Math.min(a.count, b.count) < LEAD_LAG_MIN_SAMPLES) continue;
       let best = null;
       for (const lag of LEAD_LAG_LAGS) {
-        const r = laggedCorrelation(returnsBySymbol[leader], returnsBySymbol[follower], lag);
+        const r = laggedCorrelationDense(a, b, lag);
         if (!r || r.samples < LEAD_LAG_MIN_SAMPLES) continue;
         if (!best || Math.abs(r.corr) > Math.abs(best.corr)) best = { lag, ...r };
       }
@@ -664,6 +669,105 @@ export async function computeLeadLag(env, preloadedRows) {
     }
   }
   return signals;
+}
+
+// Returns must be dated by the close they END at. A CoinGecko row dated D is
+// a midnight sample -- the close of D-1 -- while Yahoo, Binance and the
+// composites date a bar by its own close. Pairing the two raw made same-day
+// co-movement look like a one-day LEAD: the table computed 2026-09-11 was
+// led by "OP leads ARB, LINK leads SUI, DOGE leads PENGU, all at lag 1,
+// corr ~0.83", and every one of those followers was CoinGecko-sourced. The
+// research readers already apply this shift (alignDailyResearchBars); this is
+// the same shift, plus a de-duplication that keeps the true close when a
+// supplier seam leaves two rows on one aligned date.
+//
+// DeFiLlama's daily TVL points are stamped 00:00 UTC in exactly the same way,
+// and once CoinGecko was aligned they were most of what was left: 374 of 420
+// surviving pairs were "a token leads its own TVL:<symbol> by one day".
+const MIDNIGHT_SAMPLE_SOURCES = new Set(['coingecko', 'defillama']);
+export function alignRowsByTrueClose(rows) {
+  const bySymbol = new Map();
+  for (const r of rows) {
+    if (!bySymbol.has(r.symbol)) bySymbol.set(r.symbol, []);
+    bySymbol.get(r.symbol).push(r);
+  }
+  const midnight = r => MIDNIGHT_SAMPLE_SOURCES.has(r.source);
+  const out = [];
+  for (const list of bySymbol.values()) {
+    const aligned = alignDailyResearchBars(list.map(r => (r.source === 'defillama' ? { ...r, source: 'coingecko', originalSource: 'defillama' } : r)))
+      .map(r => (r.originalSource ? { ...r, source: r.originalSource } : r))
+      .sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : (midnight(x) ? 1 : 0) - (midnight(y) ? 1 : 0)));
+    let last = null;
+    for (const r of aligned) {
+      if (r.date === last) continue;
+      last = r.date;
+      out.push(r);
+    }
+  }
+  return out;
+}
+
+const DAY_MS = 86400000;
+const dayNumber = date => Math.round(Date.parse(`${date}T00:00:00Z`) / DAY_MS);
+
+/**
+ * Each symbol's `{ date: pctReturn }` map as a Float64Array indexed by day
+ * number, NaN where there is no return. Built once, so the O(pairs x lags)
+ * loop below never touches a date string: the previous implementation
+ * re-sorted the leader's dates and constructed a Date for every comparison,
+ * which at ~900 series and 2.8M rows ran past the 120-minute job limit every
+ * day from about 2026-09-08.
+ */
+export function denseReturnsBySymbol(returnsBySymbol) {
+  const out = new Map();
+  for (const [symbol, rets] of Object.entries(returnsBySymbol)) {
+    const entries = Object.entries(rets);
+    if (!entries.length) continue;
+    let start = Infinity, end = -Infinity;
+    const days = entries.map(([d]) => {
+      const n = dayNumber(d);
+      if (n < start) start = n;
+      if (n > end) end = n;
+      return n;
+    });
+    const values = new Float64Array(end - start + 1).fill(NaN);
+    entries.forEach(([, v], i) => { values[days[i] - start] = v; });
+    out.set(symbol, { start, values, count: entries.length });
+  }
+  return out;
+}
+
+/**
+ * laggedCorrelation over dense series: leader's return on day t against the
+ * follower's on day t + lag (calendar days), over the days both have. Same
+ * pairs, same Pearson correlation, same 10-sample floor as the date-keyed
+ * version, which stays as the reference the tests hold this to.
+ */
+export function laggedCorrelationDense(leader, follower, lag) {
+  const lo = Math.max(leader.start, follower.start - lag);
+  const hi = Math.min(leader.start + leader.values.length - 1, follower.start + follower.values.length - 1 - lag);
+  if (hi - lo + 1 < 10) return null;
+  const A = leader.values, B = follower.values;
+  const offA = lo - leader.start, offB = lo + lag - follower.start;
+  let n = 0, sa = 0, sb = 0;
+  for (let k = 0, len = hi - lo + 1; k < len; k++) {
+    const x = A[offA + k], y = B[offB + k];
+    if (x !== x || y !== y) continue;
+    n++; sa += x; sb += y;
+  }
+  if (n < 10) return null;
+  // Two-pass, as pearsonCorr does, so a near-constant series cannot turn
+  // rounding error into a spurious correlation.
+  const ma = sa / n, mb = sb / n;
+  let cov = 0, va = 0, vb = 0;
+  for (let k = 0, len = hi - lo + 1; k < len; k++) {
+    const x = A[offA + k], y = B[offB + k];
+    if (x !== x || y !== y) continue;
+    const dx = x - ma, dy = y - mb;
+    cov += dx * dy; va += dx * dx; vb += dy * dy;
+  }
+  if (va === 0 || vb === 0) return null;
+  return { corr: cov / Math.sqrt(va * vb), samples: n };
 }
 
 // Wholesale replace, not upsert: a relationship that no longer clears the
@@ -1108,8 +1212,14 @@ export async function replaceRotationStatus(env, rows) {
 // low (detectPossibleLongTermBottom, worker.js — see its own docs for the
 // real research behind this, and why it deliberately does NOT try to rank
 // candidates by any signal). Purely descriptive; not financial advice.
-export async function computeLongTermBottomCandidates(env) {
-  const rows = await d1(env, `SELECT symbol, asset_class, date, close FROM asset_daily_bars WHERE asset_class IN ('crypto', 'stock') ORDER BY symbol, date`);
+//
+// Reads through readAllDailyBars, or takes the shared read. The single
+// whole-table SELECT this used to run crossed D1's result-size ceiling: every
+// run from at least 2026-09-12 logged "D1 query failed: HTTP 503 ... 7010" and
+// the boards kept showing that day's candidates, prices and all.
+export async function computeLongTermBottomCandidates(env, preloadedRows = null) {
+  const rows = (preloadedRows || await readAllDailyBars(env, 'symbol, asset_class, date, close'))
+    .filter(r => r.asset_class === 'crypto' || r.asset_class === 'stock');
   const bySymbol = {};
   for (const r of rows) (bySymbol[r.symbol] ??= []).push(r);
 
@@ -1148,9 +1258,9 @@ export async function replaceLongTermBottomCandidates(env, rows) {
   const updatedAt = new Date().toISOString();
   let written = 0;
   for (const batch of chunk(rows, 12)) {
-    const placeholders = batch.map(() => '(?,?,?,?,?,?,?)').join(',');
-    const params = batch.flatMap((r) => [r.symbol, r.lowClose, r.lowDate, r.daysSinceLow, r.currentClose, r.pctAboveLow, updatedAt]);
-    await d1(env, `INSERT INTO long_term_bottom_status (symbol, low_close, low_date, days_since_low, current_close, pct_above_low, updated_at) VALUES ${placeholders}`, params);
+    const placeholders = batch.map(() => '(?,?,?,?,?,?,?,?)').join(',');
+    const params = batch.flatMap((r) => [r.symbol, r.lowClose, r.lowDate, r.daysSinceLow, r.currentClose, r.pctAboveLow, r.drawdownPct ?? null, updatedAt]);
+    await d1(env, `INSERT INTO long_term_bottom_status (symbol, low_close, low_date, days_since_low, current_close, pct_above_low, drawdown_pct, updated_at) VALUES ${placeholders}`, params);
     written += batch.length;
   }
   return written;

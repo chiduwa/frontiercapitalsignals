@@ -979,6 +979,8 @@ CREATE TABLE IF NOT EXISTS long_term_bottom_status (
   current_close REAL NOT NULL,
   pct_above_low REAL NOT NULL,
   updated_at TEXT NOT NULL,
+  -- 0047: low below the window's highest close, for rankLongTermCandidates.
+  drawdown_pct REAL,
   PRIMARY KEY (symbol)
 );
 

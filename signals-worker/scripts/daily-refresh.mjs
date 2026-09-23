@@ -172,14 +172,6 @@ async function main() {
     console.error('outperformer rotation computation failed:', e.message);
   }
 
-  try {
-    const candidates = await computeLongTermBottomCandidates(env);
-    const written = await replaceLongTermBottomCandidates(env, candidates);
-    console.log(`long-term potential: ${written} symbol(s) currently near a fresh multi-month/year low${candidates.length ? ' -- ' + candidates.map((c) => `${c.symbol} (${c.daysSinceLow}d since low)`).join(', ') : ''}`);
-  } catch (e) {
-    console.error('long-term potential computation failed:', e.message);
-  }
-
   let latestGlobal = null;
   try {
     latestGlobal = await getGlobal();
@@ -263,11 +255,25 @@ async function main() {
   // behavior to fetching it itself).
   let sharedDailyBarsRows = null;
   try {
-    sharedDailyBarsRows = await readAllDailyBars(env, 'symbol, asset_class, date, close, high, low');
+    // `source` is what lets lead/lag date each row by the close it ends at
+    // (alignRowsByTrueClose); without it every midnight sample stays a day late.
+    sharedDailyBarsRows = await readAllDailyBars(env, 'symbol, asset_class, date, close, high, low, source');
     console.log(`shared archive read for lead/lag + support/resistance: ${sharedDailyBarsRows.length} rows`);
   } catch (e) {
     console.error('shared archive read failed — lead/lag and support/resistance will each fall back to their own read:', e.message);
   }
+
+  // Reuses the shared read; before that read existed it ran its own, and a
+  // single whole-table SELECT is what D1's size ceiling refused (see
+  // computeLongTermBottomCandidates).
+  try {
+    const candidates = await computeLongTermBottomCandidates(env, sharedDailyBarsRows);
+    const written = await replaceLongTermBottomCandidates(env, candidates);
+    console.log(`long-term potential: ${written} symbol(s) currently near a fresh multi-month/year low${candidates.length ? ' -- ' + candidates.map((c) => `${c.symbol} (${c.daysSinceLow}d since low)`).join(', ') : ''}`);
+  } catch (e) {
+    console.error('long-term potential computation failed:', e.message);
+  }
+
 
   // Median daily range per asset — the denominator for the day-trading
   // "has it moved enough today?" read. Reuses the same shared bars read as
@@ -359,9 +365,9 @@ async function main() {
   // until the runner was cancelled at 09:55, every day. Because it ran first,
   // every stage below it -- daily ranges (frozen at 2026-09-08), time-of-day
   // edges, swing times, hack alerts, DVOL, stock IV -- silently stopped too.
-  // None of them reads lead/lag or support/resistance output, so they now run
-  // before both. This does not make lead/lag finish; it stops it taking the
-  // rest of the job down with it.
+  // computeLeadLag now runs on dense day-indexed arrays (~30s on the full
+  // archive, measured 2026-09-23); it stays last so that if it ever grows
+  // slow again, it is the only thing that waits.
   // Independent of everything else in this file besides the shared read
   // above -- writes its own two tables, so a failure here can't take down
   // sentiment/sectors/lead-lag or vice versa.

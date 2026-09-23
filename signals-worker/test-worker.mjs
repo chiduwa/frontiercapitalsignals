@@ -1741,6 +1741,23 @@ check('price has already rallied well away from the low: no longer qualifies (th
 
 check('not enough history yet to judge a full lookback window: no crash, null', mod.detectPossibleLongTermBottom(ltpQualifyingBars.slice(0, 50), 100, 10, 20) === null);
 check('empty history: no crash, null', mod.detectPossibleLongTermBottom([], 100, 10, 20) === null);
+check('a qualifying low also reports how deep the fall from the window high was', ltpQualifying && ltpQualifying.drawdownPct < 0 && ltpQualifying.highClose >= ltpQualifying.lowClose
+  && Math.abs(ltpQualifying.drawdownPct - (ltpQualifying.lowClose / ltpQualifying.highClose - 1) * 100) < 1e-9, JSON.stringify(ltpQualifying));
+
+console.log('\n== rankLongTermCandidates: at most 20 per class, deepest fall + longest-held low first (user-requested 2026-09-23) ==');
+{
+  const cands = Array.from({ length: 35 }, (_, i) => ({ symbol: 'L' + i, status: { drawdownPct: -10 - i, daysSinceLow: 40 + ((i * 7) % 35) * 5 } }));
+  const ranked = mod.rankLongTermCandidates(cands);
+  check('the list is capped at LONG_TERM_POTENTIAL_MAX (20)', mod.LONG_TERM_POTENTIAL_MAX === 20 && ranked.length === 20, String(ranked.length));
+  check('ranks run 1..20 in order of the composite score', ranked.every((c, i) => c.rank === i + 1) && ranked.every((c, i) => i === 0 || ranked[i - 1].rankScore >= c.rankScore));
+  const deepAndOld = { symbol: 'BEST', status: { drawdownPct: -95, daysSinceLow: 250 } };
+  const shallowAndNew = { symbol: 'WORST', status: { drawdownPct: -1, daysSinceLow: 30 } };
+  const r2 = mod.rankLongTermCandidates([shallowAndNew, ...cands.slice(0, 5), deepAndOld]);
+  check('the deepest, longest-held low ranks first and the shallowest, newest last', r2[0].symbol === 'BEST' && r2[r2.length - 1].symbol === 'WORST', r2.map(c => c.symbol).join(','));
+  const legacy = mod.rankLongTermCandidates([{ symbol: 'A', status: { daysSinceLow: 200 } }, { symbol: 'B', status: { daysSinceLow: 50 } }]);
+  check('rows written before drawdown_pct existed still rank, on base length alone', legacy[0].symbol === 'A' && legacy.every(c => Number.isFinite(c.rankScore)));
+  check('fewer than 20 candidates: all are kept, none invented', mod.rankLongTermCandidates(cands.slice(0, 3)).length === 3 && mod.rankLongTermCandidates([]).length === 0);
+}
 
 console.log('\n== CRYPTO_BLOCKLIST: stablecoins/wrapped assets excluded from the tracked universe ==');
 // Found live 2026-08-24 verifying the long-term-potential category:
