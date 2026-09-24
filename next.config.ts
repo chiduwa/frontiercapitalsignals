@@ -13,9 +13,18 @@ const nextConfig: NextConfig = {
         // www used to serve a full duplicate of the site, and its /signals/
         // path fell through to a 404 because the signals Worker's route only
         // covers the apex. One permanent hop to the canonical host fixes both.
-        source: "/:path*",
+        // The bare root gets its own rule: with "/:path*" the Workers runtime
+        // left the empty parameter unsubstituted and sent www's homepage to a
+        // literal /:path* (404). ":path+" below always has a segment to fill.
+        source: "/",
         has: [{ type: "host", value: "www.frontiercapitalsignals.com" }],
-        destination: "https://frontiercapitalsignals.com/:path*",
+        destination: "https://frontiercapitalsignals.com/",
+        permanent: true,
+      },
+      {
+        source: "/:path+",
+        has: [{ type: "host", value: "www.frontiercapitalsignals.com" }],
+        destination: "https://frontiercapitalsignals.com/:path+",
         permanent: true,
       },
       {
