@@ -1,0 +1,856 @@
+[
+ {
+  "id": "crypto-000",
+  "assetClass": "crypto",
+  "symbols": [
+   "1INCH",
+   "AAVE",
+   "ADA",
+   "AIOZ",
+   "AKT",
+   "ALGO",
+   "ALT",
+   "ANKR"
+  ]
+ },
+ {
+  "id": "crypto-001",
+  "assetClass": "crypto",
+  "symbols": [
+   "APT",
+   "AR",
+   "ARKM",
+   "ASTR",
+   "ATOM",
+   "AVAX",
+   "AXL",
+   "AXS"
+  ]
+ },
+ {
+  "id": "crypto-002",
+  "assetClass": "crypto",
+  "symbols": [
+   "BABYDOGE",
+   "BANANAS31",
+   "BAT",
+   "BCH",
+   "BDX",
+   "BEAM",
+   "BGB",
+   "BIO"
+  ]
+ },
+ {
+  "id": "crypto-003",
+  "assetClass": "crypto",
+  "symbols": [
+   "BLUR",
+   "BNB",
+   "BOME",
+   "BONK",
+   "BSV",
+   "CAKE",
+   "CATI",
+   "CELO"
+  ]
+ },
+ {
+  "id": "crypto-004",
+  "assetClass": "crypto",
+  "symbols": [
+   "CFG",
+   "CFX",
+   "CHZ",
+   "CKB",
+   "COMP",
+   "COTI",
+   "COW",
+   "CRO"
+  ]
+ },
+ {
+  "id": "crypto-005",
+  "assetClass": "crypto",
+  "symbols": [
+   "CRV",
+   "CSPR",
+   "CTC",
+   "DBR",
+   "DCR",
+   "DEXE",
+   "DGB",
+   "DOGE"
+  ]
+ },
+ {
+  "id": "crypto-006",
+  "assetClass": "crypto",
+  "symbols": [
+   "DOT",
+   "DUSK",
+   "DYDX",
+   "EDGE",
+   "EGLD",
+   "EIGEN",
+   "ELF",
+   "ENA"
+  ]
+ },
+ {
+  "id": "crypto-007",
+  "assetClass": "crypto",
+  "symbols": [
+   "ENJ",
+   "ENS",
+   "ETC",
+   "ETHFI",
+   "FARTCOIN",
+   "FET",
+   "FIL",
+   "FLOKI"
+  ]
+ },
+ {
+  "id": "crypto-008",
+  "assetClass": "crypto",
+  "symbols": [
+   "FLOW",
+   "FLR",
+   "FLUID",
+   "GALA",
+   "GAS",
+   "GEOD",
+   "GLM",
+   "GMX"
+  ]
+ },
+ {
+  "id": "crypto-009",
+  "assetClass": "crypto",
+  "symbols": [
+   "GNO",
+   "GOMINING",
+   "GRT",
+   "GT",
+   "HNT",
+   "HOT",
+   "HTX",
+   "ICP"
+  ]
+ },
+ {
+  "id": "crypto-010",
+  "assetClass": "crypto",
+  "symbols": [
+   "ID",
+   "IMX",
+   "INJ",
+   "IO",
+   "IOTA",
+   "JASMY",
+   "JST",
+   "JTO"
+  ]
+ },
+ {
+  "id": "crypto-011",
+  "assetClass": "crypto",
+  "symbols": [
+   "JUP",
+   "KAIA",
+   "KAS",
+   "KAVA",
+   "KCS",
+   "KMNO",
+   "KSM",
+   "LDO"
+  ]
+ },
+ {
+  "id": "crypto-012",
+  "assetClass": "crypto",
+  "symbols": [
+   "LINK",
+   "LPT",
+   "LSK",
+   "LTC",
+   "LUNC",
+   "MANA",
+   "MERL",
+   "MINA"
+  ]
+ },
+ {
+  "id": "crypto-013",
+  "assetClass": "crypto",
+  "symbols": [
+   "MNT",
+   "MON",
+   "MX",
+   "NEAR",
+   "NEO",
+   "NEXO",
+   "NMR",
+   "NOT"
+  ]
+ },
+ {
+  "id": "crypto-014",
+  "assetClass": "crypto",
+  "symbols": [
+   "OKB",
+   "ONDO",
+   "ONT",
+   "OP",
+   "ORCA",
+   "ORDI",
+   "PAXG",
+   "PEAQ"
+  ]
+ },
+ {
+  "id": "crypto-015",
+  "assetClass": "crypto",
+  "symbols": [
+   "PENDLE",
+   "PENGU",
+   "PEPE",
+   "PNUT",
+   "POL",
+   "POLYX",
+   "PROM",
+   "PYTH"
+  ]
+ },
+ {
+  "id": "crypto-016",
+  "assetClass": "crypto",
+  "symbols": [
+   "QNT",
+   "QTUM",
+   "RAY",
+   "REAL",
+   "RENDER",
+   "RIF",
+   "ROSE",
+   "RSR"
+  ]
+ },
+ {
+  "id": "crypto-017",
+  "assetClass": "crypto",
+  "symbols": [
+   "RUNE",
+   "S",
+   "SAND",
+   "SC",
+   "SEI",
+   "SHIB",
+   "SKY",
+   "SNX"
+  ]
+ },
+ {
+  "id": "crypto-018",
+  "assetClass": "crypto",
+  "symbols": [
+   "SSV",
+   "STX",
+   "SUI",
+   "SUN",
+   "SUPER",
+   "SUSHI",
+   "SYRUP",
+   "TAG"
+  ]
+ },
+ {
+  "id": "crypto-019",
+  "assetClass": "crypto",
+  "symbols": [
+   "TAO",
+   "TEL",
+   "TFUEL",
+   "THETA",
+   "TRAC",
+   "TRB",
+   "TRUMP",
+   "TRX"
+  ]
+ },
+ {
+  "id": "crypto-020",
+  "assetClass": "crypto",
+  "symbols": [
+   "TURBO",
+   "TWT",
+   "ULTIMA",
+   "UNI",
+   "USX",
+   "VELO",
+   "VET",
+   "VIRTUAL"
+  ]
+ },
+ {
+  "id": "crypto-021",
+  "assetClass": "crypto",
+  "symbols": [
+   "VTHO",
+   "W",
+   "WBT",
+   "WIF",
+   "WLD",
+   "XCN",
+   "XDC",
+   "XEC"
+  ]
+ },
+ {
+  "id": "crypto-022",
+  "assetClass": "crypto",
+  "symbols": [
+   "XMR",
+   "XNO",
+   "XPR",
+   "XTZ",
+   "XVG",
+   "XYO",
+   "YFI",
+   "ZANO"
+  ]
+ },
+ {
+  "id": "crypto-023",
+  "assetClass": "crypto",
+  "symbols": [
+   "ZBCN",
+   "ZEC",
+   "ZEN",
+   "ZETA",
+   "ZIG",
+   "ZIL",
+   "ZK",
+   "ZRO"
+  ]
+ },
+ {
+  "id": "crypto-024",
+  "assetClass": "crypto",
+  "symbols": [
+   "ZRX"
+  ]
+ },
+ {
+  "id": "stock-025",
+  "assetClass": "stock",
+  "symbols": [
+   "AA",
+   "AAL",
+   "AAPL",
+   "ABBV",
+   "ABNB",
+   "ABT",
+   "ACHR",
+   "ADBE"
+  ]
+ },
+ {
+  "id": "stock-026",
+  "assetClass": "stock",
+  "symbols": [
+   "ADI",
+   "ADSK",
+   "AEP",
+   "AFRM",
+   "AIG",
+   "ALB",
+   "ALL",
+   "AMAT"
+  ]
+ },
+ {
+  "id": "stock-027",
+  "assetClass": "stock",
+  "symbols": [
+   "AMD",
+   "AMGN",
+   "AMT",
+   "AMZN",
+   "ANET",
+   "AON",
+   "APD",
+   "APP"
+  ]
+ },
+ {
+  "id": "stock-028",
+  "assetClass": "stock",
+  "symbols": [
+   "APTV",
+   "ARM",
+   "ASML",
+   "ASTS",
+   "AVGO",
+   "AXP",
+   "AZO",
+   "BA"
+  ]
+ },
+ {
+  "id": "stock-029",
+  "assetClass": "stock",
+  "symbols": [
+   "BABA",
+   "BAC",
+   "BIIB",
+   "BKNG",
+   "BKR",
+   "BLK",
+   "BMY",
+   "BSX"
+  ]
+ },
+ {
+  "id": "stock-030",
+  "assetClass": "stock",
+  "symbols": [
+   "BWA",
+   "C",
+   "CAT",
+   "CB",
+   "CCI",
+   "CCL",
+   "CI",
+   "CIEN"
+  ]
+ },
+ {
+  "id": "stock-031",
+  "assetClass": "stock",
+  "symbols": [
+   "CL",
+   "CLF",
+   "CMCSA",
+   "CME",
+   "CMG",
+   "CMI",
+   "COF",
+   "COIN"
+  ]
+ },
+ {
+  "id": "stock-032",
+  "assetClass": "stock",
+  "symbols": [
+   "COP",
+   "COST",
+   "CRM",
+   "CRSP",
+   "CRWD",
+   "CSCO",
+   "CSX",
+   "CVS"
+  ]
+ },
+ {
+  "id": "stock-033",
+  "assetClass": "stock",
+  "symbols": [
+   "CVX",
+   "D",
+   "DAL",
+   "DASH",
+   "DD",
+   "DDOG",
+   "DE",
+   "DELL"
+  ]
+ },
+ {
+  "id": "stock-034",
+  "assetClass": "stock",
+  "symbols": [
+   "DHR",
+   "DINO",
+   "DIS",
+   "DLR",
+   "DOCU",
+   "DOV",
+   "DOW",
+   "DUK"
+  ]
+ },
+ {
+  "id": "stock-035",
+  "assetClass": "stock",
+  "symbols": [
+   "DVN",
+   "EL",
+   "ELV",
+   "EMR",
+   "ENPH",
+   "EOG",
+   "EQIX",
+   "ESTC"
+  ]
+ },
+ {
+  "id": "stock-036",
+  "assetClass": "stock",
+  "symbols": [
+   "ETN",
+   "EXC",
+   "F",
+   "FANG",
+   "FCX",
+   "FDX",
+   "FSLR",
+   "FTNT"
+  ]
+ },
+ {
+  "id": "stock-037",
+  "assetClass": "stock",
+  "symbols": [
+   "GE",
+   "GEV",
+   "GILD",
+   "GIS",
+   "GLW",
+   "GM",
+   "GOOGL",
+   "GRAB"
+  ]
+ },
+ {
+  "id": "stock-038",
+  "assetClass": "stock",
+  "symbols": [
+   "GS",
+   "GTLB",
+   "HAL",
+   "HCA",
+   "HD",
+   "HLT",
+   "HMC",
+   "HON"
+  ]
+ },
+ {
+  "id": "stock-039",
+  "assetClass": "stock",
+  "symbols": [
+   "HOOD",
+   "HPE",
+   "HPQ",
+   "HUBS",
+   "HUM",
+   "IBM",
+   "ICE",
+   "INTC"
+  ]
+ },
+ {
+  "id": "stock-040",
+  "assetClass": "stock",
+  "symbols": [
+   "INTU",
+   "IONQ",
+   "ISRG",
+   "ITW",
+   "JD",
+   "JNJ",
+   "JOBY",
+   "JPM"
+  ]
+ },
+ {
+  "id": "stock-041",
+  "assetClass": "stock",
+  "symbols": [
+   "KHC",
+   "KLAC",
+   "KMB",
+   "KMI",
+   "KO",
+   "LCID",
+   "LI",
+   "LIN"
+  ]
+ },
+ {
+  "id": "stock-042",
+  "assetClass": "stock",
+  "symbols": [
+   "LLY",
+   "LMT",
+   "LNG",
+   "LOW",
+   "LRCX",
+   "LULU",
+   "LUNR",
+   "LUV"
+  ]
+ },
+ {
+  "id": "stock-043",
+  "assetClass": "stock",
+  "symbols": [
+   "MA",
+   "MAR",
+   "MCD",
+   "MCHP",
+   "MCK",
+   "MCO",
+   "MDB",
+   "MDLZ"
+  ]
+ },
+ {
+  "id": "stock-044",
+  "assetClass": "stock",
+  "symbols": [
+   "MDT",
+   "MELI",
+   "MET",
+   "META",
+   "MMM",
+   "MP",
+   "MPC",
+   "MRK"
+  ]
+ },
+ {
+  "id": "stock-045",
+  "assetClass": "stock",
+  "symbols": [
+   "MRNA",
+   "MRVL",
+   "MS",
+   "MSFT",
+   "MSTR",
+   "MU",
+   "NCLH",
+   "NDAQ"
+  ]
+ },
+ {
+  "id": "stock-046",
+  "assetClass": "stock",
+  "symbols": [
+   "NEE",
+   "NEM",
+   "NET",
+   "NFLX",
+   "NIO",
+   "NKE",
+   "NOW",
+   "NSC"
+  ]
+ },
+ {
+  "id": "stock-047",
+  "assetClass": "stock",
+  "symbols": [
+   "NTLA",
+   "NU",
+   "NUE",
+   "NVDA",
+   "NXPI",
+   "O",
+   "OKE",
+   "OKLO"
+  ]
+ },
+ {
+  "id": "stock-048",
+  "assetClass": "stock",
+  "symbols": [
+   "OKTA",
+   "ON",
+   "ORCL",
+   "ORLY",
+   "OXY",
+   "PANW",
+   "PBF",
+   "PCAR"
+  ]
+ },
+ {
+  "id": "stock-049",
+  "assetClass": "stock",
+  "symbols": [
+   "PDD",
+   "PEP",
+   "PFE",
+   "PG",
+   "PGR",
+   "PH",
+   "PINS",
+   "PLD"
+  ]
+ },
+ {
+  "id": "stock-050",
+  "assetClass": "stock",
+  "symbols": [
+   "PLTR",
+   "PNC",
+   "PRU",
+   "PSA",
+   "PSX",
+   "PWR",
+   "PYPL",
+   "QCOM"
+  ]
+ },
+ {
+  "id": "stock-051",
+  "assetClass": "stock",
+  "symbols": [
+   "QLYS",
+   "QRVO",
+   "RBLX",
+   "RCL",
+   "RDDT",
+   "REGN",
+   "RGTI",
+   "RIVN"
+  ]
+ },
+ {
+  "id": "stock-052",
+  "assetClass": "stock",
+  "symbols": [
+   "RKLB",
+   "ROK",
+   "ROKU",
+   "ROST",
+   "RPD",
+   "RTX",
+   "RUN",
+   "SAP"
+  ]
+ },
+ {
+  "id": "stock-053",
+  "assetClass": "stock",
+  "symbols": [
+   "SBUX",
+   "SCHW",
+   "SE",
+   "SHOP",
+   "SHW",
+   "SLB",
+   "SMCI",
+   "SMR"
+  ]
+ },
+ {
+  "id": "stock-054",
+  "assetClass": "stock",
+  "symbols": [
+   "SNAP",
+   "SNOW",
+   "SO",
+   "SOFI",
+   "SPG",
+   "SPGI",
+   "SPOT",
+   "SRE"
+  ]
+ },
+ {
+  "id": "stock-055",
+  "assetClass": "stock",
+  "symbols": [
+   "STLD",
+   "STT",
+   "SWKS",
+   "SYK",
+   "T",
+   "TEAM",
+   "TENB",
+   "TER"
+  ]
+ },
+ {
+  "id": "stock-056",
+  "assetClass": "stock",
+  "symbols": [
+   "TFC",
+   "TGT",
+   "TJX",
+   "TM",
+   "TMO",
+   "TMUS",
+   "TOST",
+   "TRV"
+  ]
+ },
+ {
+  "id": "stock-057",
+  "assetClass": "stock",
+  "symbols": [
+   "TSLA",
+   "TSM",
+   "TTD",
+   "TTWO",
+   "TWLO",
+   "TXN",
+   "UAL",
+   "UBER"
+  ]
+ },
+ {
+  "id": "stock-058",
+  "assetClass": "stock",
+  "symbols": [
+   "UNH",
+   "UNP",
+   "UPS",
+   "UPST",
+   "URI",
+   "USB",
+   "V",
+   "VLO"
+  ]
+ },
+ {
+  "id": "stock-059",
+  "assetClass": "stock",
+  "symbols": [
+   "VRT",
+   "VRTX",
+   "VZ",
+   "WBD",
+   "WDAY",
+   "WDC",
+   "WELL",
+   "WFC"
+  ]
+ },
+ {
+  "id": "stock-060",
+  "assetClass": "stock",
+  "symbols": [
+   "WM",
+   "WMB",
+   "WMT",
+   "XOM",
+   "XPEV",
+   "YUM",
+   "ZM",
+   "ZS"
+  ]
+ },
+ {
+  "id": "stock-061",
+  "assetClass": "stock",
+  "symbols": [
+   "ZTS"
+  ]
+ }
+]

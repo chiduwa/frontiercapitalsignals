@@ -3,8 +3,9 @@
 Asked on 2026-09-23: make the learning models learn from sequences, time and
 momentum, and find out whether an LSTM, ARIMA/SARIMAX, XGBoost/LightGBM,
 support vector regression or logistic regression works for any individual
-always-tracked asset. This page is the evidence and the handoff for carrying
-the same test to the other tracked assets.
+always-tracked asset. On 2026-09-24 the same test was carried to every other
+asset in the archive ([the wide screen](#the-wide-screen-every-other-asset-2026-09-24)).
+This page is the evidence for both runs and the recipe for running it again.
 
 ## The answer
 
@@ -28,11 +29,22 @@ gap) was already an input to the per-asset model, and adding acceleration,
 return lags, calendar and a 30-day sequence did not create direction skill in
 any family.
 
+**Across the other 471 assets, the answer is the same for direction and
+nearly the same for size.** Pooled with the favorites, the wide screen ran
+14,834 tests on 479 assets. Of the 6,221 direction tests, none survives
+correction. On size, two assets do beat GARCH + weekday, and both are stocks
+at one session with the LSTM: LMT and CAT. Each holds in both halves of its
+window, and both are now challengers in the
+[model tournament](MODEL_TOURNAMENT.md), which decides forward.
+
 Frozen run: `research-2026-09-23-sequence/` (`report.json`, `report.md`,
 `panel.json.gz`). `inputHash` `45b7de9b4abf44d9…`, `codeHash`
-`3aad25eea16ffe21…`, as of 2026-09-23. To reproduce it without credentials,
-from `signals-worker`, in an environment built as in the handoff below (about
-14 minutes on one core):
+`3aad25eea16ffe21…`, as of 2026-09-23. The script has since learned stocks,
+so that hash is the version at commit `3c9b45b`
+(`git show 3c9b45b:signals-worker/scripts/tracked-sequence-research.py`).
+To reproduce the run without credentials, from `signals-worker`, in an
+environment built as in [Running it again](#running-it-again) (about 14
+minutes on one core):
 
 ```sh
 gzip -dc docs/research-2026-09-23-sequence/panel.json.gz > /tmp/seq-panel.json
@@ -176,81 +188,175 @@ no D1 rows, publishes nothing and places no orders. Libraries are pinned in
 `scripts/sequence-research-requirements.txt`; PyTorch comes from the CPU
 index at 2.14.0.
 
-## Handoff: carrying this to the other tracked assets
+## The wide screen: every other asset (2026-09-24)
 
-### Other crypto assets: ready to run
+The handoff this page used to end with was carried out. The row builder
+learned stocks: horizons counted in trading sessions, SPY as benchmark and
+leader, the weekday factor over five sessions, and SARIMA's season set to 5.
+Every asset in the archive with enough usable history was then scored by the
+same seven families, and everything was corrected as one family.
 
-The row builder and the model script both take a symbol list. From
-`signals-worker`, with the FCS D1 credentials in the environment:
+### What was run
+
+- **Panel:** the whole archive as of 2026-09-24 (652 assets), loaded once.
+- **Assets:** every crypto asset or stock with at least 600 usable daily
+  bars, minus pegs and series stored at too few decimals to have a real
+  return. That left 182 other coins and 289 stocks. The 8 favorites came from
+  the weekly lane's own 360-day report, for **479 assets** in all (190 crypto,
+  289 stocks).
+- **Inputs:** crypto assets use the favorites as leaders and stocks use SPY,
+  so no asset's rows depend on its batch. Only the favorites have open
+  interest, funding and liquidation lanes, so every other result is a
+  price, volume, calendar and momentum result.
+- **Test:** the last 360 days per asset (245 sessions for a stock), walk-forward
+  as in [Protocol](#protocol). Horizons were 1 and 7 days for crypto, and 1
+  and 5 sessions for stocks.
+- **Correction:** 63 reports, pooled by `scripts/tracked-sequence-combine.py`
+  into one family of **14,834 tests**: 6,221 on direction against the base
+  rate, 4,785 on size against the median move and 3,828 on size against
+  GARCH + weekday. Both Holm (no false positive anywhere, at 5%) and
+  Benjamini–Hochberg (at most 5% of passes false) were applied. The p-values
+  come from each test's bootstrap interval. The bootstrap's own p bottoms out
+  at 1/20,001, which sits above Holm's first bar at this width, so it would
+  have made passing impossible however real the effect.
+- **Cost:** about 7 hours on 5 cores, in 62 batches of 8.
+
+Frozen in `research-2026-09-24-sequence-wide/`:
+
+- `combined.json`: the summary and every Holm and BH pass.
+- `all-tests.json.gz`: all 14,834 tests, with p, Holm p and BH q.
+- `batches.json`: the batches exactly as run.
+
+The `codeHash` is `f501eedd9500880a…` (commit `1a5b820`). The 245 MB panel is
+not frozen, so re-running on today's archive is a new screen, not a
+reproduction.
+
+### What it found
+
+| Question | Tests | BH passes | Holm passes |
+|---|---:|---:|---:|
+| Direction vs base rate | 6,221 | **0** | 0 |
+| Size vs median move | 4,785 | 78 | 21 |
+| Size vs GARCH + weekday | 3,828 | **2** | 0 |
+
+**Direction: nothing, anywhere.** Chance alone would put about 311 direction
+tests below p = 0.05 in the models' favour. There were 91, so the models lose
+to the plain base rate more often than luck would have them.
+
+**Size vs the median move** is mostly production's own method. GARCH +
+weekday has 46 passes (31 coins, 15 stocks), 42 of them at one day or
+session. The learned models have 32 passes, 30 of them on stocks. The LSTM
+has 21: ANET, ASML, BSX, CIEN (both horizons), CSCO, GLW, HPE, HUBS, IBM,
+INTU, LMT, LRCX, MU, NEM, OKLO (both horizons), ORCL and WDC, plus two coins,
+MX and PAXG. SVR has 6, LightGBM 3 and XGBoost 2.
+
+**Size vs GARCH + weekday**, the bar that matters, has two passes. Both are
+the LSTM at one session:
+
+| Asset | MAE gain vs GARCH + weekday | 95% interval | BH q | First half | Second half |
+|---|---:|---|---:|---:|---:|
+| LMT | +0.0755 pp | +0.041 to +0.111 | 0.006 | +0.074, t 3.59 | +0.078, t 3.93 |
+| CAT | +0.0501 pp | +0.022 to +0.079 | 0.048 | +0.054, t 2.94 | +0.046, t 2.00 |
+
+Each window runs from 2025-09-29 to 2026-09-18, split at its midpoint.
+Neither clears Holm (LMT's Holm p is 0.18), so both are candidates, not
+conclusions.
+
+The class-level pattern explains why they are exceptions. This is the share
+of assets where each model beat GARCH + weekday on size:
+
+| Model | Stocks, 1 session | Stocks, 5 sessions | Crypto, 1 day | Crypto, 7 days |
+|---|---:|---:|---:|---:|
+| LSTM | 60% | 39% | 5% | 24% |
+| LightGBM | 32% | 34% | 1% | 14% |
+| SVR | 19% | 31% | 1% | 20% |
+| XGBoost | 23% | 23% | 1% | 9% |
+
+On stocks at one session, the LSTM is roughly level with GARCH + weekday on
+average (+0.003 pp). It wins on 60% of stocks, but narrowly; LMT and CAT are
+the tail where it wins clearly. On crypto, every learned model loses to
+GARCH + weekday almost everywhere.
+
+### What happened with the results
+
+- **LMT and CAT are challengers in the model tournament** (1 session, move
+  size). This is recorded in `scripts/tournament-universe.json` under
+  `screened`, and LMT joined the stock universe for it. The tournament runs
+  this study's own `fit_lstm`, turned into a calibrated volatility and scored
+  forward on QLIKE against the slot's incumbent. Promotion needs e ≥ 33 for
+  LMT (a fresh slot, first alpha) and e ≥ 526 for CAT (fourth in a slot that
+  already had three challengers), plus at least 60 forward sessions.
+  Details: [MODEL_TOURNAMENT](MODEL_TOURNAMENT.md), "Screened candidates".
+- **Nothing else from the screen is actionable.** GARCH + weekday is
+  production already, and a size-vs-median pass by a learned model is
+  already beaten by it.
+- **Data defects the screen exposed:**
+  - Tiny-price coins stored at six decimals. Nightly repaired SHIB, BONK,
+    LUNC, FLOKI and XEC from Binance. BABYDOGE, BTT, HTX, SKY, TAG and XCN
+    have no clean source and are skipped.
+  - USX, a loosely pegged USD stablecoin (median daily move 0.07%, above the
+    0.03% peg bar), is now on the stable list.
+  - On 2026-09-22 Yahoo returned no close for 211 stocks. That date is a
+    hole the nightly keeps re-offering, so a one-session label across it
+    spans two sessions for those stocks.
+
+### Running it again
+
+No schedule runs it; it is too heavy for that. Re-run it after a large
+archive repair, or when the tournament's universe is due for review. From
+`signals-worker`:
 
 ```sh
 python3 -m venv /tmp/fcs-seq-env
 /tmp/fcs-seq-env/bin/pip install -r scripts/sequence-research-requirements.txt
 /tmp/fcs-seq-env/bin/pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
 
-SYMS=LINK,AVAX,DOT,ADA,DOGE,SUI      # one batch; see the pitfalls below
-node scripts/hierarchical-research.mjs --dry-run --symbols $SYMS --save-input /tmp/seq-panel.json --load-only
-node scripts/tracked-research-data.mjs /tmp/seq-panel.json /tmp/seq-rows.json --sequence --symbols $SYMS
-OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /tmp/fcs-seq-env/bin/python scripts/tracked-sequence-research.py \
-  --input /tmp/seq-rows.json --output /tmp/seq-results --test-days 720
+# 1. One whole-archive panel (wrangler logged in; unset a stale CLOUDFLARE_API_TOKEN first).
+node scripts/hierarchical-research.mjs --dry-run --wrangler --load-only --save-input /tmp/wide/panel.json
+# 2. Split into batches: usable history, pegs and quantized series decided here.
+node scripts/sequence-wide-batches.mjs /tmp/wide/panel.json /tmp/wide
+# 3. Score every batch, one core each; resumable.
+/tmp/fcs-seq-env/bin/python scripts/sequence-wide-run.py /tmp/wide --workers 5 --test-days 360
+# 4. The favorites, from the same panel.
+node scripts/tracked-research-data.mjs /tmp/wide/panel.json /tmp/wide/fav-rows.json --sequence
+OPENBLAS_NUM_THREADS=1 /tmp/fcs-seq-env/bin/python scripts/tracked-sequence-research.py \
+  --input /tmp/wide/fav-rows.json --output /tmp/wide/out/favorites --test-days 360
+# 5. Correct everything as ONE family.
+python3 scripts/tracked-sequence-combine.py /tmp/wide/out/*/report.json --output /tmp/wide/final
 ```
 
-Runtime is about 100 seconds per asset for a 720-day test on one core (1-day
-and 7-day together), about half that at 360 days. `--no-lstm` and
-`--no-sarima` remove the two slowest families. The archive holds 321 crypto
-assets, so the other 313 are roughly 9 core-hours at 720 days: run batches as
-parallel processes, then correct them together (pitfall 1).
+On the 2026-09-24 panel, step 2 reproduces the screen's exact asset set
+without any hand exclusions: 471 batched assets plus the 8 favorites.
 
 Pitfalls, in the order they will bite:
 
-1. **Correct across the whole family, not one batch.** Holm runs over whatever
-   is in one report. Six assets scored in isolation and then compared by eye
-   is an uncorrected search. Either run every symbol in one invocation (rows
-   from several panel loads with the **same `asOf`** can be concatenated,
-   since the script only needs `asOf`, `symbols` and `rows`), or pool the
-   per-batch `p` values from each `report.json` and correct them together
-   before calling anything a result.
-2. **Load in small symbol batches.** The panel loader already pages symbols,
-   but a very long `--symbols` list still makes large D1 reads, and the D1
-   7010 result-size limit has silently emptied research inputs before. Six to
-   ten symbols per load is safe.
-3. **Only the always-tracked 8 have OI, funding and liquidation samples.** For
-   every other asset those lanes drop out, so a result there is a
-   price/volume/calendar/momentum result. Say so when reporting it, and do not
-   compare it one-for-one with a favorite's.
-4. **Survivorship.** Any asset still being tracked today survived. Split every
-   result by listing cohort, established versus recent, before believing it
-   (the survivorship section of [MODEL_ZOO](MODEL_ZOO.md)).
-5. **Short histories.** An asset needs about 150 daily rows before its first
-   test fold (90 train + 60 validation). A recent listing produces few test
-   outcomes and wide intervals. Report n next to every number.
-
-### Stocks: needs code, not just a flag
-
-`researchRows` keeps crypto assets only, and three things in it assume a
-7-day week:
-
-- The target check `end.date === offset(date, horizon)` counts calendar days,
-  so every Friday 1-day row (Friday → Saturday) would be dropped. Stocks need
-  the horizon counted in **sessions**.
-- `timeSeriesPaths` is called with `assetClass: 'crypto'`. Stocks need
-  `'stock'` so the weekday factor is estimated over the five sessions.
-- SARIMA's seasonal period should be 5 on a session index, and the weekday
-  one-hot will have two always-zero columns (harmless, but drop them).
-
-The crypto derivatives and liquidity lanes must stay absent for stocks. Add
-equity-specific inputs (earnings dates, adjusted prices, options) only with
-their own publication timestamps, as
-[PREDICTION_ROADMAP](PREDICTION_ROADMAP.md) §5 requires.
+1. **Correct across the whole family, never one batch.** A batch corrected
+   on its own is an uncorrected search. Step 5 is the only place a result is
+   read.
+2. **Judge quantization on the stored bars.** Sanitizing drops repeated
+   closes, which is exactly what hides the defect. Count *usable* bars, too:
+   BABYDOGE stores 1,929 bars, of which 11 are usable.
+3. **Survivorship.** Every coin and stock still in the archive survived. The
+   stock universe is today's large caps. Split a result by listing cohort
+   before believing it (the survivorship section of
+   [MODEL_ZOO](MODEL_ZOO.md)).
+4. **A screen's pass is a candidate.** Before a pass goes into `screened`, it
+   needs BH across the whole family, the strong benchmark (GARCH + weekday,
+   not the median move) and both halves. After that, only the tournament's
+   forward record can promote it.
 
 ### What would count as "it works"
 
-The same bar as every other lane: clear Holm across the full family in the
-established cohort, hold in both halves of the test window, beat the *strong*
-benchmark (GARCH + weekday for magnitude, not just the median), and then
-survive a pre-declared forward window before anything touches the published
-direction or a bot. The report does not split halves itself; for any
-candidate, split `predictions.json` by date and score each half.
+The same bar as every other lane, now enforced by the tournament:
+
+1. Clear the corrected screen.
+2. Beat the strong benchmark in both halves.
+3. Win forward on forecasts logged before their outcomes existed, through an
+   e-process that stays valid however often it is checked.
+
+Only a model that has done all three may touch the published direction or a
+bot. The screen's report does not split halves itself. For any candidate,
+split its batch's `predictions.json` by date and score each half.
 
 Related: [[TIME_SERIES_EVIDENCE]], [[TRACKED_ASSET_AUDIT_2026_09_19]],
 [[PREDICTION_ROADMAP]], [[MODEL_ZOO]]

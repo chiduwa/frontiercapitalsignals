@@ -386,7 +386,7 @@ export function isStableValueAsset(asset) {
   const id = String(asset?.id || '').toLowerCase();
   const name = String(asset?.name || '').toLowerCase();
   if (CRYPTO_BLOCKLIST.has(symbol)) return true;
-  if (/^(usd|usdt|usdc|usde|usds|dai|fdusd|pyusd|tusd|usdp|gusd|frax|lusd|susd|usdd|usdy|usd0|usdtb|rlusd|eurc|eurt|bfusd|gho|usd1|usdg|usdgo|ausd|usdf|usdl|usdo|usdb|usdn|deusd)$/.test(symbol)) return true;
+  if (/^(usd|usdt|usdc|usde|usds|dai|fdusd|pyusd|tusd|usdp|gusd|frax|lusd|susd|usdd|usdy|usd0|usdtb|rlusd|eurc|eurt|bfusd|gho|usd1|usdg|usdgo|ausd|usdf|usdl|usdo|usdb|usdn|deusd|usx)$/.test(symbol)) return true;
   // Pegged to another fiat currency: their moves are that currency against
   // the dollar, not a crypto view. JPYC ranked 4th among "possible
   // multi-month lows" (2026-09-23) on the yen's year; its series is also too
