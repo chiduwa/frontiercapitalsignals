@@ -1,5 +1,5 @@
 {
- "note": "Tournament universe, 2026-09-24: the always-tracked 8 plus the 32 most liquid other coins (30-day median dollar volume, >=600 days of history, no pegs) and the 40 most liquid stocks. Membership is fixed so every forward record stays continuous; change it by commit.",
+ "note": "Tournament universe, 2026-09-24: the always-tracked 8 plus the 32 most liquid other coins (30-day median dollar volume, >=600 days of history, no pegs) and the 40 most liquid stocks. Membership is fixed so every forward record stays continuous; change it by commit. `screened` lists candidates the archive-wide study validated on history (docs/SEQUENCE_MODELS.md); each enters its slot once and must then win forward like any challenger.",
  "crypto": [
   "BTC",
   "ETH",
@@ -82,6 +82,25 @@
   "GEV",
   "GS",
   "KLAC",
-  "QCOM"
+  "QCOM",
+  "LMT"
+ ],
+ "screened": [
+  {
+   "symbol": "LMT",
+   "assetClass": "stock",
+   "target": "magnitude",
+   "horizon": 1,
+   "family": "lstm",
+   "evidence": "2026-09-24 screen of 479 assets: LSTM beat GARCH+weekday on 1-session move size by 0.076% MAE (BH q=0.006 across 14,834 tests; first half t=3.59, second half t=3.93)"
+  },
+  {
+   "symbol": "CAT",
+   "assetClass": "stock",
+   "target": "magnitude",
+   "horizon": 1,
+   "family": "lstm",
+   "evidence": "2026-09-24 screen of 479 assets: LSTM beat GARCH+weekday on 1-session move size by 0.050% MAE (BH q=0.048 across 14,834 tests; first half t=2.94, second half t=2.00)"
+  }
  ]
 }

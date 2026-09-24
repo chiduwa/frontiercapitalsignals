@@ -271,5 +271,83 @@ class Stocks(unittest.TestCase):
         self.assertEqual(len(pairs), math.ceil(len(sessions) / 5))
 
 
+
+def with_sequences(rows):
+    """The 30-day window a row knows at its close: returns THROUGH its date
+    (the previous row's move), never its own target."""
+    daily = sorted((r for r in rows if r['horizon'] == 1), key=lambda r: r['date'])
+    moves = {r['date']: math.log1p(r['target'] / 100) if r['target'] is not None else None for r in daily}
+    order = [r['date'] for r in daily]
+    window = {}
+    for i, d in enumerate(order):
+        window[d] = [[moves[order[k - 1]] if k >= 1 else None, 0.1 * ((k * 7) % 5 - 2)] for k in range(i - 29, i + 1)]
+    return [dict(r, sequence=window[r['date']]) for r in rows]
+
+
+HAS_TORCH = importlib.util.find_spec('torch') is not None
+LSTM = {'symbol': 'A', 'assetClass': 'crypto', 'target': 'magnitude', 'horizon': 1, 'family': 'lstm',
+        'evidence': 'test: beat GARCH+weekday in both halves'}
+
+
+class Screened(unittest.TestCase):
+    """A candidate the archive-wide screen validated enters its slot once,
+    first in line for alpha, and still has to win forward."""
+    def data(self, rows, screened):
+        return {'symbols': ['A'], 'rows': rows, 'klines': {}, 'screened': screened}
+
+    @unittest.skipUnless(HAS_TORCH, 'torch is installed in the tournament workflow')
+    def test_admitted_once_first_in_line_and_the_slot_still_seeds(self):
+        # Production's trailing scale reads twice the true volatility, so the
+        # generator has calibrated candidates worth seeding beside the LSTM.
+        rows = [dict(r, values=dict(r['values'], dailyVol=0.04)) for r in with_sequences(synthetic_rows(n=420))]
+        asof = rows[-1]['date']
+        for r in rows:
+            if r['date'] == asof: r['target'] = None
+        extra = [dict(LSTM, symbol='ZZZ'), dict(LSTM, horizon=5)]  # not in the universe; not a crypto slot
+        out = mt.run(self.data(rows, [LSTM] + extra), [], [], run_at='2026-01-01T00:00:00Z', weights=False)
+        lstm_id = mt.make('magnitude', 'lstm')['id']
+        slot = [m for m in out['registry'] if m['symbol'] == 'A' and m['target'] == 'magnitude' and m['horizon'] == 1]
+        mine = [m for m in slot if m['model_id'] == lstm_id]
+        self.assertEqual(len(mine), 1)
+        self.assertEqual((mine[0]['status'], mine[0]['alpha_index']), ('challenger', 1))
+        self.assertIn('both halves', mine[0]['reason'])
+        self.assertTrue(any(m['status'] == 'challenger' and m['model_id'] != lstm_id for m in slot),
+                        'the generator still seeds the slot around it')
+        self.assertEqual(sum(1 for m in out['registry'] if m['model_id'] == lstm_id), 1, 'nothing admitted off-universe or off-slot')
+        f = [x for x in out['forecasts'] if x['model_id'] == lstm_id]
+        self.assertEqual(len(f), 1)
+        self.assertGreater(json.loads(f[0]['forecast_json'])['sigma'], 0)
+        again = mt.run(self.data(rows, [LSTM]), out['registry'], out['forecasts'], run_at='2026-01-02T00:00:00Z', weights=False)
+        self.assertFalse([x for x in again['transitions'] if x['model_id'] == lstm_id], 'admitted once, never again')
+
+    @unittest.skipUnless(HAS_TORCH, 'torch is installed in the tournament workflow')
+    def test_the_lstm_forecasts_the_same_without_later_rows_and_twice_alike(self):
+        rows = [r for r in with_sequences(synthetic_rows(n=520)) if r['horizon'] == 1]
+        asof = rows[400]['date']
+        test = [dict(r, target=None) for r in rows if r['date'] == asof]
+        cut = [r for r in rows if r['targetDate'] <= asof] + test
+        spec = mt.make('magnitude', 'lstm')
+        full, _ = mt.fit_predict(spec, mt.matured(rows, asof), test, 1)
+        short, _ = mt.fit_predict(spec, mt.matured(cut, asof), test, 1)
+        again, _ = mt.fit_predict(spec, mt.matured(rows, asof), test, 1)
+        self.assertEqual(json.dumps(full), json.dumps(short))
+        self.assertEqual(json.dumps(full), json.dumps(again), 'deterministic on CPU')
+        realized = float(np.std([math.log1p(r['target'] / 100) for r in mt.matured(rows, asof)]))
+        self.assertTrue(0.2 * realized < full[0]['sigma'] < 5 * realized)
+
+    def test_no_window_means_no_forecast_never_a_stand_in(self):
+        rows = synthetic_rows(n=260)
+        asof = rows[-1]['date']
+        for r in rows:
+            if r['date'] == asof: r['target'] = None
+        fc, _ = mt.fit_predict(mt.make('magnitude', 'lstm'), mt.matured([r for r in rows if r['horizon'] == 1], asof),
+                               [r for r in rows if r['horizon'] == 1 and r['date'] == asof], 1)
+        self.assertEqual(fc, [{'sigma': None}])
+        out = mt.run(self.data(rows, [LSTM]), [], [], run_at='2026-01-01T00:00:00Z', weights=False)
+        lstm_id = mt.make('magnitude', 'lstm')['id']
+        self.assertTrue(any(m['model_id'] == lstm_id for m in out['registry']))
+        self.assertFalse([x for x in out['forecasts'] if x['model_id'] == lstm_id], 'nothing logged under its name')
+
+
 if __name__ == '__main__':
     unittest.main()

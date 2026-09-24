@@ -135,6 +135,7 @@ def describe(spec):
         name = SOURCE_LABELS[p['source']]
         return name + (', calibrated' if p.get('calibrated') else '') + (' (production)' if spec == BENCHMARKS['magnitude'] else '')
     if f == 'harx': return 'HAR regression' + (f" + {groups()}" if p.get('groups') else '')
+    if f == 'lstm': return 'LSTM on the 30-day sequence'
     if f == 'uniform': return 'no firing preferred'
     if f == 'firingFrequency': return f"cheapest-firing frequency, {p['window']} days" + (', by weekday' if p['weekday'] else '')
     return f
@@ -208,6 +209,50 @@ def base_sigma(row, source, h):
 def log_move(r): return math.log1p(r['target'] / 100)
 
 
+_seq = None
+
+
+def sequence_study():
+    """tracked-sequence-research.py, loaded on first use: the LSTM a screened
+    candidate runs IS the study's network, not a lookalike."""
+    global _seq
+    if _seq is None:
+        sp = importlib.util.spec_from_file_location('tracked_sequence_research', HERE / 'tracked-sequence-research.py')
+        _seq = importlib.util.module_from_spec(sp); sp.loader.exec_module(_seq)
+    return _seq
+
+
+def fit_lstm_magnitude(train, test, h):
+    """Move size from the 30-day sequence (return, |return|, volume against its
+    20-day mean), by the study's own two-head LSTM (fit_lstm): trained on the
+    matured rows before the last 60 (20 at longer horizons), early-stopped on
+    those 60, as the archive-wide screen ran it. Its |move| forecast becomes a
+    volatility by the one constant that minimizes QLIKE over the training
+    window, c^2 = mean(r^2 / m^2) -- the same calibration the `scale` family
+    uses -- with m floored at a tenth of the median move so no row divides by
+    zero. Deterministic on CPU for a fixed seed.
+
+    Not in the weekly grid: screening it on every asset would take hours. It
+    enters a slot only as a SCREENED candidate, one that already beat GARCH +
+    weekday out of sample, in both halves, after correcting across the whole
+    archive (docs/SEQUENCE_MODELS.md). The forward record decides the rest."""
+    s = sequence_study()
+    valn = 60 if h == 1 else 20
+    fit, val = train[:-valn], train[-valn:]
+    fit = [r for r in fit if r['targetDate'] < val[0]['date']]
+    y, yv = np.array([r['target'] for r in fit]), np.array([r['target'] for r in val])
+    everything = s.sequences(fit + val + test)
+    _, m = s.fit_lstm(s.sequences(fit), (y > 0).astype(float), abs(y), s.sequences(val), (yv > 0).astype(float), abs(yv),
+                      everything)
+    # |move| in percent -> log units, floored.
+    m = np.log1p(np.asarray(m, dtype=float) / 100)
+    seen = fit + val
+    floor = 0.1 * float(np.median([abs(log_move(r)) for r in seen]))
+    m = np.maximum(m, max(floor, 1e-6))
+    c = math.sqrt(float(np.mean([log_move(r) ** 2 for r in seen] / m[:len(seen)] ** 2)))
+    return [{'sigma': float(c * x)} for x in m[len(seen):]], None
+
+
 def fit_predict(spec, train, test, h, klines=None):
     """(forecasts for `test`, weights or None). Only `train` is ever fitted on."""
     fam, p = spec['family'], spec['params']
@@ -256,6 +301,13 @@ def fit_predict(spec, train, test, h, klines=None):
                 s = base_sigma(r, src, h) or base_sigma(r, 'trailing', h)
                 out.append({'sigma': float(s * c) if s else None})
             return out, None
+        if fam == 'lstm':
+            # Without the 30-day window there is no LSTM forecast -- never a
+            # stand-in logged under its name.
+            seq_rows = [r for r in train if r.get('sequence')]
+            if len(seq_rows) < 150 or not all(r.get('sequence') for r in test):
+                return [{'sigma': None} for _ in test], None
+            return fit_lstm_magnitude(seq_rows, test, h)
         if fam == 'harx':
             parts = ('harDaily', 'harWeek', 'harMonth')
             ok = lambda r: all((r['values'].get(k) or 0) > 0 for k in parts)
@@ -439,6 +491,7 @@ class Tournament:
         self.registry = {(r['model_id'], r['symbol'], int(r['horizon'])): dict(r) for r in registry}
         self.ledger = Ledger(ledger_rows)
         self.forecasts, self.scores, self.transitions, self.weights = [], [], [], {}
+        self.screened_ids = set()
 
     # -- registry helpers
     def cls(self, sym):
@@ -620,7 +673,9 @@ class Tournament:
                 room = LIVE_CHALLENGERS - len(live)
                 if room <= 0: continue
                 ever = self.slot_models(sym, target, h)
-                seeding = not any(m['status'] != 'benchmark' for m in ever)
+                # A screened candidate admitted ahead of the generator does not
+                # count as seeding; the slot still gets its first full draw.
+                seeding = not any(m['status'] != 'benchmark' and (m['model_id'], sym, h) not in self.screened_ids for m in ever)
                 if not (force or seeding): continue
                 tried = {m['model_id'] for m in ever}
                 inc = self.incumbent_id(sym, target, h)
@@ -632,6 +687,20 @@ class Tournament:
                 ranked.sort(key=lambda t: -t[0])
                 for _, spec, res in ranked[:min(room, room if seeding else ADMIT_PER_RUN)]:
                     self.register(spec, sym, h, 'challenger', f"admitted: history ranked it {res['meanScaled']:+.3f} vs {inc}", res)
+
+    def admit_screened(self):
+        """Candidates the archive-wide screen validated on history
+        (tournament-universe.json `screened`) enter their slot once, before the
+        generator, so a fresh slot spends its first and largest alpha on the
+        best-evidenced candidate. A slot that already holds challengers gives
+        it the next index -- the error guarantee is never re-cut. History
+        only admits; the forward record still decides."""
+        for c in self.data.get('screened') or []:
+            sym, h = c['symbol'], int(c['horizon'])
+            if sym not in self.symbols or (c['target'], h) not in SLOTS_BY_CLASS[self.cls(sym)]: continue
+            spec = make(c['target'], c['family'])
+            self.screened_ids.add((spec['id'], sym, h))
+            self.register(spec, sym, h, 'challenger', f"admitted by the archive-wide screen: {c['evidence']}")
 
     # -- 4. issue today's forecasts for every active model
     def active(self, sym, target, h):
@@ -672,6 +741,8 @@ class Tournament:
                 if len(train) < 150: continue
                 for spec in self.active(sym, target, h):
                     fc, w = fit_predict(spec, train, open_rows, h)
+                    # A size forecast of nothing can never be scored; log none.
+                    if target == 'magnitude' and not fc[0].get('sigma'): continue
                     self.emit(spec, sym, target, h, open_rows[0]['targetDate'], fc[0], as_of=latest)
 
     def emit(self, spec, sym, target, h, tdate, fc, as_of=None):
@@ -761,6 +832,7 @@ def run(data, registry, ledger_rows, generate=False, run_at=None, weights=True):
         t.register(BENCHMARKS[target], sym, h, 'benchmark', 'production method')
     t.score()
     t.lifecycle()
+    t.admit_screened()
     t.generate(force=generate)
     t.issue()
     if weights: t.weights_report()

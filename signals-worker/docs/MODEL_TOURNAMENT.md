@@ -27,8 +27,8 @@ generator runs.
 
 `scripts/tournament-universe.json` is a fixed, reviewed list: the
 always-tracked 8, the 32 most liquid other coins (30-day median dollar
-volume, at least 600 days of history, no pegs), and the 40 most liquid
-stocks. It is fixed on purpose: a forward record only means something if the
+volume, at least 600 days of history, no pegs), the 40 most liquid stocks,
+and LMT, which joined on 2026-09-24 for its screened candidate (below). It is fixed on purpose: a forward record only means something if the
 asset stays in. Change it by commit. An asset that leaves keeps its ledger;
 one that joins starts seeding on its first run.
 
@@ -53,6 +53,57 @@ one that joins starts seeding on its first run.
   in D1.
 - The futures bot trades only promoted 7-day crypto slots, so a promoted
   stock is published but never becomes a futures trade.
+
+## Screened candidates (added 2026-09-24)
+
+The weekly generator only proposes cheap families it can screen on every
+asset in minutes. A slower model enters by a second door: the
+**archive-wide sequence screen** ([SEQUENCE_MODELS](SEQUENCE_MODELS.md),
+"The wide screen"). A candidate that clears that screen is written into
+`scripts/tournament-universe.json` under `screened`, with its evidence. It
+must have cleared all three of these:
+
+1. Benjamini–Hochberg q < 0.05, corrected across every test in the screen.
+2. The strong benchmark: beating GARCH + weekday on size, not just the median
+   move.
+3. Both halves of its test window.
+
+Each run then:
+
+- **Admits it once,** before the generator, as a challenger whose reason is
+  the evidence. In a fresh slot it spends the slot's first and largest alpha
+  (promotion at e ≥ 33). In a slot that already holds challengers it takes
+  the next index; the error guarantee is never re-cut to make room. It does
+  not count as seeding, so a fresh slot still gets its full first draw from
+  the generator.
+- **Feeds it only what it reads.** The LSTM reads a 30-day window
+  (return, |return|, volume against its 20-day mean). Only its own slot's
+  rows carry that window, and every other row of the input is byte-identical
+  to a build without it. Open rows carry the window too, because they are
+  what a live forecast is issued from.
+- **Runs the study's own network,** `fit_lstm` from
+  `tracked-sequence-research.py`, not a lookalike. It trains on the matured
+  rows before the last 60 and is early-stopped on those 60. Its |move|
+  forecast becomes a volatility by the constant that minimizes QLIKE over
+  the training window, the same calibration the `scale` family uses. The
+  network is deterministic on CPU. PyTorch 2.14.0 is installed from the CPU
+  index in the workflow.
+- **Never logs a stand-in.** A row without its window gets no LSTM forecast
+  at all, rather than some other model's forecast under the LSTM's name.
+  More generally, a size forecast of nothing is no longer logged, since it
+  could never be scored.
+
+In the tournament from 2026-09-24, both at 1 trading session:
+
+| Asset | Screen evidence (LSTM vs GARCH + weekday, MAE of the move) | Slot | Promotion at |
+|---|---|---|---|
+| LMT | +0.076 pp, BH q = 0.006; halves t = 3.59 / 3.93 | fresh (LMT joined the universe for it) | e ≥ 33, index 1 |
+| CAT | +0.050 pp, BH q = 0.048; halves t = 2.94 / 2.00 | already held 3 challengers | e ≥ 526, index 4 |
+
+Both still face the forward bar: at least 60 paired forward sessions against
+the slot's incumbent, on QLIKE. The screen scored the size of the move by
+MAE, while the tournament scores the variance forecast by QLIKE, so passing
+one is no promise of passing the other. A stock size model feeds no bot.
 
 ## Slots
 
@@ -201,7 +252,7 @@ Reruns are safe. A second run the same day issues nothing and decides nothing
   without Oracle OI/funding simply drop those inputs; stocks run on sessions
   (above). **Scaling limit to fix before about 200 assets:** each run
   re-reads every active model's forward ledger since its epoch from D1 to
-  recompute the e-values. That is fine at 80 assets. Beyond that, store each
+  recompute the e-values. That is fine at 81 assets. Beyond that, store each
   challenger's e-process state and update it incrementally, keeping the full
   recompute as a periodic audit.
 - **Changing the rule** (α, bars, minimum samples) resets nothing already

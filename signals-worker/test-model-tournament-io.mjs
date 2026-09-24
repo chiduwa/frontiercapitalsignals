@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { importResults, exportState, loadTournamentHealth, sameAsset, binanceFourHourOpens } from './scripts/model-tournament-io.mjs';
+import { importResults, exportState, loadTournamentHealth, sameAsset, binanceFourHourOpens, buildTournamentInput } from './scripts/model-tournament-io.mjs';
 
 function database() {
   const db = new DatabaseSync(':memory:');
@@ -136,4 +136,43 @@ test('4-hour opens page forward, and a different asset under the same ticker is 
   assert.equal(new Set(opens.map(o => o[0])).size, opens.length, 'no candle twice across pages');
   assert.ok(sameAsset(opens, 0.26));
   assert.ok(!sameAsset(opens, 25), 'ARB-USD on Yahoo is a $0.0006 token; the reverse mismatch is refused too');
+});
+
+test('a screened LSTM slot gets its 30-day window, open rows included, and no other row changes', async () => {
+  const sessions = [];
+  for (let t = Date.UTC(2025, 0, 1); sessions.length < 320; t += 86400000) {
+    const w = new Date(t).getUTCDay();
+    if (w !== 0 && w !== 6) sessions.push(new Date(t).toISOString().slice(0, 10));
+  }
+  const walk = seed => {
+    let x = 100, s = seed;
+    return sessions.map((date, k) => {
+      s = (s * 16807) % 2147483647; x *= 1 + (s / 2147483647 - 0.5) * 0.04;
+      return { date, open: x, high: x * 1.01, low: x * 0.99, close: x, volume: 1e6 * (1 + (k % 7) / 10), source: 'yahoo' };
+    });
+  };
+  // As in production, the panel is "as of" the day after the newest complete bar.
+  const asOf = new Date(Date.parse(`${sessions.at(-1)}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
+  const panel = { asOf, assets: [{ symbol: 'LMT', assetClass: 'stock', bars: walk(7) },
+    { symbol: 'CAT', assetClass: 'stock', bars: walk(11) }, { symbol: 'SPY', assetClass: 'benchmark', bars: walk(13) }] };
+  const screened = [{ symbol: 'LMT', assetClass: 'stock', target: 'magnitude', horizon: 1, family: 'lstm', evidence: 'test' }];
+  const opts = { fetcher: async () => { throw new Error('offline'); }, log: () => {}, rowDays: 5000 };
+  const withSeq = await buildTournamentInput(panel, { ...opts, universe: { crypto: [], stock: ['LMT', 'CAT'], screened } });
+  const plain = await buildTournamentInput(panel, { ...opts, universe: { crypto: [], stock: ['LMT', 'CAT'] } });
+  assert.equal(withSeq.rows.length, plain.rows.length);
+  const key = r => `${r.symbol}|${r.horizon}|${r.date}`;
+  const before = new Map(plain.rows.map(r => [key(r), JSON.stringify(r)]));
+  for (const r of withSeq.rows) {
+    const { sequence, ...rest } = r;
+    assert.equal(JSON.stringify(rest), before.get(key(r)), `${key(r)} changed beyond its window`);
+    assert.equal(Boolean(sequence), r.symbol === 'LMT' && r.horizon === 1, `${key(r)} window`);
+    if (sequence) assert.equal(sequence.length, 30);
+  }
+  const open = withSeq.rows.find(r => r.symbol === 'LMT' && r.horizon === 1 && r.target === null);
+  assert.ok(open?.sequence, 'the open row a live forecast is issued from carries the window');
+  assert.equal(open.date, sessions.at(-1));
+  const bars = panel.assets[0].bars, k = bars.findIndex(b => b.date === open.date);
+  assert.ok(Math.abs(open.sequence.at(-1)[0] - Math.log(bars[k].close / bars[k - 1].close)) < 1e-12,
+    'the window ends with the return through the close it is issued at, never after');
+  assert.deepEqual(withSeq.screened, screened);
 });

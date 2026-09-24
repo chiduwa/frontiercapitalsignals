@@ -132,7 +132,7 @@ export function researchRows(panel, { symbols = TRACKED, sequence: withSequence 
         if (!reaches) {
           // Only the tail is open; a hole inside history is simply unusable.
           if (tournament && i+horizon>=bs.length) result.rows.push({symbol,date,targetDate:isStock ? addSessions(date,horizon) : offset(date,horizon),horizon,target:null,values,
-            garchWeekdayPct:pct(paths?.garchWeekdayVol?.[horizon]),...scales});
+            sequence,garchWeekdayPct:pct(paths?.garchWeekdayVol?.[horizon]),...scales});
           continue;
         }
         const target=Math.expm1(Math.log(end.close/b.close))*100;

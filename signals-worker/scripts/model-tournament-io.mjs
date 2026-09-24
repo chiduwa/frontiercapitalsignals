@@ -86,6 +86,20 @@ export async function buildTournamentInput(panel, { fetcher = fetchJson, nowMs =
       ...stock.symbols.filter(s => panel.assets.some(a => a.symbol === s && a.assetClass === 'stock'))],
     rows: [...crypto.rows, ...stock.rows]
   };
+  // A screened candidate that reads the 30-day sequence (the LSTM) gets it on
+  // its own slot's rows only; every other row stays as it was. An asset's
+  // values never depend on its batch (fixed leaders), so only `sequence` differs.
+  const lstm = (u.screened || []).filter(c => c.family === 'lstm');
+  const wants = new Set(lstm.map(c => `${c.symbol}|${c.horizon}`));
+  for (const cls of ['crypto', 'stock']) {
+    const syms = [...new Set(lstm.map(c => c.symbol))].filter(s => (cls === 'stock') === (u.stock || []).includes(s));
+    if (!syms.length) continue;
+    const withSeq = researchRows(panel, { tournament: true, sequence: true, symbols: syms, assetClass: cls,
+      leaders: cls === 'crypto' ? TRACKED : null });
+    const window = new Map(withSeq.rows.map(r => [`${r.symbol}|${r.horizon}|${r.date}`, r.sequence]));
+    built.rows = built.rows.map(r => wants.has(`${r.symbol}|${r.horizon}`)
+      ? { ...r, sequence: window.get(`${r.symbol}|${r.horizon}|${r.date}`) } : r);
+  }
   const since = new Date(Date.parse(`${panel.asOf}T00:00:00Z`) - rowDays * DAY).toISOString().slice(0, 10);
   built.rows = built.rows.filter(r => r.date >= since);
   built.assetClassBySymbol = Object.fromEntries(built.symbols.map(s => [s, u.stock?.includes(s) ? 'stock' : 'crypto']));
@@ -100,7 +114,8 @@ export async function buildTournamentInput(panel, { fetcher = fetchJson, nowMs =
       log(`timing: ${symbol} 4h candles unavailable (${e.message}); no timing slot this run`);
     }
   }
-  return { asOf: built.asOf, symbols: built.symbols, assetClassBySymbol: built.assetClassBySymbol, rows: built.rows, klines };
+  return { asOf: built.asOf, symbols: built.symbols, assetClassBySymbol: built.assetClassBySymbol, rows: built.rows, klines,
+    screened: u.screened || [] };
 }
 
 const pagedQuery = (query, env, sql, params, pageSize = 5000) =>
