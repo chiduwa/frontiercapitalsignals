@@ -99,3 +99,38 @@ body {
   .tilt-card { transition: none; }
   .tilt-card:hover { transform: none; }
 }
+
+/* ── Pointer-tracked tilt and liquid glass (see SiteEffects.tsx) ───────
+   [data-fx-tilt] follows the pointer instead of the fixed hover angle, with
+   a glare that tracks it. [data-fx-glass] is a frosted surface with a rim
+   highlight and a specular spot that follows the pointer. */
+@media (hover: hover) and (pointer: fine) {
+  [data-fx-tilt] {
+    transform-style: preserve-3d;
+    transition: transform .2s ease-out, box-shadow .3s ease, border-color .3s ease;
+  }
+  [data-fx-tilt]:hover {
+    transform: perspective(900px) rotateX(var(--fx-rx, 0deg)) rotateY(var(--fx-ry, 0deg)) translateY(-4px);
+    box-shadow: 0 22px 44px -12px rgba(12, 26, 53, .28);
+  }
+}
+[data-fx-tilt], [data-fx-glass] { position: relative; isolation: isolate; }
+[data-fx-tilt]::after, [data-fx-glass]::after {
+  content: "";
+  position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: radial-gradient(240px circle at var(--fx-mx, 30%) var(--fx-my, 0%), rgba(255, 255, 255, .22), transparent 62%);
+  opacity: 0; transition: opacity .3s ease;
+}
+[data-fx-tilt]:hover::after, [data-fx-glass]:hover::after { opacity: 1; }
+[data-fx-glass] {
+  background-color: rgba(255, 255, 255, .06);
+  background-image: linear-gradient(135deg, rgba(255, 255, 255, .14), rgba(255, 255, 255, .02) 55%, rgba(255, 255, 255, .07));
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  border-color: rgba(255, 255, 255, .18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), inset 0 -10px 20px -14px rgba(255, 255, 255, .2), 0 10px 30px rgba(4, 10, 25, .25);
+}
+[data-fx-glass]::after { opacity: .55; }
+@media (prefers-reduced-motion: reduce) {
+  [data-fx-tilt], [data-fx-tilt]:hover { transform: none; transition: none; }
+}

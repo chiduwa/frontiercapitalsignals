@@ -13,8 +13,17 @@ export function toVector(lon: number, lat: number) {
 
 /** Orthographic projection of a real sphere, centred on Africa. */
 export function project(vector: readonly number[], yaw = 20, pitch = 8) {
+  return projector(yaw, pitch)(vector);
+}
+
+/** Same projection with the rotation's sines and cosines worked out once,
+ *  for drawing thousands of points per frame. */
+export function projector(yaw = 20, pitch = 8) {
   const y = yaw * radians, p = pitch * radians;
-  const x = vector[0] * Math.cos(y) - vector[2] * Math.sin(y);
-  const z = vector[0] * Math.sin(y) + vector[2] * Math.cos(y);
-  return { x: 300 + 210 * x, y: 278 - 210 * (vector[1] * Math.cos(p) - z * Math.sin(p)), z: vector[1] * Math.sin(p) + z * Math.cos(p) };
+  const cy = Math.cos(y), sy = Math.sin(y), cp = Math.cos(p), sp = Math.sin(p);
+  return (vector: readonly number[]) => {
+    const x = vector[0] * cy - vector[2] * sy;
+    const z = vector[0] * sy + vector[2] * cy;
+    return { x: 300 + 210 * x, y: 278 - 210 * (vector[1] * cp - z * sp), z: vector[1] * sp + z * cp };
+  };
 }

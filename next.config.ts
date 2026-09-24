@@ -10,6 +10,15 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       {
+        // www used to serve a full duplicate of the site, and its /signals/
+        // path fell through to a 404 because the signals Worker's route only
+        // covers the apex. One permanent hop to the canonical host fixes both.
+        source: "/:path*",
+        has: [{ type: "host", value: "www.frontiercapitalsignals.com" }],
+        destination: "https://frontiercapitalsignals.com/:path*",
+        permanent: true,
+      },
+      {
         source: "/og-image.png",
         destination: "/opengraph-image",
         permanent: false,

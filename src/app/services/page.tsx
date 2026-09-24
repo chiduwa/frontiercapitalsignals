@@ -4,7 +4,7 @@ import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Services",
-  description: "Investment intelligence, due diligence, market entry strategy, field research and data and business analytics for investors and companies in Ghana, Nigeria, Kenya, Malawi and Uganda.",
+  description: "Investment intelligence, due diligence, market entry, field research and data analytics for investors in Ghana, Nigeria, Kenya, Malawi and Uganda.",
   alternates: { canonical: "https://frontiercapitalsignals.com/services" },
   keywords: ["Africa investment services", "Africa due diligence", "market entry Africa", "Africa deal origination", "frontier market consulting", "Africa field research", "Ghana Nigeria Kenya investment advisory", "business analytics services Africa", "data analytics consulting"],
   // Declaring openGraph here replaces the root layout's block entirely,

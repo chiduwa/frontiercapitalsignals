@@ -6,6 +6,7 @@ import Footer from "@/components/Footer";
 import MarketTicker from "@/components/MarketTicker";
 import JsonLd, { organizationSchema, websiteSchema } from "@/components/JsonLd";
 import ConsentBanner from "@/components/ConsentBanner";
+import SiteEffects from "@/components/SiteEffects";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
 
@@ -145,6 +146,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
         <Footer />
         <MarketTicker />
         <ConsentBanner />
+        <SiteEffects />
       </body>
     </html>
   );

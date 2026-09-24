@@ -5,7 +5,8 @@ export const metadata: Metadata = {
   title: "Free AI Visibility Scan",
   description: "Check page titles, descriptions, canonical tags, structured data, and crawler policy. A free technical checklist with no signup.",
   alternates: { canonical: "https://frontiercapitalsignals.com/scan" },
-  openGraph: { url: "https://frontiercapitalsignals.com/scan", type: "website" },
+  // Declaring openGraph replaces the root layout block, image included.
+  openGraph: { url: "https://frontiercapitalsignals.com/scan", type: "website", images: [{ url: "/opengraph-image", width: 1200, height: 630 }] },
 };
 
 export default async function ScanPage({ searchParams }: { searchParams: Promise<{ url?: string }> }) {

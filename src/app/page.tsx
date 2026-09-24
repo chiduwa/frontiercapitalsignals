@@ -102,7 +102,7 @@ export default function HomePage() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {services.map(({ icon, title, desc }) => (
-              <div key={title} className="bg-white border border-gray-200 rounded-xl p-6 hover:border-gold/50 hover:shadow-md transition-all group">
+              <div key={title} data-fx-tilt className="bg-white border border-gray-200 rounded-xl p-6 hover:border-gold/50 hover:shadow-md transition-all group">
                 <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl border border-gold/20 bg-gold/5 text-gold-dim"><ServiceIcon name={icon} /></div>
                 <h3 className="text-ink font-bold mb-2 group-hover:text-gold-dim transition-colors">{title}</h3>
                 <p className="text-slate-500 text-sm leading-relaxed">{desc}</p>
@@ -179,7 +179,7 @@ export default function HomePage() {
                 { label: "Refresh Rate", value: "Hourly" },
                 { label: "Coverage", value: "Crypto + US Equities" },
               ].map(({ label, value }) => (
-                <div key={label} className="tilt-card bg-white/5 border border-white/10 rounded-xl p-5">
+                <div key={label} data-fx-glass className="tilt-card bg-white/5 border border-white/10 rounded-xl p-5">
                   <p className="text-2xl font-black text-gradient-gold">{value}</p>
                   <p className="text-white/60 text-xs font-semibold mt-1">{label}</p>
                 </div>
