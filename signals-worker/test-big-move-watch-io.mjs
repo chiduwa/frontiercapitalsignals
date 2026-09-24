@@ -67,8 +67,9 @@ test('quarantined bars and pegs never reach the model', () => {
     rows.push({ symbol: 'ALT', date: day(i), close: 1 + 0.1 * Math.sin(i), high: 1.2, low: 0.9, volume: 1e6, source: 'binance' });
     rows.push({ symbol: 'USDC', date: day(i), close: 1 + (i % 2 ? 0.0001 : -0.0001), high: 1, low: 1, volume: 1e9, source: 'binance' });
   }
+  for (let i = 0; i < 200; i++) rows.push({ symbol: 'BONK', date: day(i), close: [4e-6, 4e-6, 5e-6, 4e-6, 3e-6][i % 5], high: 5e-6, low: 3e-6, volume: 1e6, source: 'yahoo' });
   const s = buildSeries(rows, [{ symbol: 'ALT', date: day(50) }]);
-  assert.deepEqual(Object.keys(s), ['ALT']);
+  assert.deepEqual(Object.keys(s), ['ALT'], 'the peg and the six-decimal series are both left out');
   assert.ok(!s.ALT.some(r => r[0] === day(50)), 'the quarantined bar is gone');
 });
 

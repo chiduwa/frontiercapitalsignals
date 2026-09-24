@@ -12,6 +12,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { d1, d1Batch, chunk, readAllDailyBars, pageAll } from './d1-client.mjs';
 import { sanitizeBars } from './panel-features.mjs';
+import { isQuantizedSeries } from './archive.mjs';
 import { isNonDirectionalAsset } from '../worker.js';
 
 export const WATCH_VERSION = 'big-move-watch-v1';
@@ -28,8 +29,9 @@ export function buildSeries(rows, quarantine = []) {
   for (const [symbol, raw] of bySymbol) {
     const bars = sanitizeBars(raw);
     if (!bars || bars.length < 120) continue;
-    // A peg never makes a move worth watching.
-    if (isNonDirectionalAsset({ symbol }, bars.map(b => b.close))) continue;
+    // A peg never makes a move worth watching, and a series stored at too few
+    // decimals (or frozen) only "moves" when its rounding flips.
+    if (isNonDirectionalAsset({ symbol }, bars.map(b => b.close)) || isQuantizedSeries(bars.map(b => b.close))) continue;
     out[symbol] = bars.map(b => [b.date, b.close, b.high ?? null, b.low ?? null, b.volume ?? null]);
   }
   return out;

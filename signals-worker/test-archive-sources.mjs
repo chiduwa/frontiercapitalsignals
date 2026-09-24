@@ -5,7 +5,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { binanceDailyBars, withoutCoinGeckoSeam, coinGeckoReplacement, replaceCoinGeckoBars, alignRowsByTrueClose } from './scripts/archive.mjs';
+import { binanceDailyBars, withoutCoinGeckoSeam, coinGeckoReplacement, replaceCoinGeckoBars, alignRowsByTrueClose,
+  isQuantizedSeries, isYahooCryptoDataTrustworthy, yahooReplacement, replaceBarsFromSource } from './scripts/archive.mjs';
 import { selectArchiveUpdates } from './scripts/archive-policy.mjs';
 
 const DAY = 86400000;
@@ -18,7 +19,8 @@ function fakeBinance(days, price = 0.25) {
     calls.push(url);
     const start = Number(new URL(url).searchParams.get('startTime'));
     const first = Math.max(0, Math.round((start - t0) / DAY));
-    return Array.from({ length: Math.max(0, Math.min(1000, days - first)) }, (_, k) => kline(first + k, price));
+    // A real pair moves every day; a flat one is a dead listing (isQuantizedSeries).
+    return Array.from({ length: Math.max(0, Math.min(1000, days - first)) }, (_, k) => kline(first + k, price * (1 + 0.01 * Math.sin(first + k))));
   };
   return { fetcher, calls };
 }
@@ -148,4 +150,40 @@ test('the replacement SQL rewrites only CoinGecko rows, whatever it is handed', 
   const after = a.db.prepare(`SELECT date, close, source FROM asset_daily_bars WHERE date IN (${before.map(r => `'${r.date}'`).join(',')}) ORDER BY date`).all();
   assert.deepEqual(after, before, 'Binance rows untouched');
   assert.equal(a.db.prepare("SELECT COUNT(*) AS n FROM asset_daily_bars WHERE close = 777").get().n, 361 + 1, 'the 361 CoinGecko slots, plus the one free slot the seam rule had emptied');
+});
+
+// Yahoo stores the tiniest coins at about six decimals (2026-09-24): BONK
+// printed 6 distinct closes in 60 days; HTX jumped 50% whenever its rounding
+// flipped. Those rows are rounding, not prices.
+test('a low-precision or frozen series is recognised, and Yahoo is not trusted with it', () => {
+  const now = Date.UTC(2026, 8, 24);
+  const days = n => Array.from({ length: n }, (_, i) => new Date(now - (n - i) * DAY).toISOString().slice(0, 10));
+  const bonk = [4e-6, 4e-6, 4e-6, 5e-6, 4e-6, 4e-6, 3e-6];
+  const quantized = days(60).map((date, i) => ({ date, close: bonk[i % bonk.length] }));
+  const real = days(60).map((date, i) => ({ date, close: 4.1e-6 * (1 + 0.03 * Math.sin(i)) }));
+  assert.equal(isQuantizedSeries(quantized.map(b => b.close)), true);
+  assert.equal(isQuantizedSeries(real.map(b => b.close)), false);
+  assert.equal(isQuantizedSeries(Array(60).fill(0.001039)), true, 'a frozen feed (XCN)');
+  assert.equal(isQuantizedSeries(quantized.slice(0, 20).map(b => b.close)), false, 'too short to judge');
+  assert.equal(isYahooCryptoDataTrustworthy(quantized, 4.2e-6, now), false);
+  assert.equal(isYahooCryptoDataTrustworthy(real, 4.2e-6, now), true);
+});
+
+test('low-precision Yahoo rows are replaced by Binance closes for the same dates, and only Yahoo rows', async () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(readFileSync(new URL('./scripts/schema.sql', import.meta.url), 'utf8').match(/CREATE TABLE IF NOT EXISTS asset_daily_bars \([\s\S]*?\);/)[0]);
+  const put = db.prepare('INSERT INTO asset_daily_bars (symbol, asset_class, date, open, close, high, low, volume, source) VALUES (?,?,?,?,?,?,?,?,?)');
+  const truth = i => 2.4e-6 * (1 + 0.05 * Math.sin(i / 3));
+  const day = i => new Date(D0 + i * DAY).toISOString().slice(0, 10);
+  for (let i = 0; i < 80; i++) put.run('HTX', 'crypto', day(i), null, Math.round(truth(i) * 1e6) / 1e6, null, null, 1, i === 40 ? 'binance' : 'yahoo');
+  const stored = db.prepare("SELECT date, source, close FROM asset_daily_bars WHERE source = 'yahoo'").all();
+  const binance = Array.from({ length: 80 }, (_, i) => ({ date: day(i), open: truth(i), high: truth(i), low: truth(i), close: truth(i), volume: 9 }));
+  const fix = yahooReplacement(binance, stored, { nowMs: D0 + 90 * DAY });
+  assert.equal(fix.length, 79, 'every Yahoo date Binance covers');
+  assert.deepEqual(yahooReplacement(binance.map(b => ({ ...b, close: b.close * 40 })), stored, { nowMs: D0 + 90 * DAY }), [], 'a different token replaces nothing');
+  const batch = async (_e, st) => { for (const x of st) db.prepare(x.sql).run(...x.params); };
+  await replaceBarsFromSource({}, binance.map(b => ({ symbol: 'HTX', assetClass: 'crypto', ...b, close: 777, source: 'binance' })), 'yahoo', { batch });
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM asset_daily_bars WHERE source = 'yahoo'").get().n, 0);
+  assert.notEqual(db.prepare(`SELECT close FROM asset_daily_bars WHERE date = '${day(40)}'`).get().close, 777, 'the existing Binance row is untouched');
+  await assert.rejects(replaceBarsFromSource({}, [], 'binance', { batch }), /refusing/);
 });

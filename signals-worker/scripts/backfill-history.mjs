@@ -18,7 +18,8 @@ import {
   yahooHourlyBars, computeSwingTimeTallies, replaceSwingTimeBootstrap, getSwingTimeCoverage,
   replaceTimeOfDayBootstrap, getTimeOfDayCoverage, getOpenCoverage,
   binanceUsExchangeInfo, binanceUsKlines, getExistingHourlyCoverage, upsertHourlyBars,
-  isYahooCryptoDataTrustworthy, binanceDailyBars, withoutCoinGeckoSeam, coinGeckoReplacement, replaceCoinGeckoBars
+  isYahooCryptoDataTrustworthy, binanceDailyBars, withoutCoinGeckoSeam, coinGeckoReplacement, replaceCoinGeckoBars,
+  isQuantizedSeries, yahooReplacement, replaceBarsFromSource
 } from './archive.mjs';
 import { selectIntradayWatchlist } from './intraday.mjs';
 import { d1 } from './d1-client.mjs';
@@ -165,11 +166,14 @@ async function main() {
     const needsOpen = backfillOpen && !(openCoverage[a.symbol] > 0);
     if (!fullAudit && !needsDailyRefresh(existing, Date.now(), needsOpen)) continue;
 
-    let bars = null, source = null;
+    let bars = null, source = null, yahooQuantized = false;
     try {
       const yahooBars = await yahooFullHistory(a.yahooTicker);
       if (a.assetClass === 'crypto' && !isYahooCryptoDataTrustworthy(yahooBars, a.refPrice, Date.now())) {
-        throw new Error(`Yahoo ${a.yahooTicker} looks like the wrong asset (stale or off by an order of magnitude vs CoinGecko's current price) — treating as a fetch failure`);
+        yahooQuantized = isQuantizedSeries(yahooBars.map(b => b.close));
+        throw new Error(yahooQuantized
+          ? `Yahoo ${a.yahooTicker} is stored at too few decimals to be a price series (or frozen) — treating as a fetch failure`
+          : `Yahoo ${a.yahooTicker} looks like the wrong asset (stale or off by an order of magnitude vs CoinGecko's current price) — treating as a fetch failure`);
       }
       bars = yahooBars;
       source = 'yahoo';
@@ -214,6 +218,18 @@ async function main() {
             const replaced = new Set(replacement.map(b => b.date));
             for (const r of coingecko) if (replaced.has(r.date)) r.source = source;
             console.log(`${a.symbol}: ${written} CoinGecko rows replaced by Binance true closes, ${coingecko.length - replaced.size} kept (before the Binance listing)`);
+          }
+          // Low-precision Yahoo history, replaced by Binance's closes for the
+          // same dates (the seam rules above do not apply: both are true closes).
+          if (yahooQuantized) {
+            const yahooRows = stored.filter(r => r.source === 'yahoo');
+            const fix = yahooReplacement(bars, yahooRows);
+            if (fix.length && fix.length <= priceBudgetLeft()) {
+              const written = await replaceBarsFromSource(env, fix.map(b => ({ symbol: a.symbol, assetClass: a.assetClass, ...b, source })), 'yahoo');
+              priceRowsWritten += written;
+              rowsWrittenThisRun += written;
+              console.log(`${a.symbol}: ${written} low-precision Yahoo rows replaced by Binance closes, ${yahooRows.length - fix.length} kept (no Binance bar)`);
+            }
           }
           bars = withoutCoinGeckoSeam(bars, new Set(coingecko.filter(r => r.source === 'coingecko').map(r => r.date)));
         }

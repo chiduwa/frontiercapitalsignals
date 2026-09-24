@@ -115,7 +115,21 @@ export function isYahooCryptoDataTrustworthy(bars, refPrice, nowMs, maxStaleDays
   if (staleDays > maxStaleDays) return false;
   if (last.close == null || last.close <= 0) return false;
   const ratio = last.close / refPrice;
-  return ratio >= 0.1 && ratio <= 10;
+  if (!(ratio >= 0.1 && ratio <= 10)) return false;
+  return !isQuantizedSeries(bars.map(b => b.close));
+}
+
+// Too few decimals is not a price series (2026-09-24). Yahoo keeps SHIB, BONK,
+// FLOKI, LUNC, XEC and HTX at about six decimals: BONK printed 6 distinct
+// closes in 60 days, and HTX "moved" 50% whenever its rounding flipped between
+// 0.000002 and 0.000003. A frozen feed (XCN, TAG) looks the same. Every lane
+// reading such a series measured the rounding. Judged on the last 60 closes;
+// shorter input is never called quantized.
+export function isQuantizedSeries(closes, { window = 60, minDistinct = 25, maxFlatShare = 0.3 } = {}) {
+  const w = (closes || []).filter(c => Number.isFinite(c) && c > 0).slice(-window);
+  if (w.length < 30) return false;
+  const flat = w.slice(1).filter((c, i) => c === w[i]).length;
+  return new Set(w).size < minDistinct || flat / (w.length - 1) > maxFlatShare;
 }
 
 // Binance's public market-data mirror, for a coin whose Yahoo ticker is a
@@ -188,24 +202,43 @@ export function withoutCoinGeckoSeam(bars, coingeckoDates) {
  * Refused (returns []) unless the two agree on price where they overlap: a
  * shared ticker is not proof of a shared asset.
  */
-export function coinGeckoReplacement(binanceBars, storedCoinGecko, { nowMs = Date.now(), maxMedianGap = 0.03 } = {}) {
-  if (!storedCoinGecko?.length) return [];
-  const byDate = new Map(completedDailyBars(binanceBars, nowMs).map(b => [b.date, b]));
-  const dayBefore = d => new Date(Date.parse(`${d}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
-  const gaps = [];
-  for (const row of storedCoinGecko) {
-    const sameClose = byDate.get(dayBefore(row.date));
-    if (sameClose && row.close > 0) gaps.push(Math.abs(Math.log(row.close / sameClose.close)));
-  }
-  if (gaps.length < Math.min(20, storedCoinGecko.length)) return [];
-  gaps.sort((x, y) => x - y);
-  if (gaps[Math.floor(gaps.length / 2)] > maxMedianGap) return [];
-  return storedCoinGecko.map(row => byDate.get(row.date)).filter(Boolean);
+export function coinGeckoReplacement(binanceBars, storedCoinGecko, options = {}) {
+  // A CoinGecko row dated D holds D-1's close: compare like with like.
+  return trueCloseReplacement(binanceBars, storedCoinGecko, { dayShift: -1, maxMedianGap: 0.03, ...options });
 }
 
-// Rewrites only rows still marked coingecko: a Yahoo or Binance close stays
-// exactly as archived whatever this is handed, and a re-run is a no-op.
-export async function replaceCoinGeckoBars(env, rows, { batch = d1Batch } = {}) {
+// Low-precision Yahoo rows (isQuantizedSeries) replaced by Binance's full-
+// precision close for the same date; both are true UTC-day closes, so there
+// is no seam. The looser price bar is the rounding itself (HTX's 2e-6 against
+// a true 2.4e-6 is a 0.18 log gap); a different token is far further off.
+export function yahooReplacement(binanceBars, storedYahoo, options = {}) {
+  return trueCloseReplacement(binanceBars, storedYahoo, { dayShift: 0, maxMedianGap: 0.25, ...options });
+}
+
+export function trueCloseReplacement(binanceBars, stored, { nowMs = Date.now(), maxMedianGap = 0.03, dayShift = -1 } = {}) {
+  if (!stored?.length) return [];
+  const byDate = new Map(completedDailyBars(binanceBars, nowMs).map(b => [b.date, b]));
+  const shift = d => new Date(Date.parse(`${d}T00:00:00Z`) + dayShift * 86400000).toISOString().slice(0, 10);
+  const gaps = [];
+  for (const row of stored) {
+    const sameClose = byDate.get(shift(row.date));
+    if (sameClose && row.close > 0) gaps.push(Math.abs(Math.log(row.close / sameClose.close)));
+  }
+  if (gaps.length < Math.min(20, stored.length)) return [];
+  gaps.sort((x, y) => x - y);
+  if (gaps[Math.floor(gaps.length / 2)] > maxMedianGap) return [];
+  return stored.map(row => byDate.get(row.date)).filter(Boolean);
+}
+
+// Rewrites only rows still marked with the named source: every other close
+// stays exactly as archived whatever this is handed, and a re-run is a no-op.
+export async function replaceCoinGeckoBars(env, rows, options = {}) {
+  return replaceBarsFromSource(env, rows, 'coingecko', options);
+}
+
+const REPLACEABLE_SOURCES = new Set(['coingecko', 'yahoo']);
+export async function replaceBarsFromSource(env, rows, fromSource, { batch = d1Batch } = {}) {
+  if (!REPLACEABLE_SOURCES.has(fromSource)) throw new Error(`refusing to replace rows from source ${fromSource}`);
   const statements = chunk(rows, 9).map((group) => ({
     sql: `
       INSERT INTO asset_daily_bars (symbol, asset_class, date, open, close, high, low, volume, source)
@@ -213,7 +246,7 @@ export async function replaceCoinGeckoBars(env, rows, { batch = d1Batch } = {}) 
       ON CONFLICT (symbol, date) DO UPDATE SET
         open = excluded.open, close = excluded.close, high = excluded.high, low = excluded.low,
         volume = excluded.volume, source = excluded.source
-      WHERE asset_daily_bars.source = 'coingecko'
+      WHERE asset_daily_bars.source = '${fromSource}'
     `,
     params: group.flatMap((b) => [b.symbol, b.assetClass, b.date, b.open ?? null, b.close, b.high ?? null, b.low ?? null, b.volume ?? null, b.source]),
     rows: group.length
