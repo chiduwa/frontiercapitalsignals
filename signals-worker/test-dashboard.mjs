@@ -517,6 +517,28 @@ console.log('\n== the model-tournament panel shows who is in force and what is b
     && tournament.assets.ETH['direction:1'].actionable === false && tournament.actionable === true);
   mtView.dom.window.close();
 
+  // Widened to 40 coins and 40 stocks: a promoted stock shows in sessions,
+  // with no buying-time slot, under a line naming what else was promoted.
+  const base = summary.assets.BTC;
+  const stockSlot = k => ({ ...base[k.replace(':5', ':7')], incumbentLabel: 'base rate (no skill)', promoted: false });
+  const wide = { ...tournament, universe: { crypto: 40, stock: 40 }, promotedElsewhere: ['NVDA'],
+    classes: { NVDA: 'stock', '*stock': 'stock' },
+    assets: { ...tournament.assets,
+      NVDA: { 'direction:1': { ...stockSlot('direction:1'), promoted: true, actionable: true, incumbentLabel: 'logistic on momentum (light shrinkage)' },
+              'direction:5': stockSlot('direction:5'), 'magnitude:1': stockSlot('magnitude:1'), 'magnitude:5': stockSlot('magnitude:5') },
+      '*stock': { 'direction:1': stockSlot('direction:1'), 'direction:5': stockSlot('direction:5'), 'magnitude:1': stockSlot('magnitude:1'), 'magnitude:5': stockSlot('magnitude:5') } } };
+  const wideView = await render({ ...payload(), modelTournament: wide }, { settleMs: 1200 });
+  const wEl = wideView.doc.getElementById('panel-modelTournament');
+  const nv = wEl?.querySelector('[data-mt="NVDA"]')?.textContent || '';
+  check('a promoted stock renders in trading sessions, with no buying-time slot', wideView.pageErrors.length === 0
+    && /1 session: logistic on momentum \(light shrinkage\) promoted/.test(nv) && /5 sessions:/.test(nv) && nv.includes('not applicable'), nv.slice(0, 300));
+  check('pools are labelled by class and come first', /All crypto/.test(wEl.querySelector('[data-mt="*"]')?.textContent || '')
+    && /All stocks/.test(wEl.querySelector('[data-mt="*stock"]')?.textContent || '')
+    && wEl.querySelectorAll('[data-mt]')[0].getAttribute('data-mt') === '*');
+  check('the panel says how wide the tournament is and names what else was promoted',
+    /40 coins and 40 stocks/.test(wEl.textContent) && /promoted model \(NVDA\)/.test(wEl.textContent));
+  wideView.dom.window.close();
+
   const firstView = await render({ ...payload(), modelTournament: { status: 'awaiting-first-run', actionable: false } }, { settleMs: 1200 });
   const firstText = firstView.doc.getElementById('panel-modelTournament')?.textContent || '';
   check('before the first run the panel says the current methods stand', firstView.pageErrors.length === 0

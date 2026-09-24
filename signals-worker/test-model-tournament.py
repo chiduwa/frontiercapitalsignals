@@ -230,5 +230,46 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual(max(w['groupShare'], key=w['groupShare'].get), 'momentum')
 
 
+class Stocks(unittest.TestCase):
+    def rows(self, symbol, dates, h_list, seed):
+        rng = np.random.default_rng(seed)
+        out = []
+        for i, d in enumerate(dates):
+            values = {k: float(rng.normal()) for names in mt.GROUPS.values() for k in names}
+            values.update(weekday=int((mt.day(d).astype('int64') + 4) % 7), month=int(d[5:7]), dailyVol=0.02, ewmaVol=0.02,
+                          harDaily=0.02, harWeek=0.02, harMonth=0.02)
+            for h in h_list:
+                if i + h < len(dates):
+                    out.append({'symbol': symbol, 'date': d, 'targetDate': dates[i + h], 'horizon': h,
+                                'target': float(rng.normal(0, 2)), 'values': values, 'garchWeekdayPct': 2.0})
+                elif i == len(dates) - 1:
+                    out.append({'symbol': symbol, 'date': d, 'targetDate': mt.add_days(d, h), 'horizon': h, 'target': None,
+                                'values': values, 'garchWeekdayPct': 2.0})
+        return out
+
+    def test_a_stock_gets_session_slots_its_own_pool_and_forecasts_from_its_last_session(self):
+        days = [mt.add_days('2024-01-01', k) for k in range(504)]  # ends on a Sunday
+        sessions = [d for d in days if int((mt.day(d).astype('int64') + 4) % 7) not in (0, 6)]
+        data = {'symbols': ['A', 'S'], 'assetClassBySymbol': {'A': 'crypto', 'S': 'stock'}, 'klines': {},
+                'rows': self.rows('A', days, (1, 7), 1) + self.rows('S', sessions, (1, 5), 2)}
+        out = mt.run(data, [], [], generate=False, run_at='2026-01-01T00:00:00Z', weights=False)
+        slots = {(m['symbol'], m['target'], m['horizon']) for m in out['registry']}
+        self.assertIn(('S', 'direction', 5), slots); self.assertIn(('*stock', 'magnitude', 5), slots)
+        self.assertNotIn(('S', 'timing', 2), slots); self.assertNotIn(('S', 'direction', 7), slots)
+        self.assertIn(('*', 'direction', 7), slots); self.assertNotIn(('*', 'direction', 5), slots)
+        # The run's as-of is the coin's newest close (a weekend day); the stock
+        # still forecasts, from its own last session.
+        stock = [f for f in out['forecasts'] if f['symbol'] == 'S']
+        self.assertTrue(stock and all(f['as_of'] == sessions[-1] for f in stock))
+        self.assertEqual({f['horizon'] for f in stock}, {1, 5})
+        self.assertNotEqual(out['asOf'], sessions[-1])
+
+    def test_five_session_outcomes_count_once_per_five_sessions(self):
+        sessions = [d for d in (mt.add_days('2026-01-05', k) for k in range(60)) if int((mt.day(d).astype('int64') + 4) % 7) not in (0, 6)]
+        led = mt.Ledger([ledger_row(m, 'S', 5, d, 0.2) for d in sessions for m in ('c', 'i')])
+        pairs = led.paired('c', 'i', 'S', 5, sessions[0])
+        self.assertEqual(len(pairs), math.ceil(len(sessions) / 5))
+
+
 if __name__ == '__main__':
     unittest.main()

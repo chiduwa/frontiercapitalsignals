@@ -31,7 +31,8 @@ concurrency:
 jobs:
   tournament:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # The first run after the universe widened seeds ~70 assets' challengers.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
         with:
@@ -59,7 +60,9 @@ jobs:
           FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
         run: |
           mkdir -p reports/tournament
-          node scripts/hierarchical-research.mjs --dry-run --symbols BTC,ETH,SOL,XLM,XRP,HYPE,HBAR,ARB --save-input reports/tournament/panel.json --load-only
+          # The universe is a reviewed, fixed list (scripts/tournament-universe.json).
+          symbols=$(node -e "const u=require('./scripts/tournament-universe.json');console.log([...u.crypto,...u.stock].join(','))")
+          node scripts/hierarchical-research.mjs --dry-run --symbols "$symbols" --save-input reports/tournament/panel.json --load-only
           node scripts/model-tournament-io.mjs data reports/tournament/panel.json reports/tournament/input.json
           node scripts/model-tournament-io.mjs export reports/tournament/state.json
       - name: Score, promote or demote, and issue today's forecasts

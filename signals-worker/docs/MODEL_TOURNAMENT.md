@@ -23,6 +23,37 @@ models compete per asset and promotes one only when the future confirms it.
 a 17:27 UTC fallback. It is about 70 s of compute, plus about 1 min when the
 generator runs.
 
+## Who is in it (widened 2026-09-24)
+
+`scripts/tournament-universe.json` is a fixed, reviewed list: the
+always-tracked 8, the 32 most liquid other coins (30-day median dollar
+volume, at least 600 days of history, no pegs), and the 40 most liquid
+stocks. It is fixed on purpose: a forward record only means something if the
+asset stays in. Change it by commit. An asset that leaves keeps its ledger;
+one that joins starts seeding on its first run.
+
+- **Crypto** assets use the always-tracked 8 as their leader inputs, so the
+  original 8 keep exactly the inputs they were first measured on. That was
+  verified: all 17,460 of their overlapping rows are identical in the wide
+  build.
+- **Stocks** get their own slots: direction and move size at 1 and 5
+  **trading sessions**, SPY as benchmark and leader, no crypto
+  derivatives or liquidity inputs, and no timing slot (the spot bot buys
+  crypto). They pool in their own slot, `*stock`, never with coins. A stock
+  forecasts from its own last session, so a Friday close still forecasts on a
+  Sunday run, and 5-session outcomes count once per five sessions.
+- The first wide run, seeding 72 new assets at once, took about 20 minutes
+  (1,329 challengers, 2,199 forecasts). Daily runs after that are much lighter.
+  The input keeps only rows from the last 1,200 days, the most any fit or
+  screen reads.
+- Each run's per-asset slots and weights live in
+  `model_tournament_run_assets` (migration 0051), one row per asset. The
+  payload publishes the always-tracked 8, the pooled slots and **any asset
+  whose model has been promoted**, and names those in the panel. The rest stay
+  in D1.
+- The futures bot trades only promoted 7-day crypto slots, so a promoted
+  stock is published but never becomes a futures trade.
+
 ## Slots
 
 Each always-tracked asset (BTC ETH SOL XLM XRP HYPE HBAR ARB) has five slots,
@@ -166,10 +197,13 @@ Reruns are safe. A second run the same day issues nothing and decides nothing
 - **More families or inputs:** add entries to `candidate_grid()`. A new entry
   is simply untried in every slot, so the next generator run screens it.
   Entries already tried are never re-admitted to the same slot.
-- **More assets:** the row builder takes `--symbols`; add them to the
-  workflow's `--symbols`. Assets without Oracle OI/funding simply drop those
-  inputs. Stocks need session-aware horizons first (see
-  [SEQUENCE_MODELS](SEQUENCE_MODELS.md)).
+- **More assets:** add them to `scripts/tournament-universe.json`. Assets
+  without Oracle OI/funding simply drop those inputs; stocks run on sessions
+  (above). **Scaling limit to fix before about 200 assets:** each run
+  re-reads every active model's forward ledger since its epoch from D1 to
+  recompute the e-values. That is fine at 80 assets. Beyond that, store each
+  challenger's e-process state and update it incrementally, keeping the full
+  recompute as a periodic audit.
 - **Changing the rule** (α, bars, minimum samples) resets nothing already
   logged. It changes future decisions, so record why in this file.
 

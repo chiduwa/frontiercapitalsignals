@@ -13,7 +13,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { d1, d1Batch, chunk, pageAll } from './d1-client.mjs';
-import { researchRows } from './tracked-research-data.mjs';
+import { researchRows, TRACKED } from './tracked-research-data.mjs';
 import { BINANCE_KLINES_URL } from './archive.mjs';
 
 export const TOURNAMENT_VERSION = 'model-tournament-v1';
@@ -60,10 +60,37 @@ export function sameAsset(opens, lastClose) {
   return ratio > 1 / 3 && ratio < 3;
 }
 
-export async function buildTournamentInput(panel, { fetcher = fetchJson, nowMs = Date.now(), log = console.log } = {}) {
-  const built = researchRows(panel, { tournament: true });
+// Who is in the tournament: the always-tracked 8 plus a fixed, reviewed
+// list of liquid coins and stocks (scripts/tournament-universe.json).
+// Fixed on purpose: a forward record only means something if the asset stays in.
+export async function tournamentUniverse() {
+  return JSON.parse(await readFile(new URL('./tournament-universe.json', import.meta.url), 'utf8'));
+}
+
+// The tournament never reads a row older than its 730 training labels plus
+// the generator's 360-day screen; features come from bars, so older rows can
+// go. It keeps the input a fraction of its size once the universe is wide.
+export const TOURNAMENT_ROW_DAYS = 1200;
+
+export async function buildTournamentInput(panel, { fetcher = fetchJson, nowMs = Date.now(), log = console.log, universe = null,
+  rowDays = TOURNAMENT_ROW_DAYS } = {}) {
+  const u = universe || await tournamentUniverse();
+  // Leaders are the always-tracked coins for every crypto asset, so the
+  // original 8 keep exactly the inputs they were first measured on.
+  const crypto = researchRows(panel, { tournament: true, symbols: u.crypto, leaders: TRACKED });
+  const stock = u.stock?.length ? researchRows(panel, { tournament: true, symbols: u.stock, assetClass: 'stock' })
+    : { symbols: [], rows: [] };
+  const built = {
+    asOf: crypto.asOf,
+    symbols: [...crypto.symbols.filter(s => panel.assets.some(a => a.symbol === s && a.assetClass === 'crypto')),
+      ...stock.symbols.filter(s => panel.assets.some(a => a.symbol === s && a.assetClass === 'stock'))],
+    rows: [...crypto.rows, ...stock.rows]
+  };
+  const since = new Date(Date.parse(`${panel.asOf}T00:00:00Z`) - rowDays * DAY).toISOString().slice(0, 10);
+  built.rows = built.rows.filter(r => r.date >= since);
+  built.assetClassBySymbol = Object.fromEntries(built.symbols.map(s => [s, u.stock?.includes(s) ? 'stock' : 'crypto']));
   const klines = {};
-  for (const symbol of built.symbols) {
+  for (const symbol of built.symbols.filter(s => built.assetClassBySymbol[s] === 'crypto')) {
     const bars = panel.assets.find(a => a.symbol === symbol)?.bars || [];
     try {
       const opens = await binanceFourHourOpens(symbol, { fetcher, nowMs });
@@ -73,7 +100,7 @@ export async function buildTournamentInput(panel, { fetcher = fetchJson, nowMs =
       log(`timing: ${symbol} 4h candles unavailable (${e.message}); no timing slot this run`);
     }
   }
-  return { asOf: built.asOf, symbols: built.symbols, rows: built.rows, klines };
+  return { asOf: built.asOf, symbols: built.symbols, assetClassBySymbol: built.assetClassBySymbol, rows: built.rows, klines };
 }
 
 const pagedQuery = (query, env, sql, params, pageSize = 5000) =>
@@ -134,14 +161,26 @@ export function importStatements(results) {
   return statements;
 }
 
+const POOLED_KEYS = new Set(['*', '*stock']);
+const isPromoted = slots => Object.values(slots || {}).some(slot => slot?.promoted);
+
 export async function importResults(env, results, { batch = d1Batch, query = d1 } = {}) {
   const statements = importStatements(results);
+  const runId = `${results.version}:${results.runAt}`;
+  // One row per asset, so the run row stays small however wide the universe.
+  const { assets = {}, weights = {}, classes = {}, ...runSummary } = results.summary || {};
+  for (const g of chunk(Object.entries(assets), 10)) statements.push({
+    sql: `INSERT OR IGNORE INTO model_tournament_run_assets (run_id, symbol, asset_class, promoted, summary_json)
+      VALUES ${g.map(() => '(?,?,?,?,?)').join(',')}`,
+    params: g.flatMap(([sym, slots]) => [runId, sym, classes[sym] || 'crypto', isPromoted(slots) ? 1 : 0,
+      JSON.stringify({ slots, weights: weights[sym] || null })])
+  });
   for (const group of chunk(statements, 25)) await batch(env, group);
   // The run row lands last, so a half-written import is never read as a run.
   await query(env, `INSERT OR IGNORE INTO model_tournament_runs
     (run_id, model_version, created_at, as_of, input_hash, summary_json) VALUES (?,?,?,?,?,?)`,
-  [`${results.version}:${results.runAt}`, results.version, results.runAt, results.asOf, results.inputHash || '',
-    JSON.stringify(results.summary)]);
+  [runId, results.version, results.runAt, results.asOf, results.inputHash || '',
+    JSON.stringify({ ...runSummary, perAssetRows: true, assetCount: Object.keys(assets).length })]);
   return statements.length;
 }
 
@@ -153,6 +192,24 @@ export async function loadTournamentHealth(env, nowMs = Date.now(), query = d1) 
     WHERE model_version = ? ORDER BY created_at DESC LIMIT 1`, [TOURNAMENT_VERSION]);
   if (!rows.length) return { status: 'awaiting-first-run', actionable: false };
   const summary = JSON.parse(rows[0].summary_json);
+  if (summary.perAssetRows) {
+    // Publish the always-tracked assets, the pooled slots and any asset whose
+    // model was promoted; the rest stay in D1 (their count is published).
+    const runId = `${TOURNAMENT_VERSION}:${rows[0].created_at}`;
+    const assetRows = await query(env, `SELECT symbol, asset_class, promoted, summary_json FROM model_tournament_run_assets
+      WHERE run_id = ?`, [runId]);
+    summary.assets = {}; summary.weights = {}; summary.classes = {};
+    summary.promotedElsewhere = [];
+    for (const r of assetRows) {
+      const keep = TRACKED.includes(r.symbol) || POOLED_KEYS.has(r.symbol) || Number(r.promoted) === 1;
+      if (!keep) continue;
+      const body = JSON.parse(r.summary_json);
+      summary.assets[r.symbol] = body.slots;
+      if (body.weights) summary.weights[r.symbol] = body.weights;
+      summary.classes[r.symbol] = r.asset_class;
+      if (Number(r.promoted) === 1 && !TRACKED.includes(r.symbol) && !POOLED_KEYS.has(r.symbol)) summary.promotedElsewhere.push(r.symbol);
+    }
+  }
   const ageHours = (nowMs - Date.parse(rows[0].created_at)) / 3600000;
   const fresh = Number.isFinite(ageHours) && ageHours >= 0 && ageHours <= 36;
   let any = false;

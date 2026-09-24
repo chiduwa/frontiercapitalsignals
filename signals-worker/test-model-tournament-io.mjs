@@ -11,6 +11,7 @@ import { importResults, exportState, loadTournamentHealth, sameAsset, binanceFou
 function database() {
   const db = new DatabaseSync(':memory:');
   db.exec(readFileSync(new URL('./migrations/0048_model_tournament.sql', import.meta.url), 'utf8'));
+  db.exec(readFileSync(new URL('./migrations/0051_tournament_run_assets.sql', import.meta.url), 'utf8'));
   const query = async (_env, sql, params = []) => db.prepare(sql).all(...params);
   const batch = async (_env, statements) => { for (const s of statements) db.prepare(s.sql).run(...s.params); };
   return { db, query, batch };
@@ -91,6 +92,34 @@ test('the payload marks a slot actionable only when promoted and fresh', async (
   assert.equal(stale.assets.BTC['magnitude:1'].actionable, false);
   const empty = database();
   assert.equal((await loadTournamentHealth({}, now, empty.query)).status, 'awaiting-first-run');
+});
+
+test('a wide universe publishes the always-tracked, the pools and whatever was promoted; the rest stays in D1', async () => {
+  const { db, query, batch } = database();
+  const slot = promoted => ({ 'direction:1': { incumbent: 'x', promoted }, 'magnitude:1': { incumbent: 'y', promoted: false } });
+  const summary = { assets: { BTC: slot(false), '*': slot(false), '*stock': slot(false), LINK: slot(true), NVDA: slot(false), AAPL: slot(true) },
+    weights: { BTC: { groupShare: { momentum: 1 } }, LINK: { groupShare: { volume: 1 } } },
+    classes: { BTC: 'crypto', '*': 'crypto', '*stock': 'stock', LINK: 'crypto', NVDA: 'stock', AAPL: 'stock' }, universe: { crypto: 40, stock: 40 } };
+  await importResults({}, results({ summary }), { batch, query });
+  const run = JSON.parse(db.prepare('SELECT summary_json FROM model_tournament_runs').get().summary_json);
+  assert.equal(run.assets, undefined, 'the run row no longer carries every asset');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM model_tournament_run_assets').get().n, 6);
+  const h = await loadTournamentHealth({}, Date.parse('2026-09-23T20:00:00Z'), query);
+  assert.deepEqual(Object.keys(h.assets).sort(), ['*', '*stock', 'AAPL', 'BTC', 'LINK']);
+  assert.deepEqual(h.promotedElsewhere.sort(), ['AAPL', 'LINK']);
+  assert.equal(h.assets.LINK['direction:1'].actionable, true);
+  assert.equal(h.classes.AAPL, 'stock');
+  assert.deepEqual(h.weights.LINK, { groupShare: { volume: 1 } });
+  assert.equal(h.universe.stock, 40);
+});
+
+test('a run written before the split still loads', async () => {
+  const { db, query } = database();
+  db.prepare(`INSERT INTO model_tournament_runs (run_id, model_version, created_at, as_of, input_hash, summary_json)
+    VALUES ('model-tournament-v1:old', 'model-tournament-v1', '2026-09-23T19:23:50Z', '2026-09-22', 'h', ?)`)
+    .run(JSON.stringify({ assets: { BTC: { 'direction:1': { promoted: false } } } }));
+  const h = await loadTournamentHealth({}, Date.parse('2026-09-23T20:00:00Z'), query);
+  assert.deepEqual(Object.keys(h.assets), ['BTC']);
 });
 
 test('4-hour opens page forward, and a different asset under the same ticker is refused', async () => {

@@ -62,7 +62,11 @@ test('the provider-id maps cover every tracked asset', () => {
 test('the Python research lanes and the workflow read the same list', () => {
   assert.deepEqual(sorted(listIn(source('./scripts/session-research.py'), /^SYMBOLS=(\[[^\]]*\])/m)), canonical,
     'session-research.py SYMBOLS');
-  for (const file of ['signals-tracked-research.yml', 'signals-sequence-research.yml', 'signals-model-tournament.yml']) {
+  // The tournament reads a wider, reviewed universe; it must still hold every
+  // always-tracked asset.
+  const universe = JSON.parse(source('./scripts/tournament-universe.json'));
+  assert.ok(canonical.every(s => universe.crypto.includes(s)), 'tournament-universe.json is missing an always-tracked asset');
+  for (const file of ['signals-tracked-research.yml', 'signals-sequence-research.yml']) {
     const wf = source(`../.github/workflows/${file}`).match(/--symbols ([A-Z0-9,]+)/);
     assert.ok(wf, `${file} --symbols not found`);
     assert.deepEqual(sorted(wf[1].split(',')), canonical, `${file} --symbols`);

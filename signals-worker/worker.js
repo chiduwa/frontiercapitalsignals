@@ -8460,7 +8460,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       var mtSlot=function(key,s){
         if(!s)return '<small>not tracked</small>';
         var h=key.split(':')[1];
-        var when=key.indexOf('timing')===0?'':(h==='1'?'1 day':h+' days')+': ';
+        var when=key.indexOf('timing')===0?'':(h==='1'?'1 '+(s.unit||'day'):h+' '+(s.unit||'day')+'s')+': ';
         var name=esc(s.incumbentLabel||s.incumbent);
         var head=when+(s.promoted
           ?'<b class="up">'+name+'</b> <small>promoted on forward evidence'+(s.championSince?' '+esc(String(s.championSince).slice(0,10)):'')+'</small>'
@@ -8480,16 +8480,26 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           .map(function(t){return esc(t.feature)+' '+(t.weight>0?'+':'−');}).join(', ');
         return groups+'<br><small>'+(stable?'sign held across '+(w.refits||0)+' refits: '+stable:'no top weight held its sign across refits')+'</small>';
       };
-      var mtSyms=Object.keys(mt.assets).sort(function(a,b){return a==='*'?-1:b==='*'?1:0;});
+      // Pools first, then the always-tracked, then anything else promoted.
+      var mtOrder=function(sym){return sym==='*'?0:sym==='*stock'?1:(mt.classes&&mt.classes[sym]==='stock')?3:2;};
+      var mtSyms=Object.keys(mt.assets).sort(function(a,b){return mtOrder(a)-mtOrder(b)||(a<b?-1:a>b?1:0);});
       var mtRows=mtSyms.map(function(sym){
         var a=mt.assets[sym]||{},w=(mt.weights||{})[sym]||{};
-        return '<div class="bh-row" data-mt="'+esc(sym)+'"><span class="bh-sym">'+(sym==='*'?'All tracked <small>pooled</small>':esc(sym))+'</span>'
-          +'<span class="bh-cell" data-l="Direction">'+mtSlot('direction:1',a['direction:1'])+'<br>'+mtSlot('direction:7',a['direction:7'])+'</span>'
-          +'<span class="bh-cell" data-l="Move size">'+mtSlot('magnitude:1',a['magnitude:1'])+'<br>'+mtSlot('magnitude:7',a['magnitude:7'])+'</span>'
-          +'<span class="bh-cell" data-l="Cheapest buy time">'+mtSlot('timing:2',a['timing:2'])+'</span>'
-          +'<span class="bh-cell" data-l="What its models weigh">'+(sym==='*'?'<small>weighted per asset, below</small>'
+        var stock=sym==='*stock'||(mt.classes&&mt.classes[sym]==='stock');
+        // A stock's horizons are trading sessions; it has no buying-time slot.
+        var sess=function(k){var v=a[k];return v&&stock?Object.assign({},v,{unit:'session'}):v;};
+        var name=sym==='*'?'All crypto <small>pooled</small>':sym==='*stock'?'All stocks <small>pooled</small>':esc(sym)+(stock?' <small>stock</small>':'');
+        var pooled=sym==='*'||sym==='*stock';
+        return '<div class="bh-row" data-mt="'+esc(sym)+'"><span class="bh-sym">'+name+'</span>'
+          +'<span class="bh-cell" data-l="Direction">'+mtSlot('direction:1',sess('direction:1'))+'<br>'+(stock?mtSlot('direction:5',sess('direction:5')):mtSlot('direction:7',a['direction:7']))+'</span>'
+          +'<span class="bh-cell" data-l="Move size">'+mtSlot('magnitude:1',sess('magnitude:1'))+'<br>'+(stock?mtSlot('magnitude:5',sess('magnitude:5')):mtSlot('magnitude:7',a['magnitude:7']))+'</span>'
+          +'<span class="bh-cell" data-l="Cheapest buy time">'+(stock?'<small>not applicable: the spot bot buys crypto</small>':mtSlot('timing:2',a['timing:2']))+'</span>'
+          +'<span class="bh-cell" data-l="What its models weigh">'+(pooled?'<small>weighted per asset</small>'
             :'<b>direction</b> '+mtWeights(w['direction:1'])+'<br><b>size</b> '+mtWeights(w['magnitude:1']))+'</span></div>';
       }).join('');
+      var mtu=mt.universe||{};
+      var mtWide=(mtu.crypto||mtu.stock)?'<div class="dr-note">In the tournament: '+(mtu.crypto||0)+' coins and '+(mtu.stock||0)+' stocks, each with its own models. Shown: the always-tracked coins, the pooled slots'
+          +((mt.promotedElsewhere||[]).length?', and every other asset with a promoted model ('+mt.promotedElsewhere.map(esc).join(', ')+')':'; no other asset has a promoted model yet')+'.</div>':'';
       var mtc=mt.counts||{};
       timing+=panelStart({id:'modelTournament',tone:'timing',open:false,
           eyebrow:'PER-ASSET MODELS &middot; <b>FORWARD-TESTED</b>',
@@ -8497,6 +8507,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           meta:esc(mt.asOf||'')+(mt.status==='stale'?' · <span class="amber-t">stale</span>':'')+' · '+(mtc.champions||0)+' promoted · '+(mtc.challengers||0)+' testing'})
         +'<div class="dr-note">Every always-tracked asset has its own models for direction, move size and the cheapest of the spot bot’s six daily buying times (4-hour firings, for the day after the latest close). Each is fitted to that asset alone, so it learns that asset’s own weights for momentum, volatility, volume, derivatives, funding, calendar and the other tracked coins. New challengers are proposed weekly from history, but <b>a challenger replaces the current method only on forecasts it logged before their outcomes existed</b>, through a test that stays valid however often it is read; one that later falls behind is demoted the same way. Weights describe what a fitted model leans on, not proof that it helps. <b>Research only; nothing here places a trade.</b></div>'
         +'<div class="bh-list"><div class="bh-head"><span>Asset</span><span>Direction</span><span>Move size</span><span>Cheapest buy time</span><span>What its models weigh</span></div>'+mtRows+'</div>'
+        +mtWide
         +PANEL_END;
     } else if(mt&&mt.status){
       timing+=panelStart({id:'modelTournament',tone:'timing',open:false,eyebrow:'PER-ASSET MODELS',title:'Models that have to earn their place, asset by asset',meta:esc(mt.status)})

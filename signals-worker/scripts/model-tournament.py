@@ -39,12 +39,17 @@ tr = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(tr)
 VERSION = 'model-tournament-v1'
 POOLED = '*'
 SLOTS = (('direction', 1), ('direction', 7), ('magnitude', 1), ('magnitude', 7), ('timing', 2))
+# Stocks (2026-09-24): horizons in trading sessions, no timing slot (the spot
+# bot buys crypto), and their own pooled slot -- a stock is never pooled with
+# a coin.
+SLOTS_BY_CLASS = {'crypto': SLOTS, 'stock': (('direction', 1), ('direction', 5), ('magnitude', 1), ('magnitude', 5))}
+POOLED_BY_CLASS = {'crypto': POOLED, 'stock': '*stock'}
 TRAIN_MAX = 730              # matured labels a fit may use
 ALPHA = 0.05                 # per slot, spent over challengers in admission order
 DEMOTE_E = 20.0              # a champion worse than its fallback at e >= 20 is demoted
 RETIRE_E = 20.0              # a challenger worse than the incumbent at e >= 20 is retired
-MIN_FORWARD = {1: 60, 7: 20, 2: 60}
-MAX_FORWARD = {1: 540, 7: 80, 2: 540}
+MIN_FORWARD = {1: 60, 7: 20, 2: 60, 5: 20}
+MAX_FORWARD = {1: 540, 7: 80, 2: 540, 5: 100}
 LIVE_CHALLENGERS = 6
 ADMIT_PER_RUN = 2
 LAMBDAS = np.array([0.05, 0.1, 0.2, 0.35, 0.5])
@@ -383,6 +388,8 @@ class Ledger:
         better) on dates >= start where both were scored; one per 7 days at
         h = 7 so no two outcomes overlap."""
         dates = sorted(d for d in self.dates.get((challenger, sym, h), []) if d >= start)
+        # A 5-session horizon is counted in sessions: every 5th forecast date.
+        if h == 5: dates = dates[::5]
         out = []
         for d in dates:
             if h == 7 and ((day(d) - day(start)) // DAY) % 7: continue
@@ -422,11 +429,35 @@ class Tournament:
         self.day_outcome = {(s, d['date']): d['cheapest'] for s, ds in self.days.items() for d in ds}
         self._bt = {}
         self.symbols = [s for s in data['symbols'] if (s, 1) in self.rows]
+        self.cls_of = dict(data.get('assetClassBySymbol') or {})
+        self.by_class = {}
+        for s in self.symbols: self.by_class.setdefault(self.cls_of.get(s, 'crypto'), []).append(s)
+        # Each class is judged against its own newest close: a stock's last
+        # session is a Friday all weekend.
+        self.asof_by_class = {c: max((r['date'] for s in ss for r in self.rows.get((s, 1), []) if r['target'] is None), default=None)
+                              for c, ss in self.by_class.items()}
         self.registry = {(r['model_id'], r['symbol'], int(r['horizon'])): dict(r) for r in registry}
         self.ledger = Ledger(ledger_rows)
         self.forecasts, self.scores, self.transitions, self.weights = [], [], [], {}
 
     # -- registry helpers
+    def cls(self, sym):
+        for c, key in POOLED_BY_CLASS.items():
+            if sym == key: return c
+        return self.cls_of.get(sym, 'crypto')
+
+    def pooled_key(self, sym): return POOLED_BY_CLASS[self.cls(sym)]
+
+    def is_pooled(self, sym): return sym in POOLED_BY_CLASS.values()
+
+    def all_slots(self):
+        """(symbol, target, horizon) for every slot: each class's pooled slot
+        first, so a per-asset incumbent is current when its slots are read."""
+        for c, ss in self.by_class.items():
+            for sym in [POOLED_BY_CLASS[c]] + ss:
+                for target, h in SLOTS_BY_CLASS[c]:
+                    if self.slot_symbols(sym, target): yield sym, target, h
+
     def slot_models(self, sym, target, h, statuses=None):
         return [m for (mid, s, hh), m in self.registry.items()
                 if s == sym and hh == h and m['target'] == target and (statuses is None or m['status'] in statuses)]
@@ -438,13 +469,13 @@ class Tournament:
         return c[0] if c else None
 
     def incumbent_id(self, sym, target, h):
-        own = self.champion(sym, target, h) if sym != POOLED else None
-        pooled = self.champion(POOLED, target, h)
+        own = self.champion(sym, target, h) if not self.is_pooled(sym) else None
+        pooled = self.champion(self.pooled_key(sym), target, h)
         return (own or pooled or {'model_id': BENCHMARKS[target]['id']})['model_id']
 
     def fallback_id(self, sym, target, h):
-        if sym == POOLED: return BENCHMARKS[target]['id']
-        pooled = self.champion(POOLED, target, h)
+        if self.is_pooled(sym): return BENCHMARKS[target]['id']
+        pooled = self.champion(self.pooled_key(sym), target, h)
         return (pooled or {'model_id': BENCHMARKS[target]['id']})['model_id']
 
     def register(self, spec, sym, h, status, reason, backtest=None):
@@ -471,7 +502,7 @@ class Tournament:
         m['status'], m['reason'], m['status_changed_at'], m['updated_at'] = status, reason, self.run_at, self.run_at
 
     def slot_symbols(self, sym, target):
-        base = self.symbols if sym == POOLED else [sym]
+        base = self.by_class.get(self.cls(sym), []) if self.is_pooled(sym) else [sym]
         return [s for s in base if target != 'timing' or s in self.days]
 
     # -- 1. score what has matured
@@ -492,11 +523,9 @@ class Tournament:
 
     # -- 2. lifecycle, pooled slots first so per-asset incumbents are current
     def lifecycle(self):
-        for sym in [POOLED] + self.symbols:
-            for target, h in SLOTS:
+        for sym, target, h in list(self.all_slots()):
                 syms = self.slot_symbols(sym, target)
-                if not syms: continue
-                pooled = sym == POOLED
+                pooled = self.is_pooled(sym)
                 inc = self.incumbent_id(sym, target, h)
                 champ = self.champion(sym, target, h)
                 if champ:
@@ -572,7 +601,7 @@ class Tournament:
         else:
             rows = [r for r in self.rows.get((sym, h), []) if r['target'] is not None]
             test = [r for r in rows if r['date'] >= start]
-            if h == 7: test = test[::7]
+            if h > 1: test = test[::h]
             step = refit if h == 1 else 4
             for k in range(0, len(test), step):
                 block = test[k:k + step]
@@ -586,9 +615,7 @@ class Tournament:
         return out
 
     def generate(self, force=False):
-        for sym in [POOLED] + self.symbols:
-            for target, h in SLOTS:
-                if not self.slot_symbols(sym, target): continue
+        for sym, target, h in list(self.all_slots()):
                 live = self.slot_models(sym, target, h, ('challenger',))
                 room = LIVE_CHALLENGERS - len(live)
                 if room <= 0: continue
@@ -609,13 +636,18 @@ class Tournament:
     # -- 4. issue today's forecasts for every active model
     def active(self, sym, target, h):
         ids = {BENCHMARKS[target]['id']}
-        for s in (sym, POOLED):
+        for s in (sym, self.pooled_key(sym)):
             for m in self.slot_models(s, target, h, ('champion', 'challenger')): ids.add(m['model_id'])
         return [self.spec_for(i, target) for i in sorted(ids)]
 
     def issue(self):
         for sym in self.symbols:
-            for target, h in SLOTS:
+            cls = self.cls(sym)
+            class_asof = self.asof_by_class.get(cls) or self.asof
+            # A class whose newest close is days behind is stale as a whole
+            # (a weekend plus a holiday is the most a market is shut).
+            if class_asof < add_days(self.asof, -4): continue
+            for target, h in SLOTS_BY_CLASS[cls]:
                 if target == 'timing':
                     days = self.days.get(sym)
                     if not days: continue
@@ -634,7 +666,7 @@ class Tournament:
                 open_rows = [r for r in rows if r['target'] is None]
                 if not open_rows: continue
                 latest = max(r['date'] for r in open_rows)
-                if latest < add_days(self.asof, -1): continue
+                if latest < add_days(class_asof, -1): continue
                 open_rows = [r for r in open_rows if r['date'] == latest]
                 train = matured(rows, latest)
                 if len(train) < 150: continue
@@ -690,19 +722,17 @@ class Tournament:
     # -- 6. the compact summary build-signals reads
     def summary(self):
         assets = {}
-        for sym in [POOLED] + self.symbols:
-            for target, h in SLOTS:
-                if not self.slot_symbols(sym, target): continue
+        for sym, target, h in self.all_slots():
                 inc = self.incumbent_id(sym, target, h)
                 champ = self.champion(sym, target, h)
                 ch = sorted(self.slot_models(sym, target, h, ('challenger',)), key=lambda m: -(m.get('e_value') or 0))
                 latest = None
-                if sym != POOLED:
+                if not self.is_pooled(sym):
                     dates = [d for d in self.ledger.dates.get((inc, sym, h), [])]
                     latest = self.ledger.get(inc, sym, h, max(dates)) if dates else None
                 assets.setdefault(sym, {})[f'{target}:{h}'] = {
                     'incumbent': inc, 'incumbentLabel': describe(self.spec_for(inc, target)),
-                    'promoted': bool(champ) or (sym != POOLED and bool(self.champion(POOLED, target, h))),
+                    'promoted': bool(champ) or (not self.is_pooled(sym) and bool(self.champion(self.pooled_key(sym), target, h))),
                     'championSince': champ['status_changed_at'] if champ else None,
                     'forecast': json.loads(latest['forecast_json']) if latest else None,
                     # The window a forecast covers: from the close of forecastAsOf to
@@ -712,7 +742,9 @@ class Tournament:
                     'challengers': [{'model': m['model_id'], 'label': describe(self.spec(m)), 'eValue': round(m['e_value'], 3) if m.get('e_value') else None,
                                      'threshold': round(1 / alpha_for(m['alpha_index'])), 'forwardN': m.get('forward_n') or 0,
                                      'meanDiff': m.get('forward_mean_diff')} for m in ch]}
-        return {'version': VERSION, 'asOf': self.asof, 'generatedAt': self.run_at, 'assets': assets,
+        classes = {sym: self.cls(sym) for sym in assets}
+        return {'version': VERSION, 'asOf': self.asof, 'generatedAt': self.run_at, 'assets': assets, 'classes': classes,
+                'universe': {c: len(ss) for c, ss in self.by_class.items()},
                 'weights': self.weights, 'transitions': self.transitions[-50:],
                 'counts': {'forecasts': len(self.forecasts), 'scored': len(self.scores),
                            'champions': sum(1 for m in self.registry.values() if m['status'] == 'champion'),
@@ -725,9 +757,8 @@ def run(data, registry, ledger_rows, generate=False, run_at=None, weights=True):
     # Forecasts are "as of the close of" the newest complete daily bar.
     asof = max(r['date'] for r in data['rows'] if r['target'] is None and r['horizon'] == 1)
     t = Tournament(data, registry, ledger_rows, asof, run_at or time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()))
-    for target, h in SLOTS:
-        for sym in [POOLED] + t.symbols:
-            if t.slot_symbols(sym, target): t.register(BENCHMARKS[target], sym, h, 'benchmark', 'production method')
+    for sym, target, h in list(t.all_slots()):
+        t.register(BENCHMARKS[target], sym, h, 'benchmark', 'production method')
     t.score()
     t.lifecycle()
     t.generate(force=generate)
