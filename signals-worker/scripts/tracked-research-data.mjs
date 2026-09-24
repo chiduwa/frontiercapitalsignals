@@ -9,6 +9,14 @@ import { timeSeriesPaths } from './time-series.mjs';
 // Sequence window handed to the sequence models (tracked-sequence-research.py).
 export const SEQUENCE_DAYS = 30;
 export const TRACKED = ['BTC','ETH','SOL','XLM','XRP','HYPE','HBAR','ARB'];
+// Horizons per asset class: calendar days for crypto (it trades every day),
+// trading sessions for stocks (1 session, 1 week).
+export const HORIZONS = { crypto: [1, 7], stock: [1, 5] };
+const addSessions = (d, n) => {
+  let t = Date.parse(d + 'T00:00:00Z');
+  while (n > 0) { t += DAY; const w = new Date(t).getUTCDay(); if (w !== 0 && w !== 6) n--; }
+  return new Date(t).toISOString().slice(0, 10);
+};
 const DAY = 86400000;
 const offset = (d,n) => new Date(Date.parse(d+'T00:00:00Z')+n*DAY).toISOString().slice(0,10);
 const logRatio = (a,b) => a > 0 && b > 0 ? Math.log(a/b) : null;
@@ -19,11 +27,25 @@ const logRatio = (a,b) => a > 0 && b > 0 ? Math.log(a/b) : null;
 // seasonal-HAR scales and, for the newest dates, OPEN rows: features known at
 // that close, target still unknown (target: null). Those are the rows a live
 // forecast is issued from. Off by default so research inputs stay byte-stable.
-export function researchRows(panel, { symbols = TRACKED, sequence: withSequence = false, tournament = false } = {}) {
-  const assets = panel.assets.filter(a => a.assetClass === 'crypto' && symbols.includes(a.symbol));
-  const bars = new Map(assets.map(a => [a.symbol, sanitizeBars(a.bars, { asOf: panel.asOf })]));
+// `assetClass: 'stock'` builds equity rows: session horizons (HORIZONS),
+// SPY as benchmark and leader, no crypto derivatives or liquidity lanes.
+// `leaders` names the series whose prior-day returns become leader_* inputs;
+// by default the assets themselves, as the tracked lanes always did. For any
+// other batch pass the always-tracked set, so an asset's inputs never depend
+// on which coins happened to share its batch.
+export function researchRows(panel, { symbols = TRACKED, sequence: withSequence = false, tournament = false,
+  assetClass = 'crypto', leaders = null } = {}) {
+  const isStock = assetClass === 'stock';
+  const assets = panel.assets.filter(a => a.assetClass === assetClass && symbols.includes(a.symbol));
+  const leaderList = leaders || (isStock ? ['SPY'] : symbols);
+  const benchmark = isStock ? 'SPY' : 'BTC';
+  const extra = panel.assets.filter(a => !assets.includes(a) && (a.symbol === benchmark || leaderList.includes(a.symbol))
+    && (a.assetClass === assetClass || a.assetClass === 'benchmark'));
+  const bars = new Map([...assets, ...extra].map(a => [a.symbol, sanitizeBars(a.bars, { asOf: panel.asOf })]));
   const byDate = new Map([...bars].map(([s,bs]) => [s,new Map(bs.map(b=>[b.date,b]))]));
+  const sessionIndex = new Map([...bars].map(([s, bs]) => [s, { dates: bs.map(b => b.date), at: new Map(bs.map((b, k) => [b.date, k])) }]));
   const result = { asOf: panel.asOf, symbols, rows: [], coverage: {} };
+  if (isStock) result.assetClass = 'stock';
   for (const asset of assets) {
     const symbol = asset.symbol, bs = bars.get(symbol);
     const deriv = panel.derivatives?.[symbol] || [], funding = panel.funding?.[symbol] || [];
@@ -33,7 +55,7 @@ export function researchRows(panel, { symbols = TRACKED, sequence: withSequence 
     const dates = bs.map(b=>b.date);
     const delay = rows => rows.map(r=>({...r,date:offset(r.date,1)}));
     const delayedDeriv=delay(deriv), delayedSupply=delay(panel.supply?.[symbol]||[]);
-    const benchmarkByDate=new Map([...byDate.get('BTC')||[]].map(([d,b])=>[d,b.close]));
+    const benchmarkByDate=new Map([...byDate.get(benchmark)||[]].map(([d,b])=>[d,b.close]));
     result.coverage[symbol] = { bars: bs.length, first: dates[0], last: dates.at(-1),
       ageDays: (Date.parse(panel.asOf)-Date.parse(dates.at(-1)))/DAY,
       priceSources: [...new Set(bs.map(b=>b.source))], quarantined: asset.quarantined,
@@ -48,17 +70,18 @@ export function researchRows(panel, { symbols = TRACKED, sequence: withSequence 
     // GARCH(1,1) with the weekday factor -- the magnitude model that beat the
     // production scale out of sample (docs/TIME_SERIES_EVIDENCE.md) -- as the
     // benchmark the sequence models' magnitude forecasts must clear.
-    const garch = timeSeriesPaths({ symbol, assetClass: 'crypto', bars: bs }, { structural: false });
+    const garch = timeSeriesPaths({ symbol, assetClass, bars: bs }, { structural: false });
     const dailyLog = bs.map((x, j) => (j && bs[j - 1].close > 0 && x.close > 0 ? Math.log(x.close / bs[j - 1].close) : null));
     const logVolume = bs.map((x, j) => {
       const prior = bs.slice(Math.max(0, j - 20), j).map(y => y.volume).filter(v => v > 0);
       return x.volume > 0 && prior.length >= 10 ? Math.log(x.volume / (prior.reduce((a, v) => a + v, 0) / prior.length)) : null;
     });
     for (let i=60;i<bs.length;i++) {
-      const b=bs[i], date=b.date, previous=offset(date,-1);
+      // A stock's "previous" is the previous session, not the previous day.
+      const b=bs[i], date=b.date, previous=isStock ? bs[i-1].date : offset(date,-1);
       // Portal files and vendor snapshots do not prove same-close availability.
       // Shift optional lanes a full day before feeding the existing feature code.
-      const f=featureRow(bs,i,{assetClass:'crypto',benchmarkByDate,
+      const f=featureRow(bs,i,{assetClass,benchmarkByDate,
         derivatives:delayedDeriv, supply:delayedSupply});
       if (!f) continue;
       const values={...f.raw};
@@ -87,23 +110,28 @@ export function researchRows(panel, { symbols = TRACKED, sequence: withSequence 
       values.momentumAcceleration = Number.isFinite(f.raw.return5) && Number.isFinite(f.raw.return20) ? f.raw.return5 - f.raw.return20 : null;
       const sequence = withSequence ? [] : undefined;
       if (withSequence) for (let k = i - SEQUENCE_DAYS + 1; k <= i; k++) sequence.push([dailyLog[k] ?? null, logVolume[k] ?? null]);
-      for (const leader of symbols) {
+      for (const leader of leaderList) {
         if (leader===symbol) continue;
         const bm=byDate.get(leader);
         for (const lag of [1,3]) {
           // Strict prior-day predictor, never the follower's future interval.
-          const end=bm?.get(previous),start=bm?.get(offset(previous,-lag));
+          const si=sessionIndex.get(leader), k=si?.at.get(previous);
+          const startDate=isStock ? (k>=lag ? si.dates[k-lag] : null) : offset(previous,-lag);
+          const end=bm?.get(previous),start=startDate ? bm?.get(startDate) : null;
           values[`leader_${leader}_${lag}`]=logRatio(end?.close,start?.close);
         }
       }
-      for (const horizon of [1,7]) {
+      for (const horizon of HORIZONS[assetClass] || HORIZONS.crypto) {
         const end=bs[i+horizon];
         const pct=v=>Number.isFinite(v)?Math.expm1(v)*100:null;
         const paths=garch.get(date);
         const scales=tournament ? { garchPct:pct(paths?.garchVol?.[horizon]), harWeekdayPct:pct(paths?.harWeekdayVol?.[horizon]) } : {};
-        if (!end || end.date!==offset(date,horizon)) {
+        // A session horizon may cross a weekend or a holiday, never a data hole.
+        const reaches = end && (isStock ? (Date.parse(end.date)-Date.parse(date))/DAY <= Math.ceil(horizon*7/5)+4
+          : end.date===offset(date,horizon));
+        if (!reaches) {
           // Only the tail is open; a hole inside history is simply unusable.
-          if (tournament && i+horizon>=bs.length) result.rows.push({symbol,date,targetDate:offset(date,horizon),horizon,target:null,values,
+          if (tournament && i+horizon>=bs.length) result.rows.push({symbol,date,targetDate:isStock ? addSessions(date,horizon) : offset(date,horizon),horizon,target:null,values,
             garchWeekdayPct:pct(paths?.garchWeekdayVol?.[horizon]),...scales});
           continue;
         }
@@ -121,11 +149,16 @@ export function researchRows(panel, { symbols = TRACKED, sequence: withSequence 
   return result;
 }
 if (process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
-  // node tracked-research-data.mjs <panel> <rows> [--sequence] [--tournament] [--symbols A,B]
-  const args = process.argv.slice(2), at = args.indexOf('--symbols');
-  const symbols = at >= 0 ? args[at + 1].split(',').filter(Boolean) : TRACKED;
-  const flagValue = at >= 0 ? at + 1 : -1;
-  const [input, output] = args.filter((a, i) => i !== flagValue && !a.startsWith('--'));
+  // node tracked-research-data.mjs <panel> <rows> [--sequence] [--tournament]
+  //   [--symbols A,B] [--asset-class stock] [--leaders A,B]
+  const args = process.argv.slice(2);
+  const valueOf = flag => { const k = args.indexOf(flag); return k >= 0 ? args[k + 1] : null; };
+  const valued = new Set(['--symbols', '--asset-class', '--leaders'].map(f => args.indexOf(f)).filter(k => k >= 0).map(k => k + 1));
+  const [input, output] = args.filter((a, i) => !valued.has(i) && !a.startsWith('--'));
   const panel=JSON.parse(await readFile(input,'utf8'));
-  await writeFile(output,JSON.stringify(researchRows(panel, { symbols, sequence: args.includes('--sequence'), tournament: args.includes('--tournament') })));
+  const list = v => v ? v.split(',').filter(Boolean) : null;
+  const assetClass = valueOf('--asset-class') || 'crypto';
+  const symbols = list(valueOf('--symbols')) || (assetClass === 'crypto' ? TRACKED : panel.assets.filter(a => a.assetClass === assetClass).map(a => a.symbol));
+  await writeFile(output,JSON.stringify(researchRows(panel, { symbols, assetClass, leaders: list(valueOf('--leaders')),
+    sequence: args.includes('--sequence'), tournament: args.includes('--tournament') })));
 }

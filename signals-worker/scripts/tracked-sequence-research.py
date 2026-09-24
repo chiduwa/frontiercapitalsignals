@@ -111,7 +111,7 @@ def fit_lstm(train_seq, yu, ya, val_seq, vu, va, test_seq, seed=7):
     return 1 / (1 + np.exp(-out[:, 0])), np.maximum(0, out[:, 1] * asd + am)
 
 
-def sarima_forecasts(daily, decision_idx, horizon, fit_end, exog=None):
+def sarima_forecasts(daily, decision_idx, horizon, fit_end, exog=None, season=7):
     """SARIMA(1,0,1)(1,0,1,7) on daily % returns, parameters fitted through
     fit_end and then held fixed while the filter walks forward. Returns the
     h-step cumulative forecast and its standard deviation for each decision."""
@@ -121,7 +121,7 @@ def sarima_forecasts(daily, decision_idx, horizon, fit_end, exog=None):
     ex = None if exog is None else np.asarray(exog, dtype=float)
     lo = max(0, fit_end + 1 - 730)
     model = SARIMAX(y[lo:fit_end + 1], exog=None if ex is None else ex[lo:fit_end + 1], order=(1, 0, 1),
-                    seasonal_order=(1, 0, 1, 7), trend='c', enforce_stationarity=True, enforce_invertibility=True)
+                    seasonal_order=(1, 0, 1, season), trend='c', enforce_stationarity=True, enforce_invertibility=True)
     res = model.fit(disp=False, maxiter=80)
     out = []
     for t in decision_idx:
@@ -140,7 +140,7 @@ def normal_cdf(z):
     return 0.5 * (1 + math.erf(z / math.sqrt(2)))
 
 
-def evaluate_asset(rows, horizon, test_start, asof, use_lstm=True, use_sarima=True):
+def evaluate_asset(rows, horizon, test_start, asof, use_lstm=True, use_sarima=True, season=7):
     rows = sorted(rows, key=lambda r: r['date'])
     # Daily return series (percent) indexed by date, for SARIMA.
     daily_rows = sorted({r['date']: r for r in rows}.values(), key=lambda r: r['date'])
@@ -184,7 +184,7 @@ def evaluate_asset(rows, horizon, test_start, asof, use_lstm=True, use_sarima=Tr
             for name, ex in (('sarima', None), ('sarimax', exog if horizon == 1 else None)):
                 if name == 'sarimax' and ex is None: continue
                 try:
-                    fc = sarima_forecasts(daily, idx, horizon, fit_end, exog=ex)
+                    fc = sarima_forecasts(daily, idx, horizon, fit_end, exog=ex, season=season)
                     signed[name] = np.array([m for m, _ in fc])
                     prob[name] = np.array([normal_cdf(m / s) if s > 0 else 0.5 for m, s in fc])
                 except Exception as e:  # a failed fit is recorded as coin-flip, not dropped
@@ -268,12 +268,17 @@ def run(data, test_days=360, symbols=None, use_lstm=True, use_sarima=True):
                            'sequenceChannels': ['daily log return', '|daily log return|', 'log volume vs 20-day mean']},
               'assets': {}}
     predictions = {}
+    # Stocks trade five sessions a week: horizons 1 and 5, a 5-session season.
+    stock = data.get('assetClass') == 'stock'
+    report['assetClass'] = 'stock' if stock else 'crypto'
+    horizons = sorted({int(r['horizon']) for r in data['rows']}) or [1, 7]
     for symbol in symbols or data['symbols']:
         report['assets'][symbol] = {}
-        for h in (1, 7):
+        for h in horizons:
             rows = [r for r in data['rows'] if r['symbol'] == symbol and r['horizon'] == h]
             t0 = time.time()
-            recs = evaluate_asset(rows, h, test_start, asof, use_lstm=use_lstm, use_sarima=use_sarima) if rows else []
+            recs = evaluate_asset(rows, h, test_start, asof, use_lstm=use_lstm, use_sarima=use_sarima,
+                                  season=5 if stock else 7) if rows else []
             report['assets'][symbol][str(h)] = score(recs, h)
             predictions[f'{symbol}|{h}'] = recs
             print(f'{symbol} {h}d: {len(recs)} test outcomes in {time.time() - t0:.0f}s', flush=True)
