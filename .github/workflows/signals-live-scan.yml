@@ -28,7 +28,7 @@ on:
       symbols:
         description: "How many Binance-global symbols to scan"
         required: false
-        default: "250"
+        default: "500"
 
 concurrency:
   group: signals-live-scan
@@ -37,8 +37,9 @@ concurrency:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    # ~250 klines calls at 120ms pacing is ~1 minute of fetch time, plus
-    # scoring and D1 writes. Every outbound call is individually bounded by
+    # ~480 klines calls (1000 hourly bars each, for the per-coin 30-day
+    # calibration) four at a time is ~2-3 minutes of fetch time, plus scoring
+    # and D1 writes. Every outbound call is individually bounded by
     # fetchWithTimeout, so this ceiling is about total time, not hangs.
     timeout-minutes: 15
     steps:
@@ -66,5 +67,5 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
-          LIVE_SCAN_SYMBOLS: ${{ inputs.symbols || '250' }}
+          LIVE_SCAN_SYMBOLS: ${{ inputs.symbols || '500' }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}

@@ -294,11 +294,11 @@ One counter-intuitive detail worth preserving: exhaustion carries **no liquidity
 
 ### `scripts/live-scan.mjs` — earning the right to interrupt you
 
-Runs hourly over 250 Binance-global symbols (deliberately wider than `CRYPTO_UNIVERSE`, since the retrospective's standing finding is that ~80% of missed moves were never fetched at all).
+Runs hourly over every Binance-global USDT pair (about 480 since 2026-09-26; 250 before), deliberately wider than `CRYPTO_UNIVERSE`, since the retrospective's standing finding is that ~80% of missed moves were never fetched at all. Since 2026-09-26 the Worker dispatches it on the first cron tick after each hour closes, rather than on a free-running hourly timer.
 
 **Every** configuration is cast, logged and scored on live forward data — proven or not. That is the learning loop: an unproven candidate can only earn its way in by accumulating a real forward record, and it cannot accumulate one if it is never cast. The notification gate, in order:
 
-- **proven at discovery** → notifies (only `exhaustion20`)
+- **proven at discovery** → notifies (`exhaustion20`, and `exhaustion_calibrated` since 2026-09-26)
 - **≥30 scored casts and a Wilson lower bound above a coin flip** → notifies, graduated on its own live evidence
 - otherwise → logged, silent
 
@@ -739,3 +739,11 @@ different token, and the anonymous CoinGecko fallback had stopped answering
 tries Binance's public klines before CoinGecko -- full history, true UTC closes,
 quote volume -- and passes the existing `COINGECKO_API_KEY` secret, which the
 archive step had never received.
+
+## Sell pressure and profit growers (added 2026-09-26)
+
+Two user requests, both tested before anything was built. Full write-ups, scripts and outputs: `docs/research-2026-09-26/`.
+
+**Volume exhaustion, per coin (`EXHAUSTION.md`).** `exhaustion_calibrated` measures each hour against the coin's own last 30 days (`calibratedSurge` in worker.js): volume 3+ standard deviations above its norm, an hour 3+ of its own volatility units, after a 24h run. On 478 coins since January 2024 it was followed by -2.8% (mid-size) to -5.3% (thin) against the market over 24h, holding in both halves of the history. It does not work on the most liquid coins (BTC, ETH, SOL, XRP, HBAR, ARB and ~40 more), so they are excluded by 30-day liquidity and the page says why. `scripts/exhaustion-gauge.mjs` adds the market-wide reading, which the research found means continuation, not tops, so it is context and never an alert. The live scan writes each reading to `market_exhaustion_log`; the dashboard's **Sell pressure** view shows it, your coins (favorites plus spot-bot holdings) and the last day's prints. US stocks were tested too (4,578 of them, ten years): nothing held up, so there are no stock warnings.
+
+**Profit growers (`PROFIT_GROWTH.md`).** `scripts/profit-growth.mjs` runs daily (`signals-profit-growth.yml`, 22:40 UTC): SEC XBRL frames plus Nasdaq's screener, the top 25 small caps ($300M-$2B, by revenue growth) and mid caps ($2B-$10B, by operating-profit growth) that are profitable, growing revenue, and either consistently growing profit or growing operating profit 20%+. Over 37 quarters they beat same-size stocks by +1.7% and +2.0% a quarter (moderate evidence; survivorship bias in the free data works against them). Weekly cohorts are scored forward at 4, 13 and 26 weeks. Every listed company's profit facts land in `company_profit_metrics`, and the Live screens show them in each US stock's details.

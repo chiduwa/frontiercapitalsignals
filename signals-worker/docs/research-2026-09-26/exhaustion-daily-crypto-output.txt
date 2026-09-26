@@ -1,0 +1,45 @@
+26,216 rows; split 2023-04-04
+reference: all days (2% sample)          n=  8587 d=2173  5d exc  +0.18% t  +1.0 | H1  -0.12% (t  -0.4) H2  +0.40% (t  +2.1) | top  30%
+
+== top 12 by DISCOVERY-half t ==
+volZ>=4 barZ>=1.5 run5Z>=2.5             n=  1017 d= 628 10d exc  -6.88% t  -6.1 | H1 -10.70% (t  -5.6) H2  -5.24% (t  -3.8) | top  43%
+volZ>=4 barZ>=1.5                        n=  1534 d= 869 10d exc  -5.33% t  -6.3 | H1  -8.11% (t  -5.5) H2  -4.09% (t  -4.0) | top  49%
+volZ>=4 barZ>=1.5 run5Z>=1.5             n=  1322 d= 770 10d exc  -5.63% t  -5.9 | H1  -8.85% (t  -5.5) H2  -4.23% (t  -3.6) | top  46%
+volZ>=4 barZ>=2 run5Z>=2.5               n=   972 d= 614 10d exc  -6.60% t  -5.6 | H1 -10.39% (t  -5.3) H2  -4.99% (t  -3.4) | top  43%
+volZ>=4 barZ>=1.5 run5Z>=2.5 new20dHigh  n=   899 d= 564 10d exc  -7.07% t  -5.9 | H1 -10.49% (t  -5.3) H2  -5.51% (t  -3.7) | top  42%
+volZ>=4 barZ>=3 run5Z>=2.5               n=   869 d= 568 10d exc  -6.86% t  -5.6 | H1 -10.69% (t  -5.3) H2  -5.29% (t  -3.5) | top  43%
+volZ>=4 barZ>=2 run5Z>=2.5 new20dHigh    n=   872 d= 557 10d exc  -7.04% t  -5.8 | H1 -10.50% (t  -5.2) H2  -5.48% (t  -3.6) | top  42%
+volZ>=4 barZ>=2 run5Z>=1.5               n=  1251 d= 754 10d exc  -5.44% t  -5.4 | H1  -8.50% (t  -5.1) H2  -4.12% (t  -3.3) | top  45%
+volZ>=4 barZ>=3 run5Z>=2.5 new20dHigh    n=   794 d= 524 10d exc  -7.56% t  -6.0 | H1 -10.80% (t  -5.1) H2  -6.15% (t  -4.0) | top  42%
+volZ>=4 barZ>=2                          n=  1420 d= 840 10d exc  -5.30% t  -5.9 | H1  -7.80% (t  -5.1) H2  -4.20% (t  -3.8) | top  48%
+volZ>=4 barZ>=3                          n=  1154 d= 729 10d exc  -6.14% t  -6.2 | H1  -8.59% (t  -5.1) H2  -5.09% (t  -4.2) | top  47%
+volZ>=4 barZ>=1.5 new20dHigh             n=  1169 d= 690 10d exc  -5.75% t  -5.6 | H1  -8.60% (t  -5.0) H2  -4.36% (t  -3.4) | top  45%
+
+32 (variant, horizon) pairs pass discovery t<=-3 AND validation t<=-2
+volZ>=4 barZ>=1.5 run5Z>=2.5             n=  1017 d= 628 10d exc  -6.88% t  -6.1 | H1 -10.70% (t  -5.6) H2  -5.24% (t  -3.8) | top  43%
+volZ>=4 barZ>=1.5                        n=  1534 d= 869 10d exc  -5.33% t  -6.3 | H1  -8.11% (t  -5.5) H2  -4.09% (t  -4.0) | top  49%
+volZ>=4 barZ>=1.5 run5Z>=1.5             n=  1322 d= 770 10d exc  -5.63% t  -5.9 | H1  -8.85% (t  -5.5) H2  -4.23% (t  -3.6) | top  46%
+volZ>=4 barZ>=2 run5Z>=2.5               n=   972 d= 614 10d exc  -6.60% t  -5.6 | H1 -10.39% (t  -5.3) H2  -4.99% (t  -3.4) | top  43%
+volZ>=4 barZ>=1.5 run5Z>=2.5 new20dHigh  n=   899 d= 564 10d exc  -7.07% t  -5.9 | H1 -10.49% (t  -5.3) H2  -5.51% (t  -3.7) | top  42%
+volZ>=4 barZ>=3 run5Z>=2.5               n=   869 d= 568 10d exc  -6.86% t  -5.6 | H1 -10.69% (t  -5.3) H2  -5.29% (t  -3.5) | top  43%
+volZ>=4 barZ>=2 run5Z>=2.5 new20dHigh    n=   872 d= 557 10d exc  -7.04% t  -5.8 | H1 -10.50% (t  -5.2) H2  -5.48% (t  -3.6) | top  42%
+volZ>=4 barZ>=2 run5Z>=1.5               n=  1251 d= 754 10d exc  -5.44% t  -5.4 | H1  -8.50% (t  -5.1) H2  -4.12% (t  -3.3) | top  45%
+volZ>=4 barZ>=3 run5Z>=2.5 new20dHigh    n=   794 d= 524 10d exc  -7.56% t  -6.0 | H1 -10.80% (t  -5.1) H2  -6.15% (t  -4.0) | top  42%
+volZ>=4 barZ>=2                          n=  1420 d= 840 10d exc  -5.30% t  -5.9 | H1  -7.80% (t  -5.1) H2  -4.20% (t  -3.8) | top  48%
+
+== best: volZ>=4 barZ>=1.5 run5Z>=2.5 @ 10d, by tier ==
+  major                                  n=   101 d=  78  1d exc  +0.98% t  +0.5 | H1  +1.16% (t  +0.3) H2  +0.86% (t  +0.6) | top  45%
+  major                                  n=   101 d=  77  3d exc  +1.98% t  +0.9 | H1  -2.03% (t  -0.6) H2  +4.68% (t  +1.6) | top  32%
+  major                                  n=   101 d=  77  5d exc  +3.85% t  +1.2 | H1  -3.63% (t  -1.0) H2  +8.89% (t  +1.9) | top  27%
+  major                                  n=   101 d=  75 10d exc  +8.11% t  +1.6 | H1  -7.06% (t  -1.7) H2 +18.79% (t  +2.4) | top  20%
+  major                                  n=   101 d=  74 20d exc +10.20% t  +1.6 | H1  -6.16% (t  -1.1) H2 +21.99% (t  +2.3) | top  20%
+  mid                                    n=   376 d= 292  1d exc  -0.16% t  -0.1 | H1  -5.21% (t  -2.6) H2  +1.31% (t  +0.8) | top  57%
+  mid                                    n=   376 d= 291  3d exc  -2.65% t  -1.9 | H1  -7.90% (t  -3.5) H2  -1.11% (t  -0.7) | top  46%
+  mid                                    n=   376 d= 289  5d exc  -1.96% t  -1.2 | H1  -7.60% (t  -2.8) H2  -0.29% (t  -0.1) | top  43%
+  mid                                    n=   376 d= 286 10d exc  -0.85% t  -0.4 | H1  -7.11% (t  -2.2) H2  +1.03% (t  +0.4) | top  38%
+  mid                                    n=   376 d= 282 20d exc  +1.48% t  +0.5 | H1  -1.84% (t  -0.3) H2  +2.49% (t  +0.8) | top  33%
+  thin                                   n=   540 d= 422  1d exc  -3.84% t  -4.8 | H1  -3.67% (t  -1.8) H2  -3.91% (t  -5.3) | top  68%
+  thin                                   n=   540 d= 422  3d exc  -6.42% t  -5.7 | H1  -5.53% (t  -1.8) H2  -6.77% (t  -6.9) | top  60%
+  thin                                   n=   540 d= 421  5d exc  -7.35% t  -6.0 | H1  -5.64% (t  -1.7) H2  -8.02% (t  -7.5) | top  56%
+  thin                                   n=   540 d= 417 10d exc -11.53% t -10.6 | H1 -13.59% (t  -5.3) H2 -10.71% (t  -9.5) | top  50%
+  thin                                   n=   540 d= 408 20d exc -12.50% t  -8.6 | H1 -14.33% (t  -4.0) H2 -11.74% (t  -8.1) | top  46%

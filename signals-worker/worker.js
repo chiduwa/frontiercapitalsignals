@@ -137,7 +137,15 @@ export const CADENCE_DISPATCHES = Object.freeze([
     // scanning twice inside one bar re-evaluates a closed bar and spends the
     // fetches to have its casts rejected.
     key: 'signals:cadence:live-scan',
-    intervalSeconds: 60 * 60
+    intervalSeconds: 60 * 60,
+    // Aligned to the clock, not to the last dispatch (2026-09-26). An exhaustion
+    // warning is worth most in its first hours (the measured excess is already
+    // -1.8% at 4h against -3.2% at 24h), and a free-running hourly timer landed
+    // the scan anywhere from minutes to an hour after the bar it needs had
+    // closed. Now: one dispatch per clock hour, on the first cron tick at or
+    // after minute 1, so the scan reads a bar that closed a few minutes ago.
+    alignToHour: true,
+    afterMinute: 1
   })
 ]);
 // 250, raised from 100 on 2026-09-06. The old value's stated reason was that
@@ -2193,6 +2201,32 @@ export const SURGE_CONFIGS = [
     note: 'a 20x+ volume spike on an hour that already ran +5% or more has historically been followed by roughly -8% over the next day. This is a warning not to chase, not an entry'
   },
   {
+    // 2026-09-26 (docs/research-2026-09-26/EXHAUSTION.md): the same idea
+    // measured against each coin's OWN last 30 days instead of a fixed 20x, so
+    // it can see exhaustion on coins whose books never print 20x. Tested over
+    // 478 Binance pairs, Jan 2024 - Sep 2026, ranked on the first half of the
+    // dates and judged on the second: -3.21% vs the same-window market over
+    // 24h (day-clustered t = -12.3; halves -3.10% / -3.32%), 71% of prints
+    // negative. Where it overlaps exhaustion20 the two agree and are stronger
+    // together (-4.6%); where it does not, it still holds (-2.6%, t = -9.3).
+    //
+    // NOT for the most liquid coins. In the top tier by volume (BTC, ETH, SOL,
+    // XRP, HBAR, ARB and ~40 more) the same print was followed by -0.27% at 24h
+    // and +0.59% at 72h, and no threshold in a separate majors-only sweep held
+    // up in both halves. Deep books absorb a volume surge as real flow, so it
+    // tends to be continuation, not a top. maxLiquidity30d keeps those coins
+    // out rather than warning on evidence that does not exist.
+    id: 'exhaustion_calibrated',
+    label: 'Volume exhaustion (per-coin)',
+    minRatio: 0, maxRatio: null, minTradeRatio: null,
+    requireRising: true, minBarPct: null, maxBarPct: null, minLiquidity: 0,
+    minVolZ: 3, minBarZ: 3, minRun24Z: 1.5,
+    maxLiquidity30d: 400_000,
+    dir: -1, horizonHours: 24,
+    proven: true,
+    note: 'volume this far above the coin\'s own 30-day norm, on an hour this large for it, after a run, has been followed by about -3% against the market over the next day on smaller coins. It usually pokes higher first, so there is often a chance to sell into strength'
+  },
+  {
     id: 'accum_quiet',
     label: 'Quiet accumulation',
     minRatio: 2, maxRatio: 3, minTradeRatio: null,
@@ -2213,6 +2247,52 @@ export const SURGE_CONFIGS = [
     note: 'candidate only, failed the out-of-sample split at discovery'
   }
 ];
+
+// ---- per-coin calibration (2026-09-26) --------------------------------------
+// A fixed "20x the 48h median" bar can only fire on thin books: a coin like
+// HBAR or XLM almost never prints 20x its own median, however exhausted the
+// buying is. These measure the bar against the coin's OWN last 30 days
+// instead: how unusual this hour's volume is in log terms (volZ), how big this
+// hour's move is in units of the coin's own hourly volatility (barZ), and how
+// far the last 24 hours ran in the same units (run24Z). Computed exactly as
+// the research did (docs/research-2026-09-26/EXHAUSTION.md): windows end at
+// the previous bar, sample standard deviation, zero-volume hours excluded, and
+// nothing reported until half the window exists.
+export const SURGE_CALIBRATION_HOURS = 720;
+export const SURGE_CALIBRATION_MIN_HOURS = 360;
+
+function sampleMeanSd(xs) {
+  const n = xs.length;
+  if (n < 2) return { mean: null, sd: null };
+  const mean = xs.reduce((a, b) => a + b, 0) / n;
+  const sd = Math.sqrt(xs.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (n - 1));
+  return { mean, sd };
+}
+
+export function calibratedSurge(bars, index, hours = SURGE_CALIBRATION_HOURS) {
+  const empty = { volZ: null, barZ: null, run24Z: null, liquidity30d: null };
+  if (!Array.isArray(bars) || index < 1 || index >= bars.length) return empty;
+  const start = Math.max(1, index - hours);
+  const logVol = [], logRet = [], vols = [];
+  for (let i = start; i < index; i++) {
+    const b = bars[i], p = bars[i - 1];
+    if (Number.isFinite(b.quoteVolume) && b.quoteVolume > 0) { logVol.push(Math.log(b.quoteVolume)); vols.push(b.quoteVolume); }
+    if (b.close > 0 && p.close > 0) logRet.push(Math.log(b.close / p.close));
+  }
+  if (logVol.length < SURGE_CALIBRATION_MIN_HOURS || logRet.length < SURGE_CALIBRATION_MIN_HOURS) return empty;
+  const v = sampleMeanSd(logVol);
+  const r = sampleMeanSd(logRet);
+  const bar = bars[index];
+  if (!(v.sd > 0) || !(r.sd > 0) || !(bar.quoteVolume > 0) || !(bar.open > 0) || !(bar.close > 0)) return empty;
+  const back = index >= 24 ? bars[index - 24] : null;
+  vols.sort((a, b) => a - b);
+  return {
+    volZ: (Math.log(bar.quoteVolume) - v.mean) / v.sd,
+    barZ: Math.log(bar.close / bar.open) / r.sd,
+    run24Z: back && back.close > 0 ? Math.log(bar.close / back.close) / (r.sd * Math.sqrt(24)) : null,
+    liquidity30d: vols[Math.floor(vols.length / 2)]
+  };
+}
 
 // Surge features for one bar against its own trailing window. Pure, so the
 // live scanner and any backtest compute the identical number — the whole
@@ -2240,7 +2320,8 @@ export function surgeFeatures(bars, index, baselineHours = 48) {
     // discriminating filter in the sweep: thin books manufacture large
     // ratios from nothing, and every cohort measured cleaner once they
     // were excluded.
-    liquidity: medQv
+    liquidity: medQv,
+    ...calibratedSurge(bars, index)
   };
 }
 
@@ -2256,6 +2337,12 @@ export function surgeConfigMatches(cfg, f) {
   if (cfg.minBarPct != null && f.barPct < cfg.minBarPct) return false;
   if (cfg.maxBarPct != null && f.barPct >= cfg.maxBarPct) return false;
   if (cfg.minLiquidity && f.liquidity < cfg.minLiquidity) return false;
+  // Calibrated tests. A null feature (not enough history yet) fails the test
+  // rather than passing it: `null >= 3` is false, so the negation rejects.
+  if (cfg.minVolZ != null && !(f.volZ >= cfg.minVolZ)) return false;
+  if (cfg.minBarZ != null && !(f.barZ >= cfg.minBarZ)) return false;
+  if (cfg.minRun24Z != null && !(f.run24Z >= cfg.minRun24Z)) return false;
+  if (cfg.maxLiquidity30d != null && !(f.liquidity30d < cfg.maxLiquidity30d)) return false;
   return true;
 }
 
@@ -6530,12 +6617,23 @@ async function readGitHubErrorDetail(response) {
 // rewritten with the short failure cooldown instead, so a broken token retries
 // in minutes rather than holding the lane shut for a whole interval -- the same
 // asymmetry dispatchRefreshIfStale learned the hard way.
-export async function dispatchWorkflowOnCadence(env, spec) {
+export async function dispatchWorkflowOnCadence(env, spec, nowMs = Date.now()) {
   if (!env || !env.FCS_CACHE) throw new Error('FCS_CACHE binding is required for cadence dispatch');
-  if (await env.FCS_CACHE.get(spec.key)) return false;
+  // A clock-aligned lane keys its lock on the UTC hour, so it fires exactly once
+  // per hour, on the first tick at or after `afterMinute`, whenever the last
+  // run happened to be.
+  let key = spec.key;
+  let ttl = spec.intervalSeconds;
+  if (spec.alignToHour) {
+    const now = new Date(nowMs);
+    if (now.getUTCMinutes() < (spec.afterMinute || 0)) return false;
+    key = `${spec.key}:${now.toISOString().slice(0, 13)}`;
+    ttl = 2 * 3600;
+  }
+  if (await env.FCS_CACHE.get(key)) return false;
   try {
     if (!env.GITHUB_ACTIONS_TOKEN) throw new Error(`GITHUB_ACTIONS_TOKEN Worker secret is required to dispatch ${spec.workflow}`);
-    await env.FCS_CACHE.put(spec.key, new Date().toISOString(), { expirationTtl: spec.intervalSeconds });
+    await env.FCS_CACHE.put(key, new Date().toISOString(), { expirationTtl: ttl });
     const response = await fetch(`${GITHUB_WORKFLOW_DISPATCH_BASE}${spec.workflow}/dispatches`, {
       method: 'POST',
       headers: {
@@ -6552,7 +6650,9 @@ export async function dispatchWorkflowOnCadence(env, spec) {
     }
   } catch (error) {
     try {
-      await env.FCS_CACHE.put(spec.key, new Date().toISOString(), { expirationTtl: REFRESH_DISPATCH_FAILURE_COOLDOWN_SECONDS });
+      // The same key the success path used, so an aligned lane retries later
+      // in the SAME hour after the cooldown rather than waiting for the next.
+      await env.FCS_CACHE.put(key, new Date().toISOString(), { expirationTtl: REFRESH_DISPATCH_FAILURE_COOLDOWN_SECONDS });
     } catch (cooldownError) {
       console.error(`Unable to set ${spec.workflow} dispatch cooldown:`, cooldownError.message);
     }
@@ -7219,6 +7319,23 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   #panel-timeSeriesResearch .bh-cell{display:block;line-height:1.7}
   #panel-modelTournament .bh-cell{display:block;line-height:1.7}
   @media(min-width:721px){#panel-bigMoveWatch .bh-head,#panel-bigMoveWatch .bh-row{grid-template-columns:minmax(110px,.9fr) repeat(5,minmax(90px,1fr))}}
+  @media(min-width:721px){#panel-exhWatch .bh-head,#panel-exhWatch .bh-row{grid-template-columns:minmax(64px,.5fr) minmax(80px,.6fr) minmax(64px,.5fr) minmax(90px,.6fr) minmax(70px,.5fr) minmax(230px,2fr)}}
+  @media(min-width:721px){#panel-exhPrints .bh-head,#panel-exhPrints .bh-row{grid-template-columns:minmax(70px,.6fr) repeat(6,minmax(76px,.7fr))}}
+  @media(min-width:721px){#panel-profitSmall .bh-head,#panel-profitSmall .bh-row,#panel-profitMid .bh-head,#panel-profitMid .bh-row{grid-template-columns:minmax(190px,1.7fr) minmax(90px,.8fr) repeat(6,minmax(70px,.6fr))}}
+  .ex-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin:12px 0}
+  .ex-tile{background:var(--ink-1);padding:10px 12px;font-family:var(--mono)}
+  .ex-tile b{display:block;font-size:18px;color:var(--paper);font-variant-numeric:tabular-nums}
+  .ex-tile span{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+  .ex-tile em{display:block;font-style:normal;font-size:10.5px;color:var(--muted);margin-top:3px}
+  .ex-state{font-family:var(--disp);font-size:15px;color:var(--paper);margin:6px 0 2px}
+  .ex-warn{color:var(--down);font-weight:700}
+  .ex-quiet{color:var(--muted)}
+  .pg-name{display:block;font-size:10.5px;color:var(--muted);font-family:var(--disp);font-weight:400}
+  .pg-why{display:block;font-size:10px;color:var(--dim);margin-top:2px;font-family:var(--disp);font-weight:400}
+  .profit-note{display:block;color:var(--muted);font-size:10px;letter-spacing:.02em;margin-top:3px;font-family:var(--disp);cursor:help}
+  .profit-note.grower{color:var(--up)}
+  .ex-list{margin:8px 0 4px;padding-left:18px;font-family:var(--mono);font-size:11.5px;line-height:1.75;color:var(--muted)}
+  .ex-list b{color:var(--paper)}
   @media(min-width:721px){#panel-modelTournament .bh-head,#panel-modelTournament .bh-row{grid-template-columns:minmax(80px,.45fr) minmax(200px,1.2fr) minmax(200px,1.2fr) minmax(170px,1fr) minmax(190px,1.1fr)}}
   @media(min-width:721px){#panel-timeSeriesResearch .bh-head,#panel-timeSeriesResearch .bh-row{grid-template-columns:minmax(96px,.6fr) minmax(170px,1fr) minmax(230px,1.5fr) minmax(230px,1.5fr)}}
   .ts-bars{display:inline-flex;align-items:flex-end;gap:2px;height:14px;vertical-align:-2px;margin-right:7px}
@@ -7454,6 +7571,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     <a class="qnav-link" href="#screens" data-view-link="screens">Live screens</a>
     <a class="qnav-link" href="#intraday" data-view-link="intraday">Intraday</a>
     <a class="qnav-link" href="#watchlists" data-view-link="watchlists">Watchlists</a>
+    <a class="qnav-link" href="#sell" data-view-link="sell">Sell pressure</a>
+    <a class="qnav-link" href="#profits" data-view-link="profits">Profit growers</a>
     <a class="qnav-link" href="#timing" data-view-link="timing">Timing &amp; range</a>
     <a class="qnav-link" href="#research" data-view-link="research">Research</a>
   </nav>
@@ -7637,6 +7756,28 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     if(v>=1e6) return '$'+(v/1e6).toFixed(0)+'M';
     return '$'+Math.round(v).toLocaleString('en-US');
   }
+  function num(v){ return typeof v==='number'&&isFinite(v); }
+  // Growth as a fraction (0.25 = +25%). Growth off a tiny base reads as
+  // thousands of percent, which says less than the dollar figures beside it.
+  function fmtGrowth(x){
+    if(!num(x)) return 'n/a';
+    if(x>5) return 'over +500%';
+    return (x>=0?'+':'')+Math.round(x*100)+'%';
+  }
+  function fmtUsd(v){
+    if(!num(v)) return 'n/a';
+    var a=Math.abs(v), sign=v<0?'-':'';
+    if(a>=1e9) return sign+'$'+(a/1e9).toFixed(1)+'B';
+    if(a>=1e6) return sign+'$'+(a/1e6).toFixed(0)+'M';
+    return sign+'$'+Math.round(a).toLocaleString('en-US');
+  }
+  function fmtZ(z){ return num(z)?(z>=0?'+':'')+z.toFixed(1)+'σ':'n/a'; }
+  function hoursAgo(iso){
+    var t=Date.parse(iso); if(!isFinite(t)) return '';
+    var h=(Date.now()-t)/36e5;
+    return h<1?Math.max(1,Math.round(h*60))+' min ago':Math.round(h)+'h ago';
+  }
+  function shortName(n){ return String(n||'').replace(/ +(Class [A-Z] +)?(Common Stock|Common Shares|Ordinary Shares|Common Share)( .*)?$/i,''); }
   function pad(n){ return n<10?'0'+n:''+n; }
 
   // ---- Data timestamps ---------------------------------------------------
@@ -7704,6 +7845,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     screens:['ASSET SCREENER','Live screens','Compare ranked assets. Open an asset’s details for its drivers and evidence.'],
     intraday:['SESSION MONITOR','Intraday context','Live range measurements and historical time windows. Observation only.'],
     watchlists:['STANDING COVERAGE','Watchlists','Always-tracked assets and descriptive long-term lows, in one place.'],
+    sell:['SELL PRESSURE','Volume exhaustion','When a coin’s buying looks spent, measured against its own history, plus the whole market for context.'],
+    profits:['PROFIT GROWERS','Growing profits, small and mid caps','US companies worth $300M to $10B that are making money and growing it, from their own SEC filings.'],
     timing:['HISTORICAL MEASUREMENTS','Timing & range','Explore when assets moved and how much of their normal range they used.'],
     research:['MODEL EVIDENCE','Research & track record','Review missed moves, measured performance, and research still being tested.']
   };
@@ -8128,6 +8271,116 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       +'This hour&#39;s '+(assetClass==='crypto'?'crypto':'equity')+' feed returned '+(cf.freshUniverse||0)+' of the usual '+(cf.priorUniverse||0)+' assets, so the last complete board is shown instead of an empty one. Prices on these rows are still live.</div>';
   }
 
+  // ---- Sell pressure (scripts/exhaustion-gauge.mjs, exhaustion-io.mjs) -----
+  // Per-coin volume exhaustion, the coins you hold, and the market as context.
+  // Every figure quoted comes from the payload's own evidence block, so the
+  // page can never claim more than the research measured.
+  function renderSellPressure(x){
+    if(!x||x.status==='unavailable') return '<div class="dashboard-empty">The sell-pressure reading is unavailable right now.</div>';
+    var ev=x.evidence||{}, tiers=ev.byTier||{}, both=ev.bothRules||{}, mk=ev.market||{};
+    var pct=function(v,dp){return num(v)?(v>0?'+':'')+v.toFixed(dp==null?1:dp)+'%':'n/a';};
+    var share=function(v){return num(v)?Math.round(v*100)+'%':'n/a';};
+    var out='<div class="xp-banner" role="note"><b>What this watches.</b> Volume exhaustion is an hour where a coin trades far more than its own normal, jumps in price, and has already run up. On smaller coins that has usually meant the buying is used up: across 478 coins since January 2024, those hours were followed by '
+      +pct(tiers.mid&&tiers.mid.excess24)+' on mid-size coins and '+pct(tiers.thin&&tiers.thin.excess24)+' on the thinnest, against the market over the next day. The coin often pokes higher first, so there is usually time to sell into strength. On the biggest coins (BTC, ETH, SOL, XRP and similar) it has not worked, and surges there have tended to keep going, so they get no sell warnings. Not financial advice.</div>';
+    if(x.status==='awaiting-first-run') return out+'<div class="dashboard-empty">The first scan has not landed yet. It runs a few minutes after every hour.</div>';
+    var g=x.gauge||{};
+    out+=panelStart({id:'exhMarket',tone:'watch',open:true,eyebrow:'CRYPTO &middot; <b>WHOLE MARKET</b>',title:g.headline||'The whole market',
+        meta:'as of '+esc(String(x.at||'').slice(11,16))+' UTC &middot; '+(g.scanned||0)+' coins'+(x.status==='stale'?' &middot; <span class="amber-t">stale</span>':'')})
+      +'<div class="ex-tiles">'
+        +'<div class="ex-tile"><span>Coins printing exhaustion, 24h</span><b>'+share(g.breadth)+'</b><em>a typical day is '+share(x.reference&&x.reference.median)+'</em></div>'
+        +'<div class="ex-tile"><span>Total volume vs 30-day norm</span><b>'+fmtZ(g.aggVolumeZ)+'</b><em>standard deviations</em></div>'
+        +'<div class="ex-tile"><span>Market, last 24h</span><b>'+pct(g.marketRet24Pct)+'</b><em>equal-weight, '+(g.indexCoins||0)+' coins</em></div>'
+        +'<div class="ex-tile"><span>Market run, 3 days</span><b>'+fmtZ(g.marketRun72Z)+'</b><em>in its own hourly volatility</em></div>'
+      +'</div>'
+      +'<div class="dr-note">'+esc(g.detail||'')+' Across the history tested, a market-wide volume surge during a rally was followed by more upside ('+pct(mk.surgeInRally72)+' over 3 days, '+pct(mk.surgeInRally168)+' over a week), so this panel is context, never a sell signal.</div>'
+      +PANEL_END;
+    var watch=x.watch||[];
+    if(watch.length){
+      var wRows=watch.map(function(w){
+        var reading;
+        if(w.onVenue===false) reading='<span class="ex-quiet">Not on Binance spot, so not scanned</span>';
+        else if(w.tier==='major') reading='<span class="ex-quiet">Large coin: volume surges here have tended to continue, so no sell warnings</span>';
+        else if(!num(w.volZ)) reading='<span class="ex-quiet">Not enough trading history on Binance yet</span>';
+        else if(w.lastPrint) reading='<span class="ex-warn">Exhaustion '+hoursAgo(w.lastPrint.at)+'</span>, '+pct(w.moveSinceLastPrintPct)+' since';
+        else reading='<span class="ex-quiet">Quiet</span>';
+        var size=w.tier==='major'?'Large':w.tier==='thin'?'Thin':w.tier==='mid'?'Mid':'n/a';
+        return '<div class="bh-row" data-exh="'+esc(w.symbol)+'"><span class="bh-sym">'+esc(w.symbol)+'</span>'
+          +'<span class="bh-cell" data-l="Price">'+(num(w.price)?fmtPrice(w.price):'n/a')+'</span>'
+          +'<span class="bh-cell" data-l="Size">'+size+'</span>'
+          +'<span class="bh-cell" data-l="Volume vs its norm">'+fmtZ(w.volZ)+'</span>'
+          +'<span class="bh-cell" data-l="Last hour">'+pct(w.barPct)+'</span>'
+          +'<span class="bh-cell" data-l="Reading">'+reading+'</span></div>';
+      }).join('');
+      out+=panelStart({id:'exhWatch',tone:'watch',open:true,eyebrow:'YOUR COINS &middot; <b>FAVORITES AND HOLDINGS</b>',title:'Sell warnings on what you hold',meta:watch.length+' coins'})
+        +'<div class="bh-list"><div class="bh-head"><span>Coin</span><span>Price</span><span>Size</span><span>Volume vs its norm</span><span>Last hour</span><span>Reading</span></div>'+wRows+'</div>'
+        +'<div class="dr-note">Checked a few minutes after every hour closes, and a warning on one of these is pushed to your phone. Size comes from the coin&#39;s own trading volume over the last 30 days.</div>'
+        +PANEL_END;
+    }
+    var prints=(x.prints||[]).slice(0,30);
+    var pRows=prints.map(function(p){
+      var rules=(p.configs||[]).length>1?'both rules':((p.configs||[])[0]==='exhaustion20'?'20x rule':'per-coin rule');
+      return '<div class="bh-row"><span class="bh-sym">'+esc(p.symbol)+'</span>'
+        +'<span class="bh-cell" data-l="Hour (UTC)">'+esc(String(p.at||'').slice(11,16))+'</span>'
+        +'<span class="bh-cell" data-l="Hour move">'+pct(p.barPct)+'</span>'
+        +'<span class="bh-cell" data-l="Volume vs its norm">'+fmtZ(p.volZ)+'</span>'
+        +'<span class="bh-cell" data-l="Size">'+esc(p.tier||'n/a')+'</span>'
+        +'<span class="bh-cell" data-l="Rule">'+rules+'</span>'
+        +'<span class="bh-cell '+pctCls(p.moveSincePct)+'" data-l="Since then">'+pct(p.moveSincePct)+'</span></div>';
+    }).join('');
+    out+=panelStart({id:'exhPrints',tone:'watch',open:false,eyebrow:'CRYPTO &middot; <b>LAST 24 HOURS</b>',title:'Recent exhaustion prints',meta:prints.length+' prints'})
+      +(prints.length?'<div class="bh-list"><div class="bh-head"><span>Coin</span><span>Hour (UTC)</span><span>Hour move</span><span>Volume vs its norm</span><span>Size</span><span>Rule</span><span>Since then</span></div>'+pRows+'</div>'
+        :'<div class="dr-note">No coin printed exhaustion in the last 24 hours.</div>')
+      +PANEL_END;
+    var cfgRows=(x.configs||[]).map(function(c){
+      var line=(num(c.excessPct)&&c.days)
+        ?(c.excessPct>=0?'coins then trailed the market by ':'coins then beat the market by ')+Math.abs(c.excessPct).toFixed(2)+'% per warning over 24h (t='+(num(c.excessT)?c.excessT.toFixed(2):'n/a')+', '+c.days+' days, '+(c.casts||0)+' scored)'
+        :'live record still collecting';
+      return '<li><b>'+esc(c.label)+'</b>: '+line+(c.notifying?'':' &middot; <span class="amber-t">silent</span>')+'</li>';
+    }).join('');
+    out+=panelStart({id:'exhRecord',tone:'watch',open:false,eyebrow:'EVIDENCE &middot; <b>TRACK RECORD</b>',title:'How well the warnings have worked',meta:''})
+      +(cfgRows?'<ul class="ex-list">'+cfgRows+'</ul>':'')
+      +'<div class="dr-note"><b>Measured before it was built</b> ('+esc(ev.period||'')+'; the first half of the dates chose the rule and the second half judged it). Against the market over the next day: thin coins '+pct(tiers.thin&&tiers.thin.excess24)+', mid-size '+pct(tiers.mid&&tiers.mid.excess24)+', large coins '+pct(tiers.major&&tiers.major.excess24)+', which is no reliable effect. When both rules fire on the same hour: '+pct(both.excess24)+', and the coin fell in '+share(both.fellShare24)+' of cases.</div>'
+      +'<div class="dr-note">'+esc((x.stocks&&x.stocks.note)||'')+'</div>'
+      +PANEL_END;
+    return out;
+  }
+
+  // ---- Profit growers (scripts/profit-growth.mjs) --------------------------
+  function renderProfitGrowers(pg){
+    if(!pg||pg.status==='unavailable') return '<div class="dashboard-empty">The profit-grower lists are unavailable right now.</div>';
+    var ev=pg.evidence||{}, sm=ev.small||{}, md=ev.mid||{};
+    var pq=function(v){return num(v)?(v>0?'+':'')+v.toFixed(1)+'%':'n/a';};
+    var out='<div class="xp-banner" role="note"><b>What this is.</b> US companies worth $300M to $10B that are making money and growing it, read straight from their SEC filings: net profit above zero over the last four quarters, revenue up on the year before, and either profit higher than a year earlier in at least three of the last four quarters or operating profit up 20% or more. Small caps are ordered by revenue growth and mid caps by operating-profit growth, the orderings that tested best. In a test over '+esc(ev.period||'')+', the top 25 beat other companies their size by about '+pq(sm.perQuarterPct)+' (small) and '+pq(md.perQuarterPct)+' (mid) a quarter, and by '+pq(sm.recentPerQuarterPct)+' and '+pq(md.recentPerQuarterPct)+' a quarter since mid-2021. That is moderate evidence, not a guarantee. Not financial advice.</div>';
+    if(pg.status==='awaiting-first-run') return out+'<div class="dashboard-empty">The first lists are built after the next US close.</div>';
+    var list=function(key,rows,title){
+      var rh=(rows||[]).map(function(r){
+        return '<div class="bh-row" data-pg="'+esc(r.symbol)+'"><span class="bh-sym">'+r.rank+'. '+esc(r.symbol)
+            +'<span class="pg-name">'+esc(shortName(r.name))+'</span>'+(r.why?'<span class="pg-why">'+esc(r.why)+'</span>':'')+'</span>'
+          +'<span class="bh-cell" data-l="Sector">'+esc(r.sector||'n/a')+'</span>'
+          +'<span class="bh-cell" data-l="Market cap">'+fmtUsd(r.mcap)+'</span>'
+          +'<span class="bh-cell" data-l="Net profit, 4 qtrs">'+fmtUsd(r.ttm_ni)+'</span>'
+          +'<span class="bh-cell" data-l="Profit growth">'+fmtGrowth(r.ni_growth)+'</span>'
+          +'<span class="bh-cell" data-l="Revenue growth">'+fmtGrowth(r.rev_growth)+'</span>'
+          +'<span class="bh-cell" data-l="Op. profit growth">'+fmtGrowth(r.oi_growth)+'</span>'
+          +'<span class="bh-cell" data-l="P/E">'+(num(r.pe)&&r.pe>0?r.pe.toFixed(0):'n/a')+'</span></div>';
+      }).join('');
+      var lv=(pg.live||{})[key+'|91'];
+      var liveLine=lv&&lv.cohorts
+        ?'<b>Live record</b>: '+lv.cohorts+' weekly list'+(lv.cohorts===1?'':'s')+' scored after 13 weeks, averaging '+pq(lv.meanExcessPct)+' against other '+key+' caps, ahead in '+Math.round(lv.winShare*100)+'% of them.'
+        :'<b>Live record</b>: each week&#39;s list is scored against every other '+key+'-cap stock after 4, 13 and 26 weeks. The first 13-week result lands about three months after launch.';
+      return panelStart({id:key==='small'?'profitSmall':'profitMid',tone:'watch',open:true,
+          eyebrow:'US EQUITIES &middot; <b>'+(key==='small'?'SMALL CAP, $300M TO $2B':'MID CAP, $2B TO $10B')+'</b>',title:title,
+          meta:'filings as of '+esc(pg.asOf||'')+' &middot; '+((rows||[]).length)+' companies'+(pg.status==='stale'?' &middot; <span class="amber-t">stale</span>':'')})
+        +((rows||[]).length?'<div class="bh-list"><div class="bh-head"><span>Company</span><span>Sector</span><span>Market cap</span><span>Net profit, 4 qtrs</span><span>Profit growth</span><span>Revenue growth</span><span>Op. profit growth</span><span>P/E</span></div>'+rh+'</div>'
+          :'<div class="dr-note">No company in this size range passes every test today.</div>')
+        +'<div class="dr-note">'+liveLine+'</div>'+PANEL_END;
+    };
+    out+=list('small',pg.lists&&pg.lists.small,'Small caps growing their profits');
+    out+=list('mid',pg.lists&&pg.lists.mid,'Mid caps growing their profits');
+    out+='<div class="dr-note"><b>Keep in mind.</b> '+(ev.caveats||[]).map(esc).join(' ')+' Growth compares the last four quarters with the four before them. P/E is market cap over the last four quarters of net profit. On the Live screens, each US stock&#39;s details now show the same profit figures.</div>';
+    return out;
+  }
+
   function boardHtml(cfg, rowsIn, universe){
     // A column header click pins one board; the toolbar's selection applies to
     // every board and is the only sort control that exists on a phone.
@@ -8193,6 +8446,14 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           var ltp = r.longTermPotential;
           ltpNote = '<span class="ltp-note" title="'+(ltp.rank?'Ranked #'+ltp.rank+' of the top '+'20 by depth of the fall'+(typeof ltp.drawdownPct==='number'?' ('+ltp.drawdownPct.toFixed(0)+'% below the 52-week high)':'')+' and how long the low has held. ':'')+'Currently near a fresh multi-month/year low ('+ltp.daysSinceLow+' days since the low, '+ltp.pctAboveLow.toFixed(0)+'% above it). Historically, a genuine isolated low like this has gone on to 10x or more within about 3 years roughly 38% of the time (56 of 146 real cases studied) -- but no tested signal reliably predicts WHICH specific ones will. This is descriptive history only, not a prediction for this asset, not guaranteed, and not financial advice.">💎 Long-term potential ('+ltp.daysSinceLow+'d since low)</span>';
         }
+        var pf = r.profit;
+        var profitNote = pf
+          ? '<span class="profit-note'+(pf.grower?' grower':'')+'" title="From SEC filings through the quarter ending '+esc(pf.latestQuarterEnd||'')+'. Net profit over the last four quarters, and growth on the four before.">'
+            +(num(pf.ttmNi)?(pf.ttmNi>0?'Profitable, ':'Loss-making, ')+fmtUsd(pf.ttmNi)+' net over 4 quarters':'Profit n/a')
+            +(num(pf.niGrowth)?' ('+fmtGrowth(pf.niGrowth)+' on the year before)':'')
+            +(num(pf.revGrowth)?' &middot; revenue '+fmtGrowth(pf.revGrowth):'')
+            +(pf.grower?' &middot; <b>profit grower</b>':'')+'</span>'
+          : '';
         var moves = r.dailyMoves;
         var moveNote = moves
           ? '<span class="move-note" title="Computed from the archived daily bars for this asset ('+moves.samples+' daily moves).">1d '+(moves.highestGain.pct>=0?'+':'')+moves.highestGain.pct.toFixed(1)+'% ('+fmtPrice(moves.highestGain.dollar)+') '+esc(moves.highestGain.date||'')+' · low '+moves.highestLoss.pct.toFixed(1)+'% ('+fmtPrice(moves.highestLoss.dollar)+') '+esc(moves.highestLoss.date||'')+' · median |move| '+moves.medianAbsPct.toFixed(2)+'%</span>'
@@ -8217,7 +8478,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           : r.range ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+rangeTitle+'. This is an expected-move band, not an exact top, bottom, target, or stop.'+referencePrice+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>' : '<span class="dim">—</span>';
         h+='<tr class="in" style="animation-delay:'+(i*30)+'ms" data-symbol="'+esc(r.symbol)+'" data-name="'+esc(String(r.name||'').toLowerCase())+'" data-class="'+cfg.assetClass+'">'
           +'<td class="rk">#'+(i+1)+'</td>'
-          +'<td class="asset">'+symHtml+name+flipNote+'<details class="asset-details"><summary>Asset details</summary><div>'+why+topInd+coil+quality+rotation+ltpNote+moveNote+'</div></details></td>'
+          +'<td class="asset">'+symHtml+name+flipNote+'<details class="asset-details"><summary>Asset details</summary><div>'+why+topInd+coil+quality+rotation+ltpNote+profitNote+moveNote+'</div></details></td>'
           +'<td class="live-price-cell" data-label="Price"><span class="live-price">'+fmtPrice(r.price)+'</span></td>'
           +'<td class="live-chg-cell '+pctCls(r.chg24h)+'" data-label="24h"><span class="live-chg">'+fmtPct(r.chg24h)+'</span></td>'
           +'<td class="'+pctCls(r.chg7d)+'" data-label="7d">'+fmtPct(r.chg7d)+'</td>'
@@ -8790,6 +9051,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     }
 
     b+='<section data-dashboard-view="timing" hidden>'+zoneHead('timing','Timing and range','Backward-looking measurement, never a call')+'<div class="zone">'+(timing||'<div class="dashboard-empty">Timing measurements are still gathering enough historical observations.</div>')+'</div></section>';
+
+    b+='<section data-dashboard-view="sell" hidden>'+zoneHead('sell','Sell pressure','Volume exhaustion, per coin and across the market')+'<div class="zone">'+renderSellPressure(d.exhaustion)+'</div></section>';
+    b+='<section data-dashboard-view="profits" hidden>'+zoneHead('profits','Profit growers','Small and mid-sized US companies growing their profits')+'<div class="zone">'+renderProfitGrowers(d.profitGrowth)+'</div></section>';
 
     $('boards').innerHTML=b;
     wirePanels($('boards'));

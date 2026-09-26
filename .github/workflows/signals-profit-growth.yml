@@ -1,0 +1,46 @@
+name: Signals Profit Growers
+
+# Small and mid-sized US companies whose profits are growing, from SEC
+# filings (scripts/profit-growth.mjs, docs/research-2026-09-26/PROFIT_GROWTH.md).
+# Once a day after the US close: filings arrive on their own schedule, so the
+# lists change as new quarters are reported, and a daily look is plenty.
+# Daily crons in this repo have been delivered reliably, unlike the sub-daily
+# ones, so this needs no Worker-side dispatcher.
+on:
+  schedule:
+    - cron: "40 22 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: signals-profit-growth
+  cancel-in-progress: false
+
+jobs:
+  profit-growth:
+    runs-on: ubuntu-latest
+    # ~60 SEC frame requests, one Nasdaq screener call, ~140 short price
+    # histories and a few hundred D1 batches: a few minutes.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Apply D1 migrations
+        working-directory: signals-worker
+        run: npx --yes wrangler@4 d1 migrations apply frontier-capital-signals-reliability --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Build the profit-grower lists and score past ones
+        working-directory: signals-worker
+        run: node scripts/profit-growth.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}

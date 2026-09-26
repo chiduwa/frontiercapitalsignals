@@ -202,6 +202,19 @@ export function checkPayload(payload, now = Date.now()) {
       `${c.class} boards are carried forward from ${c.from} (${Number.isFinite(age) ? age.toFixed(1) : '?'}h old): this build's feed returned ${c.fresh_universe} against ${c.carried_universe} before`);
   }
 
+  // The two views added 2026-09-26. Each loader reports its own staleness; a
+  // job that stops running shows up here rather than as a quietly frozen page.
+  const ex = payload.exhaustion;
+  if (ex && ex.status && ex.status !== 'awaiting-first-run') {
+    push('exhaustion-fresh', 'warn', ex.status === 'live',
+      `the sell-pressure reading is ${ex.status}${Number.isFinite(ex.ageHours) ? ` (${ex.ageHours.toFixed(1)}h old)` : ''}; check signals-live-scan.yml`);
+  }
+  const pg = payload.profitGrowth;
+  if (pg && pg.status && pg.status !== 'awaiting-first-run') {
+    push('profit-growers-fresh', 'warn', pg.status === 'live',
+      `the profit-grower lists are ${pg.status}${pg.asOf ? ` (as of ${pg.asOf})` : ''}; check signals-profit-growth.yml`);
+  }
+
   const boards = ['crypto', 'stocks'].flatMap((cls) => ['breakout', 'breakdown'].map((side) => (payload[cls]?.[side] || []).length));
   push('boards-populated', 'fail', boards.some((n) => n > 0),
     `board row counts: ${boards.join('/')} — every board empty means the build produced nothing`);

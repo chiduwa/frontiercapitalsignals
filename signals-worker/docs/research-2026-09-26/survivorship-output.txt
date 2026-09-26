@@ -1,0 +1,10 @@
+2017 Q2 filers, profitable  : n= 2645  exchange-listed today   57%
+2017 Q2 filers, unprofitable: n= 2509  exchange-listed today   27%
+2019 Q2 filers, profitable  : n= 2590  exchange-listed today   64%
+2019 Q2 filers, unprofitable: n= 2331  exchange-listed today   34%
+2021 Q2 filers, profitable  : n= 2501  exchange-listed today   69%
+2021 Q2 filers, unprofitable: n= 2304  exchange-listed today   43%
+2023 Q2 filers, profitable  : n= 2422  exchange-listed today   75%
+2023 Q2 filers, unprofitable: n= 2728  exchange-listed today   51%
+2025 Q2 filers, profitable  : n= 2389  exchange-listed today   82%
+2025 Q2 filers, unprofitable: n= 2363  exchange-listed today   64%

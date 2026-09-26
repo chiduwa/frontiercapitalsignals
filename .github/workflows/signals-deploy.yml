@@ -49,6 +49,8 @@ jobs:
           node test-crash-recovery-research.mjs
           node test-retrospective.mjs
           node test-session-freeze.mjs
+          node test-exhaustion.mjs
+          node test-profit-growth.mjs
           node --test test-adaptive-model.mjs
           node --test test-data-quality.mjs
           node --test test-session-data.mjs

@@ -1,0 +1,26 @@
+970 daily observations 2024-01-31 .. 2026-09-26; split 2025-05-30
+breadth: median 3.1% of coins, p90 8.9%, p97 15.7%, max 30.0%
+breadth >= p80 (6.1%)              n= 194  24h | market  +0.22% vs -0.01% (diff  +0.23, t  +0.8; H1  +0.81 H2  -0.30) | BTC  +0.33% vs +0.10% (diff  +0.24, t  +1.3; H1  +0.62 H2  +0.09)
+breadth >= p90 (8.9%)              n=  97  24h | market  +0.41% vs -0.01% (diff  +0.42, t  +1.0; H1  +0.61 H2  +0.15) | BTC  +0.36% vs +0.10% (diff  +0.26, t  +1.0; H1  +0.37 H2  +0.34)
+breadth >= p95 (12.3%)             n=  49  24h | market  +0.15% vs -0.01% (diff  +0.17, t  +0.3; H1  +0.43 H2  -0.47) | BTC  +0.43% vs +0.10% (diff  +0.33, t  +0.7; H1  +0.39 H2  +0.51)
+breadth <= p20 (quiet)             n= 194  24h | market  +0.01% vs -0.01% (diff  +0.02, t  +0.1; H1  +0.14 H2  -0.30) | BTC  +0.09% vs +0.10% (diff  -0.01, t  -0.1; H1  +0.13 H2  -0.01)
+agg volume z>=1.5 & market run72 z>=1.5 n=  30  24h | market  +1.28% vs -0.01% (diff  +1.29, t  +2.3; H1  +1.92 H2  +0.43) | BTC  +1.18% vs +0.10% (diff  +1.08, t  +2.0; H1  +1.38 H2  +0.92)
+agg volume z>=2.0 & market run72 z>=2.0 n=   9  24h | market  +1.26% vs -0.01% (diff  +1.28, t  +nan; H1  +0.81 H2  +1.83) | BTC  +0.82% vs +0.10% (diff  +0.72, t  +nan; H1  +0.41 H2  +1.33)
+agg volume z>=2.5 & market run72 z>=2.0 n=   7  24h | market  +1.50% vs -0.01% (diff  +1.51, t  +nan; H1  +1.05 H2  +1.83) | BTC  +0.95% vs +0.10% (diff  +0.85, t  +nan; H1  +0.45 H2  +1.33)
+
+breadth >= p80 (6.1%)              n= 194  72h | market  +1.10% vs -0.05% (diff  +1.15, t  +2.0; H1  +2.40 H2  -0.04) | BTC  +0.97% vs +0.30% (diff  +0.67, t  +1.7; H1  +1.99 H2  +0.07)
+breadth >= p90 (8.9%)              n=  97  72h | market  +0.97% vs -0.05% (diff  +1.02, t  +1.2; H1  +2.16 H2  -0.51) | BTC  +1.08% vs +0.30% (diff  +0.78, t  +1.3; H1  +1.85 H2  +0.12)
+breadth >= p95 (12.3%)             n=  49  72h | market  +1.14% vs -0.05% (diff  +1.18, t  +1.2; H1  +1.98 H2  -0.78) | BTC  +1.95% vs +0.30% (diff  +1.65, t  +2.2; H1  +2.22 H2  +1.32)
+breadth <= p20 (quiet)             n= 194  72h | market  +0.13% vs -0.05% (diff  +0.17, t  +0.3; H1  -0.01 H2  +0.45) | BTC  +0.44% vs +0.30% (diff  +0.15, t  +0.4; H1  +0.45 H2  +0.44)
+agg volume z>=1.5 & market run72 z>=1.5 n=  30  72h | market  +2.74% vs -0.05% (diff  +2.78, t  +2.3; H1  +4.32 H2  +0.66) | BTC  +2.45% vs +0.30% (diff  +2.16, t  +2.6; H1  +3.08 H2  +1.64)
+agg volume z>=2.0 & market run72 z>=2.0 n=   9  72h | market  +2.35% vs -0.05% (diff  +2.40, t  +nan; H1  +3.22 H2  +1.28) | BTC  +1.99% vs +0.30% (diff  +1.70, t  +nan; H1  +1.35 H2  +2.79)
+agg volume z>=2.5 & market run72 z>=2.0 n=   7  72h | market  +0.64% vs -0.05% (diff  +0.68, t  +nan; H1  -0.21 H2  +1.28) | BTC  +1.63% vs +0.30% (diff  +1.33, t  +nan; H1  +0.07 H2  +2.79)
+
+breadth >= p80 (6.1%)              n= 194 168h | market  +1.40% vs -0.14% (diff  +1.55, t  +1.1; H1  +4.61 H2  -1.54) | BTC  +1.66% vs +0.69% (diff  +0.97, t  +1.0; H1  +4.02 H2  -0.50)
+breadth >= p90 (8.9%)              n=  97 168h | market  +1.83% vs -0.14% (diff  +1.97, t  +1.0; H1  +5.07 H2  -2.44) | BTC  +1.82% vs +0.69% (diff  +1.13, t  +0.7; H1  +4.54 H2  -1.77)
+breadth >= p95 (12.3%)             n=  49 168h | market  +4.72% vs -0.14% (diff  +4.86, t  +1.8; H1  +7.00 H2  -0.46) | BTC  +3.97% vs +0.69% (diff  +3.28, t  +1.8; H1  +5.44 H2  +0.64)
+breadth <= p20 (quiet)             n= 194 168h | market  -0.31% vs -0.14% (diff  -0.16, t  -0.1; H1  -0.57 H2  +0.29) | BTC  +0.74% vs +0.69% (diff  +0.05, t  +0.1; H1  +0.84 H2  +0.53)
+agg volume z>=1.5 & market run72 z>=1.5 n=  30 168h | market  +4.83% vs -0.14% (diff  +4.97, t  +2.5; H1  +6.32 H2  +2.52) | BTC  +5.08% vs +0.69% (diff  +4.39, t  +2.9; H1  +6.74 H2  +2.51)
+agg volume z>=2.0 & market run72 z>=2.0 n=   9 168h | market  +3.29% vs -0.14% (diff  +3.44, t  +nan; H1  +3.62 H2  +2.89) | BTC  +5.29% vs +0.69% (diff  +4.59, t  +nan; H1  +7.42 H2  +2.61)
+agg volume z>=2.5 & market run72 z>=2.0 n=   7 168h | market  +2.87% vs -0.14% (diff  +3.01, t  +nan; H1  +2.84 H2  +2.89) | BTC  +4.69% vs +0.69% (diff  +4.00, t  +nan; H1  +7.46 H2  +2.61)
+

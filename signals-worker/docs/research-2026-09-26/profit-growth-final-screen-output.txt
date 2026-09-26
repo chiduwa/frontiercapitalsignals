@@ -1,0 +1,20 @@
+=== small caps, top 25 by grev, 13-week excess over the whole bucket ===
+  tested first (union, no profit requirement)          all: +2.11%/q  t +1.91  wins  65%  halves +0.62/+3.52  (37 quarters)
+                                                       since 2021-07: +3.44%/q  t +2.32  wins  80%  halves +1.85/+5.03  (20 quarters)
+  + net profit > 0                                     all: +1.45%/q  t +1.34  wins  62%  halves -0.01/+2.84  (37 quarters)
+                                                       since 2021-07: +2.80%/q  t +1.84  wins  75%  halves +1.50/+4.09  (20 quarters)
+  ADOPTED: + net profit > 0, revenue growth <= 300%    all: +1.72%/q  t +1.58  wins  65%  halves +0.38/+2.99  (37 quarters)
+                                                       since 2021-07: +2.97%/q  t +1.94  wins  70%  halves +1.53/+4.41  (20 quarters)
+  ADOPTED held 26w (overlapping windows): +1.28% over 26 weeks, positive in  58% of 36 overlapping windows
+  ADOPTED held 52w (overlapping windows): +3.92% over 52 weeks, positive in  56% of 34 overlapping windows
+
+=== mid caps, top 25 by goi, 13-week excess over the whole bucket ===
+  tested first (union, no profit requirement)          all: +1.51%/q  t +1.86  wins  62%  halves +1.23/+1.77  (37 quarters)
+                                                       since 2021-07: +1.72%/q  t +1.33  wins  65%  halves +0.66/+2.78  (20 quarters)
+  + net profit > 0                                     all: +1.98%/q  t +2.59  wins  70%  halves +1.18/+2.74  (37 quarters)
+                                                       since 2021-07: +2.64%/q  t +2.19  wins  75%  halves +0.76/+4.52  (20 quarters)
+  ADOPTED: + net profit > 0, revenue growth <= 300%    all: +1.99%/q  t +2.73  wins  73%  halves +1.15/+2.78  (37 quarters)
+                                                       since 2021-07: +2.66%/q  t +2.37  wins  80%  halves +0.70/+4.63  (20 quarters)
+  ADOPTED held 26w (overlapping windows): +2.66% over 26 weeks, positive in  58% of 36 overlapping windows
+  ADOPTED held 52w (overlapping windows): +1.15% over 52 weeks, positive in  59% of 34 overlapping windows
+

@@ -244,6 +244,15 @@ const carried = healthy({
 assert.ok(notOk(carried).includes('carried-forward-stock'), 'a carried-forward class must be reported');
 assert.ok(notOk(carried).includes('equity-feed'), 'the feed failure behind it must still be reported');
 assert.deepEqual(failing(carried), [], 'a carried class keeps the page usable, so it warns rather than fails');
+// The views added 2026-09-26 report their own staleness; the monitor warns.
+assert.deepEqual(notOk(healthy({ exhaustion: { status: 'live', ageHours: 0.3 }, profitGrowth: { status: 'live', asOf: '2026-09-15' } })), [],
+  'fresh sell-pressure and profit views raise nothing');
+assert.deepEqual(notOk(healthy({ exhaustion: { status: 'awaiting-first-run' }, profitGrowth: { status: 'awaiting-first-run' } })), [],
+  'a view that has not run yet is not an outage');
+assert.ok(notOk(healthy({ exhaustion: { status: 'stale', ageHours: 5 } })).includes('exhaustion-fresh'), 'a stale sell-pressure reading warns');
+assert.ok(notOk(healthy({ profitGrowth: { status: 'unavailable' } })).includes('profit-growers-fresh'), 'an unavailable profit view warns');
+assert.deepEqual(failing(healthy({ exhaustion: { status: 'stale' }, profitGrowth: { status: 'stale' } })), [], 'these warn, they never fail the page');
+
 // Without the carry, the same outage is the hard failure it was on the night.
 assert.ok(failing(healthy({ health: { coingecko: true, stocks_ok: 0, stocks_total: 290 }, stocks: { universe: 0, breakout: [], breakdown: [] } }))
   .includes('stock-universe'), 'an empty stock universe with nothing carried must fail');

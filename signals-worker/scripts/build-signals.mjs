@@ -26,6 +26,8 @@ import { loadAdaptiveHealth } from './adaptive-research.mjs';
 import { loadHierarchicalHealth } from './hierarchical-research.mjs';
 import { loadTournamentHealth } from './model-tournament-io.mjs';
 import { loadBigMoveWatch } from './big-move-watch-io.mjs';
+import { loadExhaustion } from './exhaustion-io.mjs';
+import { loadProfitGrowth, loadCompanyProfitMetrics } from './profit-growth.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID, FCS_D1_DATABASE_ID, TREFIS_OVERRIDES, GITHUB_EVENT_NAME, FORCE_REFRESH, NTFY_TOPIC } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID })) {
@@ -284,6 +286,36 @@ if (FCS_D1_DATABASE_ID) {
   } catch (error) {
     payload.sessionResearch = { status: 'unavailable', actionable: false };
     console.error('session research unavailable:', error.message);
+  }
+  // Sell pressure: the live scanner's newest market-wide exhaustion reading,
+  // recent prints and the coins you hold (scripts/exhaustion-io.mjs).
+  try {
+    payload.exhaustion = await loadExhaustion(env);
+    console.log(`exhaustion: ${payload.exhaustion.status}${payload.exhaustion.gauge ? `, ${payload.exhaustion.gauge.state}, ${payload.exhaustion.prints.length} recent print(s)` : ''}`);
+  } catch (error) {
+    payload.exhaustion = { status: 'unavailable' };
+    console.error('exhaustion view unavailable:', error.message);
+  }
+  // Profit growers: the daily small and mid-cap lists (scripts/profit-growth.mjs),
+  // and the same profit facts on every equity row the screens already show.
+  try {
+    payload.profitGrowth = await loadProfitGrowth(env);
+    const stockRows = ['breakout', 'breakdown', 'favorites', 'longTermPotential']
+      .flatMap((k) => (Array.isArray(payload.stocks?.[k]) ? payload.stocks[k] : []));
+    const facts = await loadCompanyProfitMetrics(env, stockRows.map((r) => r.symbol).filter(Boolean));
+    let attached = 0;
+    for (const row of stockRows) {
+      const f = facts[row.symbol];
+      if (!f) continue;
+      row.profit = { asOf: f.as_of, ttmNi: f.ttm_ni, niGrowth: f.ni_growth, revGrowth: f.rev_growth, oiGrowth: f.oi_growth,
+        yoyUp: f.yoy_up, profitableQuarters: f.profitable_quarters, netMargin: f.net_margin, latestQuarterEnd: f.latest_quarter_end,
+        grower: !!f.qualifies };
+      attached++;
+    }
+    console.log(`profit growers: ${payload.profitGrowth.status}${payload.profitGrowth.asOf ? ` (${payload.profitGrowth.asOf})` : ''}; profit facts on ${attached} of ${stockRows.length} equity rows`);
+  } catch (error) {
+    payload.profitGrowth = { status: 'unavailable' };
+    console.error('profit growers unavailable:', error.message);
   }
 }
 

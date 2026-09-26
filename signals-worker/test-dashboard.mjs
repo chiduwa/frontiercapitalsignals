@@ -576,6 +576,83 @@ console.log('\n== the big-move watch lists the likeliest movers and says directi
   first.dom.window.close();
 }
 
+// ============ sell pressure and profit growers (2026-09-26) ==================
+console.log('\n== sell pressure: per-coin exhaustion, your coins, and the market as context ==');
+{
+  const exhaustion = {
+    status: 'live', at: iso(20 * 60000).slice(0, 13) + ':00:00.000Z', createdAt: iso(10 * 60000), ageHours: 0.2,
+    gauge: { scanned: 479, indexCoins: 472, breadth: 0.044, prints24h: 40, aggVolumeZ: -0.24, marketRun72Z: 1.61, marketRet24Pct: 2.7,
+      state: 'normal', headline: 'Ordinary conditions.', detail: '4.4% of 479 coins printed exhaustion in the last 24 hours (a typical day is 3.1%).' },
+    reference: { median: 0.031, p90: 0.089, p97: 0.157 },
+    prints: [
+      { symbol: 'QNT', at: iso(60 * 60000), close: 110.7, barPct: 4.3, volZ: 3.07, tier: 'thin', configs: ['exhaustion_calibrated'], moveSincePct: -0.6 },
+      { symbol: 'SPELL', at: iso(2 * 3600000), close: 0.0001164, barPct: 4.96, volZ: 4.03, tier: 'thin', configs: ['exhaustion20', 'exhaustion_calibrated'], moveSincePct: -1.6 }
+    ],
+    watch: [
+      { symbol: 'BTC', price: 84034, barPct: 0.1, volZ: -0.97, tier: 'major', onVenue: true, lastPrint: null },
+      { symbol: 'HBAR', price: 0.094, barPct: 0.8, volZ: 0.04, tier: 'mid', onVenue: true, lastPrint: null },
+      { symbol: 'WLFI', price: 0.059, barPct: 3.1, volZ: 3.4, tier: 'mid', onVenue: true, lastPrint: { at: iso(3 * 3600000) }, moveSinceLastPrintPct: -2.4 },
+      { symbol: 'NEWC', price: 1.2, tier: null, volZ: null, onVenue: true, lastPrint: null },
+      { symbol: 'HYPE', onVenue: false }
+    ],
+    configs: [
+      { id: 'exhaustion20', label: 'Volume exhaustion', notifying: true, casts: 116, excessPct: 4.94, excessT: 2.64, days: 21 },
+      { id: 'exhaustion_calibrated', label: 'Volume exhaustion (per-coin)', notifying: true, casts: 0, excessPct: null, days: 0 }
+    ],
+    evidence: { period: 'Jan 2024 to Sep 2026, 478 Binance pairs, hourly', byTier: { thin: { excess24: -5.32 }, mid: { excess24: -2.82 }, major: { excess24: -0.27 } },
+      bothRules: { excess24: -4.62, fellShare24: 0.76 }, market: { surgeInRally72: 2.74, surgeInRally168: 4.83 } },
+    stocks: { note: 'On US stocks, no version of this signal held up in both halves of ten years of daily data (the best was about -0.8% against the market over 10 days), so there are no stock sell warnings.' }
+  };
+  const view = await render({ ...payload(), exhaustion }, { settleMs: 1200 });
+  const sec = view.doc.querySelector('[data-dashboard-view="sell"]');
+  const text = sec?.textContent || '';
+  const rowText = (sym) => view.doc.querySelector(`[data-exh="${sym}"]`)?.textContent || '';
+  check('the sell-pressure view renders without disrupting the page', view.pageErrors.length === 0 && Boolean(sec), JSON.stringify(view.pageErrors));
+  check('it has its own tab', Boolean(view.doc.querySelector('[data-view-link="sell"]')));
+  check('a large coin never gets a sell warning, and says why', /Large coin: volume surges here have tended to continue/.test(rowText('BTC')));
+  check('a smaller coin that printed shows when, and what happened since', /Exhaustion 3h ago/.test(rowText('WLFI')) && /-2\.4% since/.test(rowText('WLFI')));
+  check('a quiet smaller coin reads quiet', /Quiet/.test(rowText('HBAR')));
+  check('coins without history or off the venue say so', /Not enough trading history/.test(rowText('NEWC')) && /Not on Binance spot/.test(rowText('HYPE')));
+  check('the market panel is context, never a sell signal', /never a sell signal/.test(text) && /more upside/.test(text));
+  check('recent prints say when both rules fired', /both rules/.test(view.doc.getElementById('panel-exhPrints')?.textContent || ''));
+  check('the live record reads in plain words', /coins then trailed the market by 4\.94% per warning/.test(text) && /live record still collecting/.test(text));
+  check('stocks are stated as tested and not signalled', /no stock sell warnings/.test(text));
+  check('no NaN, undefined or em dash in the view', !/NaN|undefined|—/.test(text), (text.match(/.{0,30}(NaN|undefined|—).{0,30}/) || [])[0]);
+  view.dom.window.close();
+  const first = await render({ ...payload(), exhaustion: { status: 'awaiting-first-run', evidence: exhaustion.evidence } }, { settleMs: 1200 });
+  check('before the first scan it says so', first.pageErrors.length === 0 && /first scan has not landed yet/.test(first.doc.querySelector('[data-dashboard-view="sell"]')?.textContent || ''));
+  first.dom.window.close();
+}
+
+console.log('\n== profit growers: small and mid caps, from SEC filings ==');
+{
+  const pgRow = (list, rank, symbol, extra = {}) => ({ list, rank, symbol, name: `${symbol} Holdings Inc. Common Stock`, sector: 'Technology', price: 20,
+    mcap: list === 'small' ? 9e8 : 4e9, ttm_ni: 5.5e7, ni_growth: 0.42, rev_growth: 0.31, oi_growth: 0.55, yoy_up: 4, profitable_quarters: 4, pe: 16.4,
+    why: 'operating profit +55% on revenue +31%', ...extra });
+  const profitGrowth = {
+    status: 'live', asOf: '2026-09-26',
+    lists: { small: [pgRow('small', 1, 'AAAA'), pgRow('small', 2, 'BBBB', { oi_growth: 327.8, ni_growth: null, pe: null })], mid: [pgRow('mid', 1, 'CCCC')] },
+    live: {},
+    evidence: { period: 'Apr 2017 to Jul 2026, 37 quarters', small: { perQuarterPct: 1.72, recentPerQuarterPct: 2.97 }, mid: { perQuarterPct: 1.99, recentPerQuarterPct: 2.66 },
+      caveats: ['Only companies still listed today have prices.', 'Prices exclude dividends.', 'The ranking was picked from six candidates.'] }
+  };
+  const base = payload();
+  base.stocks.breakout[0].profit = { ttmNi: 7.2e10, niGrowth: 1.45, revGrowth: 0.94, grower: true, latestQuarterEnd: '2026-07-27' };
+  const view = await render({ ...base, profitGrowth }, { settleMs: 1200 });
+  const sec = view.doc.querySelector('[data-dashboard-view="profits"]');
+  const text = sec?.textContent || '';
+  check('the profit-grower view renders without disrupting the page', view.pageErrors.length === 0 && Boolean(sec), JSON.stringify(view.pageErrors));
+  check('it has its own tab', Boolean(view.doc.querySelector('[data-view-link="profits"]')));
+  check('both size lists render their companies', Boolean(view.doc.querySelector('#panel-profitSmall [data-pg="AAAA"]')) && Boolean(view.doc.querySelector('#panel-profitMid [data-pg="CCCC"]')));
+  check('growth off a tiny base reads as a bound, not thousands of percent', /over \+500%/.test(view.doc.querySelector('[data-pg="BBBB"]')?.textContent || ''));
+  check('names are shortened and the reason is shown', /AAAA Holdings Inc\./.test(text) && !/Common Stock/.test(text) && /operating profit \+55% on revenue \+31%/.test(text));
+  check('the evidence and its caveats are on the page', /moderate evidence, not a guarantee/.test(text) && /Prices exclude dividends/.test(text));
+  check('missing values read n/a, never NaN', !/NaN|undefined|—/.test(text));
+  const nvda = view.doc.querySelector('tr[data-symbol="NVDA"] .profit-note');
+  check('an equity row on the live screens carries its profit facts', Boolean(nvda) && /Profitable, \$72\.0B net over 4 quarters/.test(nvda?.textContent || '') && /profit grower/.test(nvda?.textContent || ''), nvda?.textContent);
+  view.dom.window.close();
+}
+
 [withheld, proven, ui, clocks, stale].forEach((r) => r.dom.window.close());
 
 console.log(`\n${passed} passed, ${failed} failed`);

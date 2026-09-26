@@ -558,6 +558,25 @@ check('the KV slot carries the interval as its own TTL, so the key expiring IS t
   cadenceEnv.FCS_CACHE.ttls.get(cadenceSpec.key) === cadenceSpec.intervalSeconds,
   String(cadenceEnv.FCS_CACHE.ttls.get(cadenceSpec.key)));
 
+// The live scan is aligned to the clock: one dispatch per UTC hour, on the
+// first tick at or after its minute, so it reads a bar that just closed.
+{
+  const liveSpec = mod.CADENCE_DISPATCHES.find((s2) => s2.workflow === 'signals-live-scan.yml');
+  const alignedCalls = [];
+  global.fetch = async (url, init) => { alignedCalls.push(String(url)); return { ok: true, status: 204 }; };
+  const alignedEnv = { FCS_CACHE: new MockKV(), GITHUB_ACTIONS_TOKEN: 'test-dispatch-token' };
+  const at = (iso) => Date.parse(iso);
+  check('the live scan is clock-aligned', liveSpec.alignToHour === true && liveSpec.afterMinute >= 1);
+  check('the tick on the hour itself waits for the bar to be closed and published',
+    await mod.dispatchWorkflowOnCadence(alignedEnv, liveSpec, at('2026-09-26T14:00:30Z')) === false && alignedCalls.length === 0);
+  check('the first tick after the close dispatches',
+    await mod.dispatchWorkflowOnCadence(alignedEnv, liveSpec, at('2026-09-26T14:05:10Z')) === true && alignedCalls.length === 1);
+  check('later ticks in the same hour do not dispatch again',
+    await mod.dispatchWorkflowOnCadence(alignedEnv, liveSpec, at('2026-09-26T14:55:00Z')) === false && alignedCalls.length === 1);
+  check('the next hour dispatches on its own first tick, however recent the last run was',
+    await mod.dispatchWorkflowOnCadence(alignedEnv, liveSpec, at('2026-09-26T15:05:00Z')) === true && alignedCalls.length === 2);
+}
+
 const cadenceFailEnv = { FCS_CACHE: new MockKV(), GITHUB_ACTIONS_TOKEN: 'test-dispatch-token' };
 global.fetch = async () => ({ ok: false, status: 503, text: async () => JSON.stringify({ message: 'upstream unavailable' }) });
 let cadenceError;
@@ -3659,8 +3678,9 @@ const mkSurgeBars = (n, { spikeAt = null, spikeMult = 30, spikeBarPct = 8 } = {}
   });
 
 const exhaustionCfg = mod.SURGE_CONFIGS.find((c) => c.id === 'exhaustion20');
-check('exactly one configuration is proven at discovery', mod.SURGE_CONFIGS.filter((c) => c.proven).length === 1);
-check('the proven one predicts DOWN, not up — it is a warning, not an entry', exhaustionCfg.dir === -1);
+check('only the two exhaustion configurations are proven at discovery',
+  mod.SURGE_CONFIGS.filter((c) => c.proven).map((c) => c.id).sort().join() === 'exhaustion20,exhaustion_calibrated');
+check('every proven one predicts DOWN, not up — a warning, not an entry', mod.SURGE_CONFIGS.filter((c) => c.proven).every((c) => c.dir === -1));
 check('the long-side candidates are explicitly unproven', mod.SURGE_CONFIGS.filter((c) => c.dir === 1).every((c) => !c.proven));
 
 // Cast on the last CLOSED bar, never the forming one.
@@ -3668,6 +3688,44 @@ const spikeBars = mkSurgeBars(80, { spikeAt: 78 });
 const hits = mod.scanSurgeConfigs(spikeBars);
 check('a 30x spike on a +8% bar fires the exhaustion configuration', hits.some((h) => h.config.id === 'exhaustion20'), JSON.stringify(hits.map(h => h.config.id)));
 check('the forming final bar is not scanned', mod.scanSurgeConfigs(mkSurgeBars(80, { spikeAt: 79 })).every((h) => h.config.id !== 'exhaustion20'));
+
+// ---- per-coin calibrated exhaustion (2026-09-26) ---------------------------
+// 800 hours of ordinary noise, a 24h run, then one hour that is extreme FOR THIS
+// COIN: 10x its usual volume on a +3% bar against ~0.2% hourly moves.
+{
+  let seed = 7;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648 - 0.5; };
+  const mkCal = ({ n = 800, base = 100000, run = true, spike = true, slideFirst = false } = {}) => {
+    const out = [];
+    let px = 100;
+    for (let i = 0; i < n; i++) {
+      const open = px;
+      let close = open * (1 + 0.004 * rnd());
+      if (run && i >= n - 26 && i < n - 2) close = open * 1.005;          // the 24h run into the print
+      if (slideFirst && i >= n - 26 && i < n - 2) close = open * 0.9988;  // a slide the spike only recovers
+      let qv = base * (1 + 0.4 * rnd());
+      if (spike && i === n - 2) { close = open * 1.03; qv = base * 10; }  // the print, last CLOSED bar
+      out.push({ openTime: new Date(Date.UTC(2026, 7, 1, i)).toISOString(), open, high: Math.max(open, close) * 1.001,
+        low: Math.min(open, close) * 0.999, close, volume: qv / close, quoteVolume: qv, trades: 500 });
+      px = close;
+    }
+    return out;
+  };
+  const fired = (bars) => mod.scanSurgeConfigs(bars).map((h) => h.config.id);
+  const thin = mkCal();
+  const f2 = mod.surgeFeatures(thin, thin.length - 2);
+  check('calibrated features are extreme for the print', f2.volZ > 10 && f2.barZ > 5 && f2.run24Z > 1.5 && f2.liquidity30d < 400000, JSON.stringify(f2));
+  check('a smaller coin\'s climax fires the per-coin rule', fired(thin).includes('exhaustion_calibrated'), JSON.stringify(fired(thin)));
+  check('the same shape on a deep book does not: majors showed no effect', !fired(mkCal({ base: 1e6 })).includes('exhaustion_calibrated'));
+  // run24Z includes the print itself (as the research did), so "no run" means
+  // a spike that only claws back a slide, leaving the day roughly flat.
+  check('a volume spike that only recovers a slide is not exhaustion', !fired(mkCal({ run: false, slideFirst: true })).includes('exhaustion_calibrated'));
+  check('an ordinary hour fires nothing', !fired(mkCal({ spike: false, run: false })).includes('exhaustion_calibrated'));
+  const short = mkCal({ n: 300 });
+  const fs = mod.surgeFeatures(short, short.length - 2);
+  check('without 15 days of history the calibrated features abstain', fs && fs.volZ === null && fs.barZ === null && !fired(short).includes('exhaustion_calibrated'));
+  check('the fixed 20x rule is unchanged by the new fields', mod.scanSurgeConfigs(mkSurgeBars(80, { spikeAt: 78 })).some((h) => h.config.id === 'exhaustion20'));
+}
 
 // A spike that has NOT yet run is not exhaustion — this is the filter that
 // took alert volume from 20.6/day to 4.4/day and doubled the effect.
