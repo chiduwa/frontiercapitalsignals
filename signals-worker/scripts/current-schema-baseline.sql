@@ -67,4 +67,5 @@ INSERT OR IGNORE INTO d1_migrations (name) VALUES
   ('0050_big_move_watch.sql'),
   ('0051_tournament_run_assets.sql'),
   ('0052_exhaustion_calibrated.sql'),
-  ('0053_profit_growth.sql');
+  ('0053_profit_growth.sql'),
+  ('0054_profit_growth_prior_year.sql');

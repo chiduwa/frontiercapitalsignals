@@ -3410,6 +3410,10 @@ CREATE TABLE IF NOT EXISTS profit_growth_screen (
   latest_quarter_end TEXT,
   liquidity REAL,                  -- median weekly dollar volume, last 13 weeks
   why TEXT,
+  -- The bases behind the growth rates (migration 0054).
+  prev_ni REAL,
+  oi_ttm REAL,
+  oi_prev REAL,
   PRIMARY KEY (as_of, list, symbol)
 );
 
@@ -3452,5 +3456,9 @@ CREATE TABLE IF NOT EXISTS company_profit_metrics (
   profitable_quarters INTEGER,
   net_margin REAL,
   latest_quarter_end TEXT,
-  qualifies INTEGER NOT NULL DEFAULT 0
+  qualifies INTEGER NOT NULL DEFAULT 0,
+  -- The bases behind the growth rates (migration 0054).
+  prev_ni REAL,
+  oi_ttm REAL,
+  oi_prev REAL
 );

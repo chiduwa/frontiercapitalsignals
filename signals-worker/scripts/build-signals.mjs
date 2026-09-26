@@ -307,7 +307,7 @@ if (FCS_D1_DATABASE_ID) {
     for (const row of stockRows) {
       const f = facts[row.symbol];
       if (!f) continue;
-      row.profit = { asOf: f.as_of, ttmNi: f.ttm_ni, niGrowth: f.ni_growth, revGrowth: f.rev_growth, oiGrowth: f.oi_growth,
+      row.profit = { asOf: f.as_of, ttmNi: f.ttm_ni, prevNi: f.prev_ni, niGrowth: f.ni_growth, revGrowth: f.rev_growth, oiGrowth: f.oi_growth,
         yoyUp: f.yoy_up, profitableQuarters: f.profitable_quarters, netMargin: f.net_margin, latestQuarterEnd: f.latest_quarter_end,
         grower: !!f.qualifies };
       attached++;

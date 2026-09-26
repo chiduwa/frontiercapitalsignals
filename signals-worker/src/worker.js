@@ -7334,6 +7334,12 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .pg-why{display:block;font-size:10px;color:var(--dim);margin-top:2px;font-family:var(--disp);font-weight:400}
   .profit-note{display:block;color:var(--muted);font-size:10px;letter-spacing:.02em;margin-top:3px;font-family:var(--disp);cursor:help}
   .profit-note.grower{color:var(--up)}
+  /* On a phone the new lists pair their fields two to a line, with the coin or
+     company and the reading across the full width, instead of one per line. */
+  @media(max-width:720px){
+    #panel-exhWatch .bh-row,#panel-exhPrints .bh-row,#panel-profitSmall .bh-row,#panel-profitMid .bh-row{grid-template-columns:1fr 1fr;column-gap:14px;row-gap:8px}
+    #panel-exhWatch .bh-row>.bh-sym,#panel-exhPrints .bh-row>.bh-sym,#panel-profitSmall .bh-row>.bh-sym,#panel-profitMid .bh-row>.bh-sym,#panel-exhWatch .bh-row>[data-l="Reading"]{grid-column:1/-1}
+  }
   .ex-list{margin:8px 0 4px;padding-left:18px;font-family:var(--mono);font-size:11.5px;line-height:1.75;color:var(--muted)}
   .ex-list b{color:var(--paper)}
   @media(min-width:721px){#panel-modelTournament .bh-head,#panel-modelTournament .bh-row{grid-template-columns:minmax(80px,.45fr) minmax(200px,1.2fr) minmax(200px,1.2fr) minmax(170px,1fr) minmax(190px,1.1fr)}}
@@ -7759,7 +7765,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   function num(v){ return typeof v==='number'&&isFinite(v); }
   // Growth as a fraction (0.25 = +25%). Growth off a tiny base reads as
   // thousands of percent, which says less than the dollar figures beside it.
-  function fmtGrowth(x){
+  // With the base: growth off a loss is not a percentage worth printing.
+  function fmtGrowth(x,base,now){
+    if(num(base)&&base<=0) return num(now)&&now>0?'turned positive':'n/a';
     if(!num(x)) return 'n/a';
     if(x>5) return 'over +500%';
     return (x>=0?'+':'')+Math.round(x*100)+'%';
@@ -7771,7 +7779,11 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     if(a>=1e6) return sign+'$'+(a/1e6).toFixed(0)+'M';
     return sign+'$'+Math.round(a).toLocaleString('en-US');
   }
-  function fmtZ(z){ return num(z)?(z>=0?'+':'')+z.toFixed(1)+'σ':'n/a'; }
+  function fmtZ(z){
+    if(!num(z)) return 'n/a';
+    var r=Math.round(z*10)/10;
+    return (r>0?'+':'')+(r===0?0:r).toFixed(1)+'σ';
+  }
   function hoursAgo(iso){
     var t=Date.parse(iso); if(!isFinite(t)) return '';
     var h=(Date.now()-t)/36e5;
@@ -8280,6 +8292,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     var ev=x.evidence||{}, tiers=ev.byTier||{}, both=ev.bothRules||{}, mk=ev.market||{};
     var pct=function(v,dp){return num(v)?(v>0?'+':'')+v.toFixed(dp==null?1:dp)+'%':'n/a';};
     var share=function(v){return num(v)?Math.round(v*100)+'%':'n/a';};
+    var share1=function(v){return num(v)?(v*100).toFixed(1)+'%':'n/a';};
     var out='<div class="xp-banner" role="note"><b>What this watches.</b> Volume exhaustion is an hour where a coin trades far more than its own normal, jumps in price, and has already run up. On smaller coins that has usually meant the buying is used up: across 478 coins since January 2024, those hours were followed by '
       +pct(tiers.mid&&tiers.mid.excess24)+' on mid-size coins and '+pct(tiers.thin&&tiers.thin.excess24)+' on the thinnest, against the market over the next day. The coin often pokes higher first, so there is usually time to sell into strength. On the biggest coins (BTC, ETH, SOL, XRP and similar) it has not worked, and surges there have tended to keep going, so they get no sell warnings. Not financial advice.</div>';
     if(x.status==='awaiting-first-run') return out+'<div class="dashboard-empty">The first scan has not landed yet. It runs a few minutes after every hour.</div>';
@@ -8287,7 +8300,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     out+=panelStart({id:'exhMarket',tone:'watch',open:true,eyebrow:'CRYPTO &middot; <b>WHOLE MARKET</b>',title:g.headline||'The whole market',
         meta:'as of '+esc(String(x.at||'').slice(11,16))+' UTC &middot; '+(g.scanned||0)+' coins'+(x.status==='stale'?' &middot; <span class="amber-t">stale</span>':'')})
       +'<div class="ex-tiles">'
-        +'<div class="ex-tile"><span>Coins printing exhaustion, 24h</span><b>'+share(g.breadth)+'</b><em>a typical day is '+share(x.reference&&x.reference.median)+'</em></div>'
+        +'<div class="ex-tile"><span>Coins printing exhaustion, 24h</span><b>'+share1(g.breadth)+'</b><em>a typical day is '+share1(x.reference&&x.reference.median)+'</em></div>'
         +'<div class="ex-tile"><span>Total volume vs 30-day norm</span><b>'+fmtZ(g.aggVolumeZ)+'</b><em>standard deviations</em></div>'
         +'<div class="ex-tile"><span>Market, last 24h</span><b>'+pct(g.marketRet24Pct)+'</b><em>equal-weight, '+(g.indexCoins||0)+' coins</em></div>'
         +'<div class="ex-tile"><span>Market run, 3 days</span><b>'+fmtZ(g.marketRun72Z)+'</b><em>in its own hourly volatility</em></div>'
@@ -8359,9 +8372,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           +'<span class="bh-cell" data-l="Sector">'+esc(r.sector||'n/a')+'</span>'
           +'<span class="bh-cell" data-l="Market cap">'+fmtUsd(r.mcap)+'</span>'
           +'<span class="bh-cell" data-l="Net profit, 4 qtrs">'+fmtUsd(r.ttm_ni)+'</span>'
-          +'<span class="bh-cell" data-l="Profit growth">'+fmtGrowth(r.ni_growth)+'</span>'
+          +'<span class="bh-cell" data-l="Profit growth">'+fmtGrowth(r.ni_growth,r.prev_ni,r.ttm_ni)+'</span>'
           +'<span class="bh-cell" data-l="Revenue growth">'+fmtGrowth(r.rev_growth)+'</span>'
-          +'<span class="bh-cell" data-l="Op. profit growth">'+fmtGrowth(r.oi_growth)+'</span>'
+          +'<span class="bh-cell" data-l="Op. profit growth">'+fmtGrowth(r.oi_growth,r.oi_prev,r.oi_ttm)+'</span>'
           +'<span class="bh-cell" data-l="P/E">'+(num(r.pe)&&r.pe>0?r.pe.toFixed(0):'n/a')+'</span></div>';
       }).join('');
       var lv=(pg.live||{})[key+'|91'];
@@ -8450,7 +8463,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var profitNote = pf
           ? '<span class="profit-note'+(pf.grower?' grower':'')+'" title="From SEC filings through the quarter ending '+esc(pf.latestQuarterEnd||'')+'. Net profit over the last four quarters, and growth on the four before.">'
             +(num(pf.ttmNi)?(pf.ttmNi>0?'Profitable, ':'Loss-making, ')+fmtUsd(pf.ttmNi)+' net over 4 quarters':'Profit n/a')
-            +(num(pf.niGrowth)?' ('+fmtGrowth(pf.niGrowth)+' on the year before)':'')
+            +(num(pf.prevNi)&&pf.prevNi<=0&&num(pf.ttmNi)&&pf.ttmNi>0?' (turned profitable this year)':num(pf.niGrowth)?' ('+fmtGrowth(pf.niGrowth)+' on the year before)':'')
             +(num(pf.revGrowth)?' &middot; revenue '+fmtGrowth(pf.revGrowth):'')
             +(pf.grower?' &middot; <b>profit grower</b>':'')+'</span>'
           : '';

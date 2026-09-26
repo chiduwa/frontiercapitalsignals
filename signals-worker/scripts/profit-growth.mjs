@@ -181,6 +181,8 @@ export function whyItQualifies(m) {
   const parts = [];
   if (m.oiTtm > 0 && m.oiPrev > 0 && m.oiGrowth >= 0.20) parts.push(`operating profit ${pct(m.oiGrowth)} on revenue ${pct(m.revGrowth)}`);
   if (m.profitableQuarters === 4 && m.yoyUp >= 3) parts.push(`profitable every quarter, up on a year earlier in ${m.yoyUp} of the last 4`);
+  if (m.prevNi <= 0 && m.ttmNi > 0) parts.push('net profit turned positive this year');
+  else if (m.oiPrev <= 0 && m.oiTtm > 0) parts.push('operating profit turned positive this year');
   return parts.join('; ');
 }
 
@@ -369,15 +371,16 @@ export async function runProfitGrowth(env, { now = new Date(), dryRun = false, l
   for (const part of chunk(listRows, 10)) {
     await d1Batch(env, part.map((r) => ({
       sql: `INSERT INTO profit_growth_screen (as_of, list, rank, symbol, name, sector, industry, price, mcap, ttm_ni, ni_growth,
-              rev_growth, oi_growth, yoy_up, profitable_quarters, net_margin, pe, latest_quarter_end, liquidity, why)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              rev_growth, oi_growth, yoy_up, profitable_quarters, net_margin, pe, latest_quarter_end, liquidity, why, prev_ni, oi_ttm, oi_prev)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(as_of, list, symbol) DO UPDATE SET rank=excluded.rank, price=excluded.price, mcap=excluded.mcap,
               ttm_ni=excluded.ttm_ni, ni_growth=excluded.ni_growth, rev_growth=excluded.rev_growth, oi_growth=excluded.oi_growth,
               yoy_up=excluded.yoy_up, profitable_quarters=excluded.profitable_quarters, net_margin=excluded.net_margin,
-              pe=excluded.pe, latest_quarter_end=excluded.latest_quarter_end, liquidity=excluded.liquidity, why=excluded.why`,
+              pe=excluded.pe, latest_quarter_end=excluded.latest_quarter_end, liquidity=excluded.liquidity, why=excluded.why,
+              prev_ni=excluded.prev_ni, oi_ttm=excluded.oi_ttm, oi_prev=excluded.oi_prev`,
       params: [asOf, r.list, r.rank, r.symbol, r.name, r.sector, r.industry, r.price, r.mcap, r.metrics.ttmNi, r.metrics.niGrowth,
         r.metrics.revGrowth, r.metrics.oiGrowth, r.metrics.yoyUp, r.metrics.profitableQuarters, r.metrics.netMargin, r.pe,
-        r.metrics.latestQuarterEnd, r.liquidity, r.why]
+        r.metrics.latestQuarterEnd, r.liquidity, r.why, r.metrics.prevNi, r.metrics.oiTtm, r.metrics.oiPrev]
     })));
   }
 
@@ -386,14 +389,16 @@ export async function runProfitGrowth(env, { now = new Date(), dryRun = false, l
   for (const part of chunk(companies, 40)) {
     await d1Batch(env, part.map((c) => ({
       sql: `INSERT INTO company_profit_metrics (symbol, as_of, bucket, mcap, ttm_ni, ni_growth, rev_growth, oi_growth, yoy_up,
-              profitable_quarters, net_margin, latest_quarter_end, qualifies)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+              profitable_quarters, net_margin, latest_quarter_end, qualifies, prev_ni, oi_ttm, oi_prev)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(symbol) DO UPDATE SET as_of=excluded.as_of, bucket=excluded.bucket, mcap=excluded.mcap, ttm_ni=excluded.ttm_ni,
               ni_growth=excluded.ni_growth, rev_growth=excluded.rev_growth, oi_growth=excluded.oi_growth, yoy_up=excluded.yoy_up,
               profitable_quarters=excluded.profitable_quarters, net_margin=excluded.net_margin,
-              latest_quarter_end=excluded.latest_quarter_end, qualifies=excluded.qualifies`,
+              latest_quarter_end=excluded.latest_quarter_end, qualifies=excluded.qualifies,
+              prev_ni=excluded.prev_ni, oi_ttm=excluded.oi_ttm, oi_prev=excluded.oi_prev`,
       params: [c.symbol, asOf, sizeBucket(c.mcap), c.mcap, c.metrics.ttmNi, c.metrics.niGrowth, c.metrics.revGrowth, c.metrics.oiGrowth,
-        c.metrics.yoyUp, c.metrics.profitableQuarters, c.metrics.netMargin, c.metrics.latestQuarterEnd, qualifies(c.metrics) ? 1 : 0]
+        c.metrics.yoyUp, c.metrics.profitableQuarters, c.metrics.netMargin, c.metrics.latestQuarterEnd, qualifies(c.metrics) ? 1 : 0,
+        c.metrics.prevNi, c.metrics.oiTtm, c.metrics.oiPrev]
     })));
   }
 
@@ -445,7 +450,8 @@ export async function loadProfitGrowth(env, nowMs = Date.now(), query = d1) {
   const asOf = latest[0] && latest[0].as_of;
   if (!asOf) return { status: 'awaiting-first-run', evidence: PROFIT_GROWTH_EVIDENCE };
   const rows = await query(env, `SELECT list, rank, symbol, name, sector, industry, price, mcap, ttm_ni, ni_growth, rev_growth, oi_growth,
-      yoy_up, profitable_quarters, net_margin, pe, latest_quarter_end, why FROM profit_growth_screen WHERE as_of = ? ORDER BY list, rank`, [asOf]);
+      yoy_up, profitable_quarters, net_margin, pe, latest_quarter_end, why, prev_ni, oi_ttm, oi_prev
+      FROM profit_growth_screen WHERE as_of = ? ORDER BY list, rank`, [asOf]);
   const outcomes = await query(env, 'SELECT list, horizon_days, excess_pct FROM profit_growth_outcomes');
   const lists = { small: [], mid: [] };
   for (const r of rows) (lists[r.list] ||= []).push(r);
@@ -458,7 +464,8 @@ export async function loadCompanyProfitMetrics(env, symbols, query = d1) {
   const out = {};
   for (const part of chunk([...new Set(symbols)], 90)) {
     const rows = await query(env, `SELECT symbol, as_of, bucket, ttm_ni, ni_growth, rev_growth, oi_growth, yoy_up, profitable_quarters,
-        net_margin, latest_quarter_end, qualifies FROM company_profit_metrics WHERE symbol IN (${part.map(() => '?').join(',')})`, part);
+        net_margin, latest_quarter_end, qualifies, prev_ni, oi_ttm, oi_prev
+        FROM company_profit_metrics WHERE symbol IN (${part.map(() => '?').join(',')})`, part);
     for (const r of rows) out[r.symbol] = r;
   }
   return out;

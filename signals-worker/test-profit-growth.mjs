@@ -55,6 +55,7 @@ assert.equal(qualifies({ ...m, revGrowth: 3.5 }), false, 'revenue more than quad
 assert.equal(qualifies({ ...m, yoyUp: 2, oiGrowth: 0.1 }), false, 'neither consistent nor operating growth');
 assert.equal(qualifies({ ...m, yoyUp: 1, profitableQuarters: 3, oiTtm: 20, oiPrev: 10, oiGrowth: 1 }), true, 'operating growth alone qualifies');
 assert.match(whyItQualifies(m), /operating profit \+33% on revenue \+20%/);
+assert.match(whyItQualifies({ ...m, prevNi: -5 }), /net profit turned positive this year/, 'a turnaround is named as one');
 assert.equal(isCommonStock('CHS Inc Class B Cumulative Redeemable Preferred Stock'), false);
 assert.equal(isCommonStock('Acme Holdings Depositary Shares'), false);
 assert.equal(isCommonStock('Apple Inc. Common Stock'), true);

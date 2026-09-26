@@ -590,6 +590,7 @@ console.log('\n== sell pressure: per-coin exhaustion, your coins, and the market
     ],
     watch: [
       { symbol: 'BTC', price: 84034, barPct: 0.1, volZ: -0.97, tier: 'major', onVenue: true, lastPrint: null },
+      { symbol: 'ARB', price: 0.2283, barPct: 1.3, volZ: -0.02, tier: 'major', onVenue: true, lastPrint: null },
       { symbol: 'HBAR', price: 0.094, barPct: 0.8, volZ: 0.04, tier: 'mid', onVenue: true, lastPrint: null },
       { symbol: 'WLFI', price: 0.059, barPct: 3.1, volZ: 3.4, tier: 'mid', onVenue: true, lastPrint: { at: iso(3 * 3600000) }, moveSinceLastPrintPct: -2.4 },
       { symbol: 'NEWC', price: 1.2, tier: null, volZ: null, onVenue: true, lastPrint: null },
@@ -612,6 +613,8 @@ console.log('\n== sell pressure: per-coin exhaustion, your coins, and the market
   check('a large coin never gets a sell warning, and says why', /Large coin: volume surges here have tended to continue/.test(rowText('BTC')));
   check('a smaller coin that printed shows when, and what happened since', /Exhaustion 3h ago/.test(rowText('WLFI')) && /-2\.4% since/.test(rowText('WLFI')));
   check('a quiet smaller coin reads quiet', /Quiet/.test(rowText('HBAR')));
+  check('a reading that rounds to zero never shows as minus zero', /0\.0σ/.test(rowText('ARB')) && !/-0\.0σ/.test(rowText('ARB')), rowText('ARB'));
+  check('breadth is shown to the same decimal as the sentence beside it', /4\.4%/.test(view.doc.getElementById('panel-exhMarket')?.textContent || ''));
   check('coins without history or off the venue say so', /Not enough trading history/.test(rowText('NEWC')) && /Not on Binance spot/.test(rowText('HYPE')));
   check('the market panel is context, never a sell signal', /never a sell signal/.test(text) && /more upside/.test(text));
   check('recent prints say when both rules fired', /both rules/.test(view.doc.getElementById('panel-exhPrints')?.textContent || ''));
@@ -631,13 +634,15 @@ console.log('\n== profit growers: small and mid caps, from SEC filings ==');
     why: 'operating profit +55% on revenue +31%', ...extra });
   const profitGrowth = {
     status: 'live', asOf: '2026-09-26',
-    lists: { small: [pgRow('small', 1, 'AAAA'), pgRow('small', 2, 'BBBB', { oi_growth: 327.8, ni_growth: null, pe: null })], mid: [pgRow('mid', 1, 'CCCC')] },
+    lists: { small: [pgRow('small', 1, 'AAAA'), pgRow('small', 2, 'BBBB', { oi_growth: 327.8, ni_growth: null, pe: null })],
+      mid: [pgRow('mid', 1, 'CCCC'), pgRow('mid', 2, 'TURN', { prev_ni: -4e6, ttm_ni: 5e7, ni_growth: 13.5, oi_prev: -1e6, oi_ttm: 3e7, oi_growth: 31 })] },
     live: {},
     evidence: { period: 'Apr 2017 to Jul 2026, 37 quarters', small: { perQuarterPct: 1.72, recentPerQuarterPct: 2.97 }, mid: { perQuarterPct: 1.99, recentPerQuarterPct: 2.66 },
       caveats: ['Only companies still listed today have prices.', 'Prices exclude dividends.', 'The ranking was picked from six candidates.'] }
   };
   const base = payload();
-  base.stocks.breakout[0].profit = { ttmNi: 7.2e10, niGrowth: 1.45, revGrowth: 0.94, grower: true, latestQuarterEnd: '2026-07-27' };
+  base.stocks.breakout[0].profit = { ttmNi: 7.2e10, prevNi: 2.9e10, niGrowth: 1.45, revGrowth: 0.94, grower: true, latestQuarterEnd: '2026-07-27' };
+  base.stocks.breakout[1].profit = { ttmNi: 3e8, prevNi: -1e8, niGrowth: 4, revGrowth: 0.3, grower: false, latestQuarterEnd: '2026-06-30' };
   const view = await render({ ...base, profitGrowth }, { settleMs: 1200 });
   const sec = view.doc.querySelector('[data-dashboard-view="profits"]');
   const text = sec?.textContent || '';
@@ -645,11 +650,15 @@ console.log('\n== profit growers: small and mid caps, from SEC filings ==');
   check('it has its own tab', Boolean(view.doc.querySelector('[data-view-link="profits"]')));
   check('both size lists render their companies', Boolean(view.doc.querySelector('#panel-profitSmall [data-pg="AAAA"]')) && Boolean(view.doc.querySelector('#panel-profitMid [data-pg="CCCC"]')));
   check('growth off a tiny base reads as a bound, not thousands of percent', /over \+500%/.test(view.doc.querySelector('[data-pg="BBBB"]')?.textContent || ''));
+  const turn = view.doc.querySelector('[data-pg="TURN"]')?.textContent || '';
+  check('growth off a loss reads as turned positive, never a percentage', /turned positive/.test(turn) && !/\+1350%|over \+500%/.test(turn), turn);
   check('names are shortened and the reason is shown', /AAAA Holdings Inc\./.test(text) && !/Common Stock/.test(text) && /operating profit \+55% on revenue \+31%/.test(text));
   check('the evidence and its caveats are on the page', /moderate evidence, not a guarantee/.test(text) && /Prices exclude dividends/.test(text));
   check('missing values read n/a, never NaN', !/NaN|undefined|—/.test(text));
   const nvda = view.doc.querySelector('tr[data-symbol="NVDA"] .profit-note');
   check('an equity row on the live screens carries its profit facts', Boolean(nvda) && /Profitable, \$72\.0B net over 4 quarters/.test(nvda?.textContent || '') && /profit grower/.test(nvda?.textContent || ''), nvda?.textContent);
+  const sofi = view.doc.querySelector('tr[data-symbol="SOFI"] .profit-note')?.textContent || '';
+  check('a company that just turned profitable says so instead of a growth rate', /turned profitable this year/.test(sofi) && !/on the year before/.test(sofi), sofi);
   view.dom.window.close();
 }
 
