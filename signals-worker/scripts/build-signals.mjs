@@ -13,7 +13,7 @@ import { loadSessionHealth } from './session-health.mjs';
 // Required env: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_KV_NAMESPACE_ID
 // Optional env: TREFIS_OVERRIDES
 // Optional (enables reliability weighting when set): FCS_D1_DATABASE_ID
-import { buildPayload, sanitizePayloadForPublication, CACHE_KEY, coingeckoSimplePrice, yahooQuote, getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, hasCrossClassTickerCollision } from '../worker.js';
+import { buildPayload, sanitizePayloadForPublication, carryForwardCollapsedClasses, CACHE_KEY, coingeckoSimplePrice, yahooQuote, getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, hasCrossClassTickerCollision } from '../worker.js';
 import { loadReliability, loadTechniquePriors, loadComboReliability, loadMoveStats, loadRangeReliability, loadCalibration, loadDetailedCalibration, loadDirectionBaselines, loadDailyRangeStats, loadTimeOfDayEdge, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, loadSwingTimeStats, loadRecentEvents, loadIvHistory, loadRegimeReliability, loadSrLevels, loadSrBreakStats, loadQualityData, loadRotationStatus, loadCallFlipData, loadLongTermBottomStatus, loadRetrospective, loadQuantResearch, loadExcursionEvidence, EXCURSION_MIN_SAMPLES, buildPublicationSnapshots, logRun, evaluateMatured, evaluateTimeOfDay, snapshotAssetScores, detectAndLogCallFlips, evaluateCallFlips } from './reliability.mjs';
 import { checkAndNotifyReversals, checkAndNotifySuddenMoves, checkAndNotifyConsolidations, checkAndNotifyConfidentMoves } from './notify.mjs';
 import { upsertMarketSentiment, loadRecentBars, loadTvlSeries, loadMarketReturn, loadYieldSpreadChange } from './archive.mjs';
@@ -90,14 +90,27 @@ async function checkForBigMove(cachedOverview) {
   return null;
 }
 
+// The payload currently being served. Read once and used twice: by the
+// freshness gate below, and after the build by carryForwardCollapsedClasses,
+// which keeps a class's last good boards when this build's feed for it
+// collapsed. Null when unreadable; both callers treat that as "no previous".
+const cacheUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${FCS_KV_NAMESPACE_ID}/values/${encodeURIComponent(CACHE_KEY)}`;
+let previousPayload = null;
+let previousReadStatus = null;
+try {
+  const existingRes = await fetch(cacheUrl, { headers: { Authorization: `Bearer ${CLOUDFLARE_API_TOKEN}` } });
+  previousReadStatus = existingRes.status;
+  if (existingRes.ok) previousPayload = await existingRes.json().catch(() => null);
+} catch (e) {
+  console.error('could not read the payload currently served (carry-forward and freshness gate both fall back to "no previous"):', e.message);
+}
+
 const obeyFreshnessGate = GITHUB_EVENT_NAME === 'schedule'
   || (GITHUB_EVENT_NAME === 'workflow_dispatch' && String(FORCE_REFRESH).toLowerCase() === 'false');
 if (obeyFreshnessGate) {
   try {
-    const checkUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${FCS_KV_NAMESPACE_ID}/values/${encodeURIComponent(CACHE_KEY)}`;
-    const existingRes = await fetch(checkUrl, { headers: { Authorization: `Bearer ${CLOUDFLARE_API_TOKEN}` } });
-    if (existingRes.ok) {
-      const existing = await existingRes.json().catch(() => null);
+    if (previousReadStatus === 200) {
+      const existing = previousPayload;
       const ageMinutes = existing && existing.generated_at ? (Date.now() - new Date(existing.generated_at).getTime()) / 60000 : Infinity;
       if (ageMinutes < FRESH_ENOUGH_MINUTES) {
         const bigMove = await checkForBigMove(existing && existing.overview).catch((e) => {
@@ -114,7 +127,7 @@ if (obeyFreshnessGate) {
         console.log(`proceeding: last build is ${ageMinutes === Infinity ? 'unknown age' : ageMinutes.toFixed(1) + 'min old'} (>= ${FRESH_ENOUGH_MINUTES}min)`);
       }
     } else {
-      console.log(`proceeding: could not read existing KV value (HTTP ${existingRes.status}), building fresh`);
+      console.log(`proceeding: could not read existing KV value (HTTP ${previousReadStatus ?? 'no response'}), building fresh`);
     }
   } catch (e) {
     console.error('staleness pre-check failed, proceeding with a full build anyway (safer than skipping on an unknown state):', e.message);
@@ -217,8 +230,11 @@ if (FCS_D1_DATABASE_ID) {
       })).join('; ');
     console.log(`loaded cross-sectional coefficients — ${xsSummary || 'no fit yet, lane abstains'}`);
     todEdge = await loadTimeOfDayEdge(env);
+    // Edge rows carry a slot name ('hour_et_16'), not a bare hour; this line
+    // used to read a field that does not exist and printed "buy@undefined:00".
+    const slotLabel = (slot) => String(slot || '?').replace(/^hour_/, '').replace(/_(\d+)$/, ' $1:00').toUpperCase();
     const edgeSummary = Object.entries(todEdge).map(([sym, e]) =>
-      `${sym}${e.buyHour ? ` buy@${String(e.buyHour.hour).padStart(2,'0')}:00(${e.buyHour.meanPct.toFixed(3)}%,t=${e.buyHour.t.toFixed(1)})` : ''}${e.sellHour ? ` sell@${String(e.sellHour.hour).padStart(2,'0')}:00(${e.sellHour.meanPct.toFixed(3)}%)` : ''}`).join('; ');
+      `${sym}${e.buyHour ? ` buy@${slotLabel(e.buyHour.slot)}(${e.buyHour.meanPct.toFixed(3)}%,t=${e.buyHour.t.toFixed(1)})` : ''}${e.sellHour ? ` sell@${slotLabel(e.sellHour.slot)}(${e.sellHour.meanPct.toFixed(3)}%)` : ''}`).join('; ');
     console.log(`loaded time-of-day edge for ${Object.keys(todEdge).length} symbols clearing both bars: ${edgeSummary || 'none'}`);
   } catch (e) {
     console.error('learning/context load failed; refreshing descriptive data but withholding any call whose evidence is unavailable:', e.message || e);
@@ -339,16 +355,21 @@ if (FCS_D1_DATABASE_ID) {
 // Defense in depth: buildPayload already gates every board row, but the object
 // written to KV is the public contract. Sanitize that exact object so a future
 // auxiliary section cannot accidentally bypass the evidence requirements.
-const publicPayload = sanitizePayloadForPublication(payload);
+const sanitizedPayload = sanitizePayloadForPublication(payload);
 // Freeze the exact post-sanitizer boards and the exact scored universe. The
 // retrospective must never infer what was published from lossy composite
-// votes after the fact.
+// votes after the fact. Taken BEFORE any carry-forward: a carried section was
+// already snapshotted when it was built, and recording it again under this
+// run's time would credit the engine with calls it did not make this hour.
 log.publicationSnapshots = buildPublicationSnapshots(
-  publicPayload, log.prices || [], payload.generated_at
+  sanitizedPayload, log.prices || [], payload.generated_at
 );
+const publicPayload = carryForwardCollapsedClasses(sanitizedPayload, previousPayload);
+for (const c of publicPayload.health?.carried_forward || []) {
+  console.error(`CARRIED FORWARD: ${c.class} feed returned ${c.fresh_universe} asset(s) against ${c.carried_universe} last build; serving the ${c.class} boards built at ${c.from}`);
+}
 
-const url = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/storage/kv/namespaces/${FCS_KV_NAMESPACE_ID}/values/${encodeURIComponent(CACHE_KEY)}`;
-const res = await fetch(url, {
+const res = await fetch(cacheUrl, {
   method: 'PUT',
   headers: { Authorization: `Bearer ${CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
   body: JSON.stringify(publicPayload)

@@ -123,10 +123,17 @@ export const THRESHOLDS = Object.freeze({
   registryAgeFailHours: 72,
   // The dashboard's own feed warning uses the same 80% equity coverage bar.
   equityCoverageFail: 0.8,
-  // Intelligence lands daily, so 36h absorbs one missed run. Past 60h a deploy
+  // Intelligence lands daily, so this absorbs one missed run. Past 60h a deploy
   // has failed rather than slipped. Sized from the 2026-09-14 token outage,
   // which sat at ~48h before anyone looked.
-  deployAgeWarnHours: 36,
+  //
+  // 40, not 36. <lastmod> is date-only, so yesterday's article reads as
+  // midnight, and the daily run lands around 12:00-12:05 UTC. At 36h the probe
+  // that fires on the hour before that deploy finishes saw exactly 36.0h and
+  // warned, every day (2026-09-25 12:00 and 12:13, 2026-09-26 12:00), with
+  // nothing wrong. Four hours of slack covers GitHub's usual scheduling delay;
+  // a run that genuinely never happens still warns by mid-afternoon UTC.
+  deployAgeWarnHours: 40,
   // Generous, because deploy-reached-production below is the precise detector
   // and this is only its backstop. One missed generation run should read as a
   // warning, not a page.
@@ -184,6 +191,16 @@ export function checkPayload(payload, now = Date.now()) {
     stockUniverse < THRESHOLDS.stockUniverseFail ? 'fail' : 'warn',
     stockUniverse >= THRESHOLDS.stockUniverseWarn,
     `${stockUniverse} equities screened (expected >= ${THRESHOLDS.stockUniverseWarn})`);
+
+  // A class served from an earlier build because this build's feed for it
+  // collapsed (carryForwardCollapsedClasses in worker.js). The page is still
+  // useful, so this warns rather than fails; the build stops carrying after
+  // its own age limit, at which point the universe checks above fail instead.
+  for (const c of payload.health?.carried_forward || []) {
+    const age = hours(now - Date.parse(c.from));
+    push(`carried-forward-${c.class}`, 'warn', false,
+      `${c.class} boards are carried forward from ${c.from} (${Number.isFinite(age) ? age.toFixed(1) : '?'}h old): this build's feed returned ${c.fresh_universe} against ${c.carried_universe} before`);
+  }
 
   const boards = ['crypto', 'stocks'].flatMap((cls) => ['breakout', 'breakdown'].map((side) => (payload[cls]?.[side] || []).length));
   push('boards-populated', 'fail', boards.some((n) => n > 0),

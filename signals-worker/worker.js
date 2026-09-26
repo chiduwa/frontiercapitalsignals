@@ -5302,8 +5302,8 @@ export async function getFundingMap() {
   return map;
 }
 
-async function yahooDaily(symbol, range = '1y') {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`
+async function yahooDaily(symbol, range = '1y', host = 'query1') {
+  const url = `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`
     + `?range=${range}&interval=1d&includePrePost=false&events=div%2Csplit`;
   const j = await fetchJson(url);
   const r = j && j.chart && j.chart.result && j.chart.result[0];
@@ -5339,35 +5339,67 @@ export async function yahooQuote(symbol) {
   return { symbol, price, chg24h: prevClose ? ((price / prevClose) - 1) * 100 : null };
 }
 
-async function stooqDaily(symbol) {
-  const s = symbol.toLowerCase().replace('^', '') + '.us';
-  const txt = await fetchText(`https://stooq.com/q/d/l/?s=${s}&i=d`);
-  const rows = txt.trim().split('\n').slice(1);
-  if (rows.length < 60) throw new Error(`stooq thin for ${symbol}`);
-  const closes = [], volumes = [], highs = [], lows = [];
-  // ~10 years of trading days, matching the Yahoo path's '10y' fetch — the
-  // Stooq fallback shouldn't quietly give seasonalAnalog() far less history.
-  const dates = [];
-  for (const row of rows.slice(-2600)) {
-    const p = row.split(',');
-    const c = parseFloat(p[4]);
-    if (Number.isFinite(c)) {
-      closes.push(c);
-      highs.push(parseFloat(p[2]) || c);
-      lows.push(parseFloat(p[3]) || c);
-      volumes.push(parseFloat(p[5]) || 0);
-      dates.push(p[0]);
-    }
-  }
-  return { symbol, price: closes[closes.length - 1], closes, volumes, highs, lows, dates, source: 'stooq' };
-}
+// The fallback used to be Stooq. By 2026-09 Stooq answered every request with a
+// JavaScript browser check (HTTP 200, an HTML page, no CSV), so it could never
+// succeed, and on 2026-09-25 22:35 UTC, when Yahoo's query1 host timed out for
+// all 290 equities, the build published a board with zero stocks. Yahoo serves
+// the same chart API from a second host, which is a real second chance for the
+// transient failures that actually happen (timeouts, 429s, 5xx). A 404 still
+// fails fast: a delisted ticker will not appear on the other host either.
+export const YAHOO_RETRY_PAUSE_MS = 1500;
 
 async function getStock(symbol) {
   // '10y', not the default '1y': seasonalAnalog() needs multiple years of
   // history to find calendar-analogous periods. Same single request either
   // way, just a longer response.
   try { return await yahooDaily(symbol, '10y'); }
-  catch { return await stooqDaily(symbol); }
+  catch (e) {
+    if (!isRetryableFetchError(e)) throw e;
+    await new Promise((r) => setTimeout(r, YAHOO_RETRY_PAUSE_MS));
+    return await yahooDaily(symbol, '10y', 'query2');
+  }
+}
+
+// ---- carrying a collapsed class forward -------------------------------------
+// One asset class's feed can fail completely while the other is fine. Before
+// this, a build published whatever it had, so on 2026-09-25 a Yahoo outage
+// replaced 290 good equity rows with an empty board for over an hour even
+// though every crypto row was current. buildPayload only refused to publish
+// when BOTH classes were empty.
+//
+// A class that comes back with under half of what the previous build scored
+// keeps the previous build's section instead, stamped with when it was built.
+// Prices on those rows still tick, because the Worker overlays live prices on
+// whatever board it serves. The carry is bounded: past
+// CLASS_CARRY_FORWARD_MAX_HOURS the old section is dropped and the board shows
+// what this build really has, empty or not, so a dead feed can never hide
+// behind an ever-older copy. The health block says which class was carried, so
+// the monitor still reports the outage.
+export const CLASS_CARRY_FORWARD_MAX_HOURS = 6;
+export const CLASS_COLLAPSE_FRACTION = 0.5;
+
+export function carryForwardCollapsedClasses(next, previous, nowMs = Date.now()) {
+  if (!next || typeof next !== 'object') return next;
+  const out = { ...next, health: { ...(next.health || {}) } };
+  const carried = [];
+  for (const [key, assetClass] of [['crypto', 'crypto'], ['stocks', 'stock']]) {
+    const fresh = next[key];
+    const prior = previous && previous[key];
+    if (!fresh || !prior) continue;
+    const freshUniverse = Number(fresh.universe) || 0;
+    const priorUniverse = Number(prior.universe) || 0;
+    if (!(priorUniverse > 0) || freshUniverse >= priorUniverse * CLASS_COLLAPSE_FRACTION) continue;
+    // A section that was itself carried keeps its ORIGINAL build time, so the
+    // age limit measures how old the rows really are, not how long ago they
+    // were last copied.
+    const from = (prior.carriedForward && prior.carriedForward.from) || previous.generated_at;
+    const ageHours = (nowMs - Date.parse(from)) / 3_600_000;
+    if (!Number.isFinite(ageHours) || ageHours < 0 || ageHours > CLASS_CARRY_FORWARD_MAX_HOURS) continue;
+    out[key] = { ...prior, carriedForward: { from, freshUniverse, priorUniverse } };
+    carried.push({ class: assetClass, from, fresh_universe: freshUniverse, carried_universe: priorUniverse });
+  }
+  if (carried.length) out.health.carried_forward = carried;
+  return out;
 }
 
 // ---- Yahoo analyst targets (quoteSummary needs a crumb + cookie handshake).
@@ -6358,7 +6390,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
       crypto: 'CoinGecko (top 100 by market cap, daily history per coin) + trending list',
       derivatives: 'CoinGecko aggregated derivatives (funding rate + open interest, highest-OI perpetual market per asset)',
       sentiment: 'alternative.me Fear & Greed (full history archived) + VIX positioning + CoinGecko community votes; CoinMarketCap Fear & Greed and CryptoPanic news sentiment where configured',
-      equities: 'Yahoo Finance daily OHLCV, Stooq fallback',
+      equities: 'Yahoo Finance daily OHLCV (query1, then query2 on a transient failure)',
       valuation: 'Wall Street consensus targets via Yahoo; TREFIS_OVERRIDES env accepted',
       archive: 'Permanent daily-bar/funding/sentiment history (Yahoo full-depth + CoinGecko fallback) backs Fibonacci, time-of-day, and cross-asset lead/lag detection',
       note: 'Mechanical confluence composites. Not investment advice.'
@@ -7500,7 +7532,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       <p><b>Expected range, top, and bottom.</b> A displayed band is an empirical move interval for the validated horizon, anchored to the model's timestamped reference price. It is not an exact top, bottom, target, or stop. Volatility-only fallback bands may still be logged for calibration, but they are not shown as trade metrics. If the exact current setup lacks a reliable historical horizon or range record, both fields are withheld rather than manufactured.</p>
       <p><b>Which indicator this asset leans on.</b> "Leans on X (n%)" under an asset's name names whichever technique has, on its own, the strongest individually-proven track record for that specific asset — some assets really are better predicted by one kind of signal than another, and this surfaces that once a technique has enough of its own scored history to say so, using the same adaptive-weighting data above.</p>
       <p><b>Prediction track record.</b> Directional accuracy, range containment, reversal outcomes, and intraday results remain separate metrics; a high-containment range can no longer inflate a directional hit rate. The list requires a conservative directional edge over the asset-class baseline and enough independent periods. Historical skill does not automatically validate today's setup, which must pass its own calibration gate.</p>
-      <p><b>Data.</b> CoinGecko free API for the top 100 coins by market cap with real daily price and volume history per coin, plus global stats and trending (stablecoins and wrappers excluded), alternative.me Fear &amp; Greed, Bybit linear perp funding rates, Yahoo Finance daily OHLCV with Stooq CSV fallback, and Yahoo analyst estimates. Free feeds can lag or drop symbols; the feeds counter in the status bar shows current coverage, and any technique without data simply abstains rather than guessing.</p>
+      <p><b>Data.</b> CoinGecko free API for the top 100 coins by market cap with real daily price and volume history per coin, plus global stats and trending (stablecoins and wrappers excluded), alternative.me Fear &amp; Greed, Bybit linear perp funding rates, Yahoo Finance daily OHLCV and Yahoo analyst estimates. Free feeds can lag or drop symbols; the feeds counter in the status bar shows current coverage, and any technique without data simply abstains rather than guessing.</p>
       <p><b>Refresh mechanics.</b> A scheduled job rebuilds the full payload — scores, ranges, horizons, every technique call — hourly and writes it to this page's cache; every visit reads that cache, so the page itself never runs the engine. This page also re-checks every 10 minutes so a new hour's data appears without a reload. Price and 24-hour change are the one exception: this page separately polls a lightweight endpoint roughly every 20 seconds for a live tick, straight from CoinGecko and Yahoo, without touching the hourly analysis — so the number in the Price column can move between rebuilds, but the score, range, and every technique read next to it stay fixed until the next hourly rebuild.</p>
       <p><b>What the scores are not.</b> A score of 70 is not a 70% probability. Only the separately labelled conservative win estimate is calibrated, and even that is uncertain. News, sentiment, earnings, security incidents, positioning, and macro data are incomplete third-party observations, not omniscience. Missing or stale inputs abstain. The automatic research engine tests calendar, event, cross-asset, regime, and strategy rules with family correction, disjoint walk-forward folds, explicit costs, drawdown, and post-discovery confirmation; it does not publish a pattern merely because an in-sample simulation looked profitable.</p>
     </div>
@@ -7511,7 +7543,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     <details class="footer-note"><summary>About this research &amp; risks</summary><p class="legal">Frontier Capital Signals is an experimental, ongoing research project — an informational tool, not a finished or audited product. Nothing on this page is investment advice, a recommendation, or a solicitation to buy or sell any asset. Inputs include market, positioning, news/sentiment, event, and selected fundamental context, but coverage can be delayed or incomplete and the system abstains when evidence is not reliable. The scalp panel is descriptive and deliberately makes no current direction, entry, target, top, or bottom call. Crypto and equity markets involve substantial risk of loss, and leveraged trading can lose more than the amount put in. Do your own research and do not rely on this page alone.</p></details>
     <div class="cols">
       <span>© <span id="yr"></span> Frontier Capital Signals</span>
-      <span>Data: CoinGecko · CoinMetrics · CMC · alternative.me · Yahoo Finance / Stooq</span>
+      <span>Data: CoinGecko · CoinMetrics · CMC · alternative.me · Yahoo Finance</span>
       <span>Model: confluence-v9</span>
     </div>
   </footer>
@@ -8083,6 +8115,19 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       +detail+' Rankings, prices, and descriptive measurements remain visible; long/short arrows, trade timeframes, and projected ranges stay hidden until the class and current setup earn them.</div>';
   }
 
+  // A class whose feed collapsed this build is served from the last complete
+  // build (carryForwardCollapsedClasses). Say so, with the time, so an old
+  // board is never mistaken for this hour's.
+  function classCarriedBanner(assetClass, section){
+    var cf=section&&section.carriedForward;
+    if(!cf||!cf.from) return '';
+    var t=new Date(cf.from);
+    if(!isFinite(t.getTime())) return '';
+    var label=assetClass==='crypto'?'Crypto':'Equity';
+    return '<div class="xp-banner class-carried" role="note" data-carried-class="'+assetClass+'"><b>'+label+' boards are from '+utcStamp(t,false)+' ('+relAge(Date.now()-t.getTime())+').</b> '
+      +'This hour&#39;s '+(assetClass==='crypto'?'crypto':'equity')+' feed returned '+(cf.freshUniverse||0)+' of the usual '+(cf.priorUniverse||0)+' assets, so the last complete board is shown instead of an empty one. Prices on these rows are still live.</div>';
+  }
+
   function boardHtml(cfg, rowsIn, universe){
     // A column header click pins one board; the toolbar's selection applies to
     // every board and is the only sort control that exists on a phone.
@@ -8278,11 +8323,13 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     // The four directional boards, paired long/short per asset class, are the
     // reason the page exists, so they lead and they open by default.
     b+='<section data-dashboard-view="screens" hidden>'+zoneHead('screens','Live screens','Rebuilt hourly · crypto and US equities')+'<div class="zone">';
+    b+=classCarriedBanner('crypto',d.crypto);
     b+=classWithheldBanner('crypto',cs.crypto);
     b+='<div class="board-pair">'
       +boardHtml({side:'long', assetClass:'crypto', boardId:'crypto-long', eyebrow:'CRYPTO &middot; <b>LONG SIDE</b>', title:'Breakout watch', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.breakout, d.crypto.universe)
       +boardHtml({side:'short', assetClass:'crypto', boardId:'crypto-short', eyebrow:'CRYPTO &middot; <b>RISK SIDE</b>', title:'Breakdown risk', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.breakdown, d.crypto.universe)
       +'</div>';
+    b+=classCarriedBanner('stock',d.stocks);
     b+=classWithheldBanner('stock',cs.stock);
     b+='<div class="board-pair">'
       +boardHtml({side:'long', assetClass:'stock', boardId:'stock-long', eyebrow:'US EQUITIES &middot; <b>LONG SIDE</b>', title:'Breakout watch', callsWithheld:stockCallsWithheld, withheldReason:stockWithheldReason}, d.stocks.breakout, d.stocks.universe)

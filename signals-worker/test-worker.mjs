@@ -378,6 +378,42 @@ const mod = await import(`${pathToFileURL(join(__dirname, 'worker.js')).href}?te
 console.log('\n== cross-class ticker collision quarantine ==');
 check('known DASH/DoorDash collision is detected', mod.hasCrossClassTickerCollision('dash') === true);
 check('ordinary crypto ticker is not falsely quarantined', mod.hasCrossClassTickerCollision('BTC') === false);
+console.log('\n== a collapsed class keeps its last good boards ==');
+// 2026-09-25 22:35 UTC: Yahoo timed out for all 290 equities and the build
+// published an empty stock board over a good one while crypto was fine.
+{
+  const T0 = Date.parse('2026-09-25T22:49:00Z');
+  const prev = {
+    generated_at: '2026-09-25T21:45:00.000Z',
+    crypto: { universe: 234, breakout: [{ symbol: 'BTC' }], breakdown: [] },
+    stocks: { universe: 290, breakout: [{ symbol: 'NVDA' }], breakdown: [{ symbol: 'INTC' }] }
+  };
+  const next = {
+    generated_at: '2026-09-25T22:49:00.000Z',
+    health: { stocks_ok: 0, stocks_total: 290 },
+    crypto: { universe: 217, breakout: [{ symbol: 'ETH' }], breakdown: [] },
+    stocks: { universe: 0, breakout: [], breakdown: [] }
+  };
+  const out = mod.carryForwardCollapsedClasses(next, prev, T0);
+  check('an empty stock build keeps the previous stock boards', out.stocks.universe === 290 && out.stocks.breakout[0].symbol === 'NVDA');
+  check('the carried section is stamped with when it was really built', out.stocks.carriedForward && out.stocks.carriedForward.from === prev.generated_at);
+  check('health names the carried class', (out.health.carried_forward || []).map((c) => c.class).join() === 'stock');
+  check('health still reports the real feed result for this build', out.health.stocks_ok === 0);
+  check('a healthy class is never replaced', out.crypto.universe === 217 && out.crypto.breakout[0].symbol === 'ETH');
+  check('the input payload is not mutated', next.stocks.universe === 0 && !next.health.carried_forward);
+
+  // Re-carrying keeps the ORIGINAL time, so the age limit is real.
+  const again = mod.carryForwardCollapsedClasses({ ...next, generated_at: '2026-09-25T23:49:00.000Z' }, out, T0 + 3_600_000);
+  check('a second carry keeps the original build time', again.stocks.carriedForward.from === prev.generated_at);
+  const tooOld = mod.carryForwardCollapsedClasses(next, out, Date.parse(prev.generated_at) + (mod.CLASS_CARRY_FORWARD_MAX_HOURS + 0.5) * 3_600_000);
+  check('past the age limit the empty board is published honestly', tooOld.stocks.universe === 0 && !tooOld.health.carried_forward);
+
+  // A partial feed is data, not a collapse.
+  const partial = mod.carryForwardCollapsedClasses({ ...next, stocks: { universe: 200, breakout: [], breakdown: [] } }, prev, T0);
+  check('a partial feed above the collapse fraction publishes as built', partial.stocks.universe === 200 && !partial.health.carried_forward);
+  check('no previous payload means nothing to carry', mod.carryForwardCollapsedClasses(next, null, T0).stocks.universe === 0);
+}
+
 const worker = mod.default;
 check('worker exports fetch + stale-cache recovery cron', typeof worker.fetch === 'function' && typeof worker.scheduled === 'function');
 check('buildPayload + CACHE_KEY exported for scripts/build-signals.mjs', typeof mod.buildPayload === 'function' && typeof mod.CACHE_KEY === 'string');

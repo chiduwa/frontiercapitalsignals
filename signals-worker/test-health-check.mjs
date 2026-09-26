@@ -221,6 +221,33 @@ assert.ok(dFailing('2026-09-14T00:00:00.000Z', null).includes('deploy-freshness'
 assert.ok(dFailing(null, '2026-09-18T00:00:00.000Z').includes('deploy-sitemap'),
   'an unreadable sitemap must fail rather than pass quietly');
 
+// THE DAILY 12:00 FALSE ALARM (2026-09-25, 2026-09-26). The probe on the hour
+// ran a few minutes before the daily deploy finished, saw yesterday's
+// date-only <lastmod> at exactly 36.0h, and warned every single day.
+assert.deepEqual(dNotOk('2026-09-25T00:00:00.000Z', null, Date.parse('2026-09-26T12:00:37Z')), [],
+  'yesterday\'s content minutes before the daily deploy lands must stay silent');
+assert.deepEqual(dNotOk('2026-09-25T00:00:00.000Z', null, Date.parse('2026-09-26T14:30:00Z')), [],
+  'a deploy running a couple of hours late is still a normal day');
+// A day whose run genuinely never happened still warns the same afternoon.
+assert.ok(dNotOk('2026-09-25T00:00:00.000Z', null, Date.parse('2026-09-26T16:30:00Z')).includes('deploy-freshness'),
+  'a missed daily run must still warn by mid-afternoon UTC');
+
+// ---- THE ZERO-EQUITY BUILD (2026-09-25 22:35 UTC) ---------------------------
+// Yahoo timed out for all 290 equities and that build published an empty stock
+// board. The build now carries the last good section forward and says so in
+// health; the monitor must still report the outage, as a warning, because the
+// page itself remains usable.
+const carried = healthy({
+  health: { coingecko: true, stocks_ok: 0, stocks_total: 290,
+    carried_forward: [{ class: 'stock', from: ago(65 * 60_000), fresh_universe: 0, carried_universe: 290 }] }
+});
+assert.ok(notOk(carried).includes('carried-forward-stock'), 'a carried-forward class must be reported');
+assert.ok(notOk(carried).includes('equity-feed'), 'the feed failure behind it must still be reported');
+assert.deepEqual(failing(carried), [], 'a carried class keeps the page usable, so it warns rather than fails');
+// Without the carry, the same outage is the hard failure it was on the night.
+assert.ok(failing(healthy({ health: { coingecko: true, stocks_ok: 0, stocks_total: 290 }, stocks: { universe: 0, breakout: [], breakdown: [] } }))
+  .includes('stock-universe'), 'an empty stock universe with nothing carried must fail');
+
 console.log('health-check tests passed');
 
 // Reproduce the Oracle token failure despite an otherwise fresh dashboard.
