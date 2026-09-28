@@ -15,7 +15,7 @@ walk-forward outcomes the daily hierarchical job scores. Everything is
 | Does it make the expected-move band better? | **Yes, at one day.** Same coverage, slightly narrower, and the weekday-to-weekday coverage gap is cut from 10.4 to 5.7 points (crypto) and 3.2 to 1.4 (equities). At multi-day horizons it is mixed (crypto 7d under-covers) or flat (equities 5d). |
 | Does a time-series model forecast which WAY the market moves? | **No.** ARIMA and the structural model have no direction skill after costs in any lane. In the recently-listed cohort both score below chance. |
 | Is there seasonality? | **In the size of moves, yes; in their direction, no.** Crypto weekends are quiet — BTC's Saturday move is half its average day's (corrected p < 0.001), confirmed on Binance's independent bars and in all three eras since 2021. No weekday direction effect survives correction for any series. |
-| Are there cycles? | **None that survive correction**, for any displayed series. Multi-day swings are statistically indistinguishable from a random walk. |
+| Are there cycles? | **None that survive correction**, for any displayed series. Multi-day swings are statistically indistinguishable from a random walk. Extended 2026-09-28 to every coin and stock, hourly swings, and pumps and breakdowns: [CADENCE.md](CADENCE.md). |
 
 So the dashboard publishes one forecast from this module — an 80% band on the
 size of the next session's move — and describes everything else.

@@ -765,6 +765,19 @@ from the market. It caught HBAR at the 08:00 UTC close, when HBAR was up
 that side pushes. The Oracle host's timers now schedule in UTC, so daylight
 saving cannot move them. [docs/DECOUPLING.md](docs/DECOUPLING.md).
 
+**Rhythm and cadence** (2026-09-28). Do assets move in a rhythm a swing
+trader could use, on regular days, in pumps or in breakdowns? Each asset was
+tested against 200 copies of itself with the signs of its moves randomized,
+which keeps the size of its moves and drops their direction. Of 13,068
+per-asset tests, none held in both periods. Nothing class-wide survives once
+assets' co-movement is accounted for. The one real pattern, coins
+mean-reverting against the rest of the market, paid in 2021-23 and is now
+below its trading costs. The rhythm in size is real: moves are a third bigger
+at 14:00-15:00 UTC and a fifth smaller at weekends, and swing lengths follow
+volatility. No production change. The archive's daily crypto closes turned out
+to mix tokens under one ticker, so the study used Binance candles.
+[docs/CADENCE.md](docs/CADENCE.md).
+
 **ARB is always tracked** (`FAVORITE_SYMBOLS`). The list is written down in
 fifteen places across the Worker, the Oracle-host collectors, Python research
 and a workflow argument; `test-tracked-assets.mjs` fails if any copy

@@ -274,6 +274,25 @@ which the crypto laggards support. It was not shipped here because it changes
 which calls get published, and it should first be run walk-forward on the hit
 rate of the calls it would publish.
 
+**Decision, 2026-09-28: not shipped.** The rule from here on: an asset's own
+estimate is pulled toward its class only where the class shows a clear,
+consistent pattern *and* a walk-forward test shows the pooled version is better
+for the model. The three pooled corrections above each passed that test before
+they shipped:
+
+- the class-calibrated size candidates reach production only by beating the
+  incumbent on forward evidence;
+- the class factor on the volatility band fixed its calibration (1.36 to 1.01
+  for crypto, 1.17 to 1.04 for stocks);
+- the 400-outcome prior on technique weights beat both extremes on live
+  outcomes, in both directions of the split.
+
+This one did not pass. The class pattern was mixed: stock winners kept about
+half their lead, while crypto laggards kept most of their gap. And its effect
+on the calls it would publish was never measured. Raw per-asset composite
+records stay as they are unless that walk-forward test shows the shrunk version
+publishes better calls.
+
 ## What changed in code
 
 - `scripts/model-tournament.py`: `calibrated='shrunk'` scale candidates for all

@@ -1,0 +1,150 @@
+{
+ "stock_fade3": {
+  "first": {
+   "rule_per_year": 0.12578191137744746,
+   "buy_hold_per_year": 0.10659162260694173,
+   "rule": "stock_fade3",
+   "real": 0.01919028877050573,
+   "surrogate_mean": -0.037777472252634045,
+   "surrogate_sd": 0.039378063508106576,
+   "z": 1.4466877227574202,
+   "unit": "log return per year, rule minus buy-and-hold"
+  },
+  "second": {
+   "rule_per_year": 0.18955138453808273,
+   "buy_hold_per_year": 0.2133891588835625,
+   "rule": "stock_fade3",
+   "real": -0.023837774345479762,
+   "surrogate_mean": -0.029250320441938808,
+   "surrogate_sd": 0.035803254458603835,
+   "z": 0.15117469566117514,
+   "unit": "log return per year, rule minus buy-and-hold"
+  }
+ },
+ "crypto_trend20": {
+  "first": {
+   "rule_per_year": 0.39459311190329743,
+   "buy_hold_per_year": 0.4310738443808744,
+   "rule": "crypto_trend20",
+   "real": -0.036480732477576994,
+   "surrogate_mean": -0.042511399893507405,
+   "surrogate_sd": 0.14218496165381223,
+   "z": 0.042414242306536634,
+   "unit": "log return per year, rule minus buy-and-hold"
+  },
+  "second": {
+   "rule_per_year": -0.30954539584763907,
+   "buy_hold_per_year": -0.226473220901208,
+   "rule": "crypto_trend20",
+   "real": -0.08307217494643107,
+   "surrogate_mean": 0.07869308083503154,
+   "surrogate_sd": 0.14379218688934983,
+   "z": -1.1249933621632955,
+   "unit": "log return per year, rule minus buy-and-hold"
+  }
+ },
+ "crypto_relrev2": {
+  "first": {
+   "rule": "crypto_relrev2",
+   "real": 0.298108975526255,
+   "surrogate_mean": -0.12147864972310732,
+   "surrogate_sd": 0.10044641974206549,
+   "z": 4.177228280777092,
+   "unit": "net log return per year, long/short"
+  },
+  "second": {
+   "rule": "crypto_relrev2",
+   "real": -0.09523472583537768,
+   "surrogate_mean": -0.1228852549038491,
+   "surrogate_sd": 0.06860267968582531,
+   "z": 0.4030531926026875,
+   "unit": "net log return per year, long/short"
+  }
+ },
+ "crypto_relrev40": {
+  "first": {
+   "rule": "crypto_relrev40",
+   "real": 0.1412752351853904,
+   "surrogate_mean": -0.06617977825876727,
+   "surrogate_sd": 0.06373911515321966,
+   "z": 3.2547520144493016,
+   "unit": "net log return per year, long/short"
+  },
+  "second": {
+   "rule": "crypto_relrev40",
+   "real": 0.01622653339620433,
+   "surrogate_mean": -0.08640707232053374,
+   "surrogate_sd": 0.06636541383512952,
+   "z": 1.5464923638042702,
+   "unit": "net log return per year, long/short"
+  }
+ },
+ "crypto_laggards40": {
+  "first": {
+   "rule_per_year": 0.2810947316500101,
+   "buy_hold_per_year": 0.35160940590684236,
+   "rule": "crypto_laggards40",
+   "real": -0.07051467425683228,
+   "surrogate_mean": -0.09198385599279969,
+   "surrogate_sd": 0.12051206675129968,
+   "z": 0.1781496435562199,
+   "unit": "log return per year, rule minus buy-and-hold"
+  },
+  "second": {
+   "rule_per_year": -0.261998547763521,
+   "buy_hold_per_year": -0.28287961584344207,
+   "rule": "crypto_laggards40",
+   "real": 0.020881068079921072,
+   "surrogate_mean": -0.08768196456903173,
+   "surrogate_sd": 0.05225564806649915,
+   "z": 2.077536814983107,
+   "unit": "log return per year, rule minus buy-and-hold"
+  }
+ },
+ "crypto_pullback": {
+  "first": {
+   "per_trade": -0.007459215875989833,
+   "random_entry": -0.0013188274140163638,
+   "trades": 1948,
+   "rule": "crypto_pullback",
+   "real": -0.006140388461973469,
+   "surrogate_mean": -0.0012517472456022006,
+   "surrogate_sd": 0.005477902931097567,
+   "z": -0.8924293252110927,
+   "unit": "net log return per 72h trade, minus random entry"
+  },
+  "second": {
+   "per_trade": -0.004534653921271648,
+   "random_entry": -0.006907574382328354,
+   "trades": 1972,
+   "rule": "crypto_pullback",
+   "real": 0.0023729204610567064,
+   "surrogate_mean": -0.0005036280745251659,
+   "surrogate_sd": 0.003655099828668029,
+   "z": 0.7869958880521543,
+   "unit": "net log return per 72h trade, minus random entry"
+  }
+ },
+ "crypto_deadcat": {
+  "first": {
+   "per_trade": 0.037690747887187535,
+   "trades": 938,
+   "rule": "crypto_deadcat",
+   "real": 0.037690747887187535,
+   "surrogate_mean": 0.0014580650086844175,
+   "surrogate_sd": 0.022544518004782455,
+   "z": 1.6071615667638999,
+   "unit": "net log return per 5-day short"
+  },
+  "second": {
+   "per_trade": 0.030928465274342922,
+   "trades": 834,
+   "rule": "crypto_deadcat",
+   "real": 0.030928465274342922,
+   "surrogate_mean": 0.002158254547193366,
+   "surrogate_sd": 0.01340487192236588,
+   "z": 2.1462503255362537,
+   "unit": "net log return per 5-day short"
+  }
+ }
+}

@@ -1,0 +1,26 @@
+== a random walk has no rhythm ==
+  PASS  z-scores look like noise (share |z| > 2: 0.026 of 234)
+== mean reversion is found ==
+  PASS  1-hour reversal: strongly negative z in both periods
+  PASS  fading the last hour pays (negative momentum P&L)
+== a planted 4-day cycle is found ==
+  PASS  Fisher g far above its surrogates in both periods
+  PASS  the dominant period is about 96 hours in both
+  PASS  the first period's cycle carries into the second
+  PASS  swing lengths are more regular than chance at some size (lower CV)
+== a planted hour-of-day drift is found ==
+  PASS  hour-of-day joint test far above surrogates
+  PASS  and it names the right hours
+== a planted turn-of-month drift is found (daily) ==
+  PASS  turn of the month found in both periods
+== the zigzag reads nothing from the future ==
+  PASS  states up to bar 2000 are identical with or without the later bars
+== pumps: no false drift on a random walk, and a planted one is found ==
+  PASS  random walk: pump statistics look like noise (max |z| 1.5)
+  PASS  a planted post-pump drift is found in both periods
+== class-wide tests: shared signs keep co-movement, stay calibrated, and still find a real class effect ==
+  PASS  surrogates keep the assets' co-movement (corr 0.52 vs real 0.52)
+  PASS  no rhythm: class z behaves like noise (sd 1.15, max |z| 2.2)
+  PASS  a small planted class-wide reversal is found (z [-3.2, -4.1, -3.5])
+
+CADENCE TESTS OK
