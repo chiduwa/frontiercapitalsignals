@@ -289,7 +289,10 @@ is not worth a second change to it in two days.
   and x1.11 (7 days) for crypto, x1.13 and x1.19 for stocks. On the engine's
   calls those multipliers give 72.1%, 72.4%, 67.5% and 70.3% coverage (72.5%,
   74.9%, 64.1% and 66.5% over the last year), against 83%, 82%, 76% and 75%
-  before. A multiplier computed from the logged outcomes themselves would sit
+  before. The first live build (2026-09-28 09:19 UTC) set x1.08 and x1.16 for
+  crypto (its coins have about a year of daily closes, not two) and x1.13 and
+  x1.18 for stocks, which on the same calls give 72.1%, 74.3%, 67.5% and
+  70.3%. A multiplier computed from the logged outcomes themselves would sit
   closer to 68%; that is a heavier query and was left for later.
 - The volatility band (the warm-up fallback) keeps the 90-day window but its
   class factor is now the 68th percentile of |7-day move / (90-day volatility x
