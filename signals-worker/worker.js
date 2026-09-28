@@ -8817,9 +8817,13 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       }).join('');
       var dcRec=function(label,rec){
         return rec&&rec.scored?'<b>'+label+'</b>: '+Math.round((rec.hitRate||0)*100)+'% moved 5% or more further from the market within a day, against '+Math.round((rec.baseRate||0)*100)+'% of all the coins over the same hours ('+rec.scored+' setup'+(rec.scored===1?'':'s')+(typeof rec.t==='number'?', t='+rec.t.toFixed(2):'')+').'
-          :'<b>'+label+'</b>: none scored yet. Each setup is scored 24 hours after it appears, against every coin over the same hours.';
+          :'<b>'+label+'</b>: none scored yet.';
       };
-      var dcl=dcw.live||{};
+      var dcl=dcw.live||{},dcLA=dcl.ahead||{},dcLB=dcl.behind||{};
+      var dcLive=(dcLA.scored||dcLB.scored)?dcRec('Pulling ahead, live',dcLA)+'<br>'+dcRec('Falling behind, live',dcLB)
+        :'<b>Live record</b>: none scored yet. Each setup is scored 24 hours after it appears, against every coin over the same hours.';
+      var dcPush=dcw.notifying===false?'Phone alerts are paused: '+esc(dcw.statusNote||'the live record trails the same hours')+'.'
+        :'Phone alerts are on for coins pulling ahead.';
       watch+=panelStart({id:'decouplingWatch',tone:'watch',open:!!dcRows,
           eyebrow:'CRYPTO &middot; <b>PULLING AWAY FROM THE MARKET</b>',
           title:'Large coins breaking away from the market on volume of their own',
@@ -8830,7 +8834,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           +'Which way the move goes is not predictable: about two in three big moves were up, yet the typical next day gave a little back. Not a buy or sell signal, not financial advice.</div>'
         +(dcRows?'<div class="bh-list"><div class="bh-head"><span>Coin</span><span>Side</span><span>Seen</span><span>8h vs market</span><span>Volume vs usual</span><span>Market 8h</span><span>Open interest 8h</span><span>Next 24h</span></div>'+dcRows+'</div>'
           :'<div class="dr-note">No large coin has pulled away from the market in the last 72 hours.</div>')
-        +'<div class="dr-note">'+dcRec('Pulling ahead, live',dcl.ahead)+'<br>'+dcRec('Falling behind, live',dcl.behind)+' '+esc(dcw.statusNote||'')+'</div>'
+        +'<div class="dr-note">'+dcLive+'<br>'+dcPush+'</div>'
         +PANEL_END;
     }
     if(d.crypto.favorites && d.crypto.favorites.length){

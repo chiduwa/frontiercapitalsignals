@@ -625,8 +625,9 @@ console.log('\n== the decoupling watch lists coins breaking away from the market
   check('no direction arrow or trade verb inside the panel',
     el.querySelectorAll('.dir-arrow, .dir-up, .dir-down').length === 0 && !/\bBUY\b|\bSELL\b|\bLONG\b|\bSHORT\b/.test(text));
   check('no em dash in the copy', !text.includes('\u2014'));
-  check('before any setup is scored, each side\'s live record says how it will be scored',
-    /Pulling ahead, live: none scored yet/.test(text) && /Falling behind, live: none scored yet/.test(text) && text.includes('scored 24 hours after it appears'));
+  check('before any setup is scored, one line says how setups will be scored, and another that alerts are on',
+    /Live record: none scored yet\. Each setup is scored 24 hours after it appears, against every coin over the same hours\./.test(text)
+    && /Phone alerts are on for coins pulling ahead\./.test(text) && !/held in both years at discovery/.test(text), text.slice(-400));
   view.dom.window.close();
 
   const scored = await render({ ...payload(), decouplingWatch: { ...live,
@@ -636,6 +637,12 @@ console.log('\n== the decoupling watch lists coins breaking away from the market
     /Pulling ahead, live: 18% moved 5% or more further from the market within a day, against 3% of all the coins over the same hours \(34 setups, t=3\.10\)/.test(st)
     && /Falling behind, live: 0% moved .* against 4% .* \(1 setup\)/.test(st), st.slice(-500));
   scored.dom.window.close();
+
+  const paused = await render({ ...payload(), decouplingWatch: { ...live, notifying: false,
+    statusNote: 'live record trails the same-window base rate (t = -2.31 over 34 setups)' } }, { settleMs: 1200 });
+  check('a demoted watch says its phone alerts are paused, and why',
+    /Phone alerts are paused: live record trails the same-window base rate \(t = -2\.31 over 34 setups\)\./.test(paused.doc.getElementById('panel-decouplingWatch')?.textContent || ''));
+  paused.dom.window.close();
 
   const quiet = await render({ ...payload(), decouplingWatch: { ...live, recent: [] } }, { settleMs: 1200 });
   const qEl = quiet.doc.getElementById('panel-decouplingWatch');
