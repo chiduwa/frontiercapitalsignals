@@ -1,0 +1,218 @@
+{
+ "setupEitherSide": {
+  "discovery": {
+   "alerts": 0,
+   "perCoinPerMonth": 0.0,
+   "hitRate": null,
+   "base": 0.02395693886657742,
+   "lift": null,
+   "tVsBase": NaN,
+   "upShareOfHits": null,
+   "fwdMedian": null,
+   "fwdMean": null
+  },
+  "validation": {
+   "alerts": 0,
+   "perCoinPerMonth": 0.0,
+   "hitRate": null,
+   "base": 0.02439657483036382,
+   "lift": null,
+   "tVsBase": NaN,
+   "upShareOfHits": null,
+   "fwdMedian": null,
+   "fwdMean": null
+  }
+ },
+ "setupStrength": {
+  "discovery": {
+   "alerts": 0,
+   "perCoinPerMonth": 0.0,
+   "hitRate": null,
+   "base": 0.02395693886657742,
+   "lift": null,
+   "tVsBase": NaN,
+   "upShareOfHits": null,
+   "fwdMedian": null,
+   "fwdMean": null
+  },
+  "validation": {
+   "alerts": 0,
+   "perCoinPerMonth": 0.0,
+   "hitRate": null,
+   "base": 0.02439657483036382,
+   "lift": null,
+   "tVsBase": NaN,
+   "upShareOfHits": null,
+   "fwdMedian": null,
+   "fwdMean": null
+  }
+ },
+ "setupWeakness": {
+  "discovery": {
+   "alerts": 0,
+   "perCoinPerMonth": 0.0,
+   "hitRate": null,
+   "base": 0.02395693886657742,
+   "lift": null,
+   "tVsBase": NaN,
+   "upShareOfHits": null,
+   "fwdMedian": null,
+   "fwdMean": null
+  },
+  "validation": {
+   "alerts": 0,
+   "perCoinPerMonth": 0.0,
+   "hitRate": null,
+   "base": 0.02439657483036382,
+   "lift": null,
+   "tVsBase": NaN,
+   "upShareOfHits": null,
+   "fwdMedian": null,
+   "fwdMean": null
+  }
+ },
+ "hbarStrict": {
+  "discovery": {
+   "alerts": 0,
+   "perCoinPerMonth": 0.0,
+   "hitRate": null,
+   "base": 0.02395693886657742,
+   "lift": null,
+   "tVsBase": NaN,
+   "upShareOfHits": null,
+   "fwdMedian": null,
+   "fwdMean": null
+  },
+  "validation": {
+   "alerts": 0,
+   "perCoinPerMonth": 0.0,
+   "hitRate": null,
+   "base": 0.02439657483036382,
+   "lift": null,
+   "tVsBase": NaN,
+   "upShareOfHits": null,
+   "fwdMedian": null,
+   "fwdMean": null
+  }
+ },
+ "setupNoOi": {
+  "discovery": {
+   "alerts": 1751,
+   "perCoinPerMonth": 3.7873107426099497,
+   "hitRate": 0.0799543118218161,
+   "base": 0.02395693886657742,
+   "lift": 3.337417700445912,
+   "tVsBase": 5.387093647211672,
+   "upShareOfHits": 0.7285714285714285,
+   "fwdMedian": -0.004018586343897734,
+   "fwdMean": 0.000788920616603336
+  },
+  "validation": {
+   "alerts": 1862,
+   "perCoinPerMonth": 3.75,
+   "hitRate": 0.09989258861439312,
+   "base": 0.02439657483036382,
+   "lift": 4.094533323180574,
+   "tVsBase": 7.10968729553472,
+   "upShareOfHits": 0.6881720430107527,
+   "fwdMedian": -0.0041625132618978156,
+   "fwdMean": 0.0010710747406105503
+  }
+ },
+ "strengthNoOi": {
+  "discovery": {
+   "alerts": 1199,
+   "perCoinPerMonth": 2.5933669790915648,
+   "hitRate": 0.1067556296914095,
+   "base": 0.02395693886657742,
+   "lift": 4.456146517130593,
+   "tVsBase": 5.880251665209626,
+   "upShareOfHits": 0.7109375,
+   "fwdMedian": -0.00715669481628084,
+   "fwdMean": 0.00021783790543698943
+  },
+  "validation": {
+   "alerts": 1256,
+   "perCoinPerMonth": 2.5295381310418907,
+   "hitRate": 0.12818471337579618,
+   "base": 0.02439657483036382,
+   "lift": 5.254209423539993,
+   "tVsBase": 7.294767019692656,
+   "upShareOfHits": 0.7080745341614907,
+   "fwdMedian": -0.005941234577185928,
+   "fwdMean": 0.0027144926720194004
+  }
+ },
+ "strengthNoOiStrict": {
+  "discovery": {
+   "alerts": 578,
+   "perCoinPerMonth": 1.2501802451333814,
+   "hitRate": 0.14186851211072665,
+   "base": 0.02395693886657742,
+   "lift": 5.921813003774406,
+   "tVsBase": 5.524368913054241,
+   "upShareOfHits": 0.7073170731707317,
+   "fwdMedian": -0.01048067530930464,
+   "fwdMean": 0.001135089967996568
+  },
+  "validation": {
+   "alerts": 617,
+   "perCoinPerMonth": 1.2426154672395273,
+   "hitRate": 0.18152350081037277,
+   "base": 0.02439657483036382,
+   "lift": 7.440532208826699,
+   "tVsBase": 7.999510769592843,
+   "upShareOfHits": 0.6428571428571429,
+   "fwdMedian": -0.006392200309521756,
+   "fwdMean": 0.004004292794723586
+  }
+ },
+ "weaknessNoOiStrict": {
+  "discovery": {
+   "alerts": 324,
+   "perCoinPerMonth": 0.7007930785868782,
+   "hitRate": 0.06481481481481481,
+   "base": 0.02395693886657742,
+   "lift": 2.705471478463329,
+   "tVsBase": 2.154443019426842,
+   "upShareOfHits": 0.8095238095238095,
+   "fwdMedian": -0.001956487462892731,
+   "fwdMean": 0.0033867938473993624
+  },
+  "validation": {
+   "alerts": 422,
+   "perCoinPerMonth": 0.8498925886143931,
+   "hitRate": 0.0971563981042654,
+   "base": 0.02439657483036382,
+   "lift": 3.9823786240413215,
+   "tVsBase": 3.663321528410691,
+   "upShareOfHits": 0.6829268292682927,
+   "fwdMedian": -0.0017812057606617637,
+   "fwdMean": 0.0016420626935317276
+  }
+ },
+ "eitherNoOiStrict": {
+  "discovery": {
+   "alerts": 741,
+   "perCoinPerMonth": 1.6027397260273974,
+   "hitRate": 0.12010796221322537,
+   "base": 0.02395693886657742,
+   "lift": 5.013493705608159,
+   "tVsBase": 5.210958677370851,
+   "upShareOfHits": 0.7415730337078652,
+   "fwdMedian": -0.006519013365280487,
+   "fwdMean": 0.0027042163849780466
+  },
+  "validation": {
+   "alerts": 835,
+   "perCoinPerMonth": 1.6816595059076263,
+   "hitRate": 0.15089820359281436,
+   "base": 0.02439657483036382,
+   "lift": 6.185220861618961,
+   "tVsBase": 7.8634620101123245,
+   "upShareOfHits": 0.6507936507936508,
+   "fwdMedian": -0.004581337226248872,
+   "fwdMean": 0.002975320156303878
+  }
+ }
+}

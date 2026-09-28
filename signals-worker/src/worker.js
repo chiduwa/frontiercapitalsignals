@@ -7461,6 +7461,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   #panel-timeSeriesResearch .bh-cell{display:block;line-height:1.7}
   #panel-modelTournament .bh-cell{display:block;line-height:1.7}
   @media(min-width:721px){#panel-bigMoveWatch .bh-head,#panel-bigMoveWatch .bh-row{grid-template-columns:minmax(110px,.9fr) repeat(5,minmax(90px,1fr))}}
+  @media(min-width:721px){#panel-decouplingWatch .bh-head,#panel-decouplingWatch .bh-row{grid-template-columns:minmax(64px,.5fr) minmax(100px,.8fr) minmax(70px,.55fr) repeat(4,minmax(76px,.65fr)) minmax(160px,1.3fr)}}
   @media(min-width:721px){#panel-exhWatch .bh-head,#panel-exhWatch .bh-row{grid-template-columns:minmax(64px,.5fr) minmax(80px,.6fr) minmax(64px,.5fr) minmax(90px,.6fr) minmax(70px,.5fr) minmax(230px,2fr)}}
   @media(min-width:721px){#panel-exhPrints .bh-head,#panel-exhPrints .bh-row{grid-template-columns:minmax(70px,.6fr) repeat(6,minmax(76px,.7fr))}}
   @media(min-width:721px){#panel-profitSmall .bh-head,#panel-profitSmall .bh-row,#panel-profitMid .bh-head,#panel-profitMid .bh-row{grid-template-columns:minmax(190px,1.7fr) minmax(90px,.8fr) repeat(6,minmax(70px,.6fr))}}
@@ -7479,7 +7480,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   /* On a phone the new lists pair their fields two to a line, with the coin or
      company and the reading across the full width, instead of one per line. */
   @media(max-width:720px){
-    #panel-exhWatch .bh-row,#panel-exhPrints .bh-row,#panel-profitSmall .bh-row,#panel-profitMid .bh-row{grid-template-columns:1fr 1fr;column-gap:14px;row-gap:8px}
+    #panel-exhWatch .bh-row,#panel-exhPrints .bh-row,#panel-profitSmall .bh-row,#panel-profitMid .bh-row,#panel-decouplingWatch .bh-row{grid-template-columns:1fr 1fr;column-gap:14px;row-gap:8px}
     #panel-exhWatch .bh-row>.bh-sym,#panel-exhPrints .bh-row>.bh-sym,#panel-profitSmall .bh-row>.bh-sym,#panel-profitMid .bh-row>.bh-sym,#panel-exhWatch .bh-row>[data-l="Reading"]{grid-column:1/-1}
   }
   .ex-list{margin:8px 0 4px;padding-left:18px;font-family:var(--mono);font-size:11.5px;line-height:1.75;color:var(--muted)}
@@ -8788,6 +8789,49 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     } else if(bmw&&bmw.status&&bmw.status!=='live'){
       watch+=panelStart({id:'bigMoveWatch',tone:'watch',open:false,eyebrow:'CRYPTO &middot; BIG-MOVE WATCH',title:'Most likely to move 12%+ in the next two days',meta:esc(bmw.status)})
         +'<div class="dr-note">The big-move watch has not published a list yet ('+esc(bmw.status)+').</div>'+PANEL_END;
+    }
+    // Decoupling watch (scripts/decoupling-watch.mjs): the 40 largest coins,
+    // hourly, when one pulls away from the market on volume that is its own.
+    // Size of the next move, not its direction, and the panel says so. Every
+    // rate quoted comes from the payload's evidence block, not from here.
+    var dcw=d.decouplingWatch;
+    if(dcw&&(dcw.status==='live'||dcw.status==='stale')){
+      var dcPct=function(x){return typeof x==='number'&&isFinite(x)?(x>=0?'+':'')+x.toFixed(1)+'%':'n/a';};
+      // A setup is seen when its bar closes, an hour after the cast_at it is keyed on.
+      var dcAgo=function(iso,lagH){var h=(Date.now()-Date.parse(iso))/3600000-(lagH||0);return !isFinite(h)?'':(h<1?'within the hour':Math.round(h)+'h ago');};
+      var dcRange=function(xs){if(!xs||xs.length<2)return 'n/a';var a=Math.round(Math.min(xs[0],xs[1])*100),b=Math.round(Math.max(xs[0],xs[1])*100);return a===b?a+'%':a+'-'+b+'%';};
+      var dcEv=dcw.evidence||{},dcA=dcEv.ahead||{},dcB=dcEv.behind||{};
+      var dcRows=(dcw.recent||[]).map(function(r){
+        var next=r.big==null?'<span class="muted">scored 24h after</span>'
+          :(r.big?'moved '+dcPct(r.outcome_excess_pct)+' vs market':'no big move ('+dcPct(r.outcome_excess_pct)+')');
+        var vol=(typeof r.volume_ratio==='number'?r.volume_ratio.toFixed(1)+'&times;':'n/a')
+          +(typeof r.rel_volume==='number'?' <span class="muted">('+r.rel_volume.toFixed(1)+'&times; typical coin)</span>':'');
+        return '<div class="bh-row" data-dcw="'+esc(r.symbol)+'"><span class="bh-sym">'+esc(r.symbol)+'</span>'
+          +'<span class="bh-cell" data-l="Side">'+(r.side>0?'pulling ahead':'falling behind')+'</span>'
+          +'<span class="bh-cell" data-l="Seen">'+dcAgo(r.cast_at,1)+'</span>'
+          +'<span class="bh-cell" data-l="8h vs market">'+dcPct(r.excess_pct)+'</span>'
+          +'<span class="bh-cell" data-l="Volume vs usual">'+vol+'</span>'
+          +'<span class="bh-cell" data-l="Market 8h">'+dcPct(r.market_pct)+'</span>'
+          +'<span class="bh-cell" data-l="Open interest 8h">'+dcPct(r.oi_change_pct)+'</span>'
+          +'<span class="bh-cell" data-l="Next 24h">'+next+'</span></div>';
+      }).join('');
+      var dcRec=function(label,rec){
+        return rec&&rec.scored?'<b>'+label+'</b>: '+Math.round((rec.hitRate||0)*100)+'% moved 5% or more further from the market within a day, against '+Math.round((rec.baseRate||0)*100)+'% of all the coins over the same hours ('+rec.scored+' setup'+(rec.scored===1?'':'s')+(typeof rec.t==='number'?', t='+rec.t.toFixed(2):'')+').'
+          :'<b>'+label+'</b>: none scored yet. Each setup is scored 24 hours after it appears, against every coin over the same hours.';
+      };
+      var dcl=dcw.live||{};
+      watch+=panelStart({id:'decouplingWatch',tone:'watch',open:!!dcRows,
+          eyebrow:'CRYPTO &middot; <b>PULLING AWAY FROM THE MARKET</b>',
+          title:'Large coins breaking away from the market on volume of their own',
+          meta:'hourly, the 40 largest coins &middot; last run '+esc(dcAgo(dcw.lastRunAt))+(dcw.status==='stale'?' &middot; <span class="amber-t">stale</span>':'')})
+        +'<div class="xp-banner" role="note"><b>A heads-up, not a direction.</b> A coin appears here when, over the last 8 hours, it traded at least 3&times; its usual volume, at least twice the typical large coin&#39;s surge, and moved at least 2 of its usual swings away from the market. HBAR met it at the 08:00 UTC close on 2026-09-28, when it was up 1% on the day; it was up 31% by 17:00 while the other large coins fell 4%. '
+          +'Over two years of the largest coins, '+dcRange(dcA.hitRate)+' of coins pulling ahead then moved 5% or more further from the market within a day, against '+dcRange(dcA.baseRate)+' of all of them over the same hours. '
+          +'For coins falling behind it was '+dcRange(dcB.hitRate)+' against '+dcRange(dcB.baseRate)+', and only the second year of that held up, so those are shown here but never sent to your phone. '
+          +'Which way the move goes is not predictable: about two in three big moves were up, yet the typical next day gave a little back. Not a buy or sell signal, not financial advice.</div>'
+        +(dcRows?'<div class="bh-list"><div class="bh-head"><span>Coin</span><span>Side</span><span>Seen</span><span>8h vs market</span><span>Volume vs usual</span><span>Market 8h</span><span>Open interest 8h</span><span>Next 24h</span></div>'+dcRows+'</div>'
+          :'<div class="dr-note">No large coin has pulled away from the market in the last 72 hours.</div>')
+        +'<div class="dr-note">'+dcRec('Pulling ahead, live',dcl.ahead)+'<br>'+dcRec('Falling behind, live',dcl.behind)+' '+esc(dcw.statusNote||'')+'</div>'
+        +PANEL_END;
     }
     if(d.crypto.favorites && d.crypto.favorites.length){
       watch+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-favorites', eyebrow:'CRYPTO &middot; <b>FAVORITES</b>', title:'Always tracked', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.favorites, d.crypto.favorites.length);

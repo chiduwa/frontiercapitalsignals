@@ -129,6 +129,12 @@ predicts it will lag the market.
   coin that just ran on a volume spike.
 - **Quiet accumulation and moderate surge** stay logged and scored, silent
   until they beat the same-window market.
+- **Pulling away from the market** (added 2026-09-28), hourly, for the 40
+  largest coins: a coin whose last 8 hours ran on volume of its own while it
+  moved well away from the market. It is the pattern HBAR showed before its
+  +31% day, and it is size, not direction, like the big-move watch. Only
+  coins pulling ahead push. Evidence and the HBAR timeline:
+  [DECOUPLING.md](DECOUPLING.md).
 
 On the first run (as of the 2026-09-21 close), the watch held AIOZ,
 MUBARAK, ALCH, AKE, ZETA, NOCK, SN53, STRK, PIEVERSE and SN3. Most had just

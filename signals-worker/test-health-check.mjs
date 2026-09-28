@@ -250,6 +250,9 @@ assert.deepEqual(notOk(healthy({ exhaustion: { status: 'live', ageHours: 0.3 }, 
 assert.deepEqual(notOk(healthy({ exhaustion: { status: 'awaiting-first-run' }, profitGrowth: { status: 'awaiting-first-run' } })), [],
   'a view that has not run yet is not an outage');
 assert.ok(notOk(healthy({ exhaustion: { status: 'stale', ageHours: 5 } })).includes('exhaustion-fresh'), 'a stale sell-pressure reading warns');
+assert.ok(notOk(healthy({ decouplingWatch: { status: 'stale', lastRunAt: new Date(Date.now() - 5 * 3600000).toISOString() } })).includes('decoupling-watch-fresh'), 'a stale decoupling watch warns');
+assert.ok(!notOk(healthy({ decouplingWatch: { status: 'live', lastRunAt: new Date().toISOString() } })).includes('decoupling-watch-fresh'), 'a live decoupling watch passes');
+assert.ok(!notOk(healthy({ decouplingWatch: { status: 'awaiting-first-run' } })).includes('decoupling-watch-fresh'), 'a watch that has not run yet is not flagged');
 assert.ok(notOk(healthy({ profitGrowth: { status: 'unavailable' } })).includes('profit-growers-fresh'), 'an unavailable profit view warns');
 assert.deepEqual(failing(healthy({ exhaustion: { status: 'stale' }, profitGrowth: { status: 'stale' } })), [], 'these warn, they never fail the page');
 

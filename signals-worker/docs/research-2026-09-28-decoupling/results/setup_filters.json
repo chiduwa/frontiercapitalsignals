@@ -1,0 +1,651 @@
+{
+ "coins": 38,
+ "first": "2024-09-01T00",
+ "last": "2026-09-27T23",
+ "filters": {
+  "live rule, no filter": {
+   "discovery": {
+    "setups": 741,
+    "perCoinPerMonth": 1.6027397260273974,
+    "hitRate": 0.12010796221322537,
+    "sameHoursBase": 0.056517949869750415,
+    "lift": 2.125129494081484,
+    "tDays": 5.098158856339846,
+    "upShareOfHits": 0.7415730337078652,
+    "next24ExcessMedian": -0.006519013365280487,
+    "next24ExcessMean": 0.0027042163849780466,
+    "sharePositive": 0.4224021592442645
+   },
+   "validation": {
+    "setups": 835,
+    "perCoinPerMonth": 1.6816595059076263,
+    "hitRate": 0.15089820359281436,
+    "sameHoursBase": 0.05586834865120423,
+    "lift": 2.700960512273201,
+    "tDays": 7.819297000909991,
+    "upShareOfHits": 0.6507936507936508,
+    "next24ExcessMedian": -0.004581337226248872,
+    "next24ExcessMean": 0.002975320156303878,
+    "sharePositive": 0.4479041916167665
+   }
+  },
+  "+ at most 2 coins on 3x volume that hour": {
+   "discovery": {
+    "setups": 232,
+    "perCoinPerMonth": 0.5018024513338141,
+    "hitRate": 0.10344827586206896,
+    "sameHoursBase": 0.031239270123117654,
+    "lift": 3.3114818449460275,
+    "tDays": 3.9659469911436633,
+    "upShareOfHits": 0.6666666666666666,
+    "next24ExcessMedian": -0.008490932842780491,
+    "next24ExcessMean": 0.0003096090401839134,
+    "sharePositive": 0.3922413793103448
+   },
+   "validation": {
+    "setups": 358,
+    "perCoinPerMonth": 0.7209989258861439,
+    "hitRate": 0.19273743016759776,
+    "sameHoursBase": 0.03281427561051202,
+    "lift": 5.873584791427013,
+    "tDays": 7.798191766402189,
+    "upShareOfHits": 0.6086956521739131,
+    "next24ExcessMedian": -0.0044501243904779275,
+    "next24ExcessMean": 0.0040546594741491205,
+    "sharePositive": 0.45251396648044695
+   }
+  },
+  "+ at most 3 coins on 3x volume that hour": {
+   "discovery": {
+    "setups": 293,
+    "perCoinPerMonth": 0.6337418889689979,
+    "hitRate": 0.11945392491467577,
+    "sameHoursBase": 0.035406522024089816,
+    "lift": 3.3737830796654342,
+    "tDays": 4.5917433718338145,
+    "upShareOfHits": 0.6571428571428571,
+    "next24ExcessMedian": -0.0075701727390675875,
+    "next24ExcessMean": 5.40025000110538e-05,
+    "sharePositive": 0.39590443686006827
+   },
+   "validation": {
+    "setups": 466,
+    "perCoinPerMonth": 0.9385069817400645,
+    "hitRate": 0.1888412017167382,
+    "sameHoursBase": 0.03742849467945475,
+    "lift": 5.0453859641968695,
+    "tDays": 8.000252197051879,
+    "upShareOfHits": 0.625,
+    "next24ExcessMedian": -0.00500877587549764,
+    "next24ExcessMean": 0.005669888345693753,
+    "sharePositive": 0.44635193133047213
+   }
+  },
+  "+ at most 4 coins on 3x volume that hour": {
+   "discovery": {
+    "setups": 334,
+    "perCoinPerMonth": 0.722422494592646,
+    "hitRate": 0.11377245508982035,
+    "sameHoursBase": 0.034546128227187146,
+    "lift": 3.2933489490229935,
+    "tDays": 4.495414817518773,
+    "upShareOfHits": 0.6842105263157895,
+    "next24ExcessMedian": -0.00542567138925628,
+    "next24ExcessMean": 0.0024445547630553553,
+    "sharePositive": 0.4251497005988024
+   },
+   "validation": {
+    "setups": 530,
+    "perCoinPerMonth": 1.0674006444683137,
+    "hitRate": 0.16981132075471697,
+    "sameHoursBase": 0.03728092541399403,
+    "lift": 4.554911630250879,
+    "tDays": 7.767215629819956,
+    "upShareOfHits": 0.6444444444444445,
+    "next24ExcessMedian": -0.005111117560709505,
+    "next24ExcessMean": 0.005182935366796557,
+    "sharePositive": 0.4547169811320755
+   }
+  },
+  "+ at most 5 coins on 3x volume that hour": {
+   "discovery": {
+    "setups": 380,
+    "perCoinPerMonth": 0.8219178082191781,
+    "hitRate": 0.11315789473684211,
+    "sameHoursBase": 0.037444785505727315,
+    "lift": 3.0219934019794077,
+    "tDays": 4.60134664958438,
+    "upShareOfHits": 0.6976744186046512,
+    "next24ExcessMedian": -0.005935999632488392,
+    "next24ExcessMean": 0.002353111397824271,
+    "sharePositive": 0.4236842105263158
+   },
+   "validation": {
+    "setups": 572,
+    "perCoinPerMonth": 1.1519871106337272,
+    "hitRate": 0.1660839160839161,
+    "sameHoursBase": 0.037688129793393074,
+    "lift": 4.406796436819517,
+    "tDays": 7.8812779149270655,
+    "upShareOfHits": 0.6631578947368421,
+    "next24ExcessMedian": -0.0051140926406351706,
+    "next24ExcessMean": 0.004287800837603875,
+    "sharePositive": 0.44755244755244755
+   }
+  },
+  "+ at most 6 coins on 3x volume that hour": {
+   "discovery": {
+    "setups": 418,
+    "perCoinPerMonth": 0.904109589041096,
+    "hitRate": 0.1291866028708134,
+    "sameHoursBase": 0.042636819645129886,
+    "lift": 3.0299305610982525,
+    "tDays": 4.993723957162736,
+    "upShareOfHits": 0.7037037037037037,
+    "next24ExcessMedian": -0.005779063797324846,
+    "next24ExcessMean": 0.004553621106086729,
+    "sharePositive": 0.42822966507177035
+   },
+   "validation": {
+    "setups": 612,
+    "perCoinPerMonth": 1.232545649838883,
+    "hitRate": 0.16339869281045752,
+    "sameHoursBase": 0.03730975557600956,
+    "lift": 4.379516571143769,
+    "tDays": 7.984004955084146,
+    "upShareOfHits": 0.65,
+    "next24ExcessMedian": -0.0051140926406351706,
+    "next24ExcessMean": 0.003938537962670903,
+    "sharePositive": 0.4477124183006536
+   }
+  },
+  "+ at most 8 coins on 3x volume that hour": {
+   "discovery": {
+    "setups": 477,
+    "perCoinPerMonth": 1.0317231434751262,
+    "hitRate": 0.129979035639413,
+    "sameHoursBase": 0.04680300956368485,
+    "lift": 2.7771512313230744,
+    "tDays": 5.048177788291819,
+    "upShareOfHits": 0.6935483870967742,
+    "next24ExcessMedian": -0.006834464841710325,
+    "next24ExcessMean": 0.0018533379751512523,
+    "sharePositive": 0.4129979035639413
+   },
+   "validation": {
+    "setups": 658,
+    "perCoinPerMonth": 1.325187969924812,
+    "hitRate": 0.1595744680851064,
+    "sameHoursBase": 0.0383019797913416,
+    "lift": 4.166219839142079,
+    "tDays": 8.01522501063742,
+    "upShareOfHits": 0.6476190476190476,
+    "next24ExcessMedian": -0.004585212040897124,
+    "next24ExcessMean": 0.003615529189678726,
+    "sharePositive": 0.44832826747720367
+   }
+  },
+  "+ at most 5% of coins on 3x volume": {
+   "discovery": {
+    "setups": 147,
+    "perCoinPerMonth": 0.3179524152847873,
+    "hitRate": 0.12244897959183673,
+    "sameHoursBase": 0.02829951326191929,
+    "lift": 4.326893486065992,
+    "tDays": 3.6841937802737315,
+    "upShareOfHits": 0.7222222222222222,
+    "next24ExcessMedian": -0.01123526629889049,
+    "next24ExcessMean": -0.0010755729436320773,
+    "sharePositive": 0.38095238095238093
+   },
+   "validation": {
+    "setups": 225,
+    "perCoinPerMonth": 0.4531417830290011,
+    "hitRate": 0.21333333333333335,
+    "sameHoursBase": 0.028806701438280354,
+    "lift": 7.4056841874245665,
+    "tDays": 6.848701709456214,
+    "upShareOfHits": 0.6041666666666666,
+    "next24ExcessMedian": -0.0026917964362538904,
+    "next24ExcessMean": 0.004438005730839498,
+    "sharePositive": 0.4666666666666667
+   }
+  },
+  "+ at most 8% of coins on 3x volume": {
+   "discovery": {
+    "setups": 260,
+    "perCoinPerMonth": 0.5623648161499639,
+    "hitRate": 0.11923076923076924,
+    "sameHoursBase": 0.03355947040157565,
+    "lift": 3.5528203456146086,
+    "tDays": 4.416501693219318,
+    "upShareOfHits": 0.6774193548387096,
+    "next24ExcessMedian": -0.006509747188799181,
+    "next24ExcessMean": 0.0018241979704733055,
+    "sharePositive": 0.4
+   },
+   "validation": {
+    "setups": 434,
+    "perCoinPerMonth": 0.8740601503759399,
+    "hitRate": 0.1935483870967742,
+    "sameHoursBase": 0.037012212309326095,
+    "lift": 5.229311489926938,
+    "tDays": 7.891498307577061,
+    "upShareOfHits": 0.6190476190476191,
+    "next24ExcessMedian": -0.005240412576205278,
+    "next24ExcessMean": 0.005384898512332695,
+    "sharePositive": 0.4447004608294931
+   }
+  },
+  "+ at most 10% of coins on 3x volume": {
+   "discovery": {
+    "setups": 293,
+    "perCoinPerMonth": 0.6337418889689979,
+    "hitRate": 0.11945392491467577,
+    "sameHoursBase": 0.035406522024089816,
+    "lift": 3.3737830796654342,
+    "tDays": 4.5917433718338145,
+    "upShareOfHits": 0.6571428571428571,
+    "next24ExcessMedian": -0.0075701727390675875,
+    "next24ExcessMean": 5.40025000110538e-05,
+    "sharePositive": 0.39590443686006827
+   },
+   "validation": {
+    "setups": 466,
+    "perCoinPerMonth": 0.9385069817400645,
+    "hitRate": 0.1888412017167382,
+    "sameHoursBase": 0.03742849467945475,
+    "lift": 5.0453859641968695,
+    "tDays": 8.000252197051879,
+    "upShareOfHits": 0.625,
+    "next24ExcessMedian": -0.00500877587549764,
+    "next24ExcessMean": 0.005669888345693753,
+    "sharePositive": 0.44635193133047213
+   }
+  },
+  "+ at most 13% of coins on 3x volume": {
+   "discovery": {
+    "setups": 334,
+    "perCoinPerMonth": 0.722422494592646,
+    "hitRate": 0.11377245508982035,
+    "sameHoursBase": 0.034546128227187146,
+    "lift": 3.2933489490229935,
+    "tDays": 4.495414817518773,
+    "upShareOfHits": 0.6842105263157895,
+    "next24ExcessMedian": -0.00542567138925628,
+    "next24ExcessMean": 0.0024445547630553553,
+    "sharePositive": 0.4251497005988024
+   },
+   "validation": {
+    "setups": 530,
+    "perCoinPerMonth": 1.0674006444683137,
+    "hitRate": 0.16981132075471697,
+    "sameHoursBase": 0.03728092541399403,
+    "lift": 4.554911630250879,
+    "tDays": 7.767215629819956,
+    "upShareOfHits": 0.6444444444444445,
+    "next24ExcessMedian": -0.005111117560709505,
+    "next24ExcessMean": 0.005182935366796557,
+    "sharePositive": 0.4547169811320755
+   }
+  },
+  "+ at most 16% of coins on 3x volume": {
+   "discovery": {
+    "setups": 387,
+    "perCoinPerMonth": 0.8370583994232156,
+    "hitRate": 0.11369509043927649,
+    "sameHoursBase": 0.03746218678899218,
+    "lift": 3.0349293563579276,
+    "tDays": 4.617612807192549,
+    "upShareOfHits": 0.7045454545454546,
+    "next24ExcessMedian": -0.00613831217722971,
+    "next24ExcessMean": 0.0022102427819626447,
+    "sharePositive": 0.42118863049095606
+   },
+   "validation": {
+    "setups": 600,
+    "perCoinPerMonth": 1.2083780880773363,
+    "hitRate": 0.16333333333333333,
+    "sameHoursBase": 0.037245139876718944,
+    "lift": 4.385359643539132,
+    "tDays": 7.951181775450499,
+    "upShareOfHits": 0.6530612244897959,
+    "next24ExcessMedian": -0.005161410637188946,
+    "next24ExcessMean": 0.0039725827550905245,
+    "sharePositive": 0.44333333333333336
+   }
+  },
+  "+ at most 20% of coins on 3x volume": {
+   "discovery": {
+    "setups": 448,
+    "perCoinPerMonth": 0.9689978370583994,
+    "hitRate": 0.13839285714285715,
+    "sameHoursBase": 0.044739699756147104,
+    "lift": 3.093289805187894,
+    "tDays": 5.363728709121328,
+    "upShareOfHits": 0.6774193548387096,
+    "next24ExcessMedian": -0.006492137640652594,
+    "next24ExcessMean": 0.0026812675212023506,
+    "sharePositive": 0.4174107142857143
+   },
+   "validation": {
+    "setups": 641,
+    "perCoinPerMonth": 1.2909505907626209,
+    "hitRate": 0.15756630265210608,
+    "sameHoursBase": 0.037570208355987254,
+    "lift": 4.193916125221489,
+    "tDays": 7.938331359127827,
+    "upShareOfHits": 0.6534653465346535,
+    "next24ExcessMedian": -0.005081679979226539,
+    "next24ExcessMean": 0.003370555445840971,
+    "sharePositive": 0.44461778471138846
+   }
+  },
+  "volume vs median coin >= 2.0x (no own floor)": {
+   "discovery": {
+    "setups": 894,
+    "perCoinPerMonth": 1.9336697909156455,
+    "hitRate": 0.116331096196868,
+    "sameHoursBase": 0.035701897588156985,
+    "lift": 3.25840092699883,
+    "tDays": 6.9190221920365875,
+    "upShareOfHits": 0.75,
+    "next24ExcessMedian": -0.005553182872764351,
+    "next24ExcessMean": 0.004122153975703015,
+    "sharePositive": 0.43847874720357943
+   },
+   "validation": {
+    "setups": 1259,
+    "perCoinPerMonth": 2.535580021482277,
+    "hitRate": 0.11596505162827642,
+    "sameHoursBase": 0.03197631392522931,
+    "lift": 3.626592230093788,
+    "tDays": 8.271618928410229,
+    "upShareOfHits": 0.7328767123287672,
+    "next24ExcessMedian": -0.0040579575941912804,
+    "next24ExcessMean": 0.0029787105379003136,
+    "sharePositive": 0.45909451945988883
+   }
+  },
+  "volume vs median coin >= 2.5x (no own floor)": {
+   "discovery": {
+    "setups": 581,
+    "perCoinPerMonth": 1.2566690699351117,
+    "hitRate": 0.1359724612736661,
+    "sameHoursBase": 0.03642491118711793,
+    "lift": 3.7329524449672298,
+    "tDays": 6.083974268439389,
+    "upShareOfHits": 0.810126582278481,
+    "next24ExcessMedian": -0.0067782258213472946,
+    "next24ExcessMean": 0.006350831566213576,
+    "sharePositive": 0.43201376936316693
+   },
+   "validation": {
+    "setups": 907,
+    "perCoinPerMonth": 1.8266648764769067,
+    "hitRate": 0.13009922822491732,
+    "sameHoursBase": 0.03289022789399987,
+    "lift": 3.955558734472958,
+    "tDays": 7.733592097538574,
+    "upShareOfHits": 0.7288135593220338,
+    "next24ExcessMedian": -0.003771015564703828,
+    "next24ExcessMean": 0.003480914207846459,
+    "sharePositive": 0.4597574421168688
+   }
+  },
+  "volume vs median coin >= 3.0x (no own floor)": {
+   "discovery": {
+    "setups": 433,
+    "perCoinPerMonth": 0.9365537130497478,
+    "hitRate": 0.14549653579676675,
+    "sameHoursBase": 0.03835098012805556,
+    "lift": 3.793815316087036,
+    "tDays": 5.654628923074385,
+    "upShareOfHits": 0.7619047619047619,
+    "next24ExcessMedian": -0.005715616148738389,
+    "next24ExcessMean": 0.007783437313030551,
+    "sharePositive": 0.4618937644341801
+   },
+   "validation": {
+    "setups": 702,
+    "perCoinPerMonth": 1.4138023630504832,
+    "hitRate": 0.13675213675213677,
+    "sameHoursBase": 0.03425490267595545,
+    "lift": 3.9921916592723883,
+    "tDays": 6.827064156518148,
+    "upShareOfHits": 0.7291666666666666,
+    "next24ExcessMedian": -0.004969413195939937,
+    "next24ExcessMean": 0.003478887077125602,
+    "sharePositive": 0.443019943019943
+   }
+  },
+  "+ volume vs median coin >= 2.0x": {
+   "discovery": {
+    "setups": 435,
+    "perCoinPerMonth": 0.9408795962509013,
+    "hitRate": 0.15862068965517243,
+    "sameHoursBase": 0.05294877454587074,
+    "lift": 2.995738636363636,
+    "tDays": 5.440780063804163,
+    "upShareOfHits": 0.7101449275362319,
+    "next24ExcessMedian": -0.010003705880004432,
+    "next24ExcessMean": 0.004715417807453725,
+    "sharePositive": 0.40229885057471265
+   },
+   "validation": {
+    "setups": 600,
+    "perCoinPerMonth": 1.2083780880773363,
+    "hitRate": 0.17333333333333334,
+    "sameHoursBase": 0.04068515884305368,
+    "lift": 4.260357788007681,
+    "tDays": 7.960535630103305,
+    "upShareOfHits": 0.6346153846153846,
+    "next24ExcessMedian": -0.0051140926406351706,
+    "next24ExcessMean": 0.004212624362751811,
+    "sharePositive": 0.4483333333333333
+   }
+  },
+  "+ volume vs median coin >= 2.5x": {
+   "discovery": {
+    "setups": 337,
+    "perCoinPerMonth": 0.7289113193943764,
+    "hitRate": 0.17507418397626112,
+    "sameHoursBase": 0.05062027512441379,
+    "lift": 3.4585782780904744,
+    "tDays": 5.551829469898262,
+    "upShareOfHits": 0.7288135593220338,
+    "next24ExcessMedian": -0.008686966209822344,
+    "next24ExcessMean": 0.006563947513768561,
+    "sharePositive": 0.42136498516320475
+   },
+   "validation": {
+    "setups": 521,
+    "perCoinPerMonth": 1.0492749731471536,
+    "hitRate": 0.18426103646833014,
+    "sameHoursBase": 0.04082448950617465,
+    "lift": 4.513492726968721,
+    "tDays": 8.04752114836854,
+    "upShareOfHits": 0.6458333333333334,
+    "next24ExcessMedian": -0.003974403632082957,
+    "next24ExcessMean": 0.0052278116367622,
+    "sharePositive": 0.46833013435700577
+   }
+  },
+  "+ volume vs median coin >= 3.0x": {
+   "discovery": {
+    "setups": 281,
+    "perCoinPerMonth": 0.6077865897620764,
+    "hitRate": 0.18505338078291814,
+    "sameHoursBase": 0.0504877419093564,
+    "lift": 3.665313079661105,
+    "tDays": 5.414723590249718,
+    "upShareOfHits": 0.6730769230769231,
+    "next24ExcessMedian": -0.008262539388757095,
+    "next24ExcessMean": 0.007491604288325679,
+    "sharePositive": 0.4306049822064057
+   },
+   "validation": {
+    "setups": 466,
+    "perCoinPerMonth": 0.9385069817400645,
+    "hitRate": 0.18669527896995708,
+    "sameHoursBase": 0.04159366052295813,
+    "lift": 4.488551298987217,
+    "tDays": 7.653805953702733,
+    "upShareOfHits": 0.6551724137931034,
+    "next24ExcessMedian": -0.0030781899031267004,
+    "next24ExcessMean": 0.005994541367336859,
+    "sharePositive": 0.4656652360515021
+   }
+  }
+ },
+ "adopted": {
+  "ahead": {
+   "discovery": {
+    "setups": 387,
+    "perCoinPerMonth": 0.8370583994232156,
+    "hitRate": 0.17571059431524547,
+    "sameHoursBase": 0.0545226989535435,
+    "lift": 3.2227053628610918,
+    "tDays": 5.5971549716739215,
+    "upShareOfHits": 0.7058823529411765,
+    "next24ExcessMedian": -0.011614577033250362,
+    "next24ExcessMean": 0.0047002039822466295,
+    "sharePositive": 0.3798449612403101
+   },
+   "validation": {
+    "setups": 472,
+    "perCoinPerMonth": 0.9505907626208377,
+    "hitRate": 0.19915254237288135,
+    "sameHoursBase": 0.044040974515996915,
+    "lift": 4.521983097820498,
+    "tDays": 7.798169605536279,
+    "upShareOfHits": 0.6595744680851063,
+    "next24ExcessMedian": -0.006983114358976972,
+    "next24ExcessMean": 0.006335758776749685,
+    "sharePositive": 0.4491525423728814
+   }
+  },
+  "behind": {
+   "discovery": {
+    "setups": 126,
+    "perCoinPerMonth": 0.2725306416726749,
+    "hitRate": 0.07936507936507936,
+    "sameHoursBase": 0.04092438302964619,
+    "lift": 1.9393103448275861,
+    "tDays": 1.5782274276474464,
+    "upShareOfHits": 0.7,
+    "next24ExcessMedian": -0.005473621744397632,
+    "next24ExcessMean": 0.0029686476885415047,
+    "sharePositive": 0.4444444444444444
+   },
+   "validation": {
+    "setups": 274,
+    "perCoinPerMonth": 0.5518259935553168,
+    "hitRate": 0.10218978102189781,
+    "sameHoursBase": 0.032566373519120326,
+    "lift": 3.1378925553961445,
+    "tDays": 3.607054944132147,
+    "upShareOfHits": 0.6785714285714286,
+    "next24ExcessMedian": -0.0021419578730888233,
+    "next24ExcessMean": 0.0011391583350148394,
+    "sharePositive": 0.4744525547445255
+   }
+  },
+  "either": {
+   "discovery": {
+    "setups": 435,
+    "perCoinPerMonth": 0.9408795962509013,
+    "hitRate": 0.15862068965517243,
+    "sameHoursBase": 0.05294877454587074,
+    "lift": 2.995738636363636,
+    "tDays": 5.440780063804163,
+    "upShareOfHits": 0.7101449275362319,
+    "next24ExcessMedian": -0.010003705880004432,
+    "next24ExcessMean": 0.004715417807453725,
+    "sharePositive": 0.40229885057471265
+   },
+   "validation": {
+    "setups": 600,
+    "perCoinPerMonth": 1.2083780880773363,
+    "hitRate": 0.17333333333333334,
+    "sameHoursBase": 0.04068515884305368,
+    "lift": 4.260357788007681,
+    "tDays": 7.960535630103305,
+    "upShareOfHits": 0.6346153846153846,
+    "next24ExcessMedian": -0.0051140926406351706,
+    "next24ExcessMean": 0.004212624362751811,
+    "sharePositive": 0.4483333333333333
+   }
+  }
+ },
+ "dropped": {
+  "discovery": {
+   "setups": 443,
+   "perCoinPerMonth": 0.9581831290555155,
+   "hitRate": 0.08577878103837472,
+   "sameHoursBase": 0.06439188386438004,
+   "lift": 1.332136534769491,
+   "tDays": 0.9950272739961202,
+   "upShareOfHits": 0.7631578947368421,
+   "next24ExcessMedian": -0.004539826010780512,
+   "next24ExcessMean": -0.00013515616067254232,
+   "sharePositive": 0.43340857787810383
+  },
+  "validation": {
+   "setups": 333,
+   "perCoinPerMonth": 0.6706498388829216,
+   "hitRate": 0.1021021021021021,
+   "sameHoursBase": 0.08189056766581661,
+   "lift": 1.2468115072637644,
+   "tDays": 1.694555980231566,
+   "upShareOfHits": 0.6176470588235294,
+   "next24ExcessMedian": -0.004735360570359684,
+   "next24ExcessMean": -0.00011145329664550638,
+   "sharePositive": 0.42042042042042044
+  }
+ },
+ "weekly": {
+  "weeksWith5Plus": 68,
+  "medianHitRate": 0.158004158004158,
+  "p10": 0.0,
+  "shareAtOrUnder5pct": 0.23529411764705882,
+  "last": [
+   [
+    "2026-08-20",
+    26,
+    5,
+    0.076
+   ],
+   [
+    "2026-08-27",
+    17,
+    6,
+    0.041
+   ],
+   [
+    "2026-09-03",
+    30,
+    3,
+    0.058
+   ],
+   [
+    "2026-09-10",
+    11,
+    0,
+    0.01
+   ],
+   [
+    "2026-09-17",
+    32,
+    6,
+    0.052
+   ],
+   [
+    "2026-09-24",
+    9,
+    1,
+    0.042
+   ]
+  ]
+ }
+}

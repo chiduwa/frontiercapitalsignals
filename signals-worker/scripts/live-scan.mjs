@@ -40,6 +40,7 @@ import {
   recentPrints, latestReading, marketGauge, describeGauge, exhaustionAlertBody, hourLabel
 } from './exhaustion-gauge.mjs';
 import { formatPct } from './price-change.mjs';
+import { runDecouplingWatch } from './decoupling-watch-io.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, NTFY_TOPIC } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
@@ -190,7 +191,8 @@ async function fetchAllBars(pairs) {
 
 async function main() {
   const nowIso = new Date().toISOString();
-  const pairs = [...await binanceGlobalTradablePairs()]
+  const tradable = new Set(await binanceGlobalTradablePairs());
+  const pairs = [...tradable]
     .filter((s) => !/^(USD|BUSD|TUSD|FDUSD|EUR|DAI|GBP|AEUR)/.test(s))
     .filter((s) => /^[A-Z0-9]+$/.test(s))
     .slice(0, MAX_SYMBOLS);
@@ -340,7 +342,18 @@ async function main() {
        r?.excess?.meanExcessPct ?? null, r?.excess?.t ?? null, r?.excess?.days ?? null, r?.excess?.baseRate ?? null]);
   }
 
-  console.log(`\nlive-scan: ${fired.length} cast(s) ${DRY_RUN ? "found (dry run: nothing written)" : "logged"}, ${sent} notification(s) sent`);
+  // The decoupling watch (scripts/decoupling-watch.mjs): a large coin pulling
+  // away from the market on volume of its own. Its own history, record and push
+  // budget; a failure here never touches the scan above.
+  let decoupled = 0;
+  try {
+    const dw = await runDecouplingWatch({ env, nowMs: Date.now(), tradable, dryRun: DRY_RUN, notify });
+    decoupled = dw.pushed;
+  } catch (e) {
+    console.error('decoupling watch failed (scan unaffected):', e.message || e);
+  }
+
+  console.log(`\nlive-scan: ${fired.length} cast(s) ${DRY_RUN ? "found (dry run: nothing written)" : "logged"}, ${sent + decoupled} notification(s) sent`);
 }
 
 main().catch((e) => { console.error('live-scan failed:', e); process.exit(1); });

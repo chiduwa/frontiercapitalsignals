@@ -751,6 +751,20 @@ are now judged against the same-window market, not a coin flip; two
 long-side alerts that had graduated on the rally are silent again.
 [docs/MISSED_MOVES.md](docs/MISSED_MOVES.md).
 
+**Coins pulling away from the market** (2026-09-28). HBAR rose 31.2% from
+the UTC day's open to 17:00 while the other large coins fell 4.4%. Over two
+years of the 40 largest coins, hourly, heavy volume and a coin's own recent
+volatility came before big moves away from the market 3 to 4 times as often
+as usual, in both years, and nothing tested said which way.
+`scripts/decoupling-watch.mjs` now runs inside the hourly live scan. It flags
+a coin whose last 8 hours ran at least 3x its usual volume and 2x the
+typical coin's surge while it moved 2 of its own standard deviations away
+from the market. It caught HBAR at the 08:00 UTC close, when HBAR was up
+1.0% on the day. Coins pulling ahead then moved 5%+ further within a day
+18-20% of the time, against 4-6% of all coins over the same hours, and only
+that side pushes. The Oracle host's timers now schedule in UTC, so daylight
+saving cannot move them. [docs/DECOUPLING.md](docs/DECOUPLING.md).
+
 **ARB is always tracked** (`FAVORITE_SYMBOLS`). The list is written down in
 fifteen places across the Worker, the Oracle-host collectors, Python research
 and a workflow argument; `test-tracked-assets.mjs` fails if any copy

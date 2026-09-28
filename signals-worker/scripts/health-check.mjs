@@ -214,6 +214,13 @@ export function checkPayload(payload, now = Date.now()) {
     push('profit-growers-fresh', 'warn', pg.status === 'live',
       `the profit-grower lists are ${pg.status}${pg.asOf ? ` (as of ${pg.asOf})` : ''}; check signals-profit-growth.yml`);
   }
+  // The decoupling watch (2026-09-28) runs inside the same hourly live scan.
+  const dw = payload.decouplingWatch;
+  if (dw && dw.status && dw.status !== 'awaiting-first-run') {
+    const age = dw.lastRunAt ? hours(now - Date.parse(dw.lastRunAt)) : NaN;
+    push('decoupling-watch-fresh', 'warn', dw.status === 'live',
+      `the pulling-away-from-the-market watch is ${dw.status}${Number.isFinite(age) ? ` (last run ${age.toFixed(1)}h ago)` : ''}; check signals-live-scan.yml`);
+  }
 
   const boards = ['crypto', 'stocks'].flatMap((cls) => ['breakout', 'breakdown'].map((side) => (payload[cls]?.[side] || []).length));
   push('boards-populated', 'fail', boards.some((n) => n > 0),

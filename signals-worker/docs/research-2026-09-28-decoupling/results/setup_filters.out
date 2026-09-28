@@ -1,0 +1,36 @@
+38 coins, 2024-09-01T00 to 2026-09-27T23; each rate against the same hours' base rate
+
+live rule, no filter                               | disc  741 (1.60/coin/mo) hit 12.0% vs  5.7% lift 2.1 t 5.1 | vali  835 (1.68/coin/mo) hit 15.1% vs  5.6% lift 2.7 t 7.8
++ at most 2 coins on 3x volume that hour           | disc  232 (0.50/coin/mo) hit 10.3% vs  3.1% lift 3.3 t 4.0 | vali  358 (0.72/coin/mo) hit 19.3% vs  3.3% lift 5.9 t 7.8
++ at most 3 coins on 3x volume that hour           | disc  293 (0.63/coin/mo) hit 11.9% vs  3.5% lift 3.4 t 4.6 | vali  466 (0.94/coin/mo) hit 18.9% vs  3.7% lift 5.0 t 8.0
++ at most 4 coins on 3x volume that hour           | disc  334 (0.72/coin/mo) hit 11.4% vs  3.5% lift 3.3 t 4.5 | vali  530 (1.07/coin/mo) hit 17.0% vs  3.7% lift 4.6 t 7.8
++ at most 5 coins on 3x volume that hour           | disc  380 (0.82/coin/mo) hit 11.3% vs  3.7% lift 3.0 t 4.6 | vali  572 (1.15/coin/mo) hit 16.6% vs  3.8% lift 4.4 t 7.9
++ at most 6 coins on 3x volume that hour           | disc  418 (0.90/coin/mo) hit 12.9% vs  4.3% lift 3.0 t 5.0 | vali  612 (1.23/coin/mo) hit 16.3% vs  3.7% lift 4.4 t 8.0
++ at most 8 coins on 3x volume that hour           | disc  477 (1.03/coin/mo) hit 13.0% vs  4.7% lift 2.8 t 5.0 | vali  658 (1.33/coin/mo) hit 16.0% vs  3.8% lift 4.2 t 8.0
++ at most 5% of coins on 3x volume                 | disc  147 (0.32/coin/mo) hit 12.2% vs  2.8% lift 4.3 t 3.7 | vali  225 (0.45/coin/mo) hit 21.3% vs  2.9% lift 7.4 t 6.8
++ at most 8% of coins on 3x volume                 | disc  260 (0.56/coin/mo) hit 11.9% vs  3.4% lift 3.6 t 4.4 | vali  434 (0.87/coin/mo) hit 19.4% vs  3.7% lift 5.2 t 7.9
++ at most 10% of coins on 3x volume                | disc  293 (0.63/coin/mo) hit 11.9% vs  3.5% lift 3.4 t 4.6 | vali  466 (0.94/coin/mo) hit 18.9% vs  3.7% lift 5.0 t 8.0
++ at most 13% of coins on 3x volume                | disc  334 (0.72/coin/mo) hit 11.4% vs  3.5% lift 3.3 t 4.5 | vali  530 (1.07/coin/mo) hit 17.0% vs  3.7% lift 4.6 t 7.8
++ at most 16% of coins on 3x volume                | disc  387 (0.84/coin/mo) hit 11.4% vs  3.7% lift 3.0 t 4.6 | vali  600 (1.21/coin/mo) hit 16.3% vs  3.7% lift 4.4 t 8.0
++ at most 20% of coins on 3x volume                | disc  448 (0.97/coin/mo) hit 13.8% vs  4.5% lift 3.1 t 5.4 | vali  641 (1.29/coin/mo) hit 15.8% vs  3.8% lift 4.2 t 7.9
+volume vs median coin >= 2.0x (no own floor)       | disc  894 (1.93/coin/mo) hit 11.6% vs  3.6% lift 3.3 t 6.9 | vali 1259 (2.54/coin/mo) hit 11.6% vs  3.2% lift 3.6 t 8.3
+volume vs median coin >= 2.5x (no own floor)       | disc  581 (1.26/coin/mo) hit 13.6% vs  3.6% lift 3.7 t 6.1 | vali  907 (1.83/coin/mo) hit 13.0% vs  3.3% lift 4.0 t 7.7
+volume vs median coin >= 3.0x (no own floor)       | disc  433 (0.94/coin/mo) hit 14.5% vs  3.8% lift 3.8 t 5.7 | vali  702 (1.41/coin/mo) hit 13.7% vs  3.4% lift 4.0 t 6.8
++ volume vs median coin >= 2.0x                    | disc  435 (0.94/coin/mo) hit 15.9% vs  5.3% lift 3.0 t 5.4 | vali  600 (1.21/coin/mo) hit 17.3% vs  4.1% lift 4.3 t 8.0
++ volume vs median coin >= 2.5x                    | disc  337 (0.73/coin/mo) hit 17.5% vs  5.1% lift 3.5 t 5.6 | vali  521 (1.05/coin/mo) hit 18.4% vs  4.1% lift 4.5 t 8.0
++ volume vs median coin >= 3.0x                    | disc  281 (0.61/coin/mo) hit 18.5% vs  5.0% lift 3.7 t 5.4 | vali  466 (0.94/coin/mo) hit 18.7% vs  4.2% lift 4.5 t 7.7
+
+adopted: own volume >= 3x its norm, >= 2x the median coin's, |excess z| >= 2
+  ahead                                            | disc  387 (0.84/coin/mo) hit 17.6% vs  5.5% lift 3.2 t 5.6 | vali  472 (0.95/coin/mo) hit 19.9% vs  4.4% lift 4.5 t 7.8
+      discovery  up share of big moves 0.71; next 24h excess median -1.16% mean +0.47%, share positive 0.38
+      validation up share of big moves 0.66; next 24h excess median -0.70% mean +0.63%, share positive 0.45
+  behind                                           | disc  126 (0.27/coin/mo) hit  7.9% vs  4.1% lift 1.9 t 1.6 | vali  274 (0.55/coin/mo) hit 10.2% vs  3.3% lift 3.1 t 3.6
+      discovery  up share of big moves 0.70; next 24h excess median -0.55% mean +0.30%, share positive 0.44
+      validation up share of big moves 0.68; next 24h excess median -0.21% mean +0.11%, share positive 0.47
+  either                                           | disc  435 (0.94/coin/mo) hit 15.9% vs  5.3% lift 3.0 t 5.4 | vali  600 (1.21/coin/mo) hit 17.3% vs  4.1% lift 4.3 t 8.0
+      discovery  up share of big moves 0.71; next 24h excess median -1.00% mean +0.47%, share positive 0.40
+      validation up share of big moves 0.63; next 24h excess median -0.51% mean +0.42%, share positive 0.45
+  what the filter drops                            | disc  443 (0.96/coin/mo) hit  8.6% vs  6.4% lift 1.3 t 1.0 | vali  333 (0.67/coin/mo) hit 10.2% vs  8.2% lift 1.2 t 1.7
+
+weeks with 5+ setups: 68; weekly hit rate median 0.16, 10th percentile 0.00; 24% of weeks at or under 5%
+last weeks (Thursday start: setups, big moves, same-hours base): [('2026-08-20', 26, 5, np.float64(0.076)), ('2026-08-27', 17, 6, np.float64(0.041)), ('2026-09-03', 30, 3, np.float64(0.058)), ('2026-09-10', 11, 0, np.float64(0.01)), ('2026-09-17', 32, 6, np.float64(0.052)), ('2026-09-24', 9, 1, np.float64(0.042))]

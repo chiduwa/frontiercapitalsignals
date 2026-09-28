@@ -26,6 +26,7 @@ import { loadAdaptiveHealth } from './adaptive-research.mjs';
 import { loadHierarchicalHealth } from './hierarchical-research.mjs';
 import { loadTournamentHealth } from './model-tournament-io.mjs';
 import { loadBigMoveWatch } from './big-move-watch-io.mjs';
+import { loadDecouplingWatch } from './decoupling-watch-io.mjs';
 import { loadExhaustion } from './exhaustion-io.mjs';
 import { loadProfitGrowth, loadCompanyProfitMetrics } from './profit-growth.mjs';
 
@@ -280,6 +281,14 @@ if (FCS_D1_DATABASE_ID) {
   } catch (error) {
     payload.bigMoveWatch = { status: 'unavailable' };
     console.error('big-move watch unavailable:', error.message);
+  }
+  // Large coins pulling away from the market on unusual volume, from the
+  // hourly live scan; direction unknown, and the panel says so.
+  try {
+    payload.decouplingWatch = await loadDecouplingWatch(env);
+  } catch (error) {
+    payload.decouplingWatch = { status: 'unavailable' };
+    console.error('decoupling watch unavailable:', error.message);
   }
   try {
     payload.sessionResearch = await loadSessionHealth(env);

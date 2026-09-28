@@ -1,0 +1,466 @@
+{
+ "breakout|top5pct|discovery": {
+  "all": {
+   "n": 2899,
+   "mean": -0.0007856238727656593,
+   "median": -0.005680485479456265,
+   "sharePositive": 0.40358744394618834,
+   "shareGiveBackHalf": null,
+   "tDays": -0.6701550979420662
+  },
+  "volume >= 2x norm": {
+   "n": 663,
+   "mean": -0.0011510760105204625,
+   "median": -0.009515082854220092,
+   "sharePositive": 0.39064856711915535,
+   "shareGiveBackHalf": null,
+   "tDays": -1.1862432171480959
+  },
+  "volume < 2x norm": {
+   "n": 2234,
+   "mean": -0.0006755698252563447,
+   "median": -0.004468693453782299,
+   "sharePositive": 0.40734109221128023,
+   "shareGiveBackHalf": null,
+   "tDays": -0.5908528454760638
+  },
+  "open interest up >= 5%": {
+   "n": 384,
+   "mean": 0.001183020040932047,
+   "median": -0.009533971411765346,
+   "sharePositive": 0.4088541666666667,
+   "shareGiveBackHalf": null,
+   "tDays": -0.27044032878911417
+  },
+  "open interest not up": {
+   "n": 1256,
+   "mean": -0.0012935858812263019,
+   "median": -0.004511415608517269,
+   "sharePositive": 0.4148089171974522,
+   "shareGiveBackHalf": null,
+   "tDays": -0.7011826013288434
+  },
+  "against a falling market": {
+   "n": 768,
+   "mean": -0.004912084615602835,
+   "median": -0.007213670909682569,
+   "sharePositive": 0.37890625,
+   "shareGiveBackHalf": null,
+   "tDays": -2.497046273834506
+  },
+  "with a rising market": {
+   "n": 1225,
+   "mean": 0.00038648510472045973,
+   "median": -0.005938189451699383,
+   "sharePositive": 0.40653061224489795,
+   "shareGiveBackHalf": null,
+   "tDays": -1.1183190683861404
+  }
+ },
+ "breakout|top5pct|validation": {
+  "all": {
+   "n": 3666,
+   "mean": 0.000982161776325497,
+   "median": -0.0036780050052117874,
+   "sharePositive": 0.4214402618657938,
+   "shareGiveBackHalf": null,
+   "tDays": 2.740841813457126
+  },
+  "volume >= 2x norm": {
+   "n": 657,
+   "mean": 0.001906393155322267,
+   "median": -0.006771516131059918,
+   "sharePositive": 0.4048706240487062,
+   "shareGiveBackHalf": null,
+   "tDays": 0.7010093909444475
+  },
+  "volume < 2x norm": {
+   "n": 3007,
+   "mean": 0.000790248309126407,
+   "median": -0.00340127567578552,
+   "sharePositive": 0.4253408713002993,
+   "shareGiveBackHalf": null,
+   "tDays": 2.449900733726028
+  },
+  "open interest up >= 5%": {
+   "n": 320,
+   "mean": 0.003776670812055144,
+   "median": -0.009252314119243155,
+   "sharePositive": 0.378125,
+   "shareGiveBackHalf": null,
+   "tDays": 1.0873135622622088
+  },
+  "open interest not up": {
+   "n": 1633,
+   "mean": 0.0002761418882596101,
+   "median": -0.003257409180551729,
+   "sharePositive": 0.43233312921004285,
+   "shareGiveBackHalf": null,
+   "tDays": 1.3620000900924898
+  },
+  "against a falling market": {
+   "n": 921,
+   "mean": 6.3364875939288e-05,
+   "median": -0.003552474267007333,
+   "sharePositive": 0.40933767643865365,
+   "shareGiveBackHalf": null,
+   "tDays": 1.5069129039186298
+  },
+  "with a rising market": {
+   "n": 1262,
+   "mean": -0.0008537957838659927,
+   "median": -0.005085901426033657,
+   "sharePositive": 0.3993660855784469,
+   "shareGiveBackHalf": null,
+   "tDays": -0.7901892466680335
+  }
+ },
+ "breakdown|top5pct|discovery": {
+  "all": {
+   "n": 3497,
+   "mean": 0.0007766180333579743,
+   "median": -0.0010772012179590396,
+   "sharePositive": 0.4752645124392336,
+   "shareGiveBackHalf": null,
+   "tDays": 1.2798096364579186
+  },
+  "volume >= 2x norm": {
+   "n": 749,
+   "mean": 0.0029438549745520277,
+   "median": -0.0013389098191565196,
+   "sharePositive": 0.46461949265687585,
+   "shareGiveBackHalf": null,
+   "tDays": 1.5669351305854975
+  },
+  "volume < 2x norm": {
+   "n": 2744,
+   "mean": 0.00019348990073139792,
+   "median": -0.000966504292690646,
+   "sharePositive": 0.478134110787172,
+   "shareGiveBackHalf": null,
+   "tDays": 0.7991947101471925
+  },
+  "open interest up >= 5%": {
+   "n": 203,
+   "mean": 0.006643288673198131,
+   "median": 0.0013288440028920157,
+   "sharePositive": 0.5615763546798029,
+   "shareGiveBackHalf": null,
+   "tDays": 2.4127386168903437
+  },
+  "open interest not up": {
+   "n": 1788,
+   "mean": 0.0008001347420039509,
+   "median": -0.0016119721757834604,
+   "sharePositive": 0.465324384787472,
+   "shareGiveBackHalf": null,
+   "tDays": 0.9116110095255203
+  },
+  "against a falling market": {
+   "n": 1100,
+   "mean": 0.002762310193264265,
+   "median": -2.247055108479945e-05,
+   "sharePositive": 0.4990909090909091,
+   "shareGiveBackHalf": null,
+   "tDays": 1.9078963378036802
+  },
+  "with a rising market": {
+   "n": 1375,
+   "mean": -0.00043986124935870485,
+   "median": -0.0016313958171032157,
+   "sharePositive": 0.4632727272727273,
+   "shareGiveBackHalf": null,
+   "tDays": 0.6858331704594688
+  }
+ },
+ "breakdown|top5pct|validation": {
+  "all": {
+   "n": 4213,
+   "mean": -0.0003259321449870204,
+   "median": -0.0005053107156116621,
+   "sharePositive": 0.4861144077854261,
+   "shareGiveBackHalf": null,
+   "tDays": -0.19554448952229503
+  },
+  "volume >= 2x norm": {
+   "n": 738,
+   "mean": 0.00021068014101600734,
+   "median": -0.002284989347966282,
+   "sharePositive": 0.45663956639566394,
+   "shareGiveBackHalf": null,
+   "tDays": 0.08069491238216633
+  },
+  "volume < 2x norm": {
+   "n": 3473,
+   "mean": -0.0004498411513780509,
+   "median": -0.00022681651167105743,
+   "sharePositive": 0.49208177368269507,
+   "shareGiveBackHalf": null,
+   "tDays": -0.5764282614812576
+  },
+  "open interest up >= 5%": {
+   "n": 205,
+   "mean": -0.005642304229622457,
+   "median": -0.0010215065852589023,
+   "sharePositive": 0.4975609756097561,
+   "shareGiveBackHalf": null,
+   "tDays": -2.140996417908844
+  },
+  "open interest not up": {
+   "n": 2237,
+   "mean": 0.0002401690338434046,
+   "median": -0.000513382827252773,
+   "sharePositive": 0.48636566830576666,
+   "shareGiveBackHalf": null,
+   "tDays": 0.6355988412263085
+  },
+  "against a falling market": {
+   "n": 1146,
+   "mean": 0.0006682888852175937,
+   "median": -9.663274227003638e-05,
+   "sharePositive": 0.4965095986038394,
+   "shareGiveBackHalf": null,
+   "tDays": 0.9692727281497844
+  },
+  "with a rising market": {
+   "n": 1455,
+   "mean": -0.0018776341325255788,
+   "median": -0.0015433206123003362,
+   "sharePositive": 0.46048109965635736,
+   "shareGiveBackHalf": null,
+   "tDays": -1.2127828708095612
+  }
+ },
+ "breakout|top1pct|discovery": {
+  "all": {
+   "n": 726,
+   "mean": -0.0020114229451472713,
+   "median": -0.009111650230305898,
+   "sharePositive": 0.3939393939393939,
+   "shareGiveBackHalf": null,
+   "tDays": -1.0647396315618063
+  },
+  "volume >= 2x norm": {
+   "n": 406,
+   "mean": 0.0010361236380216738,
+   "median": -0.008670245742951839,
+   "sharePositive": 0.39901477832512317,
+   "shareGiveBackHalf": null,
+   "tDays": -0.7018980047462787
+  },
+  "volume < 2x norm": {
+   "n": 318,
+   "mean": -0.005605562540284174,
+   "median": -0.009439838617173117,
+   "sharePositive": 0.389937106918239,
+   "shareGiveBackHalf": null,
+   "tDays": -1.786902268864458
+  },
+  "open interest up >= 5%": {
+   "n": 247,
+   "mean": -0.0031028978532780175,
+   "median": -0.010915584829049418,
+   "sharePositive": 0.39271255060728744,
+   "shareGiveBackHalf": null,
+   "tDays": -1.0000154814218807
+  },
+  "open interest not up": {
+   "n": 180,
+   "mean": -0.006310515585885882,
+   "median": -0.007757411094884495,
+   "sharePositive": 0.3611111111111111,
+   "shareGiveBackHalf": null,
+   "tDays": -1.484678637181873
+  },
+  "against a falling market": {
+   "n": 130,
+   "mean": -0.007559858526652555,
+   "median": -0.009278561072127413,
+   "sharePositive": 0.4153846153846154,
+   "shareGiveBackHalf": null,
+   "tDays": -0.9227098660657589
+  },
+  "with a rising market": {
+   "n": 385,
+   "mean": 0.0006059132530695563,
+   "median": -0.0068391063729407175,
+   "sharePositive": 0.4103896103896104,
+   "shareGiveBackHalf": null,
+   "tDays": -0.5339794184197044
+  }
+ },
+ "breakout|top1pct|validation": {
+  "all": {
+   "n": 833,
+   "mean": 0.0016744278694737751,
+   "median": -0.006173494698159809,
+   "sharePositive": 0.4225690276110444,
+   "shareGiveBackHalf": null,
+   "tDays": 1.1879675474601363
+  },
+  "volume >= 2x norm": {
+   "n": 407,
+   "mean": 0.0018316687050792797,
+   "median": -0.007070688684346793,
+   "sharePositive": 0.43243243243243246,
+   "shareGiveBackHalf": null,
+   "tDays": 1.1789886820660016
+  },
+  "volume < 2x norm": {
+   "n": 426,
+   "mean": 0.0015242001227802524,
+   "median": -0.005115907208924783,
+   "sharePositive": 0.4131455399061033,
+   "shareGiveBackHalf": null,
+   "tDays": -0.17905249280321944
+  },
+  "open interest up >= 5%": {
+   "n": 214,
+   "mean": 0.009416840856036772,
+   "median": -0.008270333277022313,
+   "sharePositive": 0.4672897196261682,
+   "shareGiveBackHalf": null,
+   "tDays": 1.8455680576392697
+  },
+  "open interest not up": {
+   "n": 237,
+   "mean": -0.004897842917122045,
+   "median": -0.0053848676621279234,
+   "sharePositive": 0.3881856540084388,
+   "shareGiveBackHalf": null,
+   "tDays": -1.6466461356839612
+  },
+  "against a falling market": {
+   "n": 130,
+   "mean": -0.0009973990550003022,
+   "median": -0.0064838655869838,
+   "sharePositive": 0.4153846153846154,
+   "shareGiveBackHalf": null,
+   "tDays": 0.9564298642943545
+  },
+  "with a rising market": {
+   "n": 395,
+   "mean": 0.00015573155484519287,
+   "median": -0.006462724426739008,
+   "sharePositive": 0.4177215189873418,
+   "shareGiveBackHalf": null,
+   "tDays": 0.4325496076471935
+  }
+ },
+ "breakdown|top1pct|discovery": {
+  "all": {
+   "n": 997,
+   "mean": 0.002163375057865875,
+   "median": -0.0009785748489665805,
+   "sharePositive": 0.48244734202607825,
+   "shareGiveBackHalf": null,
+   "tDays": 1.1222608514945445
+  },
+  "volume >= 2x norm": {
+   "n": 409,
+   "mean": 0.004600576711154663,
+   "median": -0.0037476220022102935,
+   "sharePositive": 0.45965770171149145,
+   "shareGiveBackHalf": null,
+   "tDays": 0.9885745246855423
+  },
+  "volume < 2x norm": {
+   "n": 588,
+   "mean": 0.0004681106425680606,
+   "median": -6.404646435495542e-05,
+   "sharePositive": 0.49829931972789115,
+   "shareGiveBackHalf": null,
+   "tDays": 1.4459044874385778
+  },
+  "open interest up >= 5%": {
+   "n": 98,
+   "mean": 0.0074138763019174275,
+   "median": 0.00410062154952117,
+   "sharePositive": 0.5918367346938775,
+   "shareGiveBackHalf": null,
+   "tDays": 1.6378460042513545
+  },
+  "open interest not up": {
+   "n": 523,
+   "mean": 0.0017538245660770055,
+   "median": -0.001980108646077977,
+   "sharePositive": 0.4665391969407266,
+   "shareGiveBackHalf": null,
+   "tDays": 1.3328828213080235
+  },
+  "against a falling market": {
+   "n": 357,
+   "mean": 0.0028172869574087647,
+   "median": 0.000227013511135854,
+   "sharePositive": 0.5042016806722689,
+   "shareGiveBackHalf": null,
+   "tDays": 0.5152289485788988
+  },
+  "with a rising market": {
+   "n": 423,
+   "mean": 0.0010191678823676285,
+   "median": -0.002890556553723493,
+   "sharePositive": 0.4562647754137116,
+   "shareGiveBackHalf": null,
+   "tDays": 0.7695377848676405
+  }
+ },
+ "breakdown|top1pct|validation": {
+  "all": {
+   "n": 1126,
+   "mean": 0.0003131365453267203,
+   "median": -0.0003040363391964701,
+   "sharePositive": 0.4937833037300178,
+   "shareGiveBackHalf": null,
+   "tDays": -1.2119197578353946
+  },
+  "volume >= 2x norm": {
+   "n": 465,
+   "mean": 0.0026419156773065987,
+   "median": -0.002334822031988787,
+   "sharePositive": 0.46881720430107526,
+   "shareGiveBackHalf": null,
+   "tDays": 0.529679531573872
+  },
+  "volume < 2x norm": {
+   "n": 660,
+   "mean": -0.0013691601446883504,
+   "median": 0.0006655067429158223,
+   "sharePositive": 0.5106060606060606,
+   "shareGiveBackHalf": null,
+   "tDays": -1.6099116185222333
+  },
+  "open interest up >= 5%": {
+   "n": 121,
+   "mean": 0.0019063254686298979,
+   "median": 0.005543736302126123,
+   "sharePositive": 0.5867768595041323,
+   "shareGiveBackHalf": null,
+   "tDays": -0.19973540190573416
+  },
+  "open interest not up": {
+   "n": 616,
+   "mean": 0.0021516265794882367,
+   "median": -0.000872697786034049,
+   "sharePositive": 0.48863636363636365,
+   "shareGiveBackHalf": null,
+   "tDays": -0.15249086067420248
+  },
+  "against a falling market": {
+   "n": 386,
+   "mean": 0.0015332517336277382,
+   "median": -0.00021329135098283394,
+   "sharePositive": 0.4948186528497409,
+   "shareGiveBackHalf": null,
+   "tDays": 0.7189478057831061
+  },
+  "with a rising market": {
+   "n": 368,
+   "mean": -0.001125230477511543,
+   "median": -0.0010387887729486622,
+   "sharePositive": 0.483695652173913,
+   "shareGiveBackHalf": null,
+   "tDays": -1.5589064831632142
+  }
+ }
+}

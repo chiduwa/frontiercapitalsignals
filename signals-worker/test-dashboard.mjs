@@ -576,6 +576,92 @@ console.log('\n== the big-move watch lists the likeliest movers and says directi
   first.dom.window.close();
 }
 
+// ============ decoupling watch: a coin pulling away from the market ==========
+// Shaped as scripts/decoupling-watch-io.mjs's loader returns it. HBAR's row
+// carries its real 2026-09-28 setup, read at the 08:00 UTC close (the 07:00
+// bar), as the production rule computes it from Binance spot bars.
+console.log('\n== the decoupling watch lists coins breaking away from the market and says direction is unknown ==');
+{
+  const hourIso = (h) => new Date(Math.floor((NOW - h * 3600000) / 3600000) * 3600000).toISOString();
+  const recent = [
+    { symbol: 'HBAR', cast_at: hourIso(3), side: 1, close: 0.09684, volume_ratio: 3.48, rel_volume: 2.22, excess_z: 3.31, excess_pct: 5.12, market_pct: -4.88,
+      oi_change_pct: 10.3, notified: 1, outcome_excess_pct: null, big: null, base_rate: null },
+    { symbol: 'FIL', cast_at: hourIso(30), side: -1, close: 1.62, volume_ratio: 4.1, rel_volume: 3.6, excess_z: -2.3, excess_pct: -6.2, market_pct: 0.4,
+      oi_change_pct: null, notified: 0, outcome_excess_pct: -7.9, big: 1, base_rate: 0.03 },
+    { symbol: 'ALGO', cast_at: hourIso(50), side: 1, close: 0.21, volume_ratio: 3.2, rel_volume: 2.4, excess_z: 2.1, excess_pct: 4.4, market_pct: -1.1,
+      oi_change_pct: 2.5, notified: 0, outcome_excess_pct: 1.2, big: 0, base_rate: 0.02 }
+  ];
+  const { DW_EVIDENCE } = await import('./scripts/decoupling-watch.mjs');
+  const none = { scored: 0, days: 0, hitRate: null, baseRate: null, t: null };
+  const live = { status: 'live', lastRunAt: iso(20 * 60000), evaluated: 40, universe: 40, recent,
+    live: { ahead: none, behind: none }, evidence: JSON.parse(JSON.stringify(DW_EVIDENCE)), notifying: true,
+    statusNote: 'held in both years at discovery; no live setups scored yet' };
+  const view = await render({ ...payload(), decouplingWatch: live }, { settleMs: 1200 });
+  const el = view.doc.getElementById('panel-decouplingWatch');
+  const text = el?.textContent || '';
+  check('the decoupling watch renders without disrupting the page', view.pageErrors.length === 0 && Boolean(el), JSON.stringify(view.pageErrors));
+  check('it sits with the watchlists, open when there are rows',
+    Boolean(el?.closest('[data-dashboard-view="watchlists"]')) && el.open === true);
+  check('the last run and each setup say how long ago they happened, from the bar close',
+    /last run within the hour/.test(text) && /^[23]h ago$/.test(el.querySelector('[data-dcw="HBAR"] [data-l="Seen"]')?.textContent || ''),
+    el?.querySelector('[data-dcw="HBAR"] [data-l="Seen"]')?.textContent);
+  check('every recent setup gets a row with its side, move against the market and volume',
+    recent.every(r => el.querySelector(`[data-dcw="${r.symbol}"]`))
+    && /pulling ahead/.test(el.querySelector('[data-dcw="HBAR"]').textContent)
+    && /falling behind/.test(el.querySelector('[data-dcw="FIL"]').textContent)
+    && /\+5\.1%/.test(el.querySelector('[data-dcw="HBAR"]').textContent) && /3\.5\u00d7 \(2\.2\u00d7 typical coin\)/.test(el.querySelector('[data-dcw="HBAR"]').textContent),
+    el?.querySelector('[data-dcw="HBAR"]')?.textContent);
+  check('a scored row shows what happened, an unscored one says when it will be scored',
+    /moved -7\.9% vs market/.test(el.querySelector('[data-dcw="FIL"]').textContent)
+    && /no big move \(\+1\.2%\)/.test(el.querySelector('[data-dcw="ALGO"]').textContent)
+    && /scored 24h after/.test(el.querySelector('[data-dcw="HBAR"]').textContent));
+  check('a coin the open-interest sampler does not watch shows n/a, never NaN',
+    /n\/a/.test(el.querySelector('[data-dcw="FIL"]').textContent) && !/NaN|undefined|null/.test(text));
+  check('it states size, not direction, and that it is not advice',
+    text.includes('not a direction') && text.includes('Which way the move goes is not predictable') && text.includes('not financial advice'));
+  check('it quotes each side against the same hours, from the payload\'s evidence',
+    /18-20% of coins pulling ahead then moved 5% or more further from the market within a day, against 4-6% of all of them over the same hours/.test(text)
+    && /For coins falling behind it was 8-10% against 3-4%/.test(text) && /never sent to your phone/.test(text), text.slice(0, 900));
+  check('no direction arrow or trade verb inside the panel',
+    el.querySelectorAll('.dir-arrow, .dir-up, .dir-down').length === 0 && !/\bBUY\b|\bSELL\b|\bLONG\b|\bSHORT\b/.test(text));
+  check('no em dash in the copy', !text.includes('\u2014'));
+  check('before any setup is scored, each side\'s live record says how it will be scored',
+    /Pulling ahead, live: none scored yet/.test(text) && /Falling behind, live: none scored yet/.test(text) && text.includes('scored 24 hours after it appears'));
+  view.dom.window.close();
+
+  const scored = await render({ ...payload(), decouplingWatch: { ...live,
+    live: { ahead: { scored: 34, days: 12, hitRate: 0.18, baseRate: 0.03, t: 3.1 }, behind: { scored: 1, days: 1, hitRate: 0, baseRate: 0.04, t: null } } } }, { settleMs: 1200 });
+  const st = scored.doc.getElementById('panel-decouplingWatch')?.textContent || '';
+  check('once scored, each side reports its hit rate against the same-hours base rate',
+    /Pulling ahead, live: 18% moved 5% or more further from the market within a day, against 3% of all the coins over the same hours \(34 setups, t=3\.10\)/.test(st)
+    && /Falling behind, live: 0% moved .* against 4% .* \(1 setup\)/.test(st), st.slice(-500));
+  scored.dom.window.close();
+
+  const quiet = await render({ ...payload(), decouplingWatch: { ...live, recent: [] } }, { settleMs: 1200 });
+  const qEl = quiet.doc.getElementById('panel-decouplingWatch');
+  check('with no recent setups it says so and stays closed',
+    Boolean(qEl) && qEl.open === false && (qEl.textContent || '').includes('No large coin has pulled away from the market in the last 72 hours'));
+  quiet.dom.window.close();
+
+  const stale = await render({ ...payload(), decouplingWatch: { ...live, status: 'stale', lastRunAt: iso(9 * 3600000) } }, { settleMs: 1200 });
+  check('a stale watch is marked stale', /stale/.test(stale.doc.getElementById('panel-decouplingWatch')?.textContent || ''));
+  stale.dom.window.close();
+
+  const bmw = JSON.parse(readFileSync(new URL('./test-fixtures/big-move-watch-summary.json', import.meta.url), 'utf8'));
+  const both = await render({ ...payload(), bigMoveWatch: { ...bmw, status: 'live', ageHours: 3 }, decouplingWatch: live }, { settleMs: 1200 });
+  const bEl = both.doc.getElementById('panel-bigMoveWatch'), dEl = both.doc.getElementById('panel-decouplingWatch');
+  check('it follows the big-move watch, the other size-not-direction list',
+    Boolean(bEl && dEl) && Boolean(bEl.compareDocumentPosition(dEl) & 4));
+  both.dom.window.close();
+
+  for (const status of ['awaiting-first-run', 'unavailable']) {
+    const none = await render({ ...payload(), decouplingWatch: { status } }, { settleMs: 1200 });
+    check(`before the first run (${status}) the panel stays away and the page is fine`,
+      none.pageErrors.length === 0 && !none.doc.getElementById('panel-decouplingWatch'));
+    none.dom.window.close();
+  }
+}
+
 // ============ sell pressure and profit growers (2026-09-26) ==================
 console.log('\n== sell pressure: per-coin exhaustion, your coins, and the market as context ==');
 {
