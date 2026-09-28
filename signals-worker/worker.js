@@ -839,7 +839,19 @@ export function volRegime(closes, shortN = 20, longN = 100) {
 // technique's measured accuracy is too noisy to act on — it keeps the
 // static baseline weight (multiplier 1) until enough history accumulates.
 export const MIN_RELIABILITY_SAMPLES = 20;
-const RELIABILITY_PRIOR_SAMPLES = 12;
+// How many outcomes' worth of weight the technique's class-wide record carries
+// against one asset's own record. Was 12, which let a 50-outcome asset record
+// carry 81% of the weight. Measured 2026-09-27 on 119,447 live independent
+// outcomes (docs/MODEL_OVERFITTING.md): predicting each asset-technique cell's
+// second-half hit rate from its first half, the likelihood kept improving as
+// the prior grew and was flat from 200 to infinity, in both directions of the
+// split. At the sizes these records reach (a median of 5 outcomes a cell at
+// 24h), an asset's own record carries no information the class record does not
+// already have, the same answer the four earlier per-asset weight tests gave
+// (PREDICTION_WEIGHTS_EVIDENCE.md). Even the composite's five-year records
+// (median 91 to 166 outcomes an asset) wanted a prior of 200 to 400 in every
+// year fold. 400 sits in the flat part; a 150-outcome record still gets 27%.
+export const RELIABILITY_PRIOR_SAMPLES = 400;
 const CALIBRATION_CONFIDENCE_MIN_SAMPLES = 40;
 const DETAILED_CALIBRATION_CONFIDENCE_MIN_SAMPLES = 30;
 const RANGE_CALIBRATION_MIN_SAMPLES = 30;
@@ -1697,6 +1709,62 @@ export function bestVolLookback(
   }
   if (!best) return null;
   return { lookback: best.lookback, meanSqResidual: best.meanSqResidual, samples: best.samples };
+}
+
+// ---- the volatility band's width (2026-09-27, docs/MODEL_OVERFITTING.md)
+// predictedRange sizes a band from volatility until the asset has 20 matured
+// moves of its own at that horizon. Such a band is never published (a reader
+// only sees 'historical' ranges), but every one is logged and scored, and those
+// scores are the asset's range record that the publication gate later reads.
+// bestVolLookback picks each asset's window by how well it fitted that asset's
+// whole history, and measured walk-forward that choice is an overfit: one fixed
+// 90-day window for every asset beat it (crypto QLIKE t = -3.0, stocks -1.6),
+// and the band ran too narrow (realized 7-day moves ~17% (crypto) and ~8%
+// (stocks) wider than implied). The band therefore uses a fixed 90-day window
+// scaled by ONE factor per asset class, learned from the class's own past 7-day
+// moves: calibration went 1.36 -> 1.01 (crypto) and 1.17 -> 1.04 (stocks),
+// where 1.00 is a band exactly as wide as the moves that followed.
+// volPct itself (and the techniques and features that read it) is unchanged.
+export const BAND_VOL_LOOKBACK_DAYS = 90;
+export const BAND_CALIBRATION_HORIZON_DAYS = 7;
+export const BAND_CALIBRATION_WINDOW_DAYS = 730;
+export const BAND_CALIBRATION_MIN_SAMPLES = 500;
+const BAND_Z2_CAP = 50;   // one squared standardized move may not outweigh 50 ordinary ones
+
+// Squared standardized 7-day moves for one asset, one a week over its last two
+// years, each judged against the 90-day volatility known when it began. Only
+// moves whose end is already in `closes` count, so nothing here looks ahead.
+export function bandCalibrationSample(closes, {
+  lookback = BAND_VOL_LOOKBACK_DAYS, horizon = BAND_CALIBRATION_HORIZON_DAYS, windowDays = BAND_CALIBRATION_WINDOW_DAYS
+} = {}) {
+  if (!Array.isArray(closes) || closes.length < lookback + horizon + 2) return null;
+  let sumZ2 = 0, n = 0;
+  const last = closes.length - 1;
+  for (let i = last - horizon; i > last - windowDays && i > lookback; i -= horizon) {
+    const vol = realizedVolPct(closes.slice(0, i + 1), lookback);
+    if (!(vol > 0) || !(closes[i] > 0) || !(closes[i + horizon] > 0)) continue;
+    const move = (closes[i + horizon] / closes[i] - 1) * 100;
+    sumZ2 += Math.min((move / (vol * Math.sqrt(horizon))) ** 2, BAND_Z2_CAP);
+    n++;
+  }
+  return n ? { sumZ2, n } : null;
+}
+
+// Pools every asset's sample into one factor for its class and sets each
+// metric's bandVolPct = 90-day volatility x sqrt(factor). A class with too few
+// samples keeps factor 1 (the raw 90-day window) rather than guessing.
+export function applyBandCalibration(metrics) {
+  let sumZ2 = 0, n = 0;
+  for (const m of metrics || []) {
+    if (m && m.bandCal) { sumZ2 += m.bandCal.sumZ2; n += m.bandCal.n; }
+  }
+  const factor = n >= BAND_CALIBRATION_MIN_SAMPLES ? sumZ2 / n : 1;
+  for (const m of metrics || []) {
+    if (!m) continue;
+    m.bandVolPct = m.bandVol90 > 0 ? m.bandVol90 * Math.sqrt(factor) : null;
+    delete m.bandCal;
+  }
+  return { factor, samples: n, lookbackDays: BAND_VOL_LOOKBACK_DAYS };
 }
 
 // How long an asset has been sitting at its own extreme, not just whether
@@ -5611,6 +5679,9 @@ export function buildCryptoMetrics(item, extras = {}) {
   // crypto's 365-day history cap).
   const volLookback = haveDaily ? bestVolLookback(closes) : null;
   const volPct = haveDaily ? realizedVolPct(closes, volLookback ? volLookback.lookback : undefined) : null;
+  // The volatility band's own inputs (see applyBandCalibration).
+  const bandVol90 = haveDaily ? realizedVolPct(closes, BAND_VOL_LOOKBACK_DAYS) : null;
+  const bandCal = haveDaily ? bandCalibrationSample(closes) : null;
   // 365, not stocks' 252: crypto trades every calendar day, not just
   // weekdays, so a "1-year cycle" in daily bars is 365 bars here.
   const dwell = haveDaily ? dwellAtExtreme(closes, 365) : null;
@@ -5639,6 +5710,8 @@ export function buildCryptoMetrics(item, extras = {}) {
     fib,
     dailyMoves,
     volPct,
+    bandVol90,
+    bandCal,
     volLookbackDays: volLookback ? volLookback.lookback : null,
     price,
     mcap,
@@ -5709,6 +5782,8 @@ export function buildStockMetrics(row, valuation, override, benchCloses, ivHist,
   // nearly every name, unlike crypto's 365-day cap.
   const volLookback = bestVolLookback(closes);
   const volPct = realizedVolPct(closes, volLookback ? volLookback.lookback : undefined);
+  const bandVol90 = realizedVolPct(closes, BAND_VOL_LOOKBACK_DAYS);
+  const bandCal = bandCalibrationSample(closes);
   const dwell = dwellAtExtreme(closes, 252);
   const corr = row.dates && benchDates && benchCloses
     ? datedBenchmarkCorrelation(closes.map((close, i) => ({ date: row.dates[i], close })),
@@ -5751,6 +5826,8 @@ export function buildStockMetrics(row, valuation, override, benchCloses, ivHist,
     dataQuality: 'model-ready',
     price,
     volPct,
+    bandVol90,
+    bandCal,
     volLookbackDays: volLookback ? volLookback.lookback : null,
     dwell,
     corr,
@@ -5839,7 +5916,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       // (reliability.mjs) for where this feeds the calibration curve.
       votesLog.push({ asset_class: kind, symbol: m.symbol, technique_id: 'composite', dir: cc.dir, score: cc.score, regime });
       for (const horizonDays of RANGE_LOG_HORIZONS_DAYS) {
-        const r = predictedRange(m.price, horizonDays, cc.score, cc.dir, moveStats, m.symbol, m.volPct);
+        const r = predictedRange(m.price, horizonDays, cc.score, cc.dir, moveStats, m.symbol, m.bandVolPct ?? m.volPct);
         if (r) rangeLog.push({ asset_class: kind, symbol: m.symbol, horizon_hours: horizonDays * 24, low: r.low, high: r.high });
       }
       // Distinct from the fixed 1d/7d pair just logged above (those exist
@@ -5849,7 +5926,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       // band covers whatever period this specific call actually expects to
       // resolve in rather than an arbitrary fixed one.
       horizon = cc.dir === 1 ? c.longHorizon : c.shortHorizon;
-      range = horizon ? predictedRange(m.price, horizon.days, cc.score, cc.dir, moveStats, m.symbol, m.volPct) : null;
+      range = horizon ? predictedRange(m.price, horizon.days, cc.score, cc.dir, moveStats, m.symbol, m.bandVolPct ?? m.volPct) : null;
     }
     allSymbols.push({
       symbol: m.symbol,
@@ -5989,7 +6066,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       conf: { agree: side === 'long' ? x.c.bull : x.c.bear, total: x.c.total },
       drivers: side === 'long' ? x.c.longNotes : x.c.shortNotes,
       horizon,
-      range: horizon ? predictedRange(x.m.price, horizon.days, score, dir, moveStats, x.m.symbol, x.m.volPct) : null,
+      range: horizon ? predictedRange(x.m.price, horizon.days, score, dir, moveStats, x.m.symbol, x.m.bandVolPct ?? x.m.volPct) : null,
       analysis: {
         input_interval: x.m.inputInterval || null,
         history_source: x.m.historySource || null,
@@ -6150,6 +6227,8 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   const qualityScores = computeQualityScores(qualityData || {});
   const ctx = { marketContext, reliabilityByHorizon, moveStats, todStats, nowIso, leadLagSignals, leaderReturns, swingTimeStats, recentEvents, tvlSeries, reliabilityByRegime, srLevels, srBreakStats, marketReturn, yieldSpreadChange, qualityScores, rotationStatus, callFlipData, longTermBottomStatus, techniquePriors, comboReliability, directionBaselines, xsCoefficients, decileEvidence };
 
+  // One volatility factor per class for the volatility band (applyBandCalibration).
+  const bandCalibration = {};
   let cryptoBoards = { breakout: [], breakdown: [], universe: 0 };
   let cryptoStableValue = [];
   let btc = null, eth = null;
@@ -6313,6 +6392,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
       // daily fetch failed simply wait for a later build; the separate scalp
       // view handles genuinely intraday observations.
       .filter((m) => m && m.inputInterval === '1d');
+    bandCalibration.crypto = applyBandCalibration(metrics);
     cryptoBoards = rankBoards(metrics, 'crypto', reliability, ctx);
   }
 
@@ -6329,6 +6409,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
         if (m) metrics.push(m);
       } else stockFailures.push(r && r._item);
     }
+    bandCalibration.stock = applyBandCalibration(metrics);
     stockBoards = rankBoards(metrics, 'stock', reliability, ctx);
   }
 
@@ -6435,6 +6516,9 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
       crypto_daily_by_source: cryptoDailyBySource,
       trefis_overrides: Object.keys(overrides).length
     },
+    // The factor each class's band was scaled by this build, and how many past
+    // 7-day moves it was learned from. 1.0 means the raw 90-day window.
+    bandCalibration,
     overview: {
       btc, eth,
       global: globalR.status === 'fulfilled' ? globalR.value : null,

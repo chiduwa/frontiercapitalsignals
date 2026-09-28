@@ -116,6 +116,14 @@ def candidate_grid(target):
                 for c in (True, False) if not (s == 'trailing' and not c)]
         grid += [make('magnitude', 'harx', groups=g) for g in
                  ([], ['volume'], ['volatility'], ['derivatives', 'funding'], ['market'], ['calendar'])]
+        # Calibrated toward the asset's class (2026-09-27, docs/MODEL_OVERFITTING.md).
+        # The per-asset factor above is one mean over up to 730 fat-tailed
+        # ratios, and measured walk-forward it is mostly noise: the
+        # empirical-Bayes weight an asset's own factor earns is 0.27-0.44 for
+        # GARCH and zero for HAR, EWMA and trailing volatility. These shrink it
+        # by that weight instead; they still have to win forward to be promoted.
+        grid += [make('magnitude', 'scale', source=s, calibrated='shrunk')
+                 for s in ('garchWeekday', 'garch', 'harWeekday', 'ewma', 'harEqual', 'trailing')]
         return grid
     return [make('timing', 'firingFrequency', window=n, weekday=w) for n in (30, 90, 365) for w in (False, True)]
 
@@ -133,7 +141,8 @@ def describe(spec):
     if f == 'lightgbm': return f"boosted trees on {groups()}"
     if f == 'scale':
         name = SOURCE_LABELS[p['source']]
-        return name + (', calibrated' if p.get('calibrated') else '') + (' (production)' if spec == BENCHMARKS['magnitude'] else '')
+        cal = ', calibrated toward its class' if p.get('calibrated') == 'shrunk' else (', calibrated' if p.get('calibrated') else '')
+        return name + cal + (' (production)' if spec == BENCHMARKS['magnitude'] else '')
     if f == 'harx': return 'HAR regression' + (f" + {groups()}" if p.get('groups') else '')
     if f == 'lstm': return 'LSTM on the 30-day sequence'
     if f == 'uniform': return 'no firing preferred'
@@ -253,8 +262,49 @@ def fit_lstm_magnitude(train, test, h):
     return [{'sigma': float(c * x)} for x in m[len(seen):]], None
 
 
-def fit_predict(spec, train, test, h, klines=None):
-    """(forecasts for `test`, weights or None). Only `train` is ever fitted on."""
+def log_scale_estimate(train, source, h):
+    """(log k, variance of log k, labels) for the QLIKE-optimal variance
+    factor k = mean(log-move^2 / sigma^2) over one asset's matured labels, or
+    None under 30. The variance is the delta-method one, with overlapping
+    multi-day labels counted once per h."""
+    rr = [log_move(r) ** 2 / s ** 2 for r in train for s in [base_sigma(r, source, h)] if s]
+    if len(rr) < 30: return None
+    a = np.array(rr); k = float(a.mean())
+    if not k > 0: return None
+    return (math.log(k), float(a.var(ddof=1) / max(len(a) / h, 2)) / (k * k), len(a))
+
+
+def pool_scales(estimates):
+    """(mu, tau2): the class's log factor and the between-asset variance of
+    it (DerSimonian-Laird), from each asset's estimate. None under 3 assets.
+    tau2 = 0 means assets differ by no more than sampling noise."""
+    est = [e for e in estimates if e and e[1] > 0]
+    if len(est) < 3: return None
+    y = np.array([e[0] for e in est]); v = np.array([e[1] for e in est])
+    w = 1 / v; mu0 = float(np.sum(w * y) / np.sum(w))
+    q = float(np.sum(w * (y - mu0) ** 2)); c = float(np.sum(w) - np.sum(w ** 2) / np.sum(w))
+    tau2 = max(0.0, (q - (len(y) - 1)) / c) if c > 0 else 0.0
+    wt = 1 / (v + tau2)
+    return (float(np.sum(wt * y) / np.sum(wt)), tau2)
+
+
+def shrunk_scale(own, pool):
+    """sqrt of the variance factor: the asset's own log factor pulled toward
+    its class by the weight its own precision earns, tau2 / (tau2 + se2).
+    Without a pool it is the asset's own factor; without enough labels of its
+    own, the class's."""
+    if pool is None: return math.sqrt(math.exp(own[0])) if own else 1.0
+    mu, tau2 = pool
+    if own is None: return math.sqrt(math.exp(mu))
+    y, se2, _ = own
+    w = tau2 / (tau2 + se2) if tau2 + se2 > 0 else 0.0
+    return math.sqrt(math.exp(mu + w * (y - mu)))
+
+
+def fit_predict(spec, train, test, h, klines=None, pool=None):
+    """(forecasts for `test`, weights or None). Only `train` is ever fitted on;
+    `pool` is the class's calibration estimate from labels matured by the same
+    date (Tournament.calibration_pool), used only by shrunk calibration."""
     fam, p = spec['family'], spec['params']
     if spec['target'] == 'direction':
         u = np.array([r['target'] > 0 for r in train], dtype=float)
@@ -293,7 +343,9 @@ def fit_predict(spec, train, test, h, klines=None):
         if fam == 'scale':
             src = p['source']
             c = 1.0
-            if p.get('calibrated'):
+            if p.get('calibrated') == 'shrunk':
+                c = shrunk_scale(log_scale_estimate(train, src, h), pool)
+            elif p.get('calibrated'):
                 ratios = [log_move(r) ** 2 / s ** 2 for r in train for s in [base_sigma(r, src, h)] if s]
                 c = math.sqrt(float(np.mean(ratios))) if len(ratios) >= 30 else 1.0
             out = []
@@ -480,6 +532,7 @@ class Tournament:
         self.outcome = {(r['symbol'], r['horizon'], r['date']): r['target'] for r in data['rows'] if r['target'] is not None}
         self.day_outcome = {(s, d['date']): d['cheapest'] for s, ds in self.days.items() for d in ds}
         self._bt = {}
+        self._pool = {}
         self.symbols = [s for s in data['symbols'] if (s, 1) in self.rows]
         self.cls_of = dict(data.get('assetClassBySymbol') or {})
         self.by_class = {}
@@ -500,6 +553,23 @@ class Tournament:
         return self.cls_of.get(sym, 'crypto')
 
     def pooled_key(self, sym): return POOLED_BY_CLASS[self.cls(sym)]
+
+    def calibration_pool(self, sym, source, h, asof):
+        """The class's calibration estimate for `source` at horizon h, from
+        every class member's labels matured by `asof` and nothing later.
+        Cached: the screen asks for the same (class, date) once per asset."""
+        cls = self.cls(sym)
+        key = (cls, source, h, asof)
+        if key not in self._pool:
+            self._pool[key] = pool_scales([log_scale_estimate(matured(self.rows.get((s, h), []), asof), source, h)
+                                           for s in self.by_class.get(cls, [])])
+        return self._pool[key]
+
+    def pool_for(self, spec, sym, h, asof):
+        p = spec['params']
+        if spec['family'] == 'scale' and p.get('calibrated') == 'shrunk':
+            return self.calibration_pool(sym, p['source'], h, asof)
+        return None
 
     def is_pooled(self, sym): return sym in POOLED_BY_CLASS.values()
 
@@ -660,7 +730,7 @@ class Tournament:
                 block = test[k:k + step]
                 train = matured(rows, block[0]['date'])
                 if len(train) < 150: continue
-                fc, _ = fit_predict(spec, train, block, h)
+                fc, _ = fit_predict(spec, train, block, h, pool=self.pool_for(spec, sym, h, block[0]['date']))
                 for r, f in zip(block, fc):
                     l = loss(target, f, r['target'])
                     if l is not None: out[r['date']] = l
@@ -740,7 +810,7 @@ class Tournament:
                 train = matured(rows, latest)
                 if len(train) < 150: continue
                 for spec in self.active(sym, target, h):
-                    fc, w = fit_predict(spec, train, open_rows, h)
+                    fc, w = fit_predict(spec, train, open_rows, h, pool=self.pool_for(spec, sym, h, latest))
                     # A size forecast of nothing can never be scored; log none.
                     if target == 'magnitude' and not fc[0].get('sigma'): continue
                     self.emit(spec, sym, target, h, open_rows[0]['targetDate'], fc[0], as_of=latest)

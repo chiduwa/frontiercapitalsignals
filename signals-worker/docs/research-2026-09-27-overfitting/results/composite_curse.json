@@ -1,0 +1,74 @@
+{
+ "crypto|24h|beat class": {
+  "assets": 15,
+  "classRate2124": 0.4252466797118947,
+  "raw2124": 0.46627617710829167,
+  "shrunkForecast": 0.453552974622174,
+  "actual2526": 0.4275766016713092,
+  "actualSE": 0.01002228982330628,
+  "medianTrainN": 1267.0
+ },
+ "crypto|24h|trailed class": {
+  "assets": 16,
+  "classRate2124": 0.4252466797118947,
+  "raw2124": 0.3500598154466177,
+  "shrunkForecast": 0.38348524004227724,
+  "actual2526": 0.3586504390694808,
+  "actualSE": 0.03494482648749195,
+  "medianTrainN": 558.0
+ },
+ "stock|24h|beat class": {
+  "assets": 43,
+  "classRate2124": 0.3765457136022797,
+  "raw2124": 0.4482731684034981,
+  "shrunkForecast": 0.41465953327299604,
+  "actual2526": 0.41664878781377385,
+  "actualSE": 0.004676902418489927,
+  "medianTrainN": 804.0
+ },
+ "stock|24h|trailed class": {
+  "assets": 46,
+  "classRate2124": 0.3765457136022797,
+  "raw2124": 0.2902410434315977,
+  "shrunkForecast": 0.34281689854432307,
+  "actual2526": 0.34334072133790045,
+  "actualSE": 0.005636215727999345,
+  "medianTrainN": 805.5
+ },
+ "crypto|168h|beat class": {
+  "assets": 7,
+  "classRate2124": 0.471885940861349,
+  "raw2124": 0.5509021575693746,
+  "shrunkForecast": 0.501125844470716,
+  "actual2526": 0.4500818330605565,
+  "actualSE": 0.018361285960251852,
+  "medianTrainN": 180.0
+ },
+ "crypto|168h|trailed class": {
+  "assets": 9,
+  "classRate2124": 0.471885940861349,
+  "raw2124": 0.31432259620036257,
+  "shrunkForecast": 0.437351518056123,
+  "actual2526": 0.31045241809672386,
+  "actualSE": 0.05991070023521566,
+  "medianTrainN": 140.0
+ },
+ "stock|168h|beat class": {
+  "assets": 14,
+  "classRate2124": 0.44439000489955904,
+  "raw2124": 0.5256690602673361,
+  "shrunkForecast": 0.4732886367859182,
+  "actual2526": 0.4215210355987055,
+  "actualSE": 0.014722127068440272,
+  "medianTrainN": 166.0
+ },
+ "stock|168h|trailed class": {
+  "assets": 17,
+  "classRate2124": 0.44439000489955904,
+  "raw2124": 0.3691872402670242,
+  "shrunkForecast": 0.41835196750123427,
+  "actual2526": 0.4505928853754941,
+  "actualSE": 0.012277101519358659,
+  "medianTrainN": 167.0
+ }
+}

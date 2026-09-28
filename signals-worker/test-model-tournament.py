@@ -349,5 +349,71 @@ class Screened(unittest.TestCase):
         self.assertFalse([x for x in out['forecasts'] if x['model_id'] == lstm_id], 'nothing logged under its name')
 
 
+class ShrunkCalibration(unittest.TestCase):
+    """2026-09-27 (docs/MODEL_OVERFITTING.md): an asset's own calibration
+    factor is shrunk toward its class by the weight its precision earns."""
+
+    def assets(self, true_k_by_symbol, n=900, seed=11):
+        rows = []
+        for j, (sym, k) in enumerate(true_k_by_symbol.items()):
+            rng = np.random.default_rng(seed + j)
+            start = np.datetime64('2023-01-01')
+            for i in range(n):
+                d = str(start + np.timedelta64(i, 'D'))
+                # the model reports vol 0.02; the truth is sqrt(k) times that
+                move = rng.normal(0, 0.02 * math.sqrt(k))
+                rows.append({'symbol': sym, 'date': d, 'targetDate': str(start + np.timedelta64(i + 1, 'D')), 'horizon': 1,
+                             'target': math.expm1(move) * 100, 'values': {'dailyVol': 0.02}})
+        return rows
+
+    def pool_at(self, rows, asof, source='trailing', h=1):
+        syms = sorted({r['symbol'] for r in rows})
+        by = {s: [r for r in rows if r['symbol'] == s] for s in syms}
+        return mt.pool_scales([mt.log_scale_estimate(mt.matured(by[s], asof), source, h) for s in syms]), by
+
+    def test_noise_only_differences_pool_to_the_class(self):
+        rows = self.assets({f'S{i}': 1.5 for i in range(8)})
+        asof = rows[-2]['date']
+        pool, by = self.pool_at(rows, asof)
+        mu, tau2 = pool
+        self.assertAlmostEqual(math.exp(mu), 1.5, delta=0.15)
+        for s, rs in by.items():
+            own = mt.log_scale_estimate(mt.matured(rs, asof), 'trailing', 1)
+            shrunk = mt.shrunk_scale(own, pool) ** 2
+            # pulled closer to the class than the asset's own noisy estimate
+            self.assertLessEqual(abs(math.log(shrunk) - mu), abs(own[0] - mu) + 1e-12)
+
+    def test_real_differences_are_kept(self):
+        rows = self.assets({'A': 1.0, 'B': 1.0, 'C': 1.0, 'D': 4.0, 'E': 4.0, 'F': 4.0}, n=1500)
+        asof = rows[-2]['date']
+        pool, by = self.pool_at(rows, asof)
+        self.assertGreater(pool[1], 0.1, 'a four-fold difference is not sampling noise')
+        for s, want in (('A', 1.0), ('D', 4.0)):
+            got = mt.shrunk_scale(mt.log_scale_estimate(mt.matured(by[s], asof), 'trailing', 1), pool) ** 2
+            self.assertAlmostEqual(got, want, delta=0.35 * want)
+
+    def test_the_class_estimate_never_sees_later_labels(self):
+        rows = self.assets({f'S{i}': 1.0 + 0.2 * i for i in range(5)})
+        asof = rows[600]['date']
+        early, _ = self.pool_at([r for r in rows if r['date'] <= asof], asof)
+        full, _ = self.pool_at(rows, asof)
+        self.assertEqual(early, full)
+
+    def test_the_tournament_issues_it_with_the_pool_from_its_own_date(self):
+        rows = self.assets({f'S{i}': 1.5 for i in range(4)})
+        asof = rows[-1]['date']
+        for r in rows:
+            if r['date'] == asof: r['target'] = None
+        t = mt.Tournament({'symbols': [f'S{i}' for i in range(4)], 'rows': rows, 'klines': {}}, [], [], asof, '2026-01-01T00:00:00Z')
+        spec = mt.make('magnitude', 'scale', source='trailing', calibrated='shrunk')
+        self.assertIn(spec['id'], [c['id'] for c in mt.candidate_grid('magnitude')])
+        pool = t.pool_for(spec, 'S0', 1, asof)
+        self.assertIsNotNone(pool)
+        test = [r for r in t.rows[('S0', 1)] if r['date'] == asof]
+        fc, _ = mt.fit_predict(spec, mt.matured(t.rows[('S0', 1)], asof), test, 1, pool=pool)
+        self.assertAlmostEqual(fc[0]['sigma'], 0.02 * math.sqrt(1.5), delta=0.02 * 0.2)
+        self.assertEqual(mt.describe(spec), 'trailing volatility, calibrated toward its class')
+
+
 if __name__ == '__main__':
     unittest.main()

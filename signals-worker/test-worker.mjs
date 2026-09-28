@@ -1038,6 +1038,16 @@ check('14/20 clears the sample-count floor but not significance: no promotion ab
 check('16/20 clears both bars: multiplier actually reflects the measured accuracy', mod.reliabilityMultiplier(significantRec, 'X', 'y') === mod.clamp(0.5 + 0.8, 0.5, 1.5), mod.reliabilityMultiplier(significantRec, 'X', 'y'));
 const classPrior = { byAssetClass: { crypto: { y: { accuracy: 0.6, total: 100 } } }, overall: {} };
 check('asset-class prior shrinks a significant asset-specific record toward the broader technique baseline instead of fully trusting the raw rate', mod.reliabilityMultiplierForAssetClass(significantRec, 'X', 'y', undefined, undefined, 'crypto', classPrior) < mod.reliabilityMultiplier(significantRec, 'X', 'y'));
+// 2026-09-27: the class record carries 400 outcomes of weight (measured; see
+// RELIABILITY_PRIOR_SAMPLES). An asset whose 60-outcome record looks mildly
+// bad, against a deep, neutral class record, is no longer demoted on it.
+{
+  const deepPrior = { byAssetClass: { crypto: { y: { accuracy: 0.5, total: 5000 } } }, overall: {} };
+  const mildlyBad = { 'X|y': { accuracy: 0.43, correct: 26, total: 60 } };
+  const w = mod.reliabilityMultiplierForAssetClass(mildlyBad, 'X', 'y', undefined, undefined, 'crypto', deepPrior);
+  check('a thin asset record barely moves the weight away from the class record (prior worth 400 outcomes)',
+    mod.RELIABILITY_PRIOR_SAMPLES === 400 && w > 0.97 && w <= 1, String(w));
+}
 
 console.log('\n== regimeOf: trend/chop classification off swing structure ==');
 check('structure 1 (higher-highs/higher-lows): trending', mod.regimeOf(1) === 'trending');
@@ -1275,8 +1285,51 @@ const thinMoveStats = { 'BTC|24': { meanPct: 1, stdevPct: 5, n: 4 } }; // below 
 const stillMethodology = mod.predictedRange(100, 3, 60, 1, thinMoveStats, 'BTC', 2);
 check('learned move stats below sample threshold: still falls back to methodology, not overfit', stillMethodology.basis === 'methodology', JSON.stringify(stillMethodology));
 
+console.log('\n== band calibration: one fixed window, one factor per class, learned only from the past ==');
+// 2026-09-27 (docs/MODEL_OVERFITTING.md): the per-asset lookback choice was an
+// overfit, so the band uses a fixed 90-day window times one class factor.
+{
+  let seed = 7;
+  const rand = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return (seed + 0.5) / 4294967296; };
+  const gauss = () => Math.sqrt(-2 * Math.log(rand())) * Math.cos(2 * Math.PI * rand());
+  const walk = (days, dailyPct) => { const c = [100]; for (let i = 1; i < days; i++) c.push(c[i - 1] * (1 + dailyPct / 100 * gauss())); return c; };
+  const calm = walk(1000, 2);
+  check('bandCalibrationSample: too short a history returns null rather than a factor from a handful of moves', mod.bandCalibrationSample(calm.slice(0, 60)) === null);
+  const sample = mod.bandCalibrationSample(calm);
+  check('one 7-day move a week over the last two years (104 of them), not every overlapping day', sample && sample.n === 104, JSON.stringify(sample));
+  check('a walk whose daily volatility never changes scores about 1 (the band is as wide as the moves that followed)', sample && sample.sumZ2 / sample.n > 0.6 && sample.sumZ2 / sample.n < 1.5, JSON.stringify(sample));
+  const reshuffled = calm.slice();
+  for (let i = calm.length - 6; i < calm.length - 1; i++) reshuffled[i] = calm[i] * (i % 2 ? 1.8 : 0.4);
+  const reshuffledSample = mod.bandCalibrationSample(reshuffled);
+  check('no look-ahead: rewriting the days inside the last week (its end kept) changes nothing, so no volatility read used them', reshuffledSample && reshuffledSample.n === sample.n && Math.abs(reshuffledSample.sumZ2 - sample.sumZ2) < 1e-9, JSON.stringify({ sample, reshuffledSample }));
+  const jumped = calm.slice(); jumped[jumped.length - 1] *= 11;
+  const jumpedSample = mod.bandCalibrationSample(jumped);
+  const added = jumpedSample.sumZ2 - sample.sumZ2;
+  check('one wild week counts as at most 50 ordinary ones, so a data glitch cannot set the whole class factor', added > 40 && added <= 50, String(added));
+
+  const thin = [{ bandVol90: 2, bandCal: { sumZ2: 400, n: 250 } }, { bandVol90: 3, bandCal: { sumZ2: 300, n: 249 } }];
+  const thinResult = mod.applyBandCalibration(thin);
+  check('applyBandCalibration: under 500 pooled moves keeps factor 1, the plain 90-day window, rather than guessing', thinResult.factor === 1 && thinResult.samples === 499 && thin[0].bandVolPct === 2 && thin[1].bandVolPct === 3, JSON.stringify({ thinResult, thin }));
+  const pooledMetrics = [
+    { bandVol90: 2, bandCal: { sumZ2: 400, n: 300 } },
+    { bandVol90: 4, bandCal: { sumZ2: 320, n: 300 } },
+    { bandVol90: null, bandCal: null },
+    null
+  ];
+  const pooledResult = mod.applyBandCalibration(pooledMetrics);
+  check('pools the whole class into ONE factor (720 / 600 = 1.2), not one per asset', Math.abs(pooledResult.factor - 1.2) < 1e-12 && pooledResult.samples === 600 && pooledResult.lookbackDays === 90, JSON.stringify(pooledResult));
+  check('each band volatility is its 90-day volatility x sqrt(factor)', Math.abs(pooledMetrics[0].bandVolPct - 2 * Math.sqrt(1.2)) < 1e-12 && Math.abs(pooledMetrics[1].bandVolPct - 4 * Math.sqrt(1.2)) < 1e-12);
+  check('an asset without 90 days of history gets no band volatility (its band falls back to volPct)', pooledMetrics[2].bandVolPct === null);
+  check('the per-asset tallies are dropped once pooled, so they never ship in the payload', pooledMetrics.every(m => !m || !Object.hasOwn(m, 'bandCal')));
+  const rangeCalls = workerSource.split('\n').filter(line => line.includes('predictedRange(') && !line.includes('function predictedRange'));
+  check('every range the engine builds, logged or shown, reads the calibrated band volatility first', rangeCalls.length >= 3 && rangeCalls.every(line => /bandVolPct \?\? (x\.)?m\.volPct/.test(line)), rangeCalls.join('\n'));
+}
+
 console.log('\n== range + topIndicator flow through buildPayload end-to-end ==');
 check('every ranked row carries a range field (object or null, never a crash)', built.crypto.breakout.concat(built.crypto.breakdown, built.stocks.breakout, built.stocks.breakdown).every(r => 'range' in r));
+check('the payload reports each class band factor and how many past moves set it', ['crypto', 'stock'].every(k => built.bandCalibration && built.bandCalibration[k] && built.bandCalibration[k].factor > 0 && Number.isInteger(built.bandCalibration[k].samples) && built.bandCalibration[k].lookbackDays === 90), JSON.stringify(built.bandCalibration));
+check('a class with too few past moves keeps factor 1', ['crypto', 'stock'].every(k => built.bandCalibration[k].samples >= 500 || built.bandCalibration[k].factor === 1), JSON.stringify(built.bandCalibration));
+check('no board row carries the internal band tallies', !JSON.stringify(built).includes('"bandCal"'));
 check('every ranked row carries a topIndicator field (object or null)', built.crypto.breakout.concat(built.crypto.breakdown, built.stocks.breakout, built.stocks.breakdown).every(r => 'topIndicator' in r));
 
 console.log('\n== dwellAtExtreme: how long, not just whether, an asset sits at an extreme ==');

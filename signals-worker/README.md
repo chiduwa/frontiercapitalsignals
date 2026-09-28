@@ -718,6 +718,16 @@ same way. The dashboard shows the method in force per asset, challengers'
 progress and how each asset's models weigh their inputs. Rules, timelines
 and what is not wired yet: [docs/MODEL_TOURNAMENT.md](docs/MODEL_TOURNAMENT.md).
 
+**Overfitting audit** (2026-09-27). Every per-asset fit was checked out of
+sample: the regression's in-sample R² against what noise gives, and each
+per-asset factor, window, model choice and weight walk-forward against its
+pooled alternative. Per-asset choices mostly fitted noise. The tournament
+gained size candidates calibrated toward their class, the volatility band uses
+one 90-day window with one factor per class, and technique weights trust an
+asset's own record only in proportion to its depth (prior of 400 outcomes).
+Numbers, and the one correction still waiting on a decision:
+[docs/MODEL_OVERFITTING.md](docs/MODEL_OVERFITTING.md).
+
 **Missed moves, and the big-move watch.** Of 364 moves of 12%+ in 48 h
 that the retrospective logged in September 2026, 49% were in coins outside
 the ranked universe and 51 sat on a board with direction withheld or wrong.

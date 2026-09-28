@@ -1,0 +1,82 @@
+{
+ "crypto|1": {
+  "assets": 335,
+  "isR2": 0.030173126331021316,
+  "adjR2": 0.009900650543285372,
+  "nullR2": 0.02295684113865932,
+  "oosR2": -0.014208313742670509,
+  "oosPositive": 0.19701492537313434,
+  "spearmanIsOos": 0.37672171648174874,
+  "medianN": 963.0,
+  "medianP": 23.0,
+  "shareIsAboveTwiceNull": 0.2417910447761194,
+  "correction": {
+   "rawR2": -0.000840382900110237,
+   "shrunkR2": -2.2301480582687105e-05,
+   "pooledSlopeR2": -1.1843103034259173e-05,
+   "medianSlope": 0.08456762881932252,
+   "assetsImproved": 274,
+   "assets": 335
+  }
+ },
+ "crypto|7": {
+  "assets": 201,
+  "isR2": 0.11973388826503895,
+  "adjR2": 0.030350804848470747,
+  "nullR2": 0.08650519031141868,
+  "oosR2": -0.03307226150470299,
+  "oosPositive": 0.0945273631840796,
+  "spearmanIsOos": 0.24473474213092952,
+  "medianN": 290.0,
+  "medianP": 24.0,
+  "shareIsAboveTwiceNull": 0.05472636815920398,
+  "correction": {
+   "rawR2": -0.02479494087623757,
+   "shrunkR2": -0.00035447078925865405,
+   "pooledSlopeR2": -8.214835065367687e-05,
+   "medianSlope": 0.0,
+   "assetsImproved": 181,
+   "assets": 201
+  }
+ },
+ "stock|1": {
+  "assets": 291,
+  "isR2": 0.01239252376098765,
+  "adjR2": 0.0007550983436411807,
+  "nullR2": 0.011619462599854757,
+  "oosR2": -0.016281381688433294,
+  "oosPositive": 0.048109965635738834,
+  "spearmanIsOos": 0.12701498424633187,
+  "medianN": 1378.0,
+  "medianP": 17.0,
+  "shareIsAboveTwiceNull": 0.048109965635738834,
+  "correction": {
+   "rawR2": -0.022183878092953968,
+   "shrunkR2": -0.000418937578991585,
+   "pooledSlopeR2": -0.00037599871051474665,
+   "medianSlope": 0.05291264327140144,
+   "assetsImproved": 279,
+   "assets": 291
+  }
+ },
+ "stock|5": {
+  "assets": 291,
+  "isR2": 0.05981679674155427,
+  "adjR2": 0.0019418137781546108,
+  "nullR2": 0.058394160583941604,
+  "oosR2": -0.011771774295494586,
+  "oosPositive": 0.29553264604810997,
+  "spearmanIsOos": 0.21585155028755926,
+  "medianN": 275.0,
+  "medianP": 17.0,
+  "shareIsAboveTwiceNull": 0.01718213058419244,
+  "correction": {
+   "rawR2": -0.022565340004628176,
+   "shrunkR2": -0.0025459852366518376,
+   "pooledSlopeR2": -0.004337711928821708,
+   "medianSlope": 0.14564870705871735,
+   "assetsImproved": 202,
+   "assets": 291
+  }
+ }
+}

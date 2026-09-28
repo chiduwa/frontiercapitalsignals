@@ -138,9 +138,12 @@ searched:
   coins as leaders; return lags + calendar; market + momentum; everything),
   plus boosted trees on two sets.
 - **Size:** GARCH + weekday, GARCH, seasonal HAR, EWMA, HAR and trailing
-  volatility, each raw or calibrated per asset (the QLIKE-optimal scale on
-  that asset's own history); and a HAR regression per asset with extra inputs
-  (volume, volatility, derivatives + funding, market, calendar).
+  volatility, each raw, calibrated per asset (the QLIKE-optimal scale on
+  that asset's own history), or calibrated toward its class (that scale pulled
+  toward the class's by empirical Bayes, in proportion to how much the
+  asset's own estimate can be trusted; see `MODEL_OVERFITTING.md`); and a HAR
+  regression per asset with extra inputs (volume, volatility, derivatives +
+  funding, market, calendar).
 - **Timing:** cheapest-firing frequency over 30 / 90 / 365 days, with and
   without the weekday.
 

@@ -1,0 +1,28 @@
+
+=== crypto 1d: QLIKE difference vs one fixed model (GARCH + weekday, shrunk calibration); negative = better ===
+  perAsset    +0.0337  t +2.2  (891 dates)
+  shrunkPick  +0.0016  t +1.4  (891 dates)
+  classBest   +0.0008  t +1.2  (891 dates)
+  combo       -0.0029  t -0.2  (891 dates)
+  per-asset picks: [('garchWeekday', 445), ('ewma', 219), ('garch', 160)]
+
+=== crypto 7d: QLIKE difference vs one fixed model (GARCH + weekday, shrunk calibration); negative = better ===
+  perAsset    +0.0905  t +2.6  (128 dates)
+  shrunkPick  +0.0324  t +2.5  (128 dates)
+  classBest   +0.0302  t +2.4  (128 dates)
+  combo       +0.0989  t +1.9  (128 dates)
+  per-asset picks: [('garch', 339), ('garchWeekday', 323), ('trailing', 227)]
+
+=== stock 1d: QLIKE difference vs one fixed model (GARCH + weekday, shrunk calibration); negative = better ===
+  perAsset    +0.0227  t +2.2  (554 dates)
+  shrunkPick  +0.0102  t +2.9  (554 dates)
+  classBest   +0.0090  t +2.9  (554 dates)
+  combo       -0.0122  t -0.8  (554 dates)
+  per-asset picks: [('garchWeekday', 525), ('ewma', 231), ('garch', 189)]
+
+=== stock 5d: QLIKE difference vs one fixed model (GARCH + weekday, shrunk calibration); negative = better ===
+  perAsset    +0.0212  t +1.8  (111 dates)
+  shrunkPick  +0.0059  t +1.1  (111 dates)
+  classBest   +0.0050  t +0.8  (111 dates)
+  combo       -0.0079  t -0.5  (111 dates)
+  per-asset picks: [('garchWeekday', 398), ('garch', 303), ('trailing', 236)]
