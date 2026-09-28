@@ -548,7 +548,8 @@ export async function logRun(env, runAt, log) {
 export async function loadMoveStats(env) {
   const rows = await d1(env, `
     SELECT symbol, horizon_minutes / 60 AS horizon_hours, COUNT(*) AS n,
-           SUM(return_pct) AS sum_pct, SUM(return_pct * return_pct) AS sum_pct_sq
+           SUM(return_pct) AS sum_pct, SUM(return_pct * return_pct) AS sum_pct_sq,
+           SUM(ABS(return_pct)) AS sum_abs_pct
     FROM forecast_outcomes
     WHERE series_kind = 'market' AND aggregated = 1 AND return_pct IS NOT NULL
       AND model_version IN (${WEIGHT_INDEPENDENT_MODEL_VERSIONS.map(() => "?").join(", ")}) AND label_version = ?
@@ -558,7 +559,10 @@ export async function loadMoveStats(env) {
   for (const r of rows) {
     const mean = r.sum_pct / r.n;
     const variance = Math.max(0, r.sum_pct_sq / r.n - mean * mean);
-    out[`${r.symbol}|${r.horizon_hours}`] = { meanPct: mean, stdevPct: Math.sqrt(variance), n: r.n };
+    // meanAbsPct: the asset's typical move, which predictedRange scales to the
+    // width that contains 68% (docs/CLASSIC_MODELS.md); robust where the sd is not.
+    out[`${r.symbol}|${r.horizon_hours}`] = { meanPct: mean, stdevPct: Math.sqrt(variance),
+      meanAbsPct: Number.isFinite(r.sum_abs_pct) ? r.sum_abs_pct / r.n : null, n: r.n };
   }
   return out;
 }

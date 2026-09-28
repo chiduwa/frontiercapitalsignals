@@ -1307,29 +1307,65 @@ console.log('\n== band calibration: one fixed window, one factor per class, lear
   const added = jumpedSample.sumZ2 - sample.sumZ2;
   check('one wild week counts as at most 50 ordinary ones, so a data glitch cannot set the whole class factor', added > 40 && added <= 50, String(added));
 
-  const thin = [{ bandVol90: 2, bandCal: { sumZ2: 400, n: 250 } }, { bandVol90: 3, bandCal: { sumZ2: 300, n: 249 } }];
+  // 2026-09-28 (docs/CLASSIC_MODELS.md): widths are set by coverage, not
+  // variance. The class factor is the 68th percentile of pooled |z|.
+  const zs = (from, to, count) => Array.from({ length: count }, (_, i) => from + (to - from) * i / (count - 1));
+  const thin = [{ bandVol90: 2, bandCal: { sumZ2: 400, n: 250, absZ: zs(0, 1, 250), typical: { 1: zs(0, 2, 300), 7: [] } } },
+                { bandVol90: 3, bandCal: { sumZ2: 300, n: 249, absZ: zs(0, 1, 249), typical: { 1: [], 7: [] } } }];
   const thinResult = mod.applyBandCalibration(thin);
-  check('applyBandCalibration: under 500 pooled moves keeps factor 1, the plain 90-day window, rather than guessing', thinResult.factor === 1 && thinResult.samples === 499 && thin[0].bandVolPct === 2 && thin[1].bandVolPct === 3, JSON.stringify({ thinResult, thin }));
+  check('applyBandCalibration: under 500 pooled moves keeps factor 1 (the plain 90-day window) and no historical multiplier, rather than guessing',
+    thinResult.factor === 1 && thinResult.samples === 499 && thin[0].bandVolPct === 2 && thin[1].bandVolPct === 3
+      && thinResult.historical.multiplier[24] === null && thinResult.historical.multiplier[168] === null, JSON.stringify({ thinResult, thin }));
   const pooledMetrics = [
-    { bandVol90: 2, bandCal: { sumZ2: 400, n: 300 } },
-    { bandVol90: 4, bandCal: { sumZ2: 320, n: 300 } },
+    { bandVol90: 2, bandCal: { sumZ2: 400, n: 300, absZ: zs(0, 1, 300), typical: { 1: zs(0, 2, 300), 7: zs(0, 2, 300) } } },
+    { bandVol90: 4, bandCal: { sumZ2: 320, n: 300, absZ: zs(1, 2, 300), typical: { 1: zs(0, 2, 300), 7: zs(0, 3, 300) } } },
     { bandVol90: null, bandCal: null },
     null
   ];
   const pooledResult = mod.applyBandCalibration(pooledMetrics);
-  check('pools the whole class into ONE factor (720 / 600 = 1.2), not one per asset', Math.abs(pooledResult.factor - 1.2) < 1e-12 && pooledResult.samples === 600 && pooledResult.lookbackDays === 90, JSON.stringify(pooledResult));
-  check('each band volatility is its 90-day volatility x sqrt(factor)', Math.abs(pooledMetrics[0].bandVolPct - 2 * Math.sqrt(1.2)) < 1e-12 && Math.abs(pooledMetrics[1].bandVolPct - 4 * Math.sqrt(1.2)) < 1e-12);
+  const pooledZ = [...zs(0, 1, 300), ...zs(1, 2, 300)];
+  const within = pooledZ.filter((z) => z <= pooledResult.factor).length / pooledZ.length;
+  check('pools the whole class into ONE width: the one that contains 68% of its standardized moves, not one per asset',
+    Math.abs(within - 0.68) <= 1 / 600 && pooledResult.samples === 600 && pooledResult.lookbackDays === 90 && pooledResult.coverage === 0.68
+      && Math.abs(pooledResult.varianceFactor - 1.2) < 1e-12, JSON.stringify(pooledResult));
+  check('each band volatility is its 90-day volatility x that coverage factor', Math.abs(pooledMetrics[0].bandVolPct - 2 * pooledResult.factor) < 1e-12 && Math.abs(pooledMetrics[1].bandVolPct - 4 * pooledResult.factor) < 1e-12);
+  const k24 = pooledResult.historical.multiplier[24], k168 = pooledResult.historical.multiplier[168];
+  check('the historical band gets one multiplier per horizon: the 68th percentile of |move| / mean |move|, set on every metric',
+    Math.abs([...zs(0, 2, 300), ...zs(0, 2, 300)].filter((v) => v <= k24).length / 600 - 0.68) <= 1 / 600
+      && k168 > k24 && pooledMetrics[0].bandHistK[24] === k24 && pooledMetrics[1].bandHistK[168] === k168, JSON.stringify(pooledResult.historical));
   check('an asset without 90 days of history gets no band volatility (its band falls back to volPct)', pooledMetrics[2].bandVolPct === null);
   check('the per-asset tallies are dropped once pooled, so they never ship in the payload', pooledMetrics.every(m => !m || !Object.hasOwn(m, 'bandCal')));
   const rangeCalls = workerSource.split('\n').filter(line => line.includes('predictedRange(') && !line.includes('function predictedRange'));
-  check('every range the engine builds, logged or shown, reads the calibrated band volatility first', rangeCalls.length >= 3 && rangeCalls.every(line => /bandVolPct \?\? (x\.)?m\.volPct/.test(line)), rangeCalls.join('\n'));
+  check('every range the engine builds, logged or shown, reads the calibrated band volatility first and the class multipliers',
+    rangeCalls.length >= 3 && rangeCalls.every(line => /bandVolPct \?\? (x\.)?m\.volPct, (x\.)?m\.bandHistK\)/.test(line)), rangeCalls.join('\n'));
+  // Fat tails are why a +-1 sd band over-covers: the same volatility, drawn
+  // from a fat-tailed walk, needs a narrower band to contain 68%.
+  const t3 = () => { const z = gauss(); let c = 0; for (let i = 0; i < 3; i++) { const g = gauss(); c += g * g; } return z / Math.sqrt(c / 3); };
+  const walkWith = (days, pct, draw) => { const c = [100]; for (let i = 1; i < days; i++) c.push(c[i - 1] * (1 + pct / 100 * draw())); return c; };
+  const classOf = (draw, pct) => mod.applyBandCalibration(Array.from({ length: 6 }, () => {
+    const c = walkWith(1000, pct, draw); return { bandVol90: mod.realizedVolPct(c, 90), bandCal: mod.bandCalibrationSample(c) };
+  }));
+  const normalClass = classOf(gauss, 2), fatClass = classOf(t3, 2 / Math.sqrt(3));
+  check('a normal walk: the 1-day multiplier matches the textbook 68% / mean-|move| ratio (0.994 / 0.798 = 1.246)',
+    Math.abs(normalClass.historical.multiplier[24] - 1.2456) < 0.03, JSON.stringify(normalClass.historical));
+  check('a fat-tailed walk (t, 3 df) gets a narrower band for the same volatility, both on the volatility band and the historical one',
+    fatClass.factor < normalClass.factor && fatClass.historical.multiplier[24] < normalClass.historical.multiplier[24] - 0.1,
+    JSON.stringify({ normal: normalClass.factor, fat: fatClass.factor, kn: normalClass.historical.multiplier[24], kf: fatClass.historical.multiplier[24] }));
+  const typicalStats = { 'BTC|24': { meanPct: 1, stdevPct: 5, meanAbsPct: 3, n: 30 } };
+  const byTypical = mod.predictedRange(100, 1, 50, 1, typicalStats, 'BTC', 2, { 24: 1.1, 168: 1.2 });
+  const bySd = mod.predictedRange(100, 1, 50, 1, typicalStats, 'BTC', 2, null);
+  check('the historical band is the asset\'s mean |move| x its class multiplier when both exist, and its sd when not',
+    byTypical.basis === 'historical' && Math.abs((byTypical.high - byTypical.low) - 2 * 3 * 1.1) < 1e-9
+      && bySd.basis === 'historical' && Math.abs((bySd.high - bySd.low) - 2 * 5) < 1e-9, JSON.stringify({ byTypical, bySd }));
 }
 
 console.log('\n== range + topIndicator flow through buildPayload end-to-end ==');
 check('every ranked row carries a range field (object or null, never a crash)', built.crypto.breakout.concat(built.crypto.breakdown, built.stocks.breakout, built.stocks.breakdown).every(r => 'range' in r));
 check('the payload reports each class band factor and how many past moves set it', ['crypto', 'stock'].every(k => built.bandCalibration && built.bandCalibration[k] && built.bandCalibration[k].factor > 0 && Number.isInteger(built.bandCalibration[k].samples) && built.bandCalibration[k].lookbackDays === 90), JSON.stringify(built.bandCalibration));
 check('a class with too few past moves keeps factor 1', ['crypto', 'stock'].every(k => built.bandCalibration[k].samples >= 500 || built.bandCalibration[k].factor === 1), JSON.stringify(built.bandCalibration));
-check('no board row carries the internal band tallies', !JSON.stringify(built).includes('"bandCal"'));
+check('no board row carries the internal band tallies or per-asset widths', ['"bandCal"', '"bandHistK"', '"bandVol90"', '"bandVolPct"'].every((k) => !JSON.stringify(built).includes(k)));
+check('the payload reports each class\'s historical multipliers and how many moves set them', ['crypto', 'stock'].every((k) => built.bandCalibration[k].historical
+  && Object.hasOwn(built.bandCalibration[k].historical.multiplier, '24') && Number.isInteger(built.bandCalibration[k].historical.samples[168])), JSON.stringify(built.bandCalibration));
 check('every ranked row carries a topIndicator field (object or null)', built.crypto.breakout.concat(built.crypto.breakdown, built.stocks.breakout, built.stocks.breakdown).every(r => 'topIndicator' in r));
 
 console.log('\n== dwellAtExtreme: how long, not just whether, an asset sits at an extreme ==');

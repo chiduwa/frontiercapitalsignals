@@ -125,7 +125,14 @@ def candidate_grid(target):
         grid += [make('magnitude', 'scale', source=s, calibrated='shrunk')
                  for s in ('garchWeekday', 'garch', 'harWeekday', 'ewma', 'harEqual', 'trailing')]
         return grid
-    return [make('timing', 'firingFrequency', window=n, weekday=w) for n in (30, 90, 365) for w in (False, True)]
+    grid = [make('timing', 'firingFrequency', window=n, weekday=w) for n in (30, 90, 365) for w in (False, True)]
+    # The arcsine law (2026-09-28, docs/CLASSIC_MODELS.md): where a random
+    # walk's low falls among six equally spaced opens, exactly, for any
+    # symmetric step distribution. On 13,357 coin-days it beat every window
+    # count above with no history at all; the coin's own record, as a
+    # Dirichlet update on it, adds very little.
+    grid += [make('timing', 'arcsine'), make('timing', 'arcsine', kappa=100, halfLife=120)]
+    return grid
 
 
 SOURCE_LABELS = {'trailing': 'trailing volatility', 'garchWeekday': 'GARCH + weekday', 'garch': 'GARCH',
@@ -147,6 +154,8 @@ def describe(spec):
     if f == 'lstm': return 'LSTM on the 30-day sequence'
     if f == 'uniform': return 'no firing preferred'
     if f == 'firingFrequency': return f"cheapest-firing frequency, {p['window']} days" + (', by weekday' if p['weekday'] else '')
+    if f == 'arcsine':
+        return 'random-walk low (arcsine law)' + (f", updated by the coin's record ({p['halfLife']}-day half-life)" if p.get('kappa') else '')
     return f
 
 
@@ -391,6 +400,16 @@ def fit_predict(spec, train, test, h, klines=None, pool=None):
     # timing: `train` and `test` are firing-day records, not feature rows.
     if fam == 'uniform':
         return [{'probs': [1.0 / FIRINGS] * FIRINGS} for _ in test], None
+    if fam == 'arcsine':
+        probs = arcsine_law()
+        if p.get('kappa') and train:
+            # Dirichlet update: the law is worth `kappa` days of evidence, and
+            # the coin's own cheapest firings count with a fading weight.
+            last = day(train[-1]['date'])
+            w = np.array([0.5 ** (float((last - day(d['date'])) / DAY) / p['halfLife']) for d in train])
+            counts = np.zeros(FIRINGS); np.add.at(counts, [d['cheapest'] for d in train], w)
+            probs = (counts + p['kappa'] * probs) / (counts.sum() + p['kappa'])
+        return [{'probs': [float(v) for v in probs]} for _ in test], None
     if fam == 'firingFrequency':
         window, by_weekday = p['window'], p['weekday']
         recent = train[-window:]
@@ -418,6 +437,18 @@ def loss(target, forecast, outcome):
         r = math.log1p(outcome / 100)
         return r * r / (s * s) + math.log(s * s)  # QLIKE: proper for a variance forecast
     return -math.log(max(forecast['probs'][int(outcome)], 1e-9))
+
+
+def arcsine_law(n=FIRINGS):
+    """P(the lowest of n equally spaced points of a driftless random walk is
+    the k-th): C(2k, k) C(2(n-1-k), n-1-k) / 4^(n-1), the discrete arcsine law
+    (Sparre Andersen). It holds for ANY symmetric continuous step distribution,
+    so fat tails and volatility do not change it. For six 4-hour opens:
+    24.6%, 13.7%, 11.7%, 11.7%, 13.7%, 24.6%. The same law makes the first and
+    last opens the dearest just as often, so it says which slot is lowest, not
+    that any slot is cheaper on average (docs/CLASSIC_MODELS.md)."""
+    m = n - 1
+    return np.array([math.comb(2 * k, k) * math.comb(2 * (m - k), m - k) / 4 ** m for k in range(n)])
 
 
 # ----------------------------------------------------------- timing data

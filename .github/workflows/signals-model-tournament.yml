@@ -53,6 +53,7 @@ jobs:
           OPENBLAS_NUM_THREADS: '1'
         run: |
           python test-model-tournament.py
+          python test-classic-models-research.py
           node --test test-model-tournament-io.mjs
       - name: Read the tracked panel, 4-hour opens and the tournament state
         working-directory: signals-worker

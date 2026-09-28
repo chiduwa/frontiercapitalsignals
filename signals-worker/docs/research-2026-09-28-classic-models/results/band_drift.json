@@ -1,0 +1,650 @@
+{
+ "crypto|24h": {
+  "centered": {
+   "coverage": 0.8319989371446952,
+   "meanWidth": 25.456013623238096,
+   "medianWidth": 12.392283846037337,
+   "intervalScore": 32.26939356237534,
+   "medianIntervalScore": 13.104817659661897,
+   "sane": {
+    "share": 0.9754144786065407,
+    "coverage": 0.8285386572995448,
+    "meanWidth": 12.753112342441474,
+    "intervalScore": 18.518078790303758
+   }
+  },
+  "drifted": {
+   "coverage": 0.831970967268252,
+   "meanWidth": 25.456013623238096,
+   "medianWidth": 12.392283846037337,
+   "intervalScore": 32.26965594575914,
+   "medianIntervalScore": 13.104817659661897,
+   "sane": {
+    "share": 0.9754144786065407,
+    "coverage": 0.8285099824366464,
+    "meanWidth": 12.753112342441474,
+    "intervalScore": 18.518347787114394
+   }
+  },
+  "quantile": {
+   "coverage": 0.6846676129808197,
+   "meanWidth": 16.273109676070863,
+   "medianWidth": 7.946357275360383,
+   "intervalScore": 26.24304221958437,
+   "medianIntervalScore": 9.51161506909794,
+   "sane": {
+    "share": 0.9754144786065407,
+    "coverage": 0.677809240474569,
+    "meanWidth": 8.29537571720971,
+    "intervalScore": 17.22086225556781
+   }
+  },
+  "quantileDrifted": {
+   "coverage": 0.6846466355734874,
+   "meanWidth": 16.273109676070863,
+   "medianWidth": 7.946357275360383,
+   "intervalScore": 26.24345905347157,
+   "medianIntervalScore": 9.51300936535384,
+   "sane": {
+    "share": 0.9754144786065407,
+    "coverage": 0.6777877343273953,
+    "meanWidth": 8.29537571720971,
+    "intervalScore": 17.22128959583837
+   }
+  },
+  "robustQuantile": {
+   "coverage": 0.6801994252190391,
+   "meanWidth": 8.148276437514635,
+   "medianWidth": 7.98071296375543,
+   "intervalScore": 18.424672111770548,
+   "medianIntervalScore": 9.19176671203362,
+   "sane": {
+    "share": 0.9754144786065407,
+    "coverage": 0.6792143087565863,
+    "meanWidth": 8.085788352910928,
+    "intervalScore": 17.02789167452306
+   }
+  },
+  "meanAbsQuantile": {
+   "coverage": 0.6836187426142045,
+   "meanWidth": 8.740582042677158,
+   "medianWidth": 7.95431532361919,
+   "intervalScore": 18.880083913819437,
+   "medianIntervalScore": 9.141109987993744,
+   "sane": {
+    "share": 0.9754144786065407,
+    "coverage": 0.6778952650632639,
+    "meanWidth": 8.059565121856828,
+    "intervalScore": 17.026649424345468
+   }
+  },
+  "assetQuantile": {
+   "coverage": 0.7085189251176482,
+   "meanWidth": 8.830259214722185,
+   "medianWidth": 8.683228910164718,
+   "intervalScore": 18.4515213953544,
+   "medianIntervalScore": 9.676597273896473,
+   "sane": {
+    "share": 0.9754144786065407,
+    "coverage": 0.7069644073264275,
+    "meanWidth": 8.67664129748073,
+    "intervalScore": 17.021883017382166
+   }
+  },
+  "assetQuantileAsym": {
+   "coverage": 0.7058547943864458,
+   "meanWidth": 8.780595543912753,
+   "medianWidth": 8.627619883783929,
+   "intervalScore": 18.473938050014457,
+   "medianIntervalScore": 9.647769721706588,
+   "sane": {
+    "share": 0.9754144786065407,
+    "coverage": 0.7042833076454353,
+    "meanWidth": 8.623107026610112,
+    "intervalScore": 17.043805524586244
+   }
+  },
+  "driftedVsCentered": {
+   "mean": -0.00017058925491304262,
+   "low": -0.0006432535044987642,
+   "high": 0.00031140875617825505,
+   "p": 0.7574121293935303
+  },
+  "quantileVsCentered": {
+   "mean": 6.384777377009706,
+   "low": 5.894222000996084,
+   "high": 6.868251122916926,
+   "p": 4.999750012499375e-05
+  },
+  "quantileDriftedVsDrifted": {
+   "mean": 6.384582462270259,
+   "low": 5.894118547576596,
+   "high": 6.867808534032163,
+   "p": 4.999750012499375e-05
+  },
+  "kMeanAbs68": {
+   "median": 0.9890685231087263,
+   "min": 0.8504968275014904,
+   "max": 1.080630280300028,
+   "last": 0.9652861392537626
+  },
+  "robustQuantileVsQuantile": {
+   "mean": 8.229549009143664,
+   "low": 7.535561237616237,
+   "high": 8.909685266803942,
+   "p": 4.999750012499375e-05
+  },
+  "assetQuantileVsQuantile": {
+   "mean": 8.189210981551645,
+   "low": 7.4897531339899395,
+   "high": 8.878478067963206,
+   "p": 4.999750012499375e-05
+  },
+  "assetQuantileAsymVsQuantile": {
+   "mean": 8.169141591709412,
+   "low": 7.469149849474411,
+   "high": 8.858235810282427,
+   "p": 4.999750012499375e-05
+  },
+  "meanAbsQuantileVsQuantile": {
+   "mean": 7.744466536024,
+   "low": 7.083032142221566,
+   "high": 8.391279693885773,
+   "p": 4.999750012499375e-05
+  },
+  "k68": {
+   "median": 0.6458981286338107,
+   "min": 0.5639094833272317,
+   "max": 0.7877648637340823
+  },
+  "n": 143011,
+  "first": "2021-07-18",
+  "last": "2026-09-28"
+ },
+ "crypto|168h": {
+  "centered": {
+   "coverage": 0.8147786083956297,
+   "meanWidth": 36.17163788755359,
+   "medianWidth": 29.588175587458576,
+   "intervalScore": 49.778232278463314,
+   "medianIntervalScore": 32.137752131857596,
+   "sane": {
+    "share": 0.983323749281196,
+    "coverage": 0.8118713450292397,
+    "meanWidth": 31.596087748821407,
+    "intervalScore": 44.958465418918415
+   }
+  },
+  "drifted": {
+   "coverage": 0.8147211040828062,
+   "meanWidth": 36.17163788755359,
+   "medianWidth": 29.588175587458576,
+   "intervalScore": 49.77752519891893,
+   "medianIntervalScore": 32.137797024596736,
+   "sane": {
+    "share": 0.983323749281196,
+    "coverage": 0.811812865497076,
+    "meanWidth": 31.596087748821407,
+    "intervalScore": 44.957655841206716
+   }
+  },
+  "quantile": {
+   "coverage": 0.6933870040253018,
+   "meanWidth": 25.86450797414362,
+   "medianWidth": 21.322000927032192,
+   "intervalScore": 45.884878920361494,
+   "medianIntervalScore": 25.061418715695268,
+   "sane": {
+    "share": 0.983323749281196,
+    "coverage": 0.6887426900584795,
+    "meanWidth": 22.643841818611048,
+    "intervalScore": 42.45870036143764
+   }
+  },
+  "quantileDrifted": {
+   "coverage": 0.6933870040253018,
+   "meanWidth": 25.86450797414362,
+   "medianWidth": 21.322000927032192,
+   "intervalScore": 45.884274550118256,
+   "medianIntervalScore": 25.061418715695268,
+   "sane": {
+    "share": 0.983323749281196,
+    "coverage": 0.6887426900584795,
+    "meanWidth": 22.643841818611048,
+    "intervalScore": 42.457995234880734
+   }
+  },
+  "robustQuantile": {
+   "coverage": 0.6832374928119609,
+   "meanWidth": 21.73894394575555,
+   "medianWidth": 21.30024659451488,
+   "intervalScore": 42.68360529743083,
+   "medianIntervalScore": 24.94503853000168,
+   "sane": {
+    "share": 0.983323749281196,
+    "coverage": 0.6827485380116959,
+    "meanWidth": 21.64631549966443,
+    "intervalScore": 41.96128210858766
+   }
+  },
+  "meanAbsQuantile": {
+   "coverage": 0.6872627947096033,
+   "meanWidth": 22.30006048838166,
+   "medianWidth": 21.2268903941287,
+   "intervalScore": 42.9430177181868,
+   "medianIntervalScore": 24.84272021494068,
+   "sane": {
+    "share": 0.983323749281196,
+    "coverage": 0.6837719298245614,
+    "meanWidth": 21.602767424495593,
+    "intervalScore": 41.84515927274655
+   }
+  },
+  "assetQuantile": {
+   "coverage": 0.7190339275445659,
+   "meanWidth": 23.96995246903148,
+   "medianWidth": 23.46947678908566,
+   "intervalScore": 42.998537410687625,
+   "medianIntervalScore": 25.882404267819346,
+   "sane": {
+    "share": 0.983323749281196,
+    "coverage": 0.7172222222222222,
+    "meanWidth": 23.552236127961816,
+    "intervalScore": 42.053374049812284
+   }
+  },
+  "assetQuantileAsym": {
+   "coverage": 0.7126797009775733,
+   "meanWidth": 23.723489333178993,
+   "medianWidth": 23.08656270688082,
+   "intervalScore": 43.14256292193394,
+   "medianIntervalScore": 25.724919041493088,
+   "sane": {
+    "share": 0.983323749281196,
+    "coverage": 0.7107894736842105,
+    "meanWidth": 23.307173439876596,
+    "intervalScore": 42.199198022962015
+   }
+  },
+  "driftedVsCentered": {
+   "mean": 0.001092449134600741,
+   "low": -0.001158682354850094,
+   "high": 0.004504575739269177,
+   "p": 0.21813909304534773
+  },
+  "quantileVsCentered": {
+   "mean": 3.7532346830563648,
+   "low": 2.9810729247836445,
+   "high": 4.50682022240335,
+   "p": 4.999750012499375e-05
+  },
+  "quantileDriftedVsDrifted": {
+   "mean": 3.753207574250484,
+   "low": 2.9804156297045266,
+   "high": 4.506197922080757,
+   "p": 4.999750012499375e-05
+  },
+  "kMeanAbs68": {
+   "median": 1.0255757589551429,
+   "min": 0.8602621302069362,
+   "max": 1.1747900610748914,
+   "last": 1.0181622734188307
+  },
+  "robustQuantileVsQuantile": {
+   "mean": 3.067351017697806,
+   "low": 2.718034717426825,
+   "high": 3.3910316832990084,
+   "p": 4.999750012499375e-05
+  },
+  "assetQuantileVsQuantile": {
+   "mean": 2.682578542443024,
+   "low": 2.330991385827067,
+   "high": 3.030435053466957,
+   "p": 4.999750012499375e-05
+  },
+  "assetQuantileAsymVsQuantile": {
+   "mean": 2.630625268996686,
+   "low": 2.2252654006612977,
+   "high": 3.0513427620340035,
+   "p": 4.999750012499375e-05
+  },
+  "meanAbsQuantileVsQuantile": {
+   "mean": 2.8159272277553113,
+   "low": 2.5568384304926552,
+   "high": 3.0593914173659313,
+   "p": 4.999750012499375e-05
+  },
+  "k68": {
+   "median": 0.7138085813836833,
+   "min": 0.6059625418368283,
+   "max": 0.8841605440083729
+  },
+  "n": 34780,
+  "first": "2021-12-19",
+  "last": "2026-09-28"
+ },
+ "stock|24h": {
+  "centered": {
+   "coverage": 0.7625335971330447,
+   "meanWidth": 5.382317785517685,
+   "medianWidth": 4.222800308031616,
+   "intervalScore": 7.984249619921407,
+   "medianIntervalScore": 5.065198421462419,
+   "sane": {
+    "share": 0.9671914663282066,
+    "coverage": 0.7605959290404443,
+    "meanWidth": 4.97926177274522,
+    "intervalScore": 7.486503204605309
+   }
+  },
+  "drifted": {
+   "coverage": 0.7624122741526056,
+   "meanWidth": 5.382317785517685,
+   "medianWidth": 4.222800308031616,
+   "intervalScore": 7.984995959761157,
+   "medianIntervalScore": 5.064766642612549,
+   "sane": {
+    "share": 0.9671914663282066,
+    "coverage": 0.7604801397191144,
+    "meanWidth": 4.97926177274522,
+    "intervalScore": 7.487054567563181
+   }
+  },
+  "quantile": {
+   "coverage": 0.6788580707779602,
+   "meanWidth": 4.415233803944162,
+   "medianWidth": 3.4974633406117466,
+   "intervalScore": 7.821414356009915,
+   "medianIntervalScore": 4.604994198513611,
+   "sane": {
+    "share": 0.9671914663282066,
+    "coverage": 0.6768464778335818,
+    "meanWidth": 4.084703896728179,
+    "intervalScore": 7.3570133200546755
+   }
+  },
+  "quantileDrifted": {
+   "coverage": 0.6789373973420935,
+   "meanWidth": 4.415233803944162,
+   "medianWidth": 3.4974633406117466,
+   "intervalScore": 7.822461918379541,
+   "medianIntervalScore": 4.605829550332077,
+   "sane": {
+    "share": 0.9671914663282066,
+    "coverage": 0.67694296893469,
+    "meanWidth": 4.084703896728179,
+    "intervalScore": 7.3578052707914035
+   }
+  },
+  "robustQuantile": {
+   "coverage": 0.6697868448559057,
+   "meanWidth": 4.2357223011012834,
+   "medianWidth": 3.3982929429268687,
+   "intervalScore": 7.803130268005253,
+   "medianIntervalScore": 4.435828459938449,
+   "sane": {
+    "share": 0.9671914663282066,
+    "coverage": 0.6703429776188891,
+    "meanWidth": 4.012308794319245,
+    "intervalScore": 7.358002957781467
+   }
+  },
+  "meanAbsQuantile": {
+   "coverage": 0.672801254292967,
+   "meanWidth": 4.280258211169996,
+   "medianWidth": 3.4123323983598244,
+   "intervalScore": 7.774277525660594,
+   "medianIntervalScore": 4.5076469681655364,
+   "sane": {
+    "share": 0.9671914663282066,
+    "coverage": 0.6720170982231164,
+    "meanWidth": 4.022226714606295,
+    "intervalScore": 7.342132296665485
+   }
+  },
+  "assetQuantile": {
+   "coverage": 0.6760023144691653,
+   "meanWidth": 4.2871456281999,
+   "medianWidth": 3.3604893909159275,
+   "intervalScore": 7.774076678829872,
+   "medianIntervalScore": 4.485075649800899,
+   "sane": {
+    "share": 0.9671914663282066,
+    "coverage": 0.6757223565056713,
+    "meanWidth": 4.03814717979287,
+    "intervalScore": 7.344686926880835
+   }
+  },
+  "assetQuantileAsym": {
+   "coverage": 0.672922577273406,
+   "meanWidth": 4.257057334513714,
+   "medianWidth": 3.341638338912537,
+   "intervalScore": 7.788671707942369,
+   "medianIntervalScore": 4.475723051847795,
+   "sane": {
+    "share": 0.9671914663282066,
+    "coverage": 0.672600869384821,
+    "meanWidth": 4.009038187397399,
+    "intervalScore": 7.358125071404336
+   }
+  },
+  "driftedVsCentered": {
+   "mean": -0.0007860701470233721,
+   "low": -0.0018902891075728353,
+   "high": 0.00028969556884723263,
+   "p": 0.9194040297985101
+  },
+  "quantileVsCentered": {
+   "mean": 0.17932253728132802,
+   "low": 0.13751849609573252,
+   "high": 0.22032346951757273,
+   "p": 4.999750012499375e-05
+  },
+  "quantileDriftedVsDrifted": {
+   "mean": 0.179085947175229,
+   "low": 0.1372483607805649,
+   "high": 0.2201358852634498,
+   "p": 4.999750012499375e-05
+  },
+  "kMeanAbs68": {
+   "median": 1.0943889420214699,
+   "min": 0.9540860560638735,
+   "max": 1.40981288943268,
+   "last": 1.1917379365430374
+  },
+  "robustQuantileVsQuantile": {
+   "mean": 0.03117611549029592,
+   "low": 0.012767577707375832,
+   "high": 0.049950720802770895,
+   "p": 0.000999950002499875
+  },
+  "assetQuantileVsQuantile": {
+   "mean": 0.06109775747126154,
+   "low": 0.036281919234310504,
+   "high": 0.0864826105275537,
+   "p": 4.999750012499375e-05
+  },
+  "assetQuantileAsymVsQuantile": {
+   "mean": 0.044154501211789356,
+   "low": 0.017272375372810827,
+   "high": 0.07111986004393739,
+   "p": 0.0006499675016249188
+  },
+  "meanAbsQuantileVsQuantile": {
+   "mean": 0.06359758826705716,
+   "low": 0.04930872167744759,
+   "high": 0.07857801251319035,
+   "p": 4.999750012499375e-05
+  },
+  "k68": {
+   "median": 0.7829958819947571,
+   "min": 0.6926318235151306,
+   "max": 1.0619041910634763
+  },
+  "n": 214304,
+  "first": "2021-11-19",
+  "last": "2026-09-28"
+ },
+ "stock|168h": {
+  "centered": {
+   "coverage": 0.7508200704653141,
+   "meanWidth": 11.689367045994414,
+   "medianWidth": 9.597351166446582,
+   "intervalScore": 17.316553698513346,
+   "medianIntervalScore": 11.315997776244949,
+   "sane": {
+    "share": 0.9790274571740979,
+    "coverage": 0.749530767679588,
+    "meanWidth": 11.128418742649798,
+    "intervalScore": 16.622936568225526
+   }
+  },
+  "drifted": {
+   "coverage": 0.7506530190742315,
+   "meanWidth": 11.689367045994414,
+   "medianWidth": 9.597351166446582,
+   "intervalScore": 17.32197062916787,
+   "medianIntervalScore": 11.315815726960633,
+   "sane": {
+    "share": 0.9790274571740979,
+    "coverage": 0.7493601377448927,
+    "meanWidth": 11.128418742649798,
+    "intervalScore": 16.62800868826606
+   }
+  },
+  "quantile": {
+   "coverage": 0.7020258777791277,
+   "meanWidth": 10.560319426377772,
+   "medianWidth": 8.580413959253365,
+   "intervalScore": 17.146588823665095,
+   "medianIntervalScore": 10.962328369928521,
+   "sane": {
+    "share": 0.9790274571740979,
+    "coverage": 0.700947771728171,
+    "meanWidth": 10.075332806678489,
+    "intervalScore": 16.482028107724464
+   }
+  },
+  "quantileDrifted": {
+   "coverage": 0.7019651318187341,
+   "meanWidth": 10.560319426377772,
+   "medianWidth": 8.580413959253365,
+   "intervalScore": 17.15262814954525,
+   "medianIntervalScore": 10.965215493047864,
+   "sane": {
+    "share": 0.9790274571740979,
+    "coverage": 0.700901236291436,
+    "meanWidth": 10.075332806678489,
+    "intervalScore": 16.487560214641086
+   }
+  },
+  "robustQuantile": {
+   "coverage": 0.691926861863686,
+   "meanWidth": 10.205558876226004,
+   "medianWidth": 8.531926437574846,
+   "intervalScore": 17.14711303514072,
+   "medianIntervalScore": 10.913946990687425,
+   "sane": {
+    "share": 0.9790274571740979,
+    "coverage": 0.6919043851893216,
+    "meanWidth": 9.823992725762238,
+    "intervalScore": 16.509888464505337
+   }
+  },
+  "meanAbsQuantile": {
+   "coverage": 0.6963005710120277,
+   "meanWidth": 10.311312075939822,
+   "medianWidth": 8.523292255967396,
+   "intervalScore": 17.065805904693462,
+   "medianIntervalScore": 10.892949406485481,
+   "sane": {
+    "share": 0.9790274571740979,
+    "coverage": 0.6956892673771077,
+    "meanWidth": 9.901754965588067,
+    "intervalScore": 16.4410550679721
+   }
+  },
+  "assetQuantile": {
+   "coverage": 0.7210241768922366,
+   "meanWidth": 10.822256382625056,
+   "medianWidth": 9.053351194674875,
+   "intervalScore": 17.087825732737013,
+   "medianIntervalScore": 10.993794122343573,
+   "sane": {
+    "share": 0.9790274571740979,
+    "coverage": 0.7206322614671072,
+    "meanWidth": 10.380508933522751,
+    "intervalScore": 16.434447660046366
+   }
+  },
+  "assetQuantileAsym": {
+   "coverage": 0.7144028672093305,
+   "meanWidth": 10.73022835168273,
+   "medianWidth": 9.031729962194508,
+   "intervalScore": 17.101087275892947,
+   "medianIntervalScore": 11.007057586670776,
+   "sane": {
+    "share": 0.9790274571740979,
+    "coverage": 0.7139932058262367,
+    "meanWidth": 10.286813225060582,
+    "intervalScore": 16.445646392069737
+   }
+  },
+  "driftedVsCentered": {
+   "mean": -0.005541521121646848,
+   "low": -0.011604908820949975,
+   "high": -0.0013114207819065742,
+   "p": 0.9658017099145043
+  },
+  "quantileVsCentered": {
+   "mean": 0.16992382317945143,
+   "low": 0.017541592760652532,
+   "high": 0.31718812947740244,
+   "p": 0.011749412529373532
+  },
+  "quantileDriftedVsDrifted": {
+   "mean": 0.1693281463361128,
+   "low": 0.016642813648576595,
+   "high": 0.3169867932730154,
+   "p": 0.0119994000299985
+  },
+  "kMeanAbs68": {
+   "median": 1.118035045940254,
+   "min": 0.9616548665824497,
+   "max": 1.7923590182160378,
+   "last": 1.1803204369478206
+  },
+  "robustQuantileVsQuantile": {
+   "mean": -0.0022779859257610674,
+   "low": -0.03935307449907381,
+   "high": 0.03532615143162879,
+   "p": 0.5480225988700564
+  },
+  "assetQuantileVsQuantile": {
+   "mean": 0.05882961913097425,
+   "low": 0.002776968673077602,
+   "high": 0.11927220639358332,
+   "p": 0.028148592570371483
+  },
+  "assetQuantileAsymVsQuantile": {
+   "mean": 0.050355651408214755,
+   "low": -0.0037619216371716628,
+   "high": 0.1088213143710024,
+   "p": 0.04409779511024449
+  },
+  "meanAbsQuantileVsQuantile": {
+   "mean": 0.07983609313930254,
+   "low": 0.058424273647842195,
+   "high": 0.10164706308361013,
+   "p": 4.999750012499375e-05
+  },
+  "k68": {
+   "median": 0.848755705329615,
+   "min": 0.7315179023029418,
+   "max": 1.432916073253695
+  },
+  "n": 65848,
+  "first": "2022-03-22",
+  "last": "2026-09-27"
+ }
+}

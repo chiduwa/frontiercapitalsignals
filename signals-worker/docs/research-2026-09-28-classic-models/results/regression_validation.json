@@ -1,0 +1,46 @@
+{
+ "crypto|1": {
+  "fits": 335,
+  "shareSignificant": 0.3970149253731343,
+  "underflowed": 18,
+  "shareSignificantF": 0.3880597014925373,
+  "oosMedianSignificant": -0.008235560235909434,
+  "oosMedianOther": -0.016746657111639363,
+  "oosPositiveSignificant": 0.3383458646616541,
+  "oosPositiveOther": 0.10396039603960396,
+  "spearmanJointPvsOosR2": -0.29372151219948167
+ },
+ "crypto|7": {
+  "fits": 201,
+  "shareSignificant": 0.8656716417910447,
+  "underflowed": 60,
+  "shareSignificantF": 0.8656716417910447,
+  "oosMedianSignificant": -0.03306220272163374,
+  "oosMedianOther": -0.03511844046305357,
+  "oosPositiveSignificant": 0.10919540229885058,
+  "oosPositiveOther": 0.0,
+  "spearmanJointPvsOosR2": -0.17100930988621252
+ },
+ "stock|1": {
+  "fits": 291,
+  "shareSignificant": 0.10652920962199312,
+  "underflowed": 0,
+  "shareSignificantF": 0.09965635738831616,
+  "oosMedianSignificant": -0.0088883381045477,
+  "oosMedianOther": -0.01689466320891775,
+  "oosPositiveSignificant": 0.12903225806451613,
+  "oosPositiveOther": 0.038461538461538464,
+  "spearmanJointPvsOosR2": -0.15855494791793484
+ },
+ "stock|5": {
+  "fits": 291,
+  "shareSignificant": 0.3642611683848797,
+  "underflowed": 0,
+  "shareSignificantF": 0.3402061855670103,
+  "oosMedianSignificant": -0.0033358190415964106,
+  "oosMedianOther": -0.01515731265372433,
+  "oosPositiveSignificant": 0.4528301886792453,
+  "oosPositiveOther": 0.20540540540540542,
+  "spearmanJointPvsOosR2": -0.21465407671817252
+ }
+}

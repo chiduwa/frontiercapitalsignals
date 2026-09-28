@@ -1718,53 +1718,105 @@ export function bestVolLookback(
 // scores are the asset's range record that the publication gate later reads.
 // bestVolLookback picks each asset's window by how well it fitted that asset's
 // whole history, and measured walk-forward that choice is an overfit: one fixed
-// 90-day window for every asset beat it (crypto QLIKE t = -3.0, stocks -1.6),
-// and the band ran too narrow (realized 7-day moves ~17% (crypto) and ~8%
-// (stocks) wider than implied). The band therefore uses a fixed 90-day window
-// scaled by ONE factor per asset class, learned from the class's own past 7-day
-// moves: calibration went 1.36 -> 1.01 (crypto) and 1.17 -> 1.04 (stocks),
-// where 1.00 is a band exactly as wide as the moves that followed.
+// 90-day window for every asset beat it (crypto QLIKE t = -3.0, stocks -1.6).
+// The band therefore uses a fixed 90-day window scaled by ONE factor per asset
+// class, learned from the class's own past 7-day moves.
 // volPct itself (and the techniques and features that read it) is unchanged.
+//
+// ---- ...set by coverage, not by variance (2026-09-28, docs/CLASSIC_MODELS.md)
+// The band is declared a 68% interval (RANGE_NOMINAL_COVERAGE), but a +-1 sd
+// band only contains 68% of moves when moves are normal. They are fat-tailed:
+// rebuilt on 457,943 of the engine's own composite calls, the published +-1 sd
+// band contained 83% of crypto and 76% of stock 1-day moves (82% and 75% at a
+// week), even on the 97% of assets without a glitch in their history. So each
+// width is now the one that actually contains 68%: the empirical 68th
+// percentile of standardized moves, pooled per class (the historical-
+// simulation interval that Monte Carlo would converge to). Measured by the
+// interval score, which only the true quantiles minimize, that beat +-1 sd in
+// every class and horizon, with bands 19-36% narrower at one day.
 export const BAND_VOL_LOOKBACK_DAYS = 90;
 export const BAND_CALIBRATION_HORIZON_DAYS = 7;
 export const BAND_CALIBRATION_WINDOW_DAYS = 730;
 export const BAND_CALIBRATION_MIN_SAMPLES = 500;
 const BAND_Z2_CAP = 50;   // one squared standardized move may not outweigh 50 ordinary ones
+const HISTORICAL_BAND_HORIZONS = [1, 7];   // the 24h and 168h move-stat buckets
 
-// Squared standardized 7-day moves for one asset, one a week over its last two
-// years, each judged against the 90-day volatility known when it began. Only
-// moves whose end is already in `closes` count, so nothing here looks ahead.
+// Linear-interpolated quantile of an ascending array (numpy's default).
+export function quantileSorted(sorted, q) {
+  if (!sorted.length) return null;
+  const pos = (sorted.length - 1) * q, lo = Math.floor(pos), hi = Math.ceil(pos);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+}
+
+// One asset's contribution to its class's band widths, from its own closes,
+// using only moves whose end is already in `closes` (nothing looks ahead):
+//   absZ    |7-day move| / (90-day volatility known when it began x sqrt 7),
+//           one a week over two years: the volatility band's shape
+//   typical {1: [...], 7: [...]}: each 1-day and 7-day move over the same
+//           two years divided by the asset's mean |move| at that horizon:
+//           the shape the historical band's mean |move| is scaled by
+// sumZ2/n are kept as the variance diagnostic the 2026-09-27 factor used.
 export function bandCalibrationSample(closes, {
   lookback = BAND_VOL_LOOKBACK_DAYS, horizon = BAND_CALIBRATION_HORIZON_DAYS, windowDays = BAND_CALIBRATION_WINDOW_DAYS
 } = {}) {
   if (!Array.isArray(closes) || closes.length < lookback + horizon + 2) return null;
   let sumZ2 = 0, n = 0;
+  const absZ = [];
   const last = closes.length - 1;
   for (let i = last - horizon; i > last - windowDays && i > lookback; i -= horizon) {
     const vol = realizedVolPct(closes.slice(0, i + 1), lookback);
     if (!(vol > 0) || !(closes[i] > 0) || !(closes[i + horizon] > 0)) continue;
     const move = (closes[i + horizon] / closes[i] - 1) * 100;
-    sumZ2 += Math.min((move / (vol * Math.sqrt(horizon))) ** 2, BAND_Z2_CAP);
+    const z = move / (vol * Math.sqrt(horizon));
+    sumZ2 += Math.min(z * z, BAND_Z2_CAP);
+    absZ.push(Math.abs(z));
     n++;
   }
-  return n ? { sumZ2, n } : null;
+  const typical = {};
+  for (const h of HISTORICAL_BAND_HORIZONS) {
+    const moves = [];
+    for (let i = last - h; i > last - windowDays && i >= 0; i -= h) {
+      if (closes[i] > 0 && closes[i + h] > 0) moves.push(Math.abs(closes[i + h] / closes[i] - 1) * 100);
+    }
+    const mean = moves.length ? moves.reduce((a, b) => a + b, 0) / moves.length : 0;
+    typical[h] = moves.length >= 20 && mean > 0 ? moves.map((v) => v / mean) : [];
+  }
+  return n ? { sumZ2, n, absZ, typical } : null;
 }
 
-// Pools every asset's sample into one factor for its class and sets each
-// metric's bandVolPct = 90-day volatility x sqrt(factor). A class with too few
-// samples keeps factor 1 (the raw 90-day window) rather than guessing.
+// Pools every asset's sample into its class's widths:
+//   bandVolPct = 90-day volatility x the 68th percentile of pooled |z|
+//   bandHistK  = {24: k, 168: k}, the 68th percentile of |move| / mean |move|
+//                that the historical band multiplies an asset's mean |move| by
+// A class with fewer than 500 pooled moves keeps the old widths (+-1 sd of the
+// raw window; the historical band's own sd) rather than guessing.
 export function applyBandCalibration(metrics) {
   let sumZ2 = 0, n = 0;
+  const absZ = [], typical = { 1: [], 7: [] };
   for (const m of metrics || []) {
-    if (m && m.bandCal) { sumZ2 += m.bandCal.sumZ2; n += m.bandCal.n; }
+    if (!m || !m.bandCal) continue;
+    sumZ2 += m.bandCal.sumZ2; n += m.bandCal.n;
+    for (const z of m.bandCal.absZ || []) absZ.push(z);
+    for (const h of HISTORICAL_BAND_HORIZONS) for (const v of (m.bandCal.typical && m.bandCal.typical[h]) || []) typical[h].push(v);
   }
-  const factor = n >= BAND_CALIBRATION_MIN_SAMPLES ? sumZ2 / n : 1;
+  absZ.sort((a, b) => a - b);
+  const factor = absZ.length >= BAND_CALIBRATION_MIN_SAMPLES ? quantileSorted(absZ, RANGE_NOMINAL_COVERAGE) : 1;
+  const historical = {};
+  for (const h of HISTORICAL_BAND_HORIZONS) {
+    const t = typical[h].sort((a, b) => a - b);
+    historical[h === 1 ? 24 : 168] = t.length >= BAND_CALIBRATION_MIN_SAMPLES ? quantileSorted(t, RANGE_NOMINAL_COVERAGE) : null;
+  }
   for (const m of metrics || []) {
     if (!m) continue;
-    m.bandVolPct = m.bandVol90 > 0 ? m.bandVol90 * Math.sqrt(factor) : null;
+    m.bandVolPct = m.bandVol90 > 0 ? m.bandVol90 * factor : null;
+    m.bandHistK = historical;
     delete m.bandCal;
   }
-  return { factor, samples: n, lookbackDays: BAND_VOL_LOOKBACK_DAYS };
+  return {
+    factor, coverage: RANGE_NOMINAL_COVERAGE, samples: absZ.length, lookbackDays: BAND_VOL_LOOKBACK_DAYS,
+    varianceFactor: n ? sumZ2 / n : null,
+    historical: { multiplier: historical, samples: { 24: typical[1].length, 168: typical[7].length } }
+  };
 }
 
 // How long an asset has been sitting at its own extreme, not just whether
@@ -3645,12 +3697,18 @@ export function currentSignalConfidence(signal, calibration, assetCompositeRecor
 // real conviction (score <= 50 gives a symmetric band with no directional
 // assumption at all), and the shift is capped well inside the band so it
 // never collapses into a false point prediction.
-export function predictedRange(price, horizonDays, score, dir, moveStats, symbol, fallbackVolPct) {
+export function predictedRange(price, horizonDays, score, dir, moveStats, symbol, fallbackVolPct, historicalK = null) {
   if (price == null || horizonDays == null || !dir) return null;
   const bucket = horizonDays <= 4 ? 24 : 168;
   const learned = moveStats && moveStats[`${symbol}|${bucket}`];
+  const k = historicalK && historicalK[bucket];
   let movePct, basis;
-  if (learned && learned.n >= MIN_RELIABILITY_SAMPLES && learned.stdevPct > 0) {
+  if (learned && learned.n >= MIN_RELIABILITY_SAMPLES && learned.meanAbsPct > 0 && k > 0) {
+    // The width that contains 68% of this class's moves (applyBandCalibration),
+    // on this asset's own typical move: robust where a +-1 sd band over-covers.
+    movePct = learned.meanAbsPct * k;
+    basis = 'historical';
+  } else if (learned && learned.n >= MIN_RELIABILITY_SAMPLES && learned.stdevPct > 0) {
     movePct = learned.stdevPct;
     basis = 'historical';
   } else if (fallbackVolPct != null) {
@@ -5916,7 +5974,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       // (reliability.mjs) for where this feeds the calibration curve.
       votesLog.push({ asset_class: kind, symbol: m.symbol, technique_id: 'composite', dir: cc.dir, score: cc.score, regime });
       for (const horizonDays of RANGE_LOG_HORIZONS_DAYS) {
-        const r = predictedRange(m.price, horizonDays, cc.score, cc.dir, moveStats, m.symbol, m.bandVolPct ?? m.volPct);
+        const r = predictedRange(m.price, horizonDays, cc.score, cc.dir, moveStats, m.symbol, m.bandVolPct ?? m.volPct, m.bandHistK);
         if (r) rangeLog.push({ asset_class: kind, symbol: m.symbol, horizon_hours: horizonDays * 24, low: r.low, high: r.high });
       }
       // Distinct from the fixed 1d/7d pair just logged above (those exist
@@ -5926,7 +5984,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       // band covers whatever period this specific call actually expects to
       // resolve in rather than an arbitrary fixed one.
       horizon = cc.dir === 1 ? c.longHorizon : c.shortHorizon;
-      range = horizon ? predictedRange(m.price, horizon.days, cc.score, cc.dir, moveStats, m.symbol, m.bandVolPct ?? m.volPct) : null;
+      range = horizon ? predictedRange(m.price, horizon.days, cc.score, cc.dir, moveStats, m.symbol, m.bandVolPct ?? m.volPct, m.bandHistK) : null;
     }
     allSymbols.push({
       symbol: m.symbol,
@@ -6066,7 +6124,7 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
       conf: { agree: side === 'long' ? x.c.bull : x.c.bear, total: x.c.total },
       drivers: side === 'long' ? x.c.longNotes : x.c.shortNotes,
       horizon,
-      range: horizon ? predictedRange(x.m.price, horizon.days, score, dir, moveStats, x.m.symbol, x.m.bandVolPct ?? x.m.volPct) : null,
+      range: horizon ? predictedRange(x.m.price, horizon.days, score, dir, moveStats, x.m.symbol, x.m.bandVolPct ?? x.m.volPct, x.m.bandHistK) : null,
       analysis: {
         input_interval: x.m.inputInterval || null,
         history_source: x.m.historySource || null,

@@ -145,7 +145,11 @@ searched:
   regression per asset with extra inputs (volume, volatility, derivatives +
   funding, market, calendar).
 - **Timing:** cheapest-firing frequency over 30 / 90 / 365 days, with and
-  without the weekday.
+  without the weekday; and the arcsine law, the exact probability that a
+  random walk's lowest open falls in each slot (24.6% for the first and last,
+  11.7% for the middle two), alone or updated by the coin's own record. On
+  13,357 coin-days it beat every window count without using any history
+  (`CLASSIC_MODELS.md`).
 
 The **weights report** (`summary.weights`, shown in the dashboard panel) refits
 a full-information model per asset 13 times, 28 days apart. It reports how the
@@ -225,10 +229,16 @@ per asset:
 - **The trading bot.** A promoted direction champion is published but
   authorizes no trade. Live trading is real money; enabling that is the
   user's call, per asset, with its forward record in hand.
-- **The spot bot's buy timing.** A promoted timing champion is published. The
-  natural next step is for the spot bot to delay a week's tranche to the
-  champion's likeliest cheapest firing, with the week-end guarantee still in
-  force. It should be an opt-in flag.
+- **The spot bot's buy timing.** A promoted timing champion is published, but
+  measured on 2026-09-28 it should not steer the bot as the target stands. The
+  slots most often cheapest (the first and last of the day) are just as often
+  the dearest, as the arcsine law says they must be. Averaged over 13,323
+  coin-days, no slot's open differed from the day's average open by more than
+  noise (-5.5 to +7.5 basis points, every interval spanning zero). Buying at
+  the likeliest cheapest firing would not lower the average price paid.
+  Wiring timing is only worth it if a slot is ever shown to cost less on
+  average, which is a different target (the price paid against the day's
+  average) from the one this slot scores (`CLASSIC_MODELS.md`).
 - **The main confluence engine's sizing.** A promoted size champion could
   replace trailing volatility for that asset's band.
 

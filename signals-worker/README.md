@@ -728,6 +728,17 @@ asset's own record only in proportion to its depth (prior of 400 outcomes).
 Numbers, and the one correction still waiting on a decision:
 [docs/MODEL_OVERFITTING.md](docs/MODEL_OVERFITTING.md).
 
+**Classic models** (2026-09-28). Naive Bayes, decision stumps (bagged and
+boosted), random forests, exponential smoothing up to multiplicative
+Holt-Winters and automated ETS were tested per asset, class-wide and on
+market indexes in the sequence study's harness. None beat the base rate on
+direction or GARCH + weekday on size. Two things did help. Ranges sized by the
+68th percentile of past moves (what Monte Carlo converges to) replace +-1 sd
+bands, which contained 75-83% of moves while claiming 68%. And a Monte Carlo
+of the buying time found the arcsine law, which beats every count-based
+timing model with no data, though no 4-hour slot is cheaper on average:
+[docs/CLASSIC_MODELS.md](docs/CLASSIC_MODELS.md).
+
 **Missed moves, and the big-move watch.** Of 364 moves of 12%+ in 48 h
 that the retrospective logged in September 2026, 49% were in coins outside
 the ranked universe and 51 sat on a board with direction withheld or wrong.

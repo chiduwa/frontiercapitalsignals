@@ -415,5 +415,34 @@ class ShrunkCalibration(unittest.TestCase):
         self.assertEqual(mt.describe(spec), 'trailing volatility, calibrated toward its class')
 
 
+class ArcsineTiming(unittest.TestCase):
+    """2026-09-28 (docs/CLASSIC_MODELS.md): where a random walk's low falls
+    among six opens is the discrete arcsine law, whatever the steps."""
+
+    def test_the_law_is_exact_and_symmetric(self):
+        p = mt.arcsine_law()
+        self.assertEqual([round(x * 1024) for x in p], [252, 140, 120, 120, 140, 252])
+        self.assertAlmostEqual(float(p.sum()), 1.0, places=12)
+
+    def test_any_symmetric_walk_follows_it(self):
+        rng = np.random.default_rng(3)
+        for steps in (rng.normal(size=(60000, 5)), rng.standard_t(2.5, size=(60000, 5))):
+            path = np.c_[np.zeros(len(steps)), np.cumsum(steps, axis=1)]
+            share = np.bincount(np.argmin(path, axis=1), minlength=6) / len(path)
+            self.assertLess(float(np.max(np.abs(share - mt.arcsine_law()))), 0.01)
+
+    def test_the_record_moves_it_only_as_far_as_its_weight(self):
+        spec = mt.make('timing', 'arcsine', kappa=100, halfLife=120)
+        self.assertIn(spec['id'], [c['id'] for c in mt.candidate_grid('timing')])
+        days = [{'date': mt.add_days('2026-01-01', i), 'weekday': 0, 'cheapest': 2} for i in range(60)]
+        p = mt.fit_predict(spec, days, [{'date': '2026-03-05', 'weekday': 0}], 2)[0][0]['probs']
+        w = sum(0.5 ** (i / 120) for i in range(60))
+        self.assertAlmostEqual(p[2], (w + 100 * 120 / 1024) / (w + 100), places=9)
+        self.assertAlmostEqual(p[0], 100 * 252 / 1024 / (w + 100), places=9)
+        pure = mt.fit_predict(mt.make('timing', 'arcsine'), days, [{'date': '2026-03-05', 'weekday': 0}], 2)[0][0]['probs']
+        self.assertEqual(pure, [float(v) for v in mt.arcsine_law()])
+        self.assertEqual(mt.describe(spec), "random-walk low (arcsine law), updated by the coin's record (120-day half-life)")
+
+
 if __name__ == '__main__':
     unittest.main()
