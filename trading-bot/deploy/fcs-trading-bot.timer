@@ -8,7 +8,9 @@ Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/tradin
 # enforced here, and the shadow ledger samples its running extremes here.
 # GitHub Actions could not deliver it (measured: zero firings of the same
 # request), which is why execution moved to this host.
-OnCalendar=*:0/5
+# In UTC, not the host's local clock, so a daylight-saving change can never
+# shift or double this schedule (test.mjs pins it).
+OnCalendar=*:0/5 UTC
 AccuracySec=1s
 # Do NOT catch up on missed firings. A backlog of cycles fired back-to-back
 # after downtime would each read the same stale signals payload and re-decide

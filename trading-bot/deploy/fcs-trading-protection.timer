@@ -8,7 +8,9 @@ Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/tradin
 # also excludes overlap with the five-minute decision cycle.
 # Offset from the five-minute decision cycle at second :00. If a slow decision
 # run still overlaps, the shared D1 lease makes this pass skip safely.
-OnCalendar=*-*-* *:*:07,22,37,52
+# In UTC, not the host's local clock, so a daylight-saving change can never
+# shift or double this schedule (test.mjs pins it).
+OnCalendar=*-*-* *:*:07,22,37,52 UTC
 AccuracySec=1s
 Persistent=false
 Unit=fcs-trading-protection.service

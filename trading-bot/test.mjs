@@ -1079,5 +1079,20 @@ console.log('\n== contract/signals/risk: a tournament model trades only once pro
     /tournament-sourced exposure/.test(evaluateCandidate(tCand, { ...baseCtx, openPositions: [{ notional: 500, leverage: 5, source: TOURNAMENT_SOURCE, symbol: 'XUSDT' }] }).reason || ''));
 }
 
+// Every systemd timer on the host runs in UTC. Without the suffix, OnCalendar
+// follows the host's local clock, and on a daylight-saving zone a fixed-hour
+// schedule (the spot bot's 00/04/../20 firings, which the model tournament
+// scores as UTC slots) would move by an hour twice a year.
+{
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const dir = new URL('./deploy/', import.meta.url);
+  const timers = readdirSync(dir).filter((f) => /^fcs-.*\.timer$/.test(f));
+  const specs = timers.flatMap((f) => readFileSync(new URL(f, dir), 'utf8').split('\n')
+    .filter((l) => l.startsWith('OnCalendar=')).map((l) => ({ f, l })));
+  check('every host timer schedules in UTC, so daylight saving cannot move it',
+    timers.length >= 8 && specs.length >= timers.length && specs.every(({ l }) => /\sUTC$/.test(l.trim())),
+    specs.filter(({ l }) => !/\sUTC$/.test(l.trim())).map(({ f, l }) => `${f}: ${l}`).join('; '));
+}
+
 console.log(failures === 0 ? '\nTRADING BOT OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

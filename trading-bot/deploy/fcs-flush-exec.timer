@@ -7,7 +7,9 @@ Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/signal
 # are not routinely queued behind each other on the shared futures lock.
 # The executor only considers events from the last 30 minutes, so a missed
 # firing costs at most one setup rather than accumulating a backlog.
-OnCalendar=*:0/2:30
+# In UTC, not the host's local clock, so a daylight-saving change can never
+# shift or double this schedule (test.mjs pins it).
+OnCalendar=*:0/2:30 UTC
 AccuracySec=5s
 Persistent=false
 Unit=fcs-flush-exec.service

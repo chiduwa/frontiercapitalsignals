@@ -81,6 +81,21 @@ if ! sudo -u "$RUN_USER" node --check "$STAGE_DIR/trading-bot/src/index.mjs" >"$
   sed -n '1,40p' "$TEST_LOG" | while IFS= read -r line; do log "  $line"; done
   exit 1
 fi
+
+# Every staged timer's schedule must parse on THIS host's systemd before any
+# unit is installed. A schedule systemd cannot read leaves its timer dead
+# without failing anything else, and one of these timers is the trading bot's.
+# (Schedules carry an explicit UTC so a daylight-saving change cannot move
+# them; trading-bot/test.mjs pins that.)
+for timer in "$STAGE_DIR"/trading-bot/deploy/fcs-*.timer; do
+  [ -f "$timer" ] || continue
+  while IFS= read -r spec; do
+    if ! systemd-analyze calendar "$spec" >/dev/null 2>&1; then
+      log "TIMER SCHEDULE REJECTED on staged ${TARGET:0:7}: $(basename "$timer") OnCalendar=$spec — live checkout was not changed"
+      exit 1
+    fi
+  done < <(sed -n 's/^OnCalendar=//p' "$timer")
+done
 log "guardrail tests passed on staged ${TARGET:0:7}"
 
 # Services execute files directly from /opt/fcs. Take their filesystem locks

@@ -4,7 +4,9 @@ Description=Pull trading bot updates hourly
 [Timer]
 # Hourly, offset off the top of the hour so an update never lands in the same
 # second as a decision cycle.
-OnCalendar=*:37
+# In UTC, not the host's local clock, so a daylight-saving change can never
+# shift or double this schedule (test.mjs pins it).
+OnCalendar=*:37 UTC
 AccuracySec=1m
 Persistent=true
 Unit=fcs-trading-bot-update.service

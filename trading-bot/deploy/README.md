@@ -128,6 +128,12 @@ journalctl -u fcs-account-journal -n 100 --no-pager  # imported account fills
 sudo systemctl stop fcs-trading-bot.timer            # stop trading now
 ```
 
+Every timer schedules in UTC (`OnCalendar=... UTC`), not the host's local
+clock, so a daylight-saving change can neither move a run nor skip or repeat
+one. `trading-bot/test.mjs` fails on a timer without it, and the updater
+checks each staged schedule with `systemd-analyze calendar` before it
+installs any unit.
+
 The update timer pulls `main` hourly into a detached staging worktree and runs
 all guardrail suites there. A failed target never replaces `/opt/fcs`. After a
 pass, the updater takes the journal, spot and futures runtime locks and switches

@@ -7,7 +7,9 @@ Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/tradin
 # the five-minute trading cycle. Funding settles every 8 hours, so there is
 # nothing to gain from a tighter cadence; the first few runs do the deep
 # backfill and every run after that is a cheap top-up.
-OnCalendar=*-*-* 02,08,14,20:07:00
+# In UTC, not the host's local clock, so a daylight-saving change can never
+# shift or double this schedule (test.mjs pins it).
+OnCalendar=*-*-* 02,08,14,20:07:00 UTC
 AccuracySec=30s
 # Catching up is safe and useful here, unlike the trading cycle: this only
 # appends history, and a missed window simply means more to fetch next time.

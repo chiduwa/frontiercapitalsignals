@@ -5,7 +5,9 @@ Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/accoun
 [Timer]
 # Offset from the five-minute futures decision cycle. This is a separate
 # reader and never stops, starts, or locks either trading bot.
-OnCalendar=*:2/15
+# In UTC, not the host's local clock, so a daylight-saving change can never
+# shift or double this schedule (test.mjs pins it).
+OnCalendar=*:2/15 UTC
 AccuracySec=30s
 Persistent=true
 Unit=fcs-account-journal.service

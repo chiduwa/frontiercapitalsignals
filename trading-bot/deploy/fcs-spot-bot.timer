@@ -11,7 +11,9 @@ Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/spot-b
 #
 # Firing often is safe because the pool is derived from elapsed time, not
 # accumulated per firing: repeated checks inside one period cannot inflate it.
-OnCalendar=*-*-* 00,04,08,12,16,20:11:00
+# In UTC, not the host's local clock, so a daylight-saving change can never
+# shift or double this schedule (test.mjs pins it).
+OnCalendar=*-*-* 00,04,08,12,16,20:11:00 UTC
 AccuracySec=1m
 # Catch up after downtime: a missed window is a missed chance at a dip.
 Persistent=true

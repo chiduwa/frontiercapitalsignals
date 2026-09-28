@@ -2,7 +2,9 @@
 Description=Run bounded policy history research hourly, independently of trading
 
 [Timer]
-OnCalendar=*:43
+# In UTC, not the host's local clock, so a daylight-saving change can never
+# shift or double this schedule (test.mjs pins it).
+OnCalendar=*:43 UTC
 AccuracySec=30s
 RandomizedDelaySec=60s
 Persistent=false
