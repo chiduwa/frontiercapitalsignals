@@ -170,6 +170,31 @@ export function coingeckoCheck(rows, gecko) {
   };
 }
 
+// The universe's coins (the ids the engine means) and their current prices,
+// with the CoinGecko demo key when there is one: the keyless endpoint answers
+// 403 to GitHub's shared runners at times.
+async function universePrices(key) {
+  const headers = { 'User-Agent': 'fcs-archive-audit', ...(key ? { 'x-cg-demo-api-key': key } : {}) };
+  const out = new Map();
+  for (let page = 1; page <= 2; page++) {
+    const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=${page}`;
+    let rows = null;
+    for (let k = 0; k < 4 && !rows; k++) {
+      try {
+        const r = await fetch(url, { headers });
+        if (r.ok) rows = await r.json();
+      } catch { /* retried below */ }
+      if (!rows) await new Promise((res) => setTimeout(res, 3000 * (k + 1)));
+    }
+    if (!Array.isArray(rows)) break;
+    for (const c of rows) {
+      const sym = String(c.symbol || '').toUpperCase();
+      if (!out.has(sym) && c.current_price > 0) out.set(sym, { id: c.id, price: c.current_price });
+    }
+  }
+  return out;
+}
+
 async function main() {
   const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
   for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
@@ -182,10 +207,19 @@ async function main() {
   const { binanceGlobalTradablePairs, getCryptoMarkets } = await import('../worker.js');
   const tradable = new Set(await binanceGlobalTradablePairs());
   // The universe's coins and their current prices: the identity reference.
-  const universe = new Map();
-  for (const c of await getCryptoMarkets()) {
-    const sym = String(c.symbol || '').toUpperCase();
-    if (!universe.has(sym) && c.current_price > 0) universe.set(sym, { id: c.id, price: c.current_price });
+  let universe = await universePrices(process.env.COINGECKO_API_KEY || '');
+  if (!universe.size) {
+    try {
+      for (const c of await getCryptoMarkets()) {
+        const sym = String(c.symbol || '').toUpperCase();
+        if (!universe.has(sym) && c.current_price > 0) universe.set(sym, { id: c.id, price: c.current_price });
+      }
+    } catch (e) { console.warn(`universe prices unavailable (${e.message})`); }
+  }
+  if (!universe.size) {
+    // Without the reference, only coins whose archive already agrees with
+    // Binance recently are touched, and nothing is checked against CoinGecko.
+    console.warn('no universe prices: running without an identity reference (cautious mode)');
   }
   const symbols = (await d1(env, "SELECT DISTINCT symbol FROM asset_daily_bars WHERE asset_class = 'crypto' ORDER BY symbol"))
     .map((r) => r.symbol).filter((s) => !only.length || only.includes(s));
