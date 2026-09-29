@@ -608,6 +608,21 @@ check('301 targets /signals/', (redir.headers.get('location') || '').endsWith('/
 const page = await worker.fetch(new Request('https://x.com/signals/'), emptyEnv, ctx);
 const pageText = await page.text();
 check('dashboard served', page.headers.get('content-type').includes('text/html') && pageText.includes('Frontier Capital'));
+check('large moves study linked from signals page', pageText.includes('href="/signals/research/large-moves/"'));
+const studyRedirect = await worker.fetch(new Request('https://x.com/signals/research/large-moves'), emptyEnv, ctx);
+check('large moves study canonical slash redirect', studyRedirect.status === 301 &&
+  studyRedirect.headers.get('location') === 'https://x.com/signals/research/large-moves/');
+const study = await worker.fetch(new Request('https://x.com/signals/research/large-moves/'), emptyEnv, ctx);
+const studyText = await study.text();
+check('large moves published page matches its checked-in source', studyText === readFileSync(join(__dirname, 'large-moves-dashboard.html'), 'utf8'));
+check('large moves study served as HTML', study.status === 200 && study.headers.get('content-type').includes('text/html'));
+check('large moves study includes four charts and source figures',
+  ['feature-chart', 'model-chart', 'direction-chart', 'era-chart', '330,100', '29.9%', '26.9%', '52%'].every((value) => studyText.includes(value)));
+check('large moves study CSP and frame protection present',
+  !!study.headers.get('content-security-policy') && study.headers.get('x-frame-options') === 'DENY');
+for (const script of [...studyText.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)]) {
+  if (!script[1].includes('application/ld+json')) new Function(script[2]);
+}
 
 // Every embedded <script> block must actually parse — added 2026-08-22
 // after a real, live incident: an apostrophe inside a single-quoted
