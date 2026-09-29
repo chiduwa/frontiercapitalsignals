@@ -295,7 +295,9 @@ async function main() {
   if (suspects.length) console.log(`\nnot on Binance, latest archived close 2x+ off the universe's coin (look at these): ${suspects.join(', ')}`);
   const diff = Object.entries(report.coins).filter(([, a]) => a.verdict === 'different-token').map(([s, a]) => `${s} (${a.universeId})`);
   if (diff.length) console.log(`Binance lists another token under the ticker, left alone: ${diff.join(', ')}`);
-  console.log(`\n${symbols.length} coins: ${JSON.stringify(counts)}; ${toReplace} rows to replace; ${quarantine.filter((q) => q[3] === 'level-shift').length} coins whose early history is unusable; ${zeros.length} zero closes quarantined`);
+  const marked = await d1(env, "SELECT COUNT(DISTINCT symbol) AS n FROM asset_bar_quarantine WHERE detector_version = ? AND reason = 'level-shift'", [AUDIT_VERSION]);
+  console.log(`\n${symbols.length} coins: ${JSON.stringify(counts)}; ${toReplace} rows to replace; ${quarantine.filter((q) => q[3] === 'level-shift').length} coins whose early history is unusable on this run's evidence `
+    + `(${marked?.[0]?.n ?? 0} already marked, markers are kept); ${zeros.length} zero closes quarantined`);
   if (outArg) writeFileSync(outArg.slice(6), JSON.stringify(report, null, 1));
   if (!APPLY) { console.log('DRY RUN: nothing written. Re-run with --apply.'); return; }
 
@@ -326,12 +328,22 @@ async function main() {
     }
     await replaceBarsFromSource(env, plan.rows.map((x) => ({ symbol: plan.symbol, assetClass: 'crypto', ...x.newBar, source: 'coingecko' })), 'yahoo');
   }
-  await d1(env, 'DELETE FROM asset_bar_quarantine WHERE detector_version = ?', [AUDIT_VERSION]);
+  // Markers are sticky. Once a coin's early history is marked as another
+  // token, the rows that showed it (its first month on Binance) have been
+  // replaced, so a later run cannot see the evidence again and must not undo
+  // the verdict. New markers are added; a level-shift upgrades a spike or
+  // stale mark on the same day; nothing is deleted. Removing a marker is a
+  // deliberate act (docs/ARCHIVE_AUDIT.md), never a side effect of a rerun.
   for (const group of chunk(quarantine, 14)) {
-    await d1Batch(env, [{ sql: `INSERT OR REPLACE INTO asset_bar_quarantine (asset_class, symbol, date, reason, detail, detector_version, detected_at)
-      VALUES ${group.map(() => '(?,?,?,?,?,?,?)').join(',')}`, params: group.flat() }]);
+    await d1Batch(env, [{ sql: `INSERT INTO asset_bar_quarantine (asset_class, symbol, date, reason, detail, detector_version, detected_at)
+      VALUES ${group.map(() => '(?,?,?,?,?,?,?)').join(',')}
+      ON CONFLICT(asset_class, symbol, date) DO UPDATE SET reason = excluded.reason, detail = excluded.detail,
+        detector_version = excluded.detector_version, detected_at = excluded.detected_at
+      WHERE excluded.reason = 'level-shift' AND asset_bar_quarantine.reason <> 'level-shift'`, params: group.flat() }]);
   }
-  console.log(`applied: ${toReplace} rows replaced (old rows in asset_daily_bars_backup, audit_run ${run}); ${quarantine.length} level-shift markers`);
+  const shifts = quarantine.filter((q) => q[3] === 'level-shift').length;
+  console.log(`applied: ${toReplace} rows replaced (old rows in asset_daily_bars_backup, audit_run ${run}); `
+    + `${shifts} coins' early history marked unusable; ${quarantine.length - shifts} zero closes quarantined`);
 }
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {

@@ -77,11 +77,18 @@ CoinGecko's closes and the older history is marked unusable.
 **Every close of zero** is quarantined as a spike.
 
 **Every replaced row is copied first** to `asset_daily_bars_backup` (migration
-0056), keyed by the run. The audit's markers carry their own version
-(`identity-audit-v1`), so the older detector's runs and this one's cannot
-erase each other.
+0056), keyed by the run.
 
-## What it found (first run, 2026-09-28)
+**Markers are sticky.** Once a coin's early history is marked as another
+token, the rows that showed it (its first month on Binance) have been
+replaced, so a later run can no longer see the evidence. The first rerun
+proved it: it would have dropped 5 of the 19 markers (SKY, HOT, ID, APE, OP).
+So the audit only adds markers: a level-shift upgrades a spike or stale mark
+on the same day, and nothing is deleted. The markers carry their own version
+(`identity-audit-v1`), and the older detector (`quarantine-bars.mjs`) now
+updates only its own rows, so neither can overwrite the other.
+
+## What it found (first run, 2026-09-29 03:40 UTC)
 
 | | Coins | Rows |
 |---|---:|---:|
@@ -105,6 +112,11 @@ The biggest replacements:
 | TIA | 496 |
 | SKY | 371 |
 | OP | 127 |
+
+All of it was applied from `signals-archive-audit.yml`: 6,466 rows replaced and
+backed up (13 on a first run that stopped at D1's 100-value query limit, since
+fixed, and 6,453 on the rerun), 19 early-history markers and 2,847 zero-close
+markers. A dry run afterwards finds nothing left to replace.
 
 Most other coins had one to four days where a Yahoo close sat more than 10%
 off Binance's: a glitch, or a gap between venues during a crash. BTC on
@@ -139,7 +151,7 @@ the point.
   the universe's. A wrong token trading near the right one's price would still
   pass.
 
-## Undoing a replacement
+## Undoing a replacement, or removing a marker
 
 ```sql
 INSERT INTO asset_daily_bars (symbol, asset_class, date, open, close, high, low, volume, source)

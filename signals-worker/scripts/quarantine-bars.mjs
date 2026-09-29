@@ -70,8 +70,12 @@ async function main() {
   const cols = '(asset_class, symbol, date, reason, detail, detector_version, detected_at)';
   // D1 caps bound params at 100 per statement: 7 columns -> 14 rows.
   const statements = chunk(pending, 14).map((group) => ({
-    sql: `INSERT OR REPLACE INTO asset_bar_quarantine ${cols} VALUES `
-      + group.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', '),
+    // Only its own rows: the identity audit (crypto-archive-audit.mjs) keeps
+    // markers here that this detector must never overwrite.
+    sql: `INSERT INTO asset_bar_quarantine ${cols} VALUES `
+      + group.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ')
+      + ' ON CONFLICT(asset_class, symbol, date) DO UPDATE SET reason = excluded.reason, detail = excluded.detail, detected_at = excluded.detected_at'
+      + ' WHERE asset_bar_quarantine.detector_version = excluded.detector_version',
     params: group.flat()
   }));
   for (const batch of chunk(statements, 40)) await d1Batch(env, batch);
