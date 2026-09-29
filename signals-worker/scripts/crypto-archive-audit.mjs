@@ -195,6 +195,17 @@ async function universePrices(key) {
   return out;
 }
 
+// A coin's archived rows on the given dates. D1 binds at most 100 values a
+// query, and a coin can have nearly 2,000 rows to replace (HOT).
+async function rowsOn(env, symbol, dates) {
+  const out = [];
+  for (const group of chunk(dates, 90)) {
+    out.push(...await d1(env, `SELECT symbol, date, open, close, high, low, volume, source FROM asset_daily_bars
+      WHERE asset_class = 'crypto' AND symbol = ? AND date IN (${group.map(() => '?').join(',')})`, [symbol, ...group]));
+  }
+  return out;
+}
+
 async function main() {
   const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
   for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
@@ -292,8 +303,7 @@ async function main() {
   for (const [s, a] of Object.entries(report.coins)) {
     const reps = (a.replace || []);
     if (!reps.length) continue;
-    const old = await d1(env, `SELECT symbol, date, open, close, high, low, volume, source FROM asset_daily_bars
-      WHERE asset_class = 'crypto' AND symbol = ? AND date IN (${reps.map(() => '?').join(',')})`, [s, ...reps.map((x) => x.date)]);
+    const old = await rowsOn(env, s, reps.map((x) => x.date));
     for (const group of chunk(old, 10)) {
       await d1(env, `INSERT OR IGNORE INTO asset_daily_bars_backup (audit_run, symbol, date, open, close, high, low, volume, source)
         VALUES ${group.map(() => '(?,?,?,?,?,?,?,?,?)').join(',')}`,
@@ -308,8 +318,7 @@ async function main() {
   }
   for (const plan of geckoPlans) {
     if (!plan.rows.length) continue;
-    const old = await d1(env, `SELECT symbol, date, open, close, high, low, volume, source FROM asset_daily_bars
-      WHERE asset_class = 'crypto' AND symbol = ? AND date IN (${plan.rows.map(() => '?').join(',')})`, [plan.symbol, ...plan.rows.map((x) => x.date)]);
+    const old = await rowsOn(env, plan.symbol, plan.rows.map((x) => x.date));
     for (const group of chunk(old, 10)) {
       await d1(env, `INSERT OR IGNORE INTO asset_daily_bars_backup (audit_run, symbol, date, open, close, high, low, volume, source)
         VALUES ${group.map(() => '(?,?,?,?,?,?,?,?,?)').join(',')}`,
