@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { getAllPosts } from "@/lib/posts";
+import { studies, studyUrl, RESEARCH_BASE } from "@/lib/research";
 
 const BASE = "https://frontiercapitalsignals.com";
 
@@ -19,6 +20,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${BASE}/scan`, changeFrequency: "monthly", priority: 0.6 },
     { url: `${BASE}/resources`, changeFrequency: "weekly", priority: 0.8 },
     { url: `${BASE}/exchanges`, changeFrequency: "weekly", priority: 0.8 },
+    { url: RESEARCH_BASE, changeFrequency: "weekly", priority: 0.8 },
     { url: `${BASE}/about`, changeFrequency: "monthly", priority: 0.6 },
     { url: `${BASE}/contact`, changeFrequency: "monthly", priority: 0.6 },
   ];
@@ -30,5 +32,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.7,
   }));
 
-  return [...staticRoutes, ...postRoutes];
+  const researchRoutes: MetadataRoute.Sitemap = studies.map((s) => ({
+    url: studyUrl(s.slug),
+    lastModified: new Date(s.modified),
+    changeFrequency: "monthly",
+    priority: 0.8,
+  }));
+
+  return [...staticRoutes, ...researchRoutes, ...postRoutes];
 }

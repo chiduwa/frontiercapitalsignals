@@ -72,6 +72,7 @@ export default function Footer() {
                 { label: "Intelligence Feed", href: "/intelligence" },
                 { label: "Investor Resources", href: "/resources" },
                 { label: "Stock Exchanges", href: "/exchanges" },
+                { label: "Quant Research", href: "/research" },
                 { label: "Free Site Scan", href: "/scan" },
                 { label: "Contact", href: "/contact" },
               ].map(({ label, href }) => (
