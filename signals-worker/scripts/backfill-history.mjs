@@ -19,6 +19,7 @@ import {
   replaceTimeOfDayBootstrap, getTimeOfDayCoverage, getOpenCoverage,
   binanceUsExchangeInfo, binanceUsKlines, getExistingHourlyCoverage, upsertHourlyBars,
   isYahooCryptoDataTrustworthy, binanceDailyBars, withoutCoinGeckoSeam, coinGeckoReplacement, replaceCoinGeckoBars,
+  BINANCE_FIRST_MAX_RATIO,
   isQuantizedSeries, yahooReplacement, replaceBarsFromSource
 } from './archive.mjs';
 import { selectIntradayWatchlist } from './intraday.mjs';
@@ -148,7 +149,7 @@ async function main() {
     console.log(`BACKFILL_OPEN set: ${missing} of ${universe.length} symbols have no open price yet and will be re-pulled`);
   }
 
-  let yahooOk = 0, binanceFallback = 0, cgFallback = 0;
+  let yahooOk = 0, binanceFirst = 0, binanceFallback = 0, cgFallback = 0;
   const priceFailed = [];
   // Which coins Binance lists, asked once. An empty set (a failed discovery
   // call) just means every Yahoo failure goes straight to CoinGecko, as before.
@@ -167,13 +168,26 @@ async function main() {
     if (!fullAudit && !needsDailyRefresh(existing, Date.now(), needsOpen)) continue;
 
     let bars = null, source = null, yahooQuantized = false;
-    try {
+    // Binance FIRST for a coin it lists as the coin the engine means (the
+    // 2026-09-28 identity audit: a Yahoo ticker can be another token for years
+    // while its latest price still looks plausible, and rounds micro-priced
+    // coins to six decimals). One pair, one token, a true UTC close. Only the
+    // recent past is fetched when the archive already has the coin.
+    if (a.assetClass === 'crypto' && binancePairs.has(a.symbol) && a.refPrice > 0) {
+      try {
+        const startMs = existing?.maxDate ? Date.parse(`${existing.maxDate}T00:00:00Z`) - 60 * 86400000 : Date.UTC(2017, 0, 1);
+        bars = await binanceDailyBars(a.symbol, a.refPrice, { startMs, maxRatio: BINANCE_FIRST_MAX_RATIO });
+        source = 'binance';
+        binanceFirst++;
+      } catch { bars = null; }
+    }
+    if (!bars) try {
       const yahooBars = await yahooFullHistory(a.yahooTicker);
       if (a.assetClass === 'crypto' && !isYahooCryptoDataTrustworthy(yahooBars, a.refPrice, Date.now())) {
         yahooQuantized = isQuantizedSeries(yahooBars.map(b => b.close));
         throw new Error(yahooQuantized
           ? `Yahoo ${a.yahooTicker} is stored at too few decimals to be a price series (or frozen) — treating as a fetch failure`
-          : `Yahoo ${a.yahooTicker} looks like the wrong asset (stale or off by an order of magnitude vs CoinGecko's current price) — treating as a fetch failure`);
+          : `Yahoo ${a.yahooTicker} looks like the wrong asset (stale, or 3x or more off CoinGecko's current price) — treating as a fetch failure`);
       }
       bars = yahooBars;
       source = 'yahoo';
@@ -269,7 +283,7 @@ async function main() {
     priceRowsWritten += written;
     rowsWrittenThisRun += written;
   }
-  console.log(`price backfill: yahoo ${yahooOk}, binance fallback ${binanceFallback}, coingecko fallback ${cgFallback}, failed ${priceFailed.length}`);
+  console.log(`price backfill: binance first ${binanceFirst}, yahoo ${yahooOk}, binance fallback ${binanceFallback}, coingecko fallback ${cgFallback}, failed ${priceFailed.length}`);
   if (priceFailed.length) console.log(`  failures: ${priceFailed.join('; ')}`);
   console.log(`price rows written: ${priceRowsWritten}/${PRICE_ROW_BUDGET}`);
 

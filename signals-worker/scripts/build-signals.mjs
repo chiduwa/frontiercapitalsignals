@@ -27,6 +27,7 @@ import { loadHierarchicalHealth } from './hierarchical-research.mjs';
 import { loadTournamentHealth } from './model-tournament-io.mjs';
 import { loadBigMoveWatch } from './big-move-watch-io.mjs';
 import { loadDecouplingWatch } from './decoupling-watch-io.mjs';
+import { loadCoinRotation } from './coin-rotation-io.mjs';
 import { loadExhaustion } from './exhaustion-io.mjs';
 import { loadProfitGrowth, loadCompanyProfitMetrics } from './profit-growth.mjs';
 
@@ -289,6 +290,14 @@ if (FCS_D1_DATABASE_ID) {
   } catch (error) {
     payload.decouplingWatch = { status: 'unavailable' };
     console.error('decoupling watch unavailable:', error.message);
+  }
+  // Coin rotation on paper (scripts/coin-rotation.mjs), logged by the hourly
+  // live scan: its live record per horizon, against the 2021-26 replay.
+  try {
+    payload.coinRotation = await loadCoinRotation(env);
+  } catch (error) {
+    payload.coinRotation = { status: 'unavailable' };
+    console.error('coin rotation unavailable:', error.message);
   }
   try {
     payload.sessionResearch = await loadSessionHealth(env);

@@ -778,6 +778,22 @@ volatility. No production change. The archive's daily crypto closes turned out
 to mix tokens under one ticker, so the study used Binance candles.
 [docs/CADENCE.md](docs/CADENCE.md).
 
+**Coin rotation on paper, and the crypto archive audit** (2026-09-28). The
+cadence study's one real pattern is now logged live with no money on it
+(`scripts/coin-rotation.mjs`, run by the hourly live scan, panel in the
+Research view). Each UTC day it forms a 2-day and a 40-day round over the 100
+most-traded Binance coins, long the laggards against the market and short the
+leaders, and scores each net of 0.2% when its days are up. On the 2021-26
+replay the 2-day version never paid and the 40-day version made about +34% and
++32% a year in 2021-23 and 2024-26, but the replay only sees coins still listed
+today. The same study found
+production's daily crypto archive holding other tokens under some tickers
+(SKY was Skycoin, STRK was Strike) and rounded or zero prices.
+`scripts/crypto-archive-audit.mjs` checks every coin against its own Binance
+candles and replaces what is wrong, backing each row up first. The backfill
+now takes Binance first. The audit runs weekly.
+[docs/ARCHIVE_AUDIT.md](docs/ARCHIVE_AUDIT.md), [docs/CADENCE.md](docs/CADENCE.md).
+
 **ARB is always tracked** (`FAVORITE_SYMBOLS`). The list is written down in
 fifteen places across the Worker, the Oracle-host collectors, Python research
 and a workflow argument; `test-tracked-assets.mjs` fails if any copy

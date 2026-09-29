@@ -1,0 +1,212 @@
+{
+ "universe": {
+  "days": 2055,
+  "medianSize": 100
+ },
+ "horizons": {
+  "2": {
+   "periods": {
+    "2021-23": {
+     "horizon": 2,
+     "cohorts": 1054,
+     "periods": 527,
+     "since": "2021-02-11",
+     "netPerCohort": -0.0007827614623232508,
+     "netPerYear": -0.14285396687399327,
+     "t": -1.0134031394486234,
+     "laggardsPerCohort": -0.0013917389147635327,
+     "laggardsPerYear": -0.2539923519443447,
+     "laggardsT": -4.1368445799071285
+    },
+    "2024-26": {
+     "horizon": 2,
+     "cohorts": 999,
+     "periods": 499,
+     "since": "2024-01-01",
+     "netPerCohort": -0.0016499889811957774,
+     "netPerYear": -0.3011229890682294,
+     "t": -2.4661488664983566,
+     "laggardsPerCohort": -0.001818860791748793,
+     "laggardsPerYear": -0.33194209449415474,
+     "laggardsT": -5.793674671020661
+    }
+   },
+   "years": {
+    "2021": {
+     "horizon": 2,
+     "cohorts": 324,
+     "periods": 162,
+     "since": "2021-02-11",
+     "netPerCohort": -0.0029505165753873673,
+     "netPerYear": -0.5384692750081945,
+     "t": -1.5114276336231023,
+     "laggardsPerCohort": -0.0021292954543211612,
+     "laggardsPerYear": -0.3885964204136119,
+     "laggardsT": -2.736178924719099
+    },
+    "2022": {
+     "horizon": 2,
+     "cohorts": 365,
+     "periods": 182,
+     "since": "2022-01-01",
+     "netPerCohort": 0.0014044342217639537,
+     "netPerYear": 0.2563092454719216,
+     "t": 1.302325922434333,
+     "laggardsPerCohort": -0.0005378280348606965,
+     "laggardsPerYear": -0.09815361636207712,
+     "laggardsT": -0.9475111883552536
+    },
+    "2023": {
+     "horizon": 2,
+     "cohorts": 365,
+     "periods": 182,
+     "since": "2023-01-01",
+     "netPerCohort": -0.0010457032926220334,
+     "netPerYear": -0.1908408509035211,
+     "t": -1.200321664853672,
+     "laggardsPerCohort": -0.0015909420718809636,
+     "laggardsPerYear": -0.29034692811827584,
+     "laggardsT": -4.291187396457963
+    },
+    "2024": {
+     "horizon": 2,
+     "cohorts": 366,
+     "periods": 183,
+     "since": "2024-01-01",
+     "netPerCohort": -0.002439337123009911,
+     "netPerYear": -0.4451790249493088,
+     "t": -2.227130980308362,
+     "laggardsPerCohort": -0.0020882396357850314,
+     "laggardsPerYear": -0.3811037335307682,
+     "laggardsT": -4.2917531111086245
+    },
+    "2025": {
+     "horizon": 2,
+     "cohorts": 365,
+     "periods": 182,
+     "since": "2025-01-01",
+     "netPerCohort": 0.0001981261641075538,
+     "netPerYear": 0.03615802494962857,
+     "t": 0.1967868047622887,
+     "laggardsPerCohort": -0.0008859901357978768,
+     "laggardsPerYear": -0.1616931997831125,
+     "laggardsT": -1.839149032152203
+    },
+    "2026": {
+     "horizon": 2,
+     "cohorts": 268,
+     "periods": 134,
+     "since": "2026-01-01",
+     "netPerCohort": -0.0030890211010903444,
+     "netPerYear": -0.5637463509489878,
+     "t": -2.1530093311069347,
+     "laggardsPerCohort": -0.0027214918831846924,
+     "laggardsPerYear": -0.49667226868120634,
+     "laggardsT": -3.90779933016328
+    }
+   }
+  },
+  "40": {
+   "periods": {
+    "2021-23": {
+     "horizon": 40,
+     "cohorts": 1054,
+     "periods": 26,
+     "since": "2021-02-11",
+     "netPerCohort": 0.03731589242889891,
+     "netPerYear": 0.3405075184137026,
+     "t": 2.9406264202678223,
+     "laggardsPerCohort": 0.014236910162622473,
+     "laggardsPerYear": 0.12991180523393006,
+     "laggardsT": 2.6503344374000797
+    },
+    "2024-26": {
+     "horizon": 40,
+     "cohorts": 961,
+     "periods": 24,
+     "since": "2024-01-01",
+     "netPerCohort": 0.0347250685915508,
+     "netPerYear": 0.31686625089790105,
+     "t": 1.957189730045094,
+     "laggardsPerCohort": 0.013125354555400417,
+     "laggardsPerYear": 0.1197688603180288,
+     "laggardsT": 1.7329262000731813
+    }
+   },
+   "years": {
+    "2021": {
+     "horizon": 40,
+     "cohorts": 324,
+     "periods": 8,
+     "since": "2021-02-11",
+     "netPerCohort": 0.08847347204728614,
+     "netPerYear": 0.807320432431486,
+     "t": 3.227303786203406,
+     "laggardsPerCohort": 0.03421235320751849,
+     "laggardsPerYear": 0.3121877230186062,
+     "laggardsT": 3.009967303502945
+    },
+    "2022": {
+     "horizon": 40,
+     "cohorts": 365,
+     "periods": 9,
+     "since": "2022-01-01",
+     "netPerCohort": 0.038088757162016984,
+     "netPerYear": 0.347559909103405,
+     "t": 3.0983398851036816,
+     "laggardsPerCohort": 0.016155042033047302,
+     "laggardsPerYear": 0.14741475855155664,
+     "laggardsT": 2.7024096152404016
+    },
+    "2023": {
+     "horizon": 40,
+     "cohorts": 365,
+     "periods": 9,
+     "since": "2023-01-01",
+     "netPerCohort": -0.008868084075061627,
+     "netPerYear": -0.08092126718493735,
+     "t": -0.8808744873065234,
+     "laggardsPerCohort": -0.005412847862723728,
+     "laggardsPerYear": -0.04939223674735401,
+     "laggardsT": -1.2246650609105953
+    },
+    "2024": {
+     "horizon": 40,
+     "cohorts": 366,
+     "periods": 9,
+     "since": "2024-01-01",
+     "netPerCohort": 0.051938955344933424,
+     "netPerYear": 0.47394296752251747,
+     "t": 1.3446768641287135,
+     "laggardsPerCohort": 0.0189742683901266,
+     "laggardsPerYear": 0.17314019905990524,
+     "laggardsT": 1.2095661687919725
+    },
+    "2025": {
+     "horizon": 40,
+     "cohorts": 365,
+     "periods": 9,
+     "since": "2025-01-01",
+     "netPerCohort": 0.025354819802023733,
+     "netPerYear": 0.23136273069346655,
+     "t": 1.0989145098424082,
+     "laggardsPerCohort": 0.01099938085055261,
+     "laggardsPerYear": 0.10036935026129257,
+     "laggardsT": 0.9844503760474651
+    },
+    "2026": {
+     "horizon": 40,
+     "cohorts": 230,
+     "periods": 5,
+     "since": "2026-01-01",
+     "netPerCohort": 0.02220271318476533,
+     "netPerYear": 0.20259975781098363,
+     "t": 1.7072377717013,
+     "laggardsPerCohort": 0.0071917803760946,
+     "laggardsPerYear": 0.06562499593186323,
+     "laggardsT": 1.238296358787663
+    }
+   }
+  }
+ }
+}

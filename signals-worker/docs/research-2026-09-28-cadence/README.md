@@ -33,6 +33,10 @@ python cadence_class.py && python cadence_resid.py && python class_summary.py
 python cadence_backtest.py && python deadcat_concentration.py
 # 7. the rhythm in size: hour of day, weekends, swing lengths
 python size_rhythm.py
+# 8. the coin rotation as the live paper log runs it, replayed since 2021 on
+#    the 100 most-traded Binance coins (scripts/coin-rotation.mjs)
+python fetch_daily_all.py $CAD_DATA/binance_tradable.json $CAD_DATA/daily_all.json
+node rotation_replay.mjs $CAD_DATA/daily_all.json $CAD_DATA/rotation_replay.json
 ```
 
 | script | CADENCE.md section | output here |
@@ -45,3 +49,4 @@ python size_rhythm.py
 | `cadence_backtest.py` | 7: the rules, net of costs | `results/backtest.out`, `results/backtest_results.json` |
 | `deadcat_concentration.py` | 7: how few weeks the dead-cat short depends on | `results/deadcat_concentration.out` |
 | `size_rhythm.py` | 6: the rhythm in size | `results/size_rhythm.out`, `results/size_rhythm.json` |
+| `fetch_daily_all.py`, `rotation_replay.mjs` | 7: the rotation on the most-traded coins | `results/rotation_replay.out`, `results/rotation_replay.json` |

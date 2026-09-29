@@ -1,0 +1,63 @@
+name: Signals Crypto Archive Audit
+
+# Weekly: check every archived coin's daily closes against its own reference
+# (Binance's candle when Binance lists the coin the engine means, CoinGecko's
+# last year for a coin Binance does not list). Closes that belong to another
+# token or were rounded are replaced (each old row is backed up to
+# asset_daily_bars_backup first), early history that belongs to another token
+# is marked unusable, and zero closes are quarantined.
+# See signals-worker/docs/ARCHIVE_AUDIT.md. Research data only; places nothing.
+on:
+  schedule:
+    - cron: '23 6 * * 0'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Write the fixes (false: report only)'
+        required: false
+        default: 'true'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signals-archive-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Test the audit before it touches D1
+        working-directory: signals-worker
+        run: node test-crypto-archive-audit.mjs
+      - name: Audit the archive, and fix what is clearly wrong
+        working-directory: signals-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+          APPLY: ${{ inputs.apply || 'true' }}
+        run: |
+          mkdir -p reports
+          if [ "$APPLY" = "true" ]; then
+            node scripts/crypto-archive-audit.mjs --apply --out=reports/archive-audit.json
+          else
+            node scripts/crypto-archive-audit.mjs --out=reports/archive-audit.json
+          fi
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: archive-audit
+          path: signals-worker/reports/archive-audit.json
+          if-no-files-found: ignore
+          retention-days: 90

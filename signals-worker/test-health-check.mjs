@@ -253,6 +253,8 @@ assert.ok(notOk(healthy({ exhaustion: { status: 'stale', ageHours: 5 } })).inclu
 assert.ok(notOk(healthy({ decouplingWatch: { status: 'stale', lastRunAt: new Date(Date.now() - 5 * 3600000).toISOString() } })).includes('decoupling-watch-fresh'), 'a stale decoupling watch warns');
 assert.ok(!notOk(healthy({ decouplingWatch: { status: 'live', lastRunAt: new Date().toISOString() } })).includes('decoupling-watch-fresh'), 'a live decoupling watch passes');
 assert.ok(!notOk(healthy({ decouplingWatch: { status: 'awaiting-first-run' } })).includes('decoupling-watch-fresh'), 'a watch that has not run yet is not flagged');
+assert.ok(notOk(healthy({ coinRotation: { status: 'stale', lastRunAt: new Date(Date.now() - 6 * 3600000).toISOString() } })).includes('coin-rotation-fresh'), 'a stale paper rotation warns');
+assert.ok(!notOk(healthy({ coinRotation: { status: 'live', lastRunAt: new Date().toISOString() } })).includes('coin-rotation-fresh'), 'a live paper rotation passes');
 assert.ok(notOk(healthy({ profitGrowth: { status: 'unavailable' } })).includes('profit-growers-fresh'), 'an unavailable profit view warns');
 assert.deepEqual(failing(healthy({ exhaustion: { status: 'stale' }, profitGrowth: { status: 'stale' } })), [], 'these warn, they never fail the page');
 

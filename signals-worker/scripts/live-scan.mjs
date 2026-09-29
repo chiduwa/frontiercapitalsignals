@@ -41,6 +41,7 @@ import {
 } from './exhaustion-gauge.mjs';
 import { formatPct } from './price-change.mjs';
 import { runDecouplingWatch } from './decoupling-watch-io.mjs';
+import { runCoinRotation } from './coin-rotation-io.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, NTFY_TOPIC } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
@@ -353,7 +354,18 @@ async function main() {
     console.error('decoupling watch failed (scan unaffected):', e.message || e);
   }
 
-  console.log(`\nlive-scan: ${fired.length} cast(s) ${DRY_RUN ? "found (dry run: nothing written)" : "logged"}, ${sent + decoupled} notification(s) sent`);
+  // The coin rotation on paper (scripts/coin-rotation.mjs): the day's cohorts
+  // from the bars already fetched above. Its own record and push; a failure
+  // here never touches the scan above.
+  let rotated = 0;
+  try {
+    const cr = await runCoinRotation({ env, nowMs: Date.now(), barsBySymbol, dryRun: DRY_RUN, notify });
+    rotated = cr.pushed;
+  } catch (e) {
+    console.error('coin rotation failed (scan unaffected):', e.message || e);
+  }
+
+  console.log(`\nlive-scan: ${fired.length} cast(s) ${DRY_RUN ? "found (dry run: nothing written)" : "logged"}, ${sent + decoupled + rotated} notification(s) sent`);
 }
 
 main().catch((e) => { console.error('live-scan failed:', e); process.exit(1); });

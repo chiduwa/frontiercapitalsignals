@@ -107,7 +107,17 @@ export async function yahooFullHistory(ticker) {
 // wide 10x band stays generous to real volatility/timing gaps while still
 // catching this. `nowMs` is a parameter, not an internal Date.now(), so
 // this stays a pure, directly testable function.
-export function isYahooCryptoDataTrustworthy(bars, refPrice, nowMs, maxStaleDays = 21) {
+//
+// The band was 10x until 2026-09-28, when the crypto identity audit
+// (crypto-archive-audit.mjs) found collisions much closer than "many orders of
+// magnitude": Yahoo's SKY-USD (Skycoin) sat 4x off Sky, STRK (Strike) 6.6x off
+// Starknet, BEAM 5-7x off Merit Circle's Beam. 3x still passes three weeks of a
+// real coin's moves between a stale last bar and today's price.
+export const IDENTITY_MAX_RATIO = 3;
+// Binance is taken FIRST (backfill-history.mjs) only when it is clearly the
+// same coin: its last close within 1.5x of CoinGecko's current price.
+export const BINANCE_FIRST_MAX_RATIO = 1.5;
+export function isYahooCryptoDataTrustworthy(bars, refPrice, nowMs, maxStaleDays = 21, maxRatio = IDENTITY_MAX_RATIO) {
   if (!bars || !bars.length) return false;
   if (refPrice == null || refPrice <= 0) return true; // nothing to check the price against — don't block on staleness alone here, that's stocks'/benchmarks' path too
   const last = bars[bars.length - 1];
@@ -115,7 +125,7 @@ export function isYahooCryptoDataTrustworthy(bars, refPrice, nowMs, maxStaleDays
   if (staleDays > maxStaleDays) return false;
   if (last.close == null || last.close <= 0) return false;
   const ratio = last.close / refPrice;
-  if (!(ratio >= 0.1 && ratio <= 10)) return false;
+  if (!(ratio >= 1 / maxRatio && ratio <= maxRatio)) return false;
   return !isQuantizedSeries(bars.map(b => b.close));
 }
 
@@ -144,7 +154,7 @@ export function isQuantizedSeries(closes, { window = 60, minDistinct = 25, maxFl
 // days at a time; a pair listed later simply starts at its listing.
 export const BINANCE_KLINES_URL = 'https://data-api.binance.vision/api/v3/klines';
 export async function binanceDailyBars(baseSymbol, refPrice, {
-  nowMs = Date.now(), startMs = Date.UTC(2017, 0, 1), fetcher = fetchJson, maxPages = 12
+  nowMs = Date.now(), startMs = Date.UTC(2017, 0, 1), fetcher = fetchJson, maxPages = 12, maxRatio = IDENTITY_MAX_RATIO
 } = {}) {
   const pair = `${String(baseSymbol).toUpperCase()}USDT`;
   const rows = [];
@@ -168,7 +178,7 @@ export async function binanceDailyBars(baseSymbol, refPrice, {
   // The same two tests the Yahoo path applies: a ticker is not a globally
   // unique asset, so the series must be recent AND within an order of
   // magnitude of the spot price we already hold for this coin.
-  if (!isYahooCryptoDataTrustworthy(bars, refPrice, nowMs, 3)) {
+  if (!isYahooCryptoDataTrustworthy(bars, refPrice, nowMs, 3, maxRatio)) {
     throw new Error(`Binance ${pair} is stale or a different asset (last ${bars[bars.length - 1].close} vs reference ${refPrice})`);
   }
   return bars;

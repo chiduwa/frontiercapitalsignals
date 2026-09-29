@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { binanceDailyBars, withoutCoinGeckoSeam, coinGeckoReplacement, replaceCoinGeckoBars, alignRowsByTrueClose,
-  isQuantizedSeries, isYahooCryptoDataTrustworthy, yahooReplacement, replaceBarsFromSource } from './scripts/archive.mjs';
+  isQuantizedSeries, isYahooCryptoDataTrustworthy, yahooReplacement, replaceBarsFromSource,
+  IDENTITY_MAX_RATIO, BINANCE_FIRST_MAX_RATIO } from './scripts/archive.mjs';
 import { selectArchiveUpdates } from './scripts/archive-policy.mjs';
 
 const DAY = 86400000;
@@ -50,6 +51,19 @@ test('a same-ticker different asset, or a dead listing, is refused rather than a
   const dead = fakeBinance(200);
   await assert.rejects(binanceDailyBars('ARB', 0.25, { fetcher: dead.fetcher, nowMs }), /stale/);
   await assert.rejects(binanceDailyBars('ARB', 0.25, { fetcher: async () => [], nowMs }), /thin history/);
+});
+
+test('identity bands: a close collision (Skycoin 4x off Sky) is refused, and Binance-first wants 1.5x', async () => {
+  const nowMs = t0 + 400 * DAY + 3600000;
+  const recent = (px) => [{ date: new Date(nowMs - DAY).toISOString().slice(0, 10), close: px }];
+  assert.equal(IDENTITY_MAX_RATIO, 3);
+  assert.equal(isYahooCryptoDataTrustworthy(recent(0.31), 0.077, nowMs), false, 'Skycoin 4x off Sky: another token');
+  assert.equal(isYahooCryptoDataTrustworthy(recent(0.15), 0.077, nowMs), true, '2x: within a volatile coin\'s range, Yahoo passes');
+  const live = fakeBinance(400);
+  await assert.rejects(binanceDailyBars('ARB', 0.5, { fetcher: live.fetcher, nowMs, maxRatio: BINANCE_FIRST_MAX_RATIO }), /different asset/,
+    'Binance first needs its last close within 1.5x of the reference');
+  const bars = await binanceDailyBars('ARB', 0.5, { fetcher: live.fetcher, nowMs });
+  assert.ok(bars.length > 300, 'the same 2x gap passes the ordinary 3x band');
 });
 
 test('bars that would collide with CoinGecko history after alignment are left out', () => {

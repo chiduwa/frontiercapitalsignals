@@ -15,9 +15,12 @@ The short answer:
   looked class-wide at first. Each turned out to be a few market-wide moves
   counted once per asset.
 - **One real pattern: coins mean-revert against the rest of the market.**
-  It holds over 2 days and over 40-60 days. It paid in 2021-23 (+35% a year,
-  net, on a 2-day long/short rotation on perps) and has since shrunk below
-  trading costs (-9% a year, net, in 2024-26).
+  It holds over 2 days and over 40-60 days. On the coins you would actually
+  trade (the 100 most traded on Binance), the 2-day rotation never paid
+  after costs. The 40-day rotation made about +34% a year in 2021-23 and
+  +32% in 2024-26 on replay, net of costs (section 7). That replay only sees
+  coins still listed today, which flatters holding laggards, so the rotation
+  is now logged live on paper to get a record without that bias.
 - **The rhythm in move size is real and steady.** This is where the swings
   you see come from:
   - moves are a third bigger at 14:00-15:00 UTC than in a typical hour;
@@ -25,9 +28,10 @@ The short answer:
   - a swing's length is set by its size relative to volatility. A 1-sd
     swing lasts about 31 hours in the big coins and 4 days on daily bars,
     which is exactly what a random walk of that volatility produces.
-- **Nothing here is worth trading or shipping.** Section 9 covers what is
-  usable (timing entries and stops by the size rhythm) and what isn't (swing
-  age, pullback depth, Fibonacci levels, pump and breakdown timing).
+- **No rhythm here is worth trading.** Section 9 covers what is usable
+  (timing entries and stops by the size rhythm) and what isn't (swing age,
+  pullback depth, Fibonacci levels, pump and breakdown timing). The 40-day
+  rotation is the one candidate, under live observation.
 
 ## 1. How rhythm was tested
 
@@ -160,8 +164,8 @@ A coin that ran ahead of the market tends to give some of it back, over days
 and over two months. The hourly version is the same but tiny: under 1 bp an
 hour. Stocks show nothing against their market (no z beyond 2).
 
-It is weaker in the recent period, and section 7 shows it no longer clears
-costs at the short horizon.
+It is weaker in the recent period. Section 7 shows it does not clear costs at
+the short horizon, and does at 40 days.
 
 ## 5. Pumps and breakdowns
 
@@ -237,8 +241,30 @@ spot, 10 bps for perps.
 | Coins: hold the 40-day laggards, spot | 7 pts a year behind buy-and-hold | 2 pts a year ahead | z +0.2, then +2.1 |
 | Coins: short the first bounce after a breakdown, 5 days (perps) | +3.8% per short | +3.1% per short | z +1.6, then +2.1 |
 
-**The rotation** (section 4) was a real, tradable edge in 2021-23 and has
-shrunk below its costs.
+**The rotation** (section 4) on the study's coins (the research panel's 124)
+was a real edge in 2021-23 that shrank. On the coins the engine would trade,
+the 100 most traded on Binance each day, it looks different. A fresh round
+forms each day, and each is scored net of 0.2% (10 bps round trip on each
+leg):
+
+| The 100 most-traded Binance coins | 2021-23 | 2024-26 |
+|---|---|---|
+| 2-day: long laggards, short leaders | -0.08% a round, -14% a year (t -1.0) | -0.16% a round, -30% a year (t -2.5) |
+| 40-day: long laggards, short leaders | **+3.7% a round, +34% a year (t 2.9)** | **+3.5% a round, +32% a year (t 2.0)** |
+| 40-day: laggards only, against the market (spot) | +1.4% a round, +13% a year (t 2.7) | +1.3% a round, +12% a year (t 1.7) |
+
+By calendar year the 40-day rotation made money in 5 of 6: 2021 +81%, 2022
++35%, 2023 -8%, 2024 +47%, 2025 +23%, 2026 so far +20%. (A one-day move
+beyond 100x is a ticker event, not a return, and drops the coin from that
+round. LUNA's relaunch as a new token printed +177,000%; SUN and QUICK were
+redenominated 1,000 to 1. The rule also drops LUNA's real 2022 collapse from
+the few rounds that held it: the conservative side.)
+
+The big caveat is **survivorship**. The replay can only see coins listed on
+Binance today. Coins that died and were delisted were often long-running
+laggards, exactly what this rule buys. So the replay flatters the rotation by
+an unknown amount. That is why it is now logged live, where no such bias
+exists (section 9).
 
 **The dead-cat short** looks consistent, but it is a bet on crash cascades:
 
@@ -256,7 +282,8 @@ cadence.
 
 ## 8. Found and fixed along the way
 
-- **The archive's daily crypto closes are unreliable for this.**
+- **The archive's daily crypto closes were unreliable for this** (now
+  audited and fixed: [ARCHIVE_AUDIT.md](ARCHIVE_AUDIT.md)).
   - Tickers were used by different tokens in different years: JUP and SKY
     in 2021 were other coins.
   - One ticker carries two tokens: FLUID alternates between about 0.75 and
@@ -268,8 +295,7 @@ cadence.
   - The study switched to Binance candles (one token per pair, full
     precision). SUN is left out: its pair jumped about 840x in a day when
     the token was swapped 1,000 to 1.
-  - This is worth a cleanup in production's archive. It feeds the research
-    panels.
+  - Production's archive has since been cleaned: see ARCHIVE_AUDIT.md.
 - **A flaw in the first class-wide test.** It flipped each asset's move
   size rather than its signed move, which made every copied asset move the
   same way at the same time. The chance baseline came out too wide, so the
@@ -290,16 +316,20 @@ cadence.
   - expect weekend moves about a fifth smaller;
   - size positions and set stops by volatility: a 1-sd swing takes about
     a day and a half in the big coins, a 2-sd swing about four days.
-- **Coin rotation** (holding laggards against leaders) was a real edge in
-  2021-23 and is no longer worth its costs. If wanted, it could be logged
-  live and scored before any money goes near it.
+- **Coin rotation, on paper.** Since 2026-09-29 the hourly live scan logs a
+  2-day and a 40-day round each UTC day over the 100 most-traded Binance
+  coins, and scores each when its days are up (`scripts/coin-rotation.mjs`,
+  panel in the Research view). A phone alert goes out only if a horizon clears
+  its costs on its live record: t of 2 or more over 4 months of 2-day rounds,
+  or a year of 40-day ones. Nothing is traded.
 - **For "something is about to move",** the size signals already built do
   better than any cadence found here: the big-move watch
   ([MISSED_MOVES.md](MISSED_MOVES.md)) and the pulling-away-from-the-market
   watch ([DECOUPLING.md](DECOUPLING.md)).
 
-No production code changed. Scripts, inputs and outputs:
-[research-2026-09-28-cadence/](research-2026-09-28-cadence/README.md).
+The study itself changed no production code. The paper rotation (above) and
+the archive audit (ARCHIVE_AUDIT.md) followed from it. Scripts, inputs and
+outputs: [research-2026-09-28-cadence/](research-2026-09-28-cadence/README.md).
 
 ## Also decided on 2026-09-28: class averages
 

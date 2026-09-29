@@ -7462,6 +7462,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   #panel-modelTournament .bh-cell{display:block;line-height:1.7}
   @media(min-width:721px){#panel-bigMoveWatch .bh-head,#panel-bigMoveWatch .bh-row{grid-template-columns:minmax(110px,.9fr) repeat(5,minmax(90px,1fr))}}
   @media(min-width:721px){#panel-decouplingWatch .bh-head,#panel-decouplingWatch .bh-row{grid-template-columns:minmax(64px,.5fr) minmax(100px,.8fr) minmax(70px,.55fr) repeat(4,minmax(76px,.65fr)) minmax(160px,1.3fr)}}
+  @media(min-width:721px){#panel-coinRotation .bh-head,#panel-coinRotation .bh-row{grid-template-columns:minmax(64px,.45fr) minmax(150px,1.1fr) repeat(2,minmax(120px,.9fr)) repeat(2,minmax(160px,1.2fr))}}
   @media(min-width:721px){#panel-exhWatch .bh-head,#panel-exhWatch .bh-row{grid-template-columns:minmax(64px,.5fr) minmax(80px,.6fr) minmax(64px,.5fr) minmax(90px,.6fr) minmax(70px,.5fr) minmax(230px,2fr)}}
   @media(min-width:721px){#panel-exhPrints .bh-head,#panel-exhPrints .bh-row{grid-template-columns:minmax(70px,.6fr) repeat(6,minmax(76px,.7fr))}}
   @media(min-width:721px){#panel-profitSmall .bh-head,#panel-profitSmall .bh-row,#panel-profitMid .bh-head,#panel-profitMid .bh-row{grid-template-columns:minmax(190px,1.7fr) minmax(90px,.8fr) repeat(6,minmax(70px,.6fr))}}
@@ -7480,7 +7481,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   /* On a phone the new lists pair their fields two to a line, with the coin or
      company and the reading across the full width, instead of one per line. */
   @media(max-width:720px){
-    #panel-exhWatch .bh-row,#panel-exhPrints .bh-row,#panel-profitSmall .bh-row,#panel-profitMid .bh-row,#panel-decouplingWatch .bh-row{grid-template-columns:1fr 1fr;column-gap:14px;row-gap:8px}
+    #panel-exhWatch .bh-row,#panel-exhPrints .bh-row,#panel-profitSmall .bh-row,#panel-profitMid .bh-row,#panel-decouplingWatch .bh-row,#panel-coinRotation .bh-row{grid-template-columns:1fr 1fr;column-gap:14px;row-gap:8px}
     #panel-exhWatch .bh-row>.bh-sym,#panel-exhPrints .bh-row>.bh-sym,#panel-profitSmall .bh-row>.bh-sym,#panel-profitMid .bh-row>.bh-sym,#panel-exhWatch .bh-row>[data-l="Reading"]{grid-column:1/-1}
   }
   .ex-list{margin:8px 0 4px;padding-left:18px;font-family:var(--mono);font-size:11.5px;line-height:1.75;color:var(--muted)}
@@ -8732,6 +8733,42 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           +pRows
         +'</div>'
         +(eRows?'<div class="rt-eps"><div class="rt-eps-h">Most recent episodes</div>'+eRows+'</div>':'')
+        +PANEL_END
+        +'</div></section>';
+    }
+
+    // Coin rotation on paper (scripts/coin-rotation.mjs): the one pattern the
+    // cadence study found, logged live with no money on it (docs/CADENCE.md).
+    var cr=d.coinRotation;
+    if(cr&&(cr.status==='live'||cr.status==='stale')&&cr.horizons){
+      var crPct=function(x,dp){return typeof x==='number'&&isFinite(x)?(x>=0?'+':'')+(x*100).toFixed(dp==null?2:dp)+'%':'n/a';};
+      var crT=function(t){return typeof t==='number'&&isFinite(t)?'t '+t.toFixed(2):'';};
+      var crEv=cr.evidence||{};
+      var crRows=[2,40].map(function(k){
+        var h=cr.horizons[k]||cr.horizons[String(k)];
+        if(!h)return '';
+        var rec=h.record||{},cur=h.current,ev=crEv[k]||crEv[String(k)]||{};
+        var live=rec.cohorts?crPct(rec.netPerCohort)+' a round, about '+crPct(rec.netPerYear,1)+' a year ('+rec.cohorts+' round'+(rec.cohorts===1?'':'s')+' since '+esc(rec.since||'')+(crT(rec.t)?', '+crT(rec.t):'')+')'
+          :'none scored yet ('+(h.open||0)+' open)';
+        var hist=function(p){var e=ev[p]||{};return e.netPerYear==null?'n/a':crPct(e.netPerYear,1)+' a year'+(crT(e.t)?' ('+crT(e.t)+')':'');};
+        var names=function(list){return (list||[]).map(function(x){return esc(x[0])+' '+crPct(x[1],1);}).join(', ')||'n/a';};
+        return '<div class="bh-row" data-cr="'+k+'"><span class="bh-sym">'+k+'-day</span>'
+          +'<span class="bh-cell" data-l="Live, after costs">'+live+(h.state==='paying'?' <b>clearing its costs</b>':'')+'</span>'
+          +'<span class="bh-cell" data-l="2021-23 replay">'+hist('2021-23')+'</span>'
+          +'<span class="bh-cell" data-l="2024-26 replay">'+hist('2024-26')+'</span>'
+          +'<span class="bh-cell" data-l="Now holding: the laggards">'+(cur?names(cur.laggards)+' <span class="muted">('+cur.nLaggards+' in all, to '+esc(cur.maturesOn)+')</span>':'n/a')+'</span>'
+          +'<span class="bh-cell" data-l="Now short: the leaders">'+(cur?names(cur.leaders)+' <span class="muted">('+cur.nLeaders+' in all)</span>':'n/a')+'</span></div>';
+      }).join('');
+      var crAgo=function(iso){var hh=(Date.now()-Date.parse(iso))/3600000;return !isFinite(hh)?'':(hh<1?'within the hour':Math.round(hh)+'h ago');};
+      b+='<section data-dashboard-view="research" hidden>'+zoneHead('rotation','Coin rotation, on paper','Logged live, never traded')
+        +'<div class="zone">'
+        +panelStart({id:'coinRotation', tone:'learn', open:true,
+          eyebrow:'RESEARCH &middot; <b>COIN ROTATION</b>',
+          title:'Does holding the laggards against the leaders pay again?',
+          meta:'daily, the 100 most-traded Binance coins &middot; last run '+esc(crAgo(cr.lastRunAt))+(cr.status==='stale'?' &middot; <span class="amber-t">stale</span>':'')})
+        +'<div class="xp-banner" role="note"><b>On paper only.</b> Each UTC day the 100 most-traded coins on Binance are split by their move against the rest of the market over the last 2 days, and separately the last 40: the laggards are held, the leaders sold short. Each round is scored when its days are up, after 0.2% costs. Replayed on these coins since 2021, the 2-day version never paid after costs and the 40-day version did, in both halves; but the replay only sees coins still listed today, which flatters holding laggards. This live record has no such bias. A phone alert goes out only if a horizon clears its costs on its live record (t of 2 or more over 4 months of 2-day rounds, or a year of 40-day ones). Not a trade, not financial advice.</div>'
+        +'<div class="bh-list"><div class="bh-head"><span>Horizon</span><span>Live, after costs</span><span>2021-23 replay</span><span>2024-26 replay</span><span>Now holding: the laggards</span><span>Now short: the leaders</span></div>'+crRows+'</div>'
+        +'<div class="dr-note">Moves are each coin&#39;s over the horizon against the other 99, as of the round&#39;s formation day. Replays: '+esc(crEv.universe||'')+', the same rules and costs.</div>'
         +PANEL_END
         +'</div></section>';
     }

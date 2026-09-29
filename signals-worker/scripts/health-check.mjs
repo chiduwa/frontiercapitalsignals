@@ -214,6 +214,13 @@ export function checkPayload(payload, now = Date.now()) {
     push('profit-growers-fresh', 'warn', pg.status === 'live',
       `the profit-grower lists are ${pg.status}${pg.asOf ? ` (as of ${pg.asOf})` : ''}; check signals-profit-growth.yml`);
   }
+  // The coin rotation on paper (2026-09-28) also runs inside the hourly live scan.
+  const cr = payload.coinRotation;
+  if (cr && cr.status && cr.status !== 'awaiting-first-run') {
+    const age = cr.lastRunAt ? hours(now - Date.parse(cr.lastRunAt)) : NaN;
+    push('coin-rotation-fresh', 'warn', cr.status === 'live',
+      `the paper coin rotation is ${cr.status}${Number.isFinite(age) ? ` (last run ${age.toFixed(1)}h ago)` : ''}; check signals-live-scan.yml`);
+  }
   // The decoupling watch (2026-09-28) runs inside the same hourly live scan.
   const dw = payload.decouplingWatch;
   if (dw && dw.status && dw.status !== 'awaiting-first-run') {

@@ -669,6 +669,43 @@ console.log('\n== the decoupling watch lists coins breaking away from the market
   }
 }
 
+// ============ coin rotation on paper (2026-09-28) =============================
+console.log('\n== the paper coin rotation shows each horizon\'s live record against its replay, and what it holds ==');
+{
+  const { ROT_EVIDENCE } = await import('./scripts/coin-rotation-io.mjs');
+  const ev = JSON.parse(JSON.stringify(ROT_EVIDENCE));
+  ev[2]['2021-23'] = { netPerCohort: 0.0019, netPerYear: 0.35, t: 4.1 }; ev[2]['2024-26'] = { netPerCohort: -0.0005, netPerYear: -0.09, t: -0.8 };
+  ev[40]['2021-23'] = { netPerCohort: 0.017, netPerYear: 0.15, t: 2.2 }; ev[40]['2024-26'] = { netPerCohort: 0.002, netPerYear: 0.016, t: 0.4 };
+  const cur = (k) => ({ formedOn: '2026-09-28', maturesOn: k === 2 ? '2026-09-30' : '2026-11-07', universeN: 100, nLaggards: 51, nLeaders: 49,
+    laggards: [['ONDO', -0.121], ['SEI', -0.08], ['AAVE', -0.05], ['TIA', -0.04], ['OP', -0.03]], leaders: [['HBAR', 0.28], ['ALGO', 0.1], ['XLM', 0.06], ['LINK', 0.05], ['SUI', 0.04]] });
+  const live = { status: 'live', lastRunAt: iso(15 * 60000), evidence: ev, horizons: {
+    2: { record: { horizon: 2, cohorts: 0, periods: 0, since: null, netPerCohort: null, netPerYear: null, t: null }, open: 1, current: cur(2), state: 'not' },
+    40: { record: { horizon: 40, cohorts: 0, periods: 0, since: null, netPerCohort: null, netPerYear: null, t: null }, open: 1, current: cur(40), state: 'not' } } };
+  const view = await render({ ...payload(), coinRotation: live }, { settleMs: 1200 });
+  const el = view.doc.getElementById('panel-coinRotation');
+  const text = el?.textContent || '';
+  check('the rotation renders in the Research view without disrupting the page',
+    view.pageErrors.length === 0 && Boolean(el?.closest('[data-dashboard-view="research"]')), JSON.stringify(view.pageErrors));
+  check('one row per horizon with its replay record from the evidence',
+    /\+35\.0% a year \(t 4\.10\)/.test(el.querySelector('[data-cr="2"]')?.textContent || '') && /-9\.0% a year/.test(el.querySelector('[data-cr="2"]')?.textContent || '')
+    && /\+15\.0% a year/.test(el.querySelector('[data-cr="40"]')?.textContent || ''), el?.querySelector('[data-cr="2"]')?.textContent);
+  check('before any round is scored it says so, with the open rounds', /none scored yet \(1 open\)/.test(el.querySelector('[data-cr="2"]')?.textContent || ''));
+  check('it names what the latest round holds and sells, with their moves against the market',
+    /ONDO -12\.1%/.test(text) && /HBAR \+28\.0%/.test(text) && /51 in all, to 2026-09-30/.test(text), text.slice(0, 300));
+  check('it says paper, the costs, the history, and not advice; no em dash',
+    /On paper only/.test(text) && /after 0\.2% costs/.test(text) && /only sees coins still listed today/.test(text) && /not financial advice/.test(text) && !text.includes('\u2014'));
+  view.dom.window.close();
+  const scored = await render({ ...payload(), coinRotation: { ...live, horizons: { ...live.horizons,
+    2: { ...live.horizons[2], record: { horizon: 2, cohorts: 130, periods: 65, since: '2026-09-28', netPerCohort: 0.0021, netPerYear: 0.383, t: 2.4 }, state: 'paying' } } } }, { settleMs: 1200 });
+  const st = scored.doc.getElementById('panel-coinRotation')?.querySelector('[data-cr="2"]')?.textContent || '';
+  check('once scored: net a round, a year, the count, t, and whether it is clearing its costs',
+    /\+0\.21% a round, about \+38\.3% a year \(130 rounds since 2026-09-28, t 2\.40\)/.test(st) && /clearing its costs/.test(st), st);
+  scored.dom.window.close();
+  const none = await render({ ...payload(), coinRotation: { status: 'awaiting-first-run' } }, { settleMs: 1200 });
+  check('before the first run the panel stays away', none.pageErrors.length === 0 && !none.doc.getElementById('panel-coinRotation'));
+  none.dom.window.close();
+}
+
 // ============ sell pressure and profit growers (2026-09-26) ==================
 console.log('\n== sell pressure: per-coin exhaustion, your coins, and the market as context ==');
 {
