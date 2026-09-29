@@ -1,0 +1,84 @@
+fresh prints: 7,250 on 441 coins; 2024-01-31 to 2026-08-31
+per month: 234 fresh prints (92 thin, 141 mid)
+by case: {'percoin': 3341, 'both': 2342, 'x20': 1567}  by tier: {'mid': 4385, 'thin': 2865}
+
+== every variant, net of fees, slippage and funding, per trade (price move, 1x) ==
+   entry  stop  hold late | half 1 (to 2025-05-28) | half 2 (from 2025-05-29)
+lmt3  stop 15%  24h on-time        H1 n=1416  -0.11% t  -0.3 | H2 n=2761  +0.19% t  +0.7 win  59%
+mkt   stop 25%  24h on-time        H1 n=2611  -0.11% t  -0.4 | H2 n=4639  +0.35% t  +1.5 win  62%
+mkt   stop 15%  24h on-time        H1 n=2611  -0.11% t  -0.4 | H2 n=4639  +0.33% t  +1.6 win  58%
+lmt5  stop 15%  24h on-time        H1 n=1032  -0.19% t  -0.5 | H2 n=2134  +0.36% t  +1.1 win  59%
+mkt   no stop   24h on-time        H1 n=2611  -0.17% t  -0.5 | H2 n=4639  +0.52% t  +1.7 win  63%
+lmt3  no stop   24h on-time        H1 n=1416  -0.27% t  -0.5 | H2 n=2761  +0.47% t  +1.1 win  67%
+lmt3  stop 25%  24h on-time        H1 n=1416  -0.29% t  -0.7 | H2 n=2761  +0.29% t  +0.9 win  65%
+mkt   stop 15%  72h on-time        H1 n=2611  -0.36% t  -0.9 | H2 n=4639  +0.24% t  +0.8 win  55%
+lmt5  no stop   24h on-time        H1 n=1032  -0.58% t  -0.9 | H2 n=2134  +0.32% t  +0.6 win  68%
+lmt5  stop 25%  24h on-time        H1 n=1032  -0.53% t  -1.1 | H2 n=2134  +0.41% t  +1.1 win  65%
+mkt   stop 25%  72h on-time        H1 n=2611  -0.54% t  -1.1 | H2 n=4639  +0.10% t  +0.3 win  60%
+lmt3  stop 15%  72h on-time        H1 n=1416  -0.64% t  -1.3 | H2 n=2761  +0.25% t  +0.6 win  55%
+mkt   stop 15%  24h late           H1 n=2611  -0.33% t  -1.3 | H2 n=4639  +0.23% t  +1.2 win  57%
+mkt   no stop   24h late           H1 n=2611  -0.43% t  -1.3 | H2 n=4639  +0.32% t  +1.1 win  61%
+mkt   stop 15%  72h late           H1 n=2611  -0.58% t  -1.4 | H2 n=4639  +0.21% t  +0.7 win  53%
+mkt   stop 25%  24h late           H1 n=2611  -0.40% t  -1.4 | H2 n=4639  +0.24% t  +1.0 win  60%
+lmt5  stop 15%  72h on-time        H1 n=1032  -0.81% t  -1.5 | H2 n=2134  +0.48% t  +1.1 win  54%
+mkt   no stop   72h on-time        H1 n=2611  -0.96% t  -1.6 | H2 n=4639  +0.58% t  +1.3 win  63%
+lmt3  stop 25%  72h on-time        H1 n=1416  -0.99% t  -1.6 | H2 n=2761  +0.21% t  +0.4 win  62%
+mkt   stop 25%  72h late           H1 n=2611  -0.87% t  -1.8 | H2 n=4639  +0.09% t  +0.3 win  58%
+lmt3  no stop   72h on-time        H1 n=1416  -1.71% t  -1.9 | H2 n=2761  +0.65% t  +1.0 win  67%
+mkt   no stop   72h late           H1 n=2611  -1.19% t  -1.9 | H2 n=4639  +0.31% t  +0.7 win  61%
+lmt5  stop 25%  72h on-time        H1 n=1032  -1.48% t  -2.2 | H2 n=2134  +0.32% t  +0.6 win  62%
+lmt5  no stop   72h on-time        H1 n=1032  -2.27% t  -2.2 | H2 n=2134  +1.01% t  +1.4 win  68%
+lmt5  no stop   24h late           H1 n= 939  -1.80% t  -2.5 | H2 n=1865  -1.42% t  -2.3 win  64%
+lmt5  stop 15%  24h late           H1 n= 939  -1.18% t  -2.8 | H2 n=1865  -0.99% t  -3.1 win  55%
+lmt3  no stop   24h late           H1 n=1242  -1.74% t  -2.9 | H2 n=2323  -1.60% t  -3.1 win  62%
+lmt5  stop 25%  24h late           H1 n= 939  -1.57% t  -3.0 | H2 n=1865  -1.17% t  -3.0 win  61%
+lmt3  no stop   72h late           H1 n=1242  -3.02% t  -3.1 | H2 n=2323  -1.01% t  -1.5 win  63%
+lmt5  no stop   72h late           H1 n= 939  -3.55% t  -3.2 | H2 n=1865  -0.74% t  -1.0 win  65%
+lmt5  stop 15%  72h late           H1 n= 939  -1.89% t  -3.4 | H2 n=1865  -0.98% t  -2.2 win  50%
+lmt3  stop 15%  72h late           H1 n=1242  -1.81% t  -3.4 | H2 n=2323  -1.30% t  -3.1 win  50%
+lmt3  stop 25%  72h late           H1 n=1242  -2.26% t  -3.4 | H2 n=2323  -1.55% t  -3.1 win  58%
+lmt3  stop 15%  24h late           H1 n=1242  -1.36% t  -3.5 | H2 n=2323  -1.36% t  -4.7 win  54%
+lmt3  stop 25%  24h late           H1 n=1242  -1.62% t  -3.5 | H2 n=2323  -1.48% t  -4.2 win  59%
+lmt5  stop 25%  72h late           H1 n= 939  -2.59% t  -3.5 | H2 n=1865  -1.35% t  -2.5 win  58%
+
+== chosen on half 1 (late execution): entry mkt, stop 0.15, hold 24h ==
+  half 1                                       n= 2611 fill 100%  mean  -0.33%  med  +0.21%  win  51%  t  -1.3  stops  15%  funding -0.20%  cost 0.22%
+     half 1 thin                               n=  310 fill 100%  mean  -0.85%  med  -0.27%  win  41%  t  -1.6  stops  14%  funding -0.32%  cost 0.31%
+     half 1 mid                                n= 2301 fill 100%  mean  -0.26%  med  +0.49%  win  53%  t  -1.0  stops  15%  funding -0.18%  cost 0.21%
+     half 1 both                               n=  794 fill 100%  mean  +0.07%  med  +0.96%  win  55%  t  +0.2  stops  16%  funding -0.34%  cost 0.23%
+     half 1 percoin                            n= 1396 fill 100%  mean  -0.50%  med  +0.32%  win  52%  t  -1.5  stops  14%  funding -0.08%  cost 0.22%
+     half 1 x20                                n=  421 fill 100%  mean  -0.53%  med  -0.17%  win  42%  t  -1.2  stops  13%  funding -0.31%  cost 0.22%
+     half 1 hedged with a BTC long             n= 2611 fill 100%  mean  -0.03%  med  +0.93%  win  56%  t  -0.1  stops  15%  funding -0.20%  cost 0.22%
+  half 2                                       n= 4639 fill 100%  mean  +0.23%  med  +1.27%  win  57%  t  +1.2  stops  18%  funding -0.45%  cost 0.27%
+     half 2 thin                               n= 2555 fill 100%  mean  +0.29%  med  +1.14%  win  56%  t  +1.3  stops  18%  funding -0.48%  cost 0.32%
+     half 2 mid                                n= 2084 fill 100%  mean  +0.16%  med  +1.40%  win  58%  t  +0.6  stops  19%  funding -0.40%  cost 0.21%
+     half 2 both                               n= 1548 fill 100%  mean  +0.88%  med  +2.33%  win  59%  t  +3.0  stops  20%  funding -0.74%  cost 0.28%
+     half 2 percoin                            n= 1945 fill 100%  mean  -0.31%  med  +1.11%  win  57%  t  -1.0  stops  19%  funding -0.21%  cost 0.27%
+     half 2 x20                                n= 1146 fill 100%  mean  +0.26%  med  +0.58%  win  53%  t  +0.9  stops  14%  funding -0.46%  cost 0.26%
+     half 2 hedged with a BTC long             n= 4639 fill 100%  mean  +0.11%  med  +1.53%  win  59%  t  +0.6  stops  18%  funding -0.45%  cost 0.27%
+  half 1 decomposition: price move +0.08%, fees+slippage -0.22%, funding -0.20%; worst 5% of trades average -16.7%, best 5% +15.7%
+  half 2 decomposition: price move +0.95%, fees+slippage -0.27%, funding -0.45%; worst 5% of trades average -16.8%, best 5% +21.0%
+  half 1, on time (optimistic)                 n= 2611 fill 100%  mean  -0.11%  med  +0.57%  win  52%  t  -0.4  stops  17%  funding -0.15%  cost 0.22%
+  half 2, on time (optimistic)                 n= 4639 fill 100%  mean  +0.33%  med  +1.76%  win  58%  t  +1.6  stops  21%  funding -0.38%  cost 0.27%
+
+per year: {2024: 'n=1779 mean -0.46% win 50%', 2025: 'n=2764 mean +0.34% win 57%', 2026: 'n=2707 mean +0.03% win 56%'}
+
+== return on margin per trade by leverage (chosen variant) ==
+   1x half 1: mean   -0.33% of margin, median   +0.21%, liquidated  0.0%, worst -27%
+   1x half 2: mean   +0.23% of margin, median   +1.27%, liquidated  0.0%, worst -26%
+   2x half 1: mean   -0.67% of margin, median   +0.42%, liquidated  0.0%, worst -54%
+   2x half 2: mean   +0.46% of margin, median   +2.54%, liquidated  0.0%, worst -53%
+   3x half 1: mean   -1.00% of margin, median   +0.62%, liquidated  0.0%, worst -82%
+   3x half 2: mean   +0.69% of margin, median   +3.81%, liquidated  0.0%, worst -79%
+   5x half 1: mean   -1.62% of margin, median   +1.04%, liquidated  0.0%, worst -100%
+   5x half 2: mean   +1.18% of margin, median   +6.35%, liquidated  0.0%, worst -100%
+  10x half 1: mean   -5.28% of margin, median   -1.70%, liquidated 26.7%, worst -100%
+  10x half 2: mean   -0.47% of margin, median   +1.86%, liquidated 30.6%, worst -100%
+
+== portfolio: 5% of equity as margin a trade, <=10 open, <=50% margin in use ==
+  2x half 1: equity x0.40, -50%/yr, worst drawdown -67% (realized), 2021 trades (127/month)
+  2x half 2: equity x0.95, -4%/yr, worst drawdown -50% (realized), 3285 trades (218/month)
+  3x half 1: equity x0.23, -66%/yr, worst drawdown -82% (realized), 2020 trades (127/month)
+  3x half 2: equity x0.75, -20%/yr, worst drawdown -65% (realized), 3285 trades (218/month)
+  5x half 1: equity x0.07, -87%/yr, worst drawdown -96% (realized), 2015 trades (126/month)
+  5x half 2: equity x0.34, -57%/yr, worst drawdown -84% (realized), 3278 trades (217/month)

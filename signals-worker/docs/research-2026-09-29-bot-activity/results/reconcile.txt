@@ -1,0 +1,24 @@
+The study's measure on the perp-listed coins (spot, from the print's close, 24h):
+  all prints (the study's unit)          n= 12843  spot fwd24  -2.19%  market  +0.04%  excess  -2.22%  H1  -1.49%  H2  -2.60%   median fwd24 -4.65%
+  all prints, thin                       n=  5387  spot fwd24  -3.43%  market  -0.01%  excess  -3.42%  H1  -1.38%  H2  -3.66%   median fwd24 -6.02%
+  all prints, mid                        n=  7456  spot fwd24  -1.28%  market  +0.08%  excess  -1.36%  H1  -1.51%  H2  -1.21%   median fwd24 -3.74%
+  first print per coin per 24h           n=  7237  spot fwd24  -1.79%  market  +0.04%  excess  -1.84%  H1  -1.29%  H2  -2.14%   median fwd24 -3.75%
+  follow-on prints (same pump)           n=  5606  spot fwd24  -2.69%  market  +0.03%  excess  -2.73%  H1  -1.79%  H2  -3.16%   median fwd24 -6.49%
+
+The same prints as a perp short (next open to 24h, no stop):
+  first print: perp gross +1.03%  fees+slippage -0.24%  funding -0.52%  net +0.27%   (a short at the spot close would have made +1.79% gross)
+  follow-on  : perp gross +1.25%  fees+slippage -0.25%  funding -1.31%  net -0.31%   (a short at the spot close would have made +2.69% gross)
+
+Funding filter: last funding rate at the print, net per trade, day-clustered t
+  mkt no stop 24h on time:  funding >= 0 H1 n=2170 +0.10% t +0.3 | funding >= 0 H2 n=3144 +0.78% t +2.2 | funding < 0 H1 n=431 -1.59% t -1.6 | funding < 0 H2 n=1495 -0.05% t -0.1
+  mkt no stop 24h late   :  funding >= 0 H1 n=2170 -0.18% t -0.6 | funding >= 0 H2 n=3144 +0.52% t +1.5 | funding < 0 H1 n=431 -1.73% t -1.9 | funding < 0 H2 n=1495 -0.10% t -0.2
+  mkt no stop 72h on time:  funding >= 0 H1 n=2170 -0.33% t -0.6 | funding >= 0 H2 n=3144 +0.88% t +1.6 | funding < 0 H1 n=431 -3.78% t -2.3 | funding < 0 H2 n=1495 -0.06% t -0.1
+  mkt no stop 72h late   :  funding >= 0 H1 n=2170 -0.55% t -1.0 | funding >= 0 H2 n=3144 +0.58% t +1.1 | funding < 0 H1 n=431 -4.02% t -2.4 | funding < 0 H2 n=1495 -0.26% t -0.4
+  mkt stop 15% 24h on time:  funding >= 0 H1 n=2170 +0.06% t +0.2 | funding >= 0 H2 n=3144 +0.49% t +1.9 | funding < 0 H1 n=431 -1.01% t -1.9 | funding < 0 H2 n=1495 +0.00% t +0.0
+  mkt stop 15% 24h late   :  funding >= 0 H1 n=2170 -0.20% t -0.7 | funding >= 0 H2 n=3144 +0.39% t +1.6 | funding < 0 H1 n=431 -1.06% t -2.1 | funding < 0 H2 n=1495 -0.11% t -0.4
+  mkt stop 15% 72h on time:  funding >= 0 H1 n=2170 -0.21% t -0.5 | funding >= 0 H2 n=3144 +0.46% t +1.4 | funding < 0 H1 n=431 -1.21% t -1.9 | funding < 0 H2 n=1495 -0.23% t -0.6
+  mkt stop 15% 72h late   :  funding >= 0 H1 n=2170 -0.41% t -0.9 | funding >= 0 H2 n=3144 +0.44% t +1.3 | funding < 0 H1 n=431 -1.60% t -2.5 | funding < 0 H2 n=1495 -0.27% t -0.7
+  mkt stop 25% 24h on time:  funding >= 0 H1 n=2170 +0.08% t +0.3 | funding >= 0 H2 n=3144 +0.57% t +1.9 | funding < 0 H1 n=431 -1.09% t -1.8 | funding < 0 H2 n=1495 -0.12% t -0.3
+  mkt stop 25% 24h late   :  funding >= 0 H1 n=2170 -0.24% t -0.8 | funding >= 0 H2 n=3144 +0.41% t +1.4 | funding < 0 H1 n=431 -1.30% t -2.1 | funding < 0 H2 n=1495 -0.13% t -0.4
+  mkt stop 25% 72h on time:  funding >= 0 H1 n=2170 -0.22% t -0.4 | funding >= 0 H2 n=3144 +0.48% t +1.2 | funding < 0 H1 n=431 -2.18% t -2.6 | funding < 0 H2 n=1495 -0.69% t -1.4
+  mkt stop 25% 72h late   :  funding >= 0 H1 n=2170 -0.57% t -1.1 | funding >= 0 H2 n=3144 +0.42% t +1.1 | funding < 0 H1 n=431 -2.45% t -2.8 | funding < 0 H2 n=1495 -0.60% t -1.2

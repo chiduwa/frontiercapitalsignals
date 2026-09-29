@@ -1,0 +1,7 @@
+Capped sleeve: exhaustion shorts, only when funding >= 0 at the print, market entry, 15% stop, 24h exit
+  on time      2x, 2% margin a trade, <= 3 open: H1 -1.1%/yr of the account, worst drawdown -9%, 60 trades/month | H2 +28.0%/yr of the account, worst drawdown -8%, 79 trades/month
+  on time      2x, 2% margin a trade, <= 5 open: H1 +1.1%/yr of the account, worst drawdown -10%, 82 trades/month | H2 +41.3%/yr of the account, worst drawdown -9%, 118 trades/month
+  on time      3x, 2% margin a trade, <= 5 open: H1 +1.0%/yr of the account, worst drawdown -15%, 82 trades/month | H2 +66.1%/yr of the account, worst drawdown -13%, 118 trades/month
+  an hour late 2x, 2% margin a trade, <= 3 open: H1 -5.9%/yr of the account, worst drawdown -12%, 57 trades/month | H2 +9.5%/yr of the account, worst drawdown -9%, 75 trades/month
+  an hour late 2x, 2% margin a trade, <= 5 open: H1 -8.4%/yr of the account, worst drawdown -16%, 80 trades/month | H2 +2.7%/yr of the account, worst drawdown -18%, 113 trades/month
+  an hour late 3x, 2% margin a trade, <= 5 open: H1 -12.9%/yr of the account, worst drawdown -24%, 80 trades/month | H2 +3.0%/yr of the account, worst drawdown -26%, 113 trades/month
