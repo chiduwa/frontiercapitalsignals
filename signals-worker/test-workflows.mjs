@@ -125,6 +125,40 @@ for (const wf of workflows) {
 }
 
 // ---------------------------------------------------------------------------
+// 2b. Steps that call CoinGecko's market or price endpoints pass its key.
+//
+// On 2026-09-29 CoinGecko began refusing /coins/markets and /simple/price
+// without a key (a CloudFront 403). The hourly build's step had never been
+// given COINGECKO_API_KEY, so it got 0 coins every hour and served
+// carried-forward crypto boards until Signals Health failed. Unlike the D1
+// check above this one is STEP-scoped: signals-daily.yml passed the key to
+// two of its steps and not to a third, and a file-wide check reads that as
+// wired. A step runs from one `- name:`/`- uses:`/`- run:` to the next, and
+// its `env:` may sit above or below the command.
+// ---------------------------------------------------------------------------
+console.log('\n== steps calling CoinGecko markets/prices pass COINGECKO_API_KEY ==');
+const needsCoingeckoKey = new Set(
+  readdirSync(SCRIPT_DIR)
+    .filter((f) => f.endsWith('.mjs'))
+    .filter((f) => /getCryptoMarkets\(|coingeckoSimplePrice\(|api\.coingecko\.com\/api\/v3\/(coins\/markets|simple\/price)/
+      .test(readFileSync(join(SCRIPT_DIR, f), 'utf8')))
+    .map((f) => basename(f))
+);
+check('CoinGecko market/price scripts were discovered from source', needsCoingeckoKey.size > 0, `found ${needsCoingeckoKey.size}`);
+
+for (const wf of workflows) {
+  for (const m of wf.text.matchAll(/node\s+(?:--[\w-]+(?:=\S+)?\s+)*scripts\/([\w.-]+\.mjs)/g)) {
+    if (!needsCoingeckoKey.has(m[1])) continue;
+    const stepStarts = [...wf.text.matchAll(/^\s*-\s+(name|uses|run):/gm)].map((s) => s.index);
+    const start = Math.max(0, ...stepStarts.filter((i) => i <= m.index));
+    const end = stepStarts.find((i) => i > m.index) ?? wf.text.length;
+    const step = wf.text.slice(start, end);
+    check(`${wf.name}: the step running ${m[1]} passes COINGECKO_API_KEY`, /\bCOINGECKO_API_KEY:\s*\$\{\{\s*secrets\.COINGECKO_API_KEY\s*\}\}/.test(step),
+      'without it CoinGecko answers /coins/markets and /simple/price with a 403');
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 3. Scheduled workflows declare a timeout.
 //
 // A cron job with no timeout-minutes inherits GitHub's six-hour default. The

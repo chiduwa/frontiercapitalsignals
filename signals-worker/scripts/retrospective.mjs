@@ -51,7 +51,7 @@ import { pathToFileURL } from 'node:url';
 import { d1, chunk, forEachConcurrent, readAllRows } from './d1-client.mjs';
 import {
   binanceGlobalKlines, binanceGlobalTradablePairs, describeMissedMove, classifyMiss,
-  isNonDirectionalAsset, COINGECKO_BACKOFFS_MS, isRetryableFetchError,
+  isNonDirectionalAsset, COINGECKO_BACKOFFS_MS, isRetryableFetchError, coingeckoHeaders,
   CRYPTO_UNIVERSE, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME,
   FAVORITE_SYMBOLS, TECHNIQUE_META, pearsonCorr
 } from '../worker.js';
@@ -903,7 +903,11 @@ async function fetchJsonOnce(url) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { signal: ctrl.signal, headers: { accept: 'application/json' } });
+    // Keyed only for CoinGecko: its /coins/markets refuses anonymous calls
+    // since 2026-09-29 (see coingeckoHeaders in worker.js), and the key has
+    // no business travelling to Binance.
+    const keyed = url.startsWith('https://api.coingecko.com/') ? coingeckoHeaders() : {};
+    const res = await fetch(url, { signal: ctrl.signal, headers: { accept: 'application/json', ...keyed } });
     // "HTTP 429" prefix exactly, so the retry below can recognise it —
     // same message shape worker.js's fetchJson uses.
     if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);

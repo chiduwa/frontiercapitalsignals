@@ -1013,6 +1013,27 @@ console.log('\n== getCryptoMarkets: pages, because CoinGecko caps per_page at 25
   let firstPageThrew = false;
   try { await mod.getCryptoMarkets(); } catch { firstPageThrew = true; }
   check('losing page 1 IS fatal — that is a real outage, not degraded coverage', firstPageThrew);
+
+  // Since 2026-09-29 CoinGecko answers both of these with a 403 unless the
+  // Demo key rides along. Without a key nothing is sent, so the Worker's
+  // keyless /api/prices call is unchanged.
+  const priorKey = process.env.COINGECKO_API_KEY;
+  const keys = [];
+  globalThis.fetch = async (url, opts = {}) => {
+    keys.push((opts.headers || {})['x-cg-demo-api-key'] || null);
+    const body = String(url).includes('/simple/price') ? { bitcoin: { usd: 1 } } : page(1, 10);
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  process.env.COINGECKO_API_KEY = 'demo-test-key';
+  await mod.getCryptoMarkets();
+  await mod.coingeckoSimplePrice(['bitcoin']);
+  check('the markets scan and the price batch both send the Demo key when one is set', keys.length === 2 && keys.every((k) => k === 'demo-test-key'), JSON.stringify(keys));
+  keys.length = 0;
+  delete process.env.COINGECKO_API_KEY;
+  await mod.getCryptoMarkets();
+  await mod.coingeckoSimplePrice(['bitcoin']);
+  check('without a key no key header is sent at all', keys.length === 2 && keys.every((k) => k === null), JSON.stringify(keys));
+  if (priorKey === undefined) delete process.env.COINGECKO_API_KEY; else process.env.COINGECKO_API_KEY = priorKey;
   globalThis.fetch = priorFetch;
 }
 

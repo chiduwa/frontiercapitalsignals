@@ -4949,11 +4949,27 @@ export function isRetryableFetchError(e) {
   return code === 429 || code >= 500;
 }
 
-export async function fetchJsonRetryingTransient(url, backoffsMs = COINGECKO_BACKOFFS_MS) {
+// CoinGecko stopped answering /coins/markets and /simple/price without a key
+// on 2026-09-29: a CloudFront 403, from GitHub's runners and from a home IP
+// alike, first seen about 04:00 UTC. /global, /search/trending and
+// market_chart still answer anonymously. The hourly build lost every crypto
+// asset and served carried-forward boards for hours until it sent the Demo
+// key, the same one the archive jobs already pass.
+//
+// The key comes from COINGECKO_API_KEY in Node, i.e. the Actions jobs. The
+// Worker has no `process` and no such secret, so its /api/prices call stays
+// keyless on purpose: it refetches about once a minute, the Demo plan caps
+// calls per month, and that budget belongs to the build. Binance.US serves
+// most of those live ticks anyway.
+export function coingeckoHeaders(key = (typeof process !== 'undefined' && process.env && process.env.COINGECKO_API_KEY) || '') {
+  return key ? { 'x-cg-demo-api-key': key } : {};
+}
+
+export async function fetchJsonRetryingTransient(url, backoffsMs = COINGECKO_BACKOFFS_MS, opts) {
   let lastErr;
   for (let attempt = 0; attempt <= backoffsMs.length; attempt++) {
     try {
-      return await fetchJson(url);
+      return await fetchJson(url, opts);
     } catch (e) {
       lastErr = e;
       if (!isRetryableFetchError(e) || attempt === backoffsMs.length) break;
@@ -5010,7 +5026,7 @@ export async function getCryptoMarkets() {
       + `?vs_currency=usd&order=market_cap_desc&per_page=${CRYPTO_MARKETS_PAGE_SIZE}&page=${page}`
       + '&sparkline=true&price_change_percentage=1h,24h,7d,30d';
     try {
-      const rows = await fetchJsonRetryingTransient(url);
+      const rows = await fetchJsonRetryingTransient(url, COINGECKO_BACKOFFS_MS, { headers: coingeckoHeaders() });
       if (!Array.isArray(rows) || !rows.length) break;
       out.push(...rows);
       if (rows.length < CRYPTO_MARKETS_PAGE_SIZE) break;
@@ -5070,7 +5086,7 @@ export async function coingeckoSimplePrice(ids) {
   if (!ids.length) return {};
   const url = 'https://api.coingecko.com/api/v3/simple/price'
     + `?ids=${ids.map(encodeURIComponent).join(',')}&vs_currencies=usd&include_24hr_change=true`;
-  const j = await fetchJson(url);
+  const j = await fetchJson(url, { headers: coingeckoHeaders() });
   const out = {};
   for (const id of ids) {
     const v = j && j[id];

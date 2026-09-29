@@ -31,6 +31,7 @@ jobs:
         working-directory: signals-worker
         run: node scripts/backtest-intraday.mjs
         env:
+          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
