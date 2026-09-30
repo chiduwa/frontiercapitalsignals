@@ -1,0 +1,14 @@
+-- idx_technique_votes_run_at(run_at) duplicates the leading column of the
+-- table's own PRIMARY KEY (run_at, symbol, technique_id), which SQLite already
+-- keeps as sqlite_autoindex_technique_votes_1. Every query that used it --
+-- the run_at range reads in notify.mjs, reliability.mjs and retrospective.mjs
+-- and both retention DELETEs -- plans onto the primary-key index with the same
+-- run_at bounds instead (EXPLAIN QUERY PLAN compared with and without it,
+-- 2026-09-30), so no read gets wider. The pending_24/168 partial indexes are
+-- untouched.
+--
+-- What it cost: D1 bills one written row per index entry, and technique_votes
+-- takes ~96k rows a day. Each vote was 5 index writes on insert (table, primary
+-- key, this index, both pending indexes) and 3 on delete; now 4 and 2 -- about
+-- 3.5M billed writes a month for an index no query needs.
+DROP INDEX IF EXISTS idx_technique_votes_run_at;

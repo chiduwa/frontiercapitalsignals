@@ -1735,7 +1735,13 @@ export async function defiLlamaProtocolTvlHistory(slug) {
 // tvltrend technique can look it up the same way every other per-symbol
 // context map already does (ctx.tvlSeries[m.symbol]).
 export async function loadTvlSeries(env, days = 15) {
-  const rows = await d1(env, "SELECT DISTINCT symbol FROM asset_daily_bars WHERE symbol LIKE 'TVL:%'");
+  // A prefix RANGE, not LIKE 'TVL:%': LIKE is case-insensitive, so SQLite
+  // cannot use the (symbol, date) key for it and read all ~2.9M daily bars on
+  // every build. The range seeks straight to the pseudo-rows. Every TVL row is
+  // written by daily-refresh.mjs with the literal uppercase prefix `TVL:`, and
+  // ';' is the character after ':', so the set is the same -- confirmed on
+  // production 2026-09-30: identical 19 symbols, 2,871,276 -> 24,738 rows read.
+  const rows = await d1(env, "SELECT DISTINCT symbol FROM asset_daily_bars WHERE symbol >= 'TVL:' AND symbol < 'TVL;'");
   if (!rows.length) return {};
   const pseudoSymbols = rows.map((r) => r.symbol);
   const bars = await loadRecentBars(env, pseudoSymbols, days);

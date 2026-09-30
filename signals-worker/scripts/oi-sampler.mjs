@@ -352,8 +352,13 @@ async function watchlist() {
   }
   // The liquid head by recent open interest — where a flush is both most
   // likely to be tradeable and most likely to matter.
+  // Same planner trap as the oi_tick seed below: D1 walked the (symbol, date)
+  // primary key to avoid sorting for GROUP BY and read the whole table on every
+  // firing. Production comparison 2026-09-30: the identical 40 symbols in the
+  // identical order, 223,468 -> 6,935 rows read, 63 -> 5 ms.
   const rows = await d1(env,
-    `SELECT symbol FROM derivatives_daily WHERE date >= date('now','-14 day')
+    `SELECT symbol FROM derivatives_daily INDEXED BY idx_derivatives_daily_date
+     WHERE date >= date('now','-14 day')
      GROUP BY symbol ORDER BY AVG(oi_usd_close) DESC LIMIT ?`, [MAX_SYMBOLS]);
   return selectOiWatchlist(rows.map((r) => r.symbol), MAX_SYMBOLS);
 }
@@ -420,8 +425,13 @@ async function main() {
   // firing is still visible in this one — otherwise every restart is blind for
   // the first lookback window.
   const seedFrom = Date.now() - (MOVE_LOOKBACK_MIN + 2) * 60000;
+  // Use the existing timestamp index before sorting the small recent window.
+  // D1 otherwise chose the (symbol, ts) primary-key index to satisfy ORDER BY
+  // and scanned the full retained history. The 2026-09-29 production read-only
+  // comparison returned identical 1,325 rows: 1,165,225 -> 2,650 rows read and
+  // 892 -> 8 ms. Sampling, retention and the seed's contents are unchanged.
   const seed = await d1(env,
-    'SELECT symbol, ts, oi_usd, mark_price FROM oi_tick WHERE ts >= ? ORDER BY symbol, ts', [seedFrom]);
+    'SELECT symbol, ts, oi_usd, mark_price FROM oi_tick INDEXED BY idx_oi_tick_ts WHERE ts >= ? ORDER BY symbol, ts', [seedFrom]);
   const history = new Map(symbols.map((s) => [s, []]));
   for (const r of seed) if (history.has(r.symbol)) history.get(r.symbol).push(r);
 

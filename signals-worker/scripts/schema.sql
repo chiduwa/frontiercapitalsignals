@@ -63,13 +63,16 @@ CREATE TABLE IF NOT EXISTS direction_baseline (
   PRIMARY KEY (asset_class, horizon_hours)
 );
 
-CREATE INDEX IF NOT EXISTS idx_technique_votes_run_at ON technique_votes(run_at);
+-- No separate run_at index: the primary key (run_at, symbol, technique_id)
+-- already leads with run_at and serves every time-range read and retention
+-- DELETE. The old idx_technique_votes_run_at duplicated it at the price of a
+-- billed D1 write per vote; migration 0058 dropped it.
 
 -- Partial indexes for evaluateMatured's maturity scan (reliability.mjs,
--- WHERE run_at <= ? AND evaluated_24/168 = 0). idx_technique_votes_run_at
--- above only narrows by time, still forcing a scan of every retained row
--- (most already evaluated) to find the few still pending; these contain
--- only not-yet-matured rows and shrink automatically as rows get evaluated.
+-- WHERE run_at <= ? AND evaluated_24/168 = 0). A run_at range alone still
+-- forces a scan of every retained row (most already evaluated) to find the
+-- few still pending; these contain only not-yet-matured rows and shrink
+-- automatically as rows get evaluated.
 CREATE INDEX IF NOT EXISTS idx_technique_votes_pending_24 ON technique_votes(run_at) WHERE evaluated_24 = 0;
 CREATE INDEX IF NOT EXISTS idx_technique_votes_pending_168 ON technique_votes(run_at) WHERE evaluated_168 = 0;
 

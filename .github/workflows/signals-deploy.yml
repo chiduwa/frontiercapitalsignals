@@ -66,6 +66,8 @@ jobs:
           node --test test-big-move-watch-io.mjs
           node --test test-model-zoo.mjs
           node --test test-time-series.mjs
+          node --test test-upsert-changed.mjs
+          node --test test-query-plans.mjs
           node --test ../account-journal/test/*.test.mjs
 
       # The dashboard is RENDERED and interrogated, not string-matched. This is

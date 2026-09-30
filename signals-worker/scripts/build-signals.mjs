@@ -509,6 +509,14 @@ if (FCS_D1_DATABASE_ID) {
   } catch (e) {
     console.error('consolidation alert check failed (KV already updated, dashboard unaffected):', e.message || e);
   }
+  // The confident-move alert and the score snapshot below both want the
+  // baselines as they stand after evaluateMatured. Nothing between the two
+  // writes forecast_outcomes (only insertForecastOutcomes and the aggregation
+  // batch do), so one read serves both. Each read scans every outcome of the
+  // current model (~1.57M rows, ~6s, measured 2026-09-30), and it ran twice.
+  // A failed read is not cached, so the snapshot still retries on its own.
+  let postEvaluationBaselines;
+  const loadPostEvaluationBaselines = async () => (postEvaluationBaselines ??= await loadDirectionBaselines(env));
   try {
     let confidentMoveAlerts = 0;
     if (env.NTFY_TOPIC) {
@@ -518,7 +526,7 @@ if (FCS_D1_DATABASE_ID) {
         pooled: await loadCalibration(env),
         detailed: await loadDetailedCalibration(env)
       };
-      confidentMoveAlerts = await checkAndNotifyConfidentMoves(env, payload.generated_at, log.signals || [], alertCalibration, await loadDirectionBaselines(env));
+      confidentMoveAlerts = await checkAndNotifyConfidentMoves(env, payload.generated_at, log.signals || [], alertCalibration, await loadPostEvaluationBaselines());
     }
     console.log(`confident-move alerts: ${confidentMoveAlerts} sent${env.NTFY_TOPIC ? '' : ' (NTFY_TOPIC not set, skipped)'}`);
   } catch (e) {
@@ -552,12 +560,11 @@ if (FCS_D1_DATABASE_ID) {
     // (no re-query) — upserts, so "today" reflects this run's numbers
     // every hour until the date rolls over, then freezes as history.
     const today = payload.generated_at.slice(0, 10);
-    // Reload after evaluateMatured: it just folded this run's outcomes into
-    // direction_baseline, and the snapshot's skill figures should be measured
-    // against the freshest baseline rather than the one loaded before the
-    // build started. The table holds one row per (asset class, horizon), so
-    // this is a trivial read.
-    const snapshotBaselines = await loadDirectionBaselines(env);
+    // Post-evaluateMatured baselines: this run's outcomes are folded in, so the
+    // snapshot's skill figures are measured against the freshest baseline
+    // rather than the one loaded before the build started. Not a trivial read
+    // any more -- see loadPostEvaluationBaselines above.
+    const snapshotBaselines = await loadPostEvaluationBaselines();
     const snapshotted = await snapshotAssetScores(env, today, reliability, rangeReliability, snapshotBaselines);
     console.log(`snapshotted prediction scores for ${snapshotted} assets`);
   } catch (e) {

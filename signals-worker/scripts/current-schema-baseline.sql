@@ -71,4 +71,5 @@ INSERT OR IGNORE INTO d1_migrations (name) VALUES
   ('0054_profit_growth_prior_year.sql'),
   ('0055_decoupling_watch.sql'),
   ('0056_archive_audit_backup.sql'),
-  ('0057_coin_rotation.sql');
+  ('0057_coin_rotation.sql'),
+  ('0058_drop_redundant_technique_votes_run_at_index.sql');

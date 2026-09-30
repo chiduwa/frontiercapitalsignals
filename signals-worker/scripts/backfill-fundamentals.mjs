@@ -7,7 +7,7 @@
 //   FUND_LIQUIDITY_SYMBOLS  how many top-OI symbols to cover (default 50)
 //   FUND_LIQUIDITY_DAYS     days of book history (default 365)
 //   FUND_TIME_BUDGET_MIN    default 90
-import { d1, d1Batch, chunk } from './d1-client.mjs';
+import { d1, d1Batch, chunk, upsertChangedSql } from './d1-client.mjs';
 import {
   fetchBookDepthDay, fetchChainTvl, fetchStablecoinSupply, fetchBtcChart, mergeBtcSeries
 } from './fundamentals-archive.mjs';
@@ -44,11 +44,24 @@ async function pool(items, limit, fn) {
   return out;
 }
 
+// Each table's primary key (migration 0036). Every writeRows caller passes all
+// of its table's columns and none of these tables has another unique index, so
+// upsertChangedSql ends in exactly the state INSERT OR REPLACE did. The chain
+// and network lanes refetch their WHOLE history every run; with REPLACE that
+// rewrote ~50k unchanged rows a day, billed at 3 D1 writes each.
+const PRIMARY_KEYS = {
+  asset_supply_snapshot_daily: ['symbol', 'date'],
+  chain_metrics_daily: ['chain', 'date', 'metric'],
+  network_cost_daily: ['network', 'date'],
+  asset_liquidity_daily: ['symbol', 'date']
+};
+
 async function writeRows(table, cols, rows, perStatement) {
   if (!rows.length) return;
+  const key = PRIMARY_KEYS[table];
+  if (!key) throw new Error(`writeRows: no primary key declared for ${table}`);
   const statements = chunk(rows, perStatement).map((group) => ({
-    sql: `INSERT OR REPLACE INTO ${table} (${cols.join(', ')}) VALUES `
-      + group.map(() => `(${cols.map(() => '?').join(', ')})`).join(', '),
+    sql: upsertChangedSql(table, cols, key, group.length),
     params: group.flatMap((r) => cols.map((c) => (r[c] === undefined ? null : r[c])))
   }));
   for (const batch of chunk(statements, 40)) await d1Batch(env, batch);

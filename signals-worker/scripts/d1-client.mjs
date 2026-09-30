@@ -185,3 +185,22 @@ export function chunk(arr, n) {
   for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
   return out;
 }
+
+// Multi-row "insert, or update only what changed" for tables whose rows are
+// re-sent unchanged most of the time (whole-history refetches). It ends in the
+// same state as INSERT OR REPLACE when `cols` are ALL of the table's columns
+// and `keyCols` is its only unique key -- the caller's contract -- but D1 bills
+// an unchanged row as 0 written rows instead of one per b-tree (3 on a table
+// with one secondary index; both measured on production 2026-09-30). A changed
+// value is still written, so upstream corrections land exactly as before.
+// Table and column names are code-controlled literals, never caller input.
+export function upsertChangedSql(table, cols, keyCols, rowCount) {
+  const valueCols = cols.filter((c) => !keyCols.includes(c));
+  if (!valueCols.length || keyCols.some((c) => !cols.includes(c))) {
+    throw new Error(`upsertChangedSql(${table}): key must be a strict subset of the inserted columns`);
+  }
+  const row = `(${cols.map(() => '?').join(', ')})`;
+  return `INSERT INTO ${table} (${cols.join(', ')}) VALUES ${Array(rowCount).fill(row).join(', ')}`
+    + ` ON CONFLICT (${keyCols.join(', ')}) DO UPDATE SET ${valueCols.map((c) => `${c} = excluded.${c}`).join(', ')}`
+    + ` WHERE ${valueCols.map((c) => `${table}.${c} IS NOT excluded.${c}`).join(' OR ')}`;
+}
