@@ -2886,6 +2886,9 @@ CREATE TABLE IF NOT EXISTS network_cost_daily (
 --
 -- Only the Oracle host can write it: fapi.binance.com is HTTP 451 from the
 -- developer machine and from GitHub runners.
+--
+-- WITHOUT ROWID (migration 0059): the table lives in its primary key, so a
+-- tick is 2 billed D1 writes (table + idx_oi_tick_ts) instead of 3.
 CREATE TABLE IF NOT EXISTS oi_tick (
   symbol TEXT NOT NULL,
   ts INTEGER NOT NULL,              -- exchange timestamp, ms epoch
@@ -2893,7 +2896,7 @@ CREATE TABLE IF NOT EXISTS oi_tick (
   oi_usd REAL,
   mark_price REAL,
   PRIMARY KEY (symbol, ts)
-);
+) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_oi_tick_ts ON oi_tick(ts);
 
 -- Detected in-flight events, written by the sampler the moment the geometry
