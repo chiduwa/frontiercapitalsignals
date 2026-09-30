@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import {parseGlobalHistory,STABLE_IDS,fetchGlobalHistory} from './scripts/stable-basket-data.mjs';
-import {cmcRequest,parseLiquidations,loadCmcLiquidations} from './scripts/cmc-research.mjs';
+import {cmcRequest,parseLiquidations,loadCmcLiquidations,collectCmc100,CMC_BACKOFF_MS,CMC_HISTORY_BACKOFF_MS,CMC_HISTORY_PAGE_PACE_MS} from './scripts/cmc-research.mjs';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {alignedOiWindow,historicalLevels,explainAssetMove,persistLiquidations,buildMarketExplanations,CMC_TRACKED_IDS} from './scripts/market-explanations.mjs';
 import {researchSupplement,persistResearchSupplement,loadSessionHealth} from './scripts/session-health.mjs';
 const now=Date.parse('2026-09-19T12:00:00Z'),DAY=86400000;
@@ -64,4 +67,54 @@ test('global volume collection survives shared-IP throttling and respects Retry-
  assert.equal(n,5);assert.deepEqual(waits,[45000,45000,60000,120000]);assert.equal(r.sha256.length,64);
  let count=0;await assert.rejects(()=>fetchGlobalHistory('https://api.coingecko.com/example',{wait:async()=>{},fetcher:async()=>{count++;return new Response('{}',{status:404});}}),/HTTP 404/);assert.equal(count,1);
  count=0;await assert.rejects(()=>fetchGlobalHistory('https://api.coingecko.com/example',{wait:async()=>{},fetcher:async()=>{count++;return new Response('{}',{status:429});}}),/HTTP 429/);assert.equal(count,6);
+});
+
+// Replays the 2026-09-21/28 failures: CMC's keyless endpoint throttles a shared
+// runner IP per rolling minute (those runs got 32 and 26 of 37 pages). A fake
+// clock advances through `wait` and ~0.2s per request, as observed in the logs.
+function throttledCmc({perMinute=26,key=null}={}){
+ const clock={t:0},hits=[],seen=[];
+ const wait=async ms=>{clock.t+=ms;};
+ const fetcher=async(url,o)=>{
+  seen.push({url,headers:o.headers});clock.t+=200;
+  while(hits.length&&hits[0]<=clock.t-60000)hits.shift();
+  if(!key&&hits.length>=perMinute)return new Response('{"status":{"error_code":1008,"error_message":"You\'ve hit an IP rate limit."}}',{status:429});
+  hits.push(clock.t);
+  const end=Date.parse(new URL(url).searchParams.get('time_end'));
+  const data=Array.from({length:10},(_,i)=>({update_time:new Date(end-(9-i)*86400000).toISOString(),value:200+i}));
+  return new Response(JSON.stringify({status:{error_code:0},data}),{status:200});
+ };
+ const collect=(output,opts={})=>collectCmc100({asOf:'2026-09-28',output,wait,...opts,
+  request:(p,q,o)=>cmcRequest(p,q,{...o,fetcher,wait})});
+ return {collect,clock,seen};
+}
+test('CMC100 history outlasts a per-minute keyless throttle that the old timing could not',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'cmc100-'));
+ try{
+  // Pre-fix timing (1.2s pacing, 2/4/8s retries) fails the way production did.
+  await assert.rejects(throttledCmc().collect(join(dir,'old'),{paceMs:1200,backoffMs:CMC_BACKOFF_MS}),/CMC HTTP 429/);
+  // Current timing completes the whole year with no key, in bounded time.
+  const cur=throttledCmc();
+  const r=await cur.collect(join(dir,'new'));
+  assert.ok(r.series.length>=365,`full year collected (${r.series.length})`);
+  assert.ok(cur.seen.every(s=>/public-api/.test(s.url)&&!s.headers['X-CMC_PRO_API_KEY']),'keyless when no key is configured');
+  assert.ok(cur.clock.t<10*60000,`bounded wall time (${Math.round(cur.clock.t/1000)}s)`);
+  // A much stricter throttle still completes: the backoff, not just pacing.
+  const strict=throttledCmc({perMinute:12});
+  assert.ok((await strict.collect(join(dir,'strict'))).series.length>=365);
+  await assert.rejects(throttledCmc({perMinute:12}).collect(join(dir,'strict-old'),{backoffMs:CMC_BACKOFF_MS}),/CMC HTTP 429/);
+  // With a key: authenticated host and header.
+  const keyed=throttledCmc({key:'k'});
+  await keyed.collect(join(dir,'keyed'),{key:'k'});
+  assert.ok(keyed.seen.every(s=>!/public-api/.test(s.url)&&s.headers['X-CMC_PRO_API_KEY']==='k'));
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+test('CMC history retries honour Retry-After and stay bounded; the default chain is unchanged',async()=>{
+ assert.deepEqual([...CMC_BACKOFF_MS],[2000,4000,8000]);assert.ok(CMC_HISTORY_PAGE_PACE_MS>=2000);
+ const waits=[];let n=0;
+ await cmcRequest('/v3/index/cmc100-historical',{},{backoffMs:CMC_HISTORY_BACKOFF_MS,wait:async ms=>waits.push(ms),
+  fetcher:async()=>++n<4?new Response('{}',{status:429,headers:{'Retry-After':n===1?'90':'1'}}):new Response('{"status":{"error_code":0},"data":[]}')});
+ assert.deepEqual(waits,[90000,30000,60000]);
+ n=0;await assert.rejects(cmcRequest('/x',{},{backoffMs:CMC_HISTORY_BACKOFF_MS,wait:async()=>{},fetcher:async()=>{n++;return new Response('{"status":{"error_code":1008}}',{status:429});}}),/CMC HTTP 429/);
+ assert.equal(n,CMC_HISTORY_BACKOFF_MS.length+1);
 });

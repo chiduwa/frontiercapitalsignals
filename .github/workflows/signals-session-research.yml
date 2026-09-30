@@ -79,6 +79,10 @@ jobs:
             reports/sessions/results/calendar-report.json
       - name: Collect the named stablecoin basket and CMC100 benchmark
         working-directory: signals-worker
+        env:
+          # Optional. Unset, CMC100 is fetched keyless (paced + long 429 backoff,
+          # see cmc-research.mjs); set, it uses CMC's free Basic plan instead.
+          CMC_API_KEY: ${{ secrets.CMC_API_KEY }}
         run: |
           node scripts/stable-basket-data.mjs "$(date -u +%F)" reports/stable-basket/current
           node scripts/cmc-research.mjs "$(date -u +%F)" reports/stable-basket/current

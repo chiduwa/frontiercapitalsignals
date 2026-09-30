@@ -6,24 +6,41 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 const BASE='https://pro-api.coinmarketcap.com';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-export async function cmcRequest(path,params,{key=null,fetcher=fetch,wait=sleep}={}){
+export const CMC_BACKOFF_MS=Object.freeze([2000,4000,8000]);
+// The weekly CMC100 history walk is ~37 keyless requests from a shared GitHub
+// runner IP. CMC throttles that per minute: the 2026-09-21 and 09-28 runs got
+// 32 and 26 of 37 pages, then 429 ("IP rate limit" / "limit for anonymous
+// access"), and the 14s default retry chain gave up inside the same minute --
+// which left stable-basket research stale and Signals Health warning. Slower
+// pacing plus retries that outlast a one-minute window fix it without a key.
+export const CMC_HISTORY_PAGE_PACE_MS=2500;
+export const CMC_HISTORY_BACKOFF_MS=Object.freeze([15000,30000,60000,60000]);
+function retryAfterMs(response){
+ const raw=response?.headers?.get?.('retry-after');if(raw==null)return 0;
+ const ms=/^\d+(\.\d+)?$/.test(raw)?Number(raw)*1000:Date.parse(raw)-Date.now();
+ return Number.isFinite(ms)?Math.min(120000,Math.max(0,ms)):0;
+}
+export async function cmcRequest(path,params,{key=null,fetcher=fetch,wait=sleep,backoffMs=CMC_BACKOFF_MS}={}){
  const url=BASE+(key?'':'/public-api')+path+'?'+new URLSearchParams(params);
- for(let attempt=0;attempt<4;attempt++){
+ for(let attempt=0;attempt<=backoffMs.length;attempt++){
   const r=await fetcher(url,{headers:key?{'X-CMC_PRO_API_KEY':key}:{},signal:AbortSignal.timeout(20000)});
-  if(r.status===429&&attempt<3){await wait(2000*2**attempt);continue;}
+  if(r.status===429&&attempt<backoffMs.length){await wait(Math.max(backoffMs[attempt],retryAfterMs(r)));continue;}
   const raw=await r.text();let j;try{j=JSON.parse(raw);}catch{throw Error('CMC non-JSON response');}
   if(!r.ok||Number(j.status?.error_code||0)!==0)throw Error(`CMC HTTP ${r.status}: ${j.status?.error_message||'API error'}`);
   return {url,retrievedAt:new Date().toISOString(),sha256:createHash('sha256').update(raw).digest('hex'),data:j};
  }
  throw Error('CMC rate limit retries exhausted');
 }
-export async function collectCmc100({asOf,output,request=cmcRequest,wait=sleep}){
+// `key` is optional: the same CMC100 series is served keyless and on CMC's free
+// Basic plan (1 credit per call); with CMC_API_KEY set the walk no longer
+// shares the anonymous per-IP allowance at all.
+export async function collectCmc100({asOf,output,request=cmcRequest,wait=sleep,key=null,paceMs=CMC_HISTORY_PAGE_PACE_MS,backoffMs=CMC_HISTORY_BACKOFF_MS}){
  await mkdir(output,{recursive:true});const end=Date.parse(asOf+'T00:00:00Z'),start=end-366*86400000;
  let cursor=end-86400000;const points=new Map(),manifest=[];
  for(let page=0;page<40&&cursor>=start;page++){
   const timeEnd=new Date(cursor).toISOString(),cache=resolve(output,'cmc100-'+timeEnd.slice(0,10)+'.json');let record;
   try{record=JSON.parse(await readFile(cache,'utf8'));if(!Array.isArray(record.data?.data))throw Error('bad cache');}
-  catch{record=await request('/v3/index/cmc100-historical',{time_end:timeEnd,count:'10',interval:'daily'});await writeFile(cache,JSON.stringify(record));await wait(1200);}
+  catch{record=await request('/v3/index/cmc100-historical',{time_end:timeEnd,count:'10',interval:'daily'},{key,wait,backoffMs});await writeFile(cache,JSON.stringify(record));await wait(paceMs);}
   const rows=record.data.data;if(!rows.length)break;
   let earliest=cursor;
   for(const row of rows){
@@ -63,5 +80,6 @@ export async function loadCmcLiquidations(env,nowMs=Date.now(),request=cmcReques
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  const asOf=process.argv[2]||new Date().toISOString().slice(0,10),output=resolve(process.argv[3]||'reports/stable-basket/'+asOf);
- const r=await collectCmc100({asOf,output});console.log(`CMC100: ${r.series.length} daily observations`);
+ const key=process.env.CMC_API_KEY||process.env.COINMARKETCAP_API_KEY||null;
+ const r=await collectCmc100({asOf,output,key});console.log(`CMC100: ${r.series.length} daily observations${key?'':' (keyless)'}`);
 }
