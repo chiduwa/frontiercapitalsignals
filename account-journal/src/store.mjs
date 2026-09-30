@@ -476,33 +476,94 @@ export async function finishRun(config, runId, result) {
     runId]);
 }
 
+// The two summary tables are a pure function of account_journal_fills. They
+// used to be rebuilt by DELETE-all + INSERT-all on every run (~13 min), which
+// D1 bills as ~3,500 written rows each time even when no fill had changed --
+// about 12M billed writes a month for figures that were almost always
+// identical. Now each run converges the tables on the same aggregate by
+// writing only the difference, in one atomic batch:
+//   1. delete groups that no longer exist in the fills (removed or
+//      reclassified source rows),
+//   2. insert new groups and update a group only when one of its figures
+//      differs (an UPSERT whose WHERE is false writes nothing; verified on
+//      production D1 2026-09-30: rows_written = 0).
+// The resulting figures are identical to a full rebuild; test/refresh-analytics
+// pins that against the old statements. The one visible difference is
+// refreshed_at: it now records when a group's figures last changed rather
+// than when a run last passed by. Nothing reads it -- the dashboard computes
+// its own refreshed_at from fills.ingested_at (signals-worker/trade-journal.js).
+const FEE_GROUP = 'substr(event_time, 1, 10), market, origin, symbol, commission_asset';
+const STATS_GROUP = 'substr(event_time, 1, 10), market, origin, symbol';
+export const REFRESH_ANALYTICS_SQL = Object.freeze([
+  `DELETE FROM account_journal_daily_fees
+    WHERE (day, market, origin, symbol, commission_asset) NOT IN (
+      SELECT ${FEE_GROUP} FROM account_journal_fills
+       WHERE commission IS NOT NULL AND commission_asset IS NOT NULL)`,
+  `INSERT INTO account_journal_daily_fees
+    (day, market, origin, symbol, commission_asset, commission_amount, refreshed_at)
+    SELECT ${FEE_GROUP}, SUM(commission), ?
+      FROM account_journal_fills
+     WHERE commission IS NOT NULL AND commission_asset IS NOT NULL
+     GROUP BY ${FEE_GROUP}
+    ON CONFLICT (day, market, origin, symbol, commission_asset) DO UPDATE SET
+      commission_amount = excluded.commission_amount,
+      refreshed_at = excluded.refreshed_at
+    WHERE account_journal_daily_fees.commission_amount IS NOT excluded.commission_amount`,
+  `DELETE FROM account_journal_daily_stats
+    WHERE (day, market, origin, symbol) NOT IN (
+      SELECT ${STATS_GROUP} FROM account_journal_fills)`,
+  // "WHERE true" is required: without it SQLite can read the ON of the upsert
+  // as a join constraint of the SELECT's FROM clause.
+  `INSERT INTO account_journal_daily_stats
+    (day, market, origin, symbol, fill_count, order_count, buy_fill_count,
+     sell_fill_count, buy_quantity, sell_quantity, buy_quote_quantity,
+     sell_quote_quantity, realized_pnl, first_fill_at, last_fill_at, refreshed_at)
+    SELECT ${STATS_GROUP},
+           COUNT(*), COUNT(DISTINCT order_id),
+           SUM(CASE WHEN side = 'BUY' THEN 1 ELSE 0 END),
+           SUM(CASE WHEN side = 'SELL' THEN 1 ELSE 0 END),
+           SUM(CASE WHEN side = 'BUY' THEN quantity ELSE 0 END),
+           SUM(CASE WHEN side = 'SELL' THEN quantity ELSE 0 END),
+           SUM(CASE WHEN side = 'BUY' THEN COALESCE(quote_quantity, 0) ELSE 0 END),
+           SUM(CASE WHEN side = 'SELL' THEN COALESCE(quote_quantity, 0) ELSE 0 END),
+           CASE WHEN market = 'futures' THEN SUM(realized_pnl) ELSE NULL END,
+           MIN(event_time), MAX(event_time), ?
+      FROM account_journal_fills
+     WHERE true
+     GROUP BY ${STATS_GROUP}
+    ON CONFLICT (day, market, origin, symbol) DO UPDATE SET
+      fill_count = excluded.fill_count,
+      order_count = excluded.order_count,
+      buy_fill_count = excluded.buy_fill_count,
+      sell_fill_count = excluded.sell_fill_count,
+      buy_quantity = excluded.buy_quantity,
+      sell_quantity = excluded.sell_quantity,
+      buy_quote_quantity = excluded.buy_quote_quantity,
+      sell_quote_quantity = excluded.sell_quote_quantity,
+      realized_pnl = excluded.realized_pnl,
+      first_fill_at = excluded.first_fill_at,
+      last_fill_at = excluded.last_fill_at,
+      refreshed_at = excluded.refreshed_at
+    WHERE account_journal_daily_stats.fill_count IS NOT excluded.fill_count
+       OR account_journal_daily_stats.order_count IS NOT excluded.order_count
+       OR account_journal_daily_stats.buy_fill_count IS NOT excluded.buy_fill_count
+       OR account_journal_daily_stats.sell_fill_count IS NOT excluded.sell_fill_count
+       OR account_journal_daily_stats.buy_quantity IS NOT excluded.buy_quantity
+       OR account_journal_daily_stats.sell_quantity IS NOT excluded.sell_quantity
+       OR account_journal_daily_stats.buy_quote_quantity IS NOT excluded.buy_quote_quantity
+       OR account_journal_daily_stats.sell_quote_quantity IS NOT excluded.sell_quote_quantity
+       OR account_journal_daily_stats.realized_pnl IS NOT excluded.realized_pnl
+       OR account_journal_daily_stats.first_fill_at IS NOT excluded.first_fill_at
+       OR account_journal_daily_stats.last_fill_at IS NOT excluded.last_fill_at`
+]);
+
 export async function refreshAnalytics(config, nowIso) {
+  const [deleteFees, upsertFees, deleteStats, upsertStats] = REFRESH_ANALYTICS_SQL;
   await d1Batch(cf(config), [
-    { sql: 'DELETE FROM account_journal_daily_fees' },
-    { sql: `INSERT INTO account_journal_daily_fees
-      (day, market, origin, symbol, commission_asset, commission_amount, refreshed_at)
-      SELECT substr(event_time, 1, 10), market, origin, symbol, commission_asset,
-             SUM(commission), ?
-        FROM account_journal_fills
-       WHERE commission IS NOT NULL AND commission_asset IS NOT NULL
-       GROUP BY substr(event_time, 1, 10), market, origin, symbol, commission_asset`, params: [nowIso] },
-    { sql: 'DELETE FROM account_journal_daily_stats' },
-    { sql: `INSERT INTO account_journal_daily_stats
-      (day, market, origin, symbol, fill_count, order_count, buy_fill_count,
-       sell_fill_count, buy_quantity, sell_quantity, buy_quote_quantity,
-       sell_quote_quantity, realized_pnl, first_fill_at, last_fill_at, refreshed_at)
-      SELECT substr(event_time, 1, 10), market, origin, symbol,
-             COUNT(*), COUNT(DISTINCT order_id),
-             SUM(CASE WHEN side = 'BUY' THEN 1 ELSE 0 END),
-             SUM(CASE WHEN side = 'SELL' THEN 1 ELSE 0 END),
-             SUM(CASE WHEN side = 'BUY' THEN quantity ELSE 0 END),
-             SUM(CASE WHEN side = 'SELL' THEN quantity ELSE 0 END),
-             SUM(CASE WHEN side = 'BUY' THEN COALESCE(quote_quantity, 0) ELSE 0 END),
-             SUM(CASE WHEN side = 'SELL' THEN COALESCE(quote_quantity, 0) ELSE 0 END),
-             CASE WHEN market = 'futures' THEN SUM(realized_pnl) ELSE NULL END,
-             MIN(event_time), MAX(event_time), ?
-        FROM account_journal_fills
-       GROUP BY substr(event_time, 1, 10), market, origin, symbol`, params: [nowIso] }
+    { sql: deleteFees },
+    { sql: upsertFees, params: [nowIso] },
+    { sql: deleteStats },
+    { sql: upsertStats, params: [nowIso] }
   ]);
 }
 
