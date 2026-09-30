@@ -82,7 +82,11 @@ jobs:
         env:
           # Optional. Unset, CMC100 is fetched keyless (paced + long 429 backoff,
           # see cmc-research.mjs); set, it uses CMC's free Basic plan instead.
-          CMC_API_KEY: ${{ secrets.CMC_API_KEY }}
+          # Deliberately NOT secrets.CMC_API_KEY: that name also switches on the
+          # dormant CMC Fear & Greed input (daily-refresh.mjs) and CMC
+          # liquidations (build-signals.mjs). This key must reach only this
+          # research benchmark, so it lives under its own secret name.
+          CMC_API_KEY: ${{ secrets.CMC_RESEARCH_API_KEY }}
         run: |
           node scripts/stable-basket-data.mjs "$(date -u +%F)" reports/stable-basket/current
           node scripts/cmc-research.mjs "$(date -u +%F)" reports/stable-basket/current
