@@ -16,6 +16,7 @@ import { selectIntradayWatchlist, CRYPTO_WATCHLIST_SIZE, firstTickAtOrAfter } fr
 import { parseBinanceKlines } from './scripts/archive.mjs';
 import { EXCURSION_MIN_SAMPLES, buildPublicationSnapshots, insertForecastOutcomes, loadReliability, OUTCOME_LABEL_VERSION, OUTCOME_MODEL_VERSION, pathExcursionStats, selectMaturityPrice, selectNonOverlappingForecasts, summarizeExcursionEvidence } from './scripts/reliability.mjs';
 import { forEachConcurrent } from './scripts/d1-client.mjs';
+import { utilityTagsFor, CRYPTO_UTILITY, STOCK_UTILITY, UTILITY_LABELS, STOCK_LABELS } from './utility-tags.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const reliabilitySource = readFileSync(join(__dirname, 'scripts', 'reliability.mjs'), 'utf8');
@@ -3905,6 +3906,21 @@ console.log('\n== surge alerts are judged against the same-window market, not a 
   check('three squeeze days do not wipe out twelve days of a working warning',
     withSqueezes.meanExcessPct > -2 && withSqueezes.rawMeanExcessPct < -5 && mod.surgeNotifyGate(exhaustionCfg, withSqueezes).allowed === true, JSON.stringify(withSqueezes));
   check('the gate note says each cast is capped', /each counted at most ±20%/.test(mod.surgeNotifyGate(exhaustionCfg, withSqueezes).why), mod.surgeNotifyGate(exhaustionCfg, withSqueezes).why);
+}
+
+console.log('\n== what each asset is used for (utility-tags.js, 2026-10-01) ==');
+{
+  const ids = (xs) => xs.map((t) => t.id).join(',');
+  check('a coin is tagged by its CoinGecko id', ids(utilityTagsFor('BTC', 'bitcoin')) === 'money,payments,mining');
+  check('Moonriver is tagged as having no current function', ids(utilityTagsFor('MOVR', 'moonriver')) === 'legacy'
+    && /shut down/.test(utilityTagsFor('MOVR', 'moonriver')[0].title));
+  check('a stock is tagged by ticker and has no CoinGecko id', ids(utilityTagsFor('NVDA')) === 'chips,ai' && utilityTagsFor('NVDA')[0].label === 'Chips');
+  check('a coin never borrows a stock\'s tags through a shared ticker', utilityTagsFor('C', 'some-coin-called-c').length === 0 && utilityTagsFor('C').length > 0);
+  check('an unknown asset gets no tags rather than a guess', utilityTagsFor('ZZZZ').length === 0 && utilityTagsFor('ZZZZ', 'zzzz').length === 0);
+  check('every crypto tag has a label', Object.values(CRYPTO_UTILITY).every((ts) => ts.length && ts.every((t) => UTILITY_LABELS[t])));
+  check('every stock tag has a label', Object.values(STOCK_UTILITY).every((ts) => ts.length && ts.every((t) => STOCK_LABELS[t])));
+  check('every stock on the watchlist is tagged', mod.STOCK_WATCHLIST.every((s) => STOCK_UTILITY[s]), mod.STOCK_WATCHLIST.filter((s) => !STOCK_UTILITY[s]).join(','));
+  check('no tag text carries an em dash', !JSON.stringify([UTILITY_LABELS, STOCK_LABELS]).includes('\u2014'));
 }
 
 console.log('\n== the per-coin exhaustion rule stays off large coins that trade thin on Binance (2026-10-01) ==');

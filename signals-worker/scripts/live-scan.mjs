@@ -37,7 +37,7 @@ import {
   marketWindow, surgeExcessRecord, surgeNotifyGate, FAVORITE_SYMBOLS, coingeckoHeaders
 } from '../worker.js';
 import {
-  recentPrints, latestReading, marketGauge, describeGauge, exhaustionAlertBody, hourLabel, tierOf, matchMarketCaps
+  recentPrints, latestReading, marketGauge, describeGauge, exhaustionAlertBody, hourLabel, tierOf, matchMarketCaps, tokenizedStockSymbols
 } from './exhaustion-gauge.mjs';
 import { formatPct } from './price-change.mjs';
 import { runDecouplingWatch } from './decoupling-watch-io.mjs';
@@ -205,6 +205,24 @@ async function fetchCoinGeckoTop(headers) {
   } finally { clearTimeout(timer); }
 }
 
+// Tokenized stocks to leave out (exhaustion-gauge.mjs KNOWN_TOKENIZED_STOCKS).
+// Keyless only: a failure costs nothing but falls back to the known list.
+async function loadTokenizedStocks() {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&category=tokenized-stock&per_page=250&page=1',
+      { headers: { Accept: 'application/json' }, signal: ctrl.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const set = tokenizedStockSymbols(await res.json());
+    console.log(`tokenized stocks: ${set.size} known (CoinGecko list + fallback)`);
+    return set;
+  } catch (e) {
+    console.log(`tokenized stocks: CoinGecko unavailable (${e.message || e}); using the known list`);
+    return tokenizedStockSymbols([]);
+  } finally { clearTimeout(timer); }
+}
+
 async function loadMarketCaps(priceBySymbol) {
   const key = coingeckoHeaders();
   for (const [label, headers] of [['keyless', {}], ...(Object.keys(key).length ? [['demo key', key]] : [])]) {
@@ -243,9 +261,11 @@ async function fetchAllBars(pairs) {
 async function main() {
   const nowIso = new Date().toISOString();
   const tradable = new Set(await binanceGlobalTradablePairs());
+  const stocks = await loadTokenizedStocks();
   const pairs = [...tradable]
     .filter((s) => !/^(USD|BUSD|TUSD|FDUSD|EUR|DAI|GBP|AEUR)/.test(s))
     .filter((s) => /^[A-Z0-9]+$/.test(s))
+    .filter((s) => !stocks.has(s))
     .slice(0, MAX_SYMBOLS);
   console.log(`live-scan: ${pairs.length} symbols on Binance global`);
   const watch = await loadWatchSet();

@@ -1,0 +1,229 @@
+514 coins, 2019-03-03..2026-10-01; tagged 393
+categories (primary use, members): ai 44, gas 39, meme 31, dex 30, scaling 28, gaming 27, rwa 23, derivatives 19, depin 18, yield 14, oracle 14, payments 13, social 12, interop 12, liquid-staking 12, privacy 12, lending 10, infra 10, nft 9
+
+## 1. Co-movement: correlation of a coin's daily excess return with its own category (leave-one-out) vs other categories
+                  own         other        coins       lift_A lift_B
+half                A      B      A      B     A     B              
+category                                                            
+meme            0.180  0.301 -0.025 -0.041   3.0  30.0  0.205  0.343
+payments        0.369  0.271 -0.044 -0.020   9.0  12.0  0.414  0.291
+gaming          0.281  0.203 -0.033 -0.017  16.0  27.0  0.315  0.220
+liquid-staking -0.023  0.201 -0.020 -0.010   2.0  12.0 -0.003  0.211
+privacy        -0.008  0.116 -0.009 -0.011   8.0  11.0  0.002  0.127
+gas             0.049  0.101 -0.016 -0.001  23.0  37.0  0.065  0.102
+derivatives     0.106  0.083 -0.007 -0.006   7.0  17.0  0.113  0.088
+scaling        -0.026  0.082 -0.009 -0.001   9.0  27.0 -0.017  0.083
+lending         0.070  0.071 -0.004 -0.007   5.0  10.0  0.074  0.077
+ai              0.061  0.050 -0.017 -0.007   9.0  43.0  0.079  0.057
+nft            -0.019  0.052 -0.008 -0.004   4.0   9.0 -0.011  0.056
+dex             0.054  0.051 -0.012 -0.004  14.0  29.0  0.066  0.055
+depin          -0.027  0.053 -0.013 -0.000  11.0  17.0 -0.014  0.053
+interop         0.047  0.041 -0.018  0.001   4.0  12.0  0.065  0.039
+rwa             0.044  0.033 -0.014 -0.006   5.0  21.0  0.058  0.039
+infra           0.022  0.022 -0.016 -0.015   5.0  10.0  0.037  0.037
+yield           0.016  0.018 -0.006 -0.007   4.0  14.0  0.022  0.025
+oracle          0.056 -0.012 -0.011 -0.009   7.0  14.0  0.067 -0.003
+social          0.008 -0.029 -0.028 -0.011   7.0  12.0  0.036 -0.018
+
+## 2. Within-category leaders: leader's excess return on day t vs followers' excess on day t+1
+   leader chosen on half A (best of the 5 largest members by trading history), judged on half B
+      category leader  A_slope    A_t  B_slope    B_t  B_days
+            ai  TFUEL    0.026  1.541   -0.028 -2.344    1369
+           gas   IOST    0.016  1.524    0.009  1.129    1369
+          meme   SHIB    0.076  1.361   -0.030 -0.671    1369
+           dex  SUSHI    0.018  1.231   -0.001 -0.091    1369
+       scaling    LSK    0.020  0.610    0.004  0.561    1369
+        gaming    AXS    0.050  1.517   -0.006 -0.447    1369
+           rwa    DIA    0.016  0.879    0.015  1.505    1369
+   derivatives    INJ    0.029  1.216    0.008  0.783    1369
+         depin  THETA    0.026  1.613   -0.012 -0.935    1369
+         yield    STG    0.062  1.529    0.006  0.544    1369
+        oracle    WIN    0.030  1.167    0.002  0.135    1369
+      payments    TRX    0.051  2.095    0.018  1.632    1369
+        social   HIVE    0.033  1.555   -0.000 -0.004    1369
+       interop   ATOM    0.063  2.094   -0.007 -0.395    1369
+liquid-staking    OGN   -0.251 -0.788   -0.007 -0.436    1369
+       privacy   ARPA    0.002  0.172   -0.010 -0.800    1369
+       lending   AAVE    0.080  2.103   -0.025 -1.506    1369
+         infra    CTK    0.092  2.446   -0.004 -0.391    1369
+           nft  AUDIO    0.192  1.765   -0.003 -0.162    1369
+
+## 2a. Largest coin by market cap as the leader (nothing chosen from returns): day t vs followers day t+1, and week w vs week w+1
+      category leader  day_A_t  day_B_t  week_A_t  week_B_t
+            ai    TAO      NaN     1.77       NaN      2.46
+           gas    SOL    -0.60     0.82      0.61      2.05
+          meme   DOGE     0.24     0.05      1.08      0.05
+           dex    UNI     1.29     0.56      0.40     -1.67
+       scaling    ARB      NaN     0.73       NaN      3.00
+        gaming    AXS     1.52    -0.45      0.60     -1.17
+           rwa   ONDO      NaN     1.93       NaN     -1.86
+   derivatives   HYPE      NaN      NaN       NaN       NaN
+         depin    FIL     0.42    -0.43      0.61      1.99
+         yield    ENA      NaN    -0.67       NaN      0.53
+        oracle   LINK    -0.09     1.06      0.16      0.01
+      payments    BTC    -0.05     1.82      0.37     -0.11
+        social    WLD      NaN    -0.14       NaN     -0.99
+       interop    QNT     1.29     0.57      0.82      0.31
+liquid-staking  ETHFI      NaN     1.31       NaN      0.21
+       privacy    ZEC    -0.49     2.59     -0.10      1.48
+       lending   AAVE     2.10    -1.51     -0.06      0.75
+         infra     2Z      NaN    -1.79       NaN     -0.12
+           nft    APE     1.24    -0.21      0.58     -0.59
+
+## 2b. BTC / ETH today vs each category's excess tomorrow (BTC and ETH are fixed, nothing chosen)
+leader       category  A_slope    A_t  B_slope    B_t
+   BTC             ai    0.050  2.082   -0.008 -0.527
+   BTC            gas    0.013  0.630    0.011  1.053
+   BTC           meme      NaN    NaN   -0.024 -0.739
+   BTC            dex    0.011  0.462    0.003  0.266
+   BTC        scaling    0.013  0.498    0.026  1.430
+   BTC         gaming   -0.059 -1.407   -0.016 -1.158
+   BTC            rwa    0.071  1.034    0.044  2.605
+   BTC    derivatives    0.008  0.182   -0.018 -1.297
+   BTC          depin   -0.001 -0.027   -0.009 -0.800
+   BTC          yield    0.047  0.906    0.013  0.599
+   BTC         oracle    0.014  0.451   -0.019 -1.278
+   BTC       payments   -0.002 -0.082    0.039  2.160
+   BTC         social   -0.026 -0.504   -0.016 -1.048
+   BTC        interop      NaN    NaN   -0.013 -0.753
+   BTC liquid-staking      NaN    NaN   -0.007 -0.269
+   BTC        privacy    0.012  0.522    0.053  1.769
+   BTC        lending    0.032  0.824    0.012  0.529
+   BTC          infra    0.010  0.166    0.023  1.374
+   BTC            nft      NaN    NaN   -0.032 -1.608
+   ETH             ai    0.031  0.845   -0.003 -0.168
+   ETH            gas   -0.001 -0.038    0.027  1.847
+   ETH           meme      NaN    NaN   -0.050 -1.348
+   ETH            dex    0.000  0.001   -0.020 -1.355
+   ETH        scaling   -0.012 -0.266    0.007  0.358
+   ETH         gaming   -0.040 -0.959   -0.027 -1.753
+   ETH            rwa    0.077  1.121    0.010  0.540
+   ETH    derivatives   -0.067 -1.548   -0.012 -0.773
+   ETH          depin   -0.033 -1.020   -0.004 -0.273
+   ETH          yield    0.023  0.367    0.011  0.456
+   ETH         oracle    0.037  0.893   -0.016 -0.952
+   ETH       payments    0.030  1.020    0.027  1.285
+   ETH         social   -0.031 -0.563   -0.016 -0.923
+   ETH        interop      NaN    NaN   -0.031 -1.423
+   ETH liquid-staking      NaN    NaN   -0.027 -0.957
+   ETH        privacy    0.032  1.339    0.062  2.113
+   ETH        lending    0.017  0.479   -0.004 -0.157
+   ETH          infra   -0.081 -1.695    0.015  0.837
+   ETH            nft      NaN    NaN   -0.033 -1.320
+
+## 2c. Catch-up: a coin's excess over its own category (leave-one-out) in the past k days vs the next k days
+   pooled over coins, non-overlapping periods, t clustered by period; negative slope = laggards catch up
+   k= 7d half A: mean slope +0.032, t +1.27, periods 178, coin-periods 12743
+   k= 7d half B: mean slope -0.044, t -3.58, periods 195, coin-periods 47907
+   k=28d half A: mean slope -0.042, t -1.06, periods 43, coin-periods 3032
+   k=28d half B: mean slope -0.085, t -4.16, periods 49, coin-periods 11833
+
+## 2d. Horse race (28d): next-28d excess over the market on past excess vs own category AND past excess vs the market
+   half A: market only: mkt -0.007 (t -0.17), periods 43 | category only: cat -0.034 (t -0.95), periods 43 | both: cat -0.216 (t -1.35) mkt +0.208 (t +1.09), periods 43
+   half B: market only: mkt -0.072 (t -3.20), periods 49 | category only: cat -0.079 (t -4.27), periods 49 | both: cat -0.093 (t -2.17) mkt +0.014 (t +0.27), periods 49
+
+## 2e. Within each category: the bottom third by past-28d excess over the category vs the top third, next 28d (0.2% round-trip cost per leg pair)
+   half A: laggards minus leaders -1.37% per 28d, t -0.57, periods 43, positive 44%
+   half B: laggards minus leaders +1.70% per 28d, t +1.26, periods 49, positive 55%
+   by category (half B):
+     ai                +2.64% per 28d  t +1.09  n 49
+     depin             +1.95% per 28d  t +1.03  n 49
+     derivatives       +4.80% per 28d  t +2.19  n 49
+     dex               +4.26% per 28d  t +1.54  n 49
+     gaming            +6.88% per 28d  t +2.57  n 49
+     gas               +3.04% per 28d  t +1.43  n 49
+     infra             +3.74% per 28d  t +1.14  n 43
+     interop           -0.21% per 28d  t -0.10  n 30
+     lending           +1.65% per 28d  t +0.46  n 26
+     liquid-staking    +2.81% per 28d  t +1.12  n 32
+     meme             -15.69% per 28d  t -1.33  n 35
+     nft               -1.85% per 28d  t -0.52  n 34
+     oracle            +0.13% per 28d  t +0.03  n 49
+     payments          -0.28% per 28d  t -0.16  n 49
+     privacy           +1.73% per 28d  t +0.26  n 49
+     rwa               +6.32% per 28d  t +2.02  n 48
+     scaling           +2.50% per 28d  t +0.80  n 49
+     social            -1.03% per 28d  t -0.17  n 49
+     yield             -0.16% per 28d  t -0.04  n 39
+
+## 3. daily: category A this period vs category B next period. 342 ordered pairs; half-A Bonferroni bar |t| >= 3.8
+   pairs past the bar in half A: 0; also nominal |t|>=2 in A: 12 (expected by chance ~16)
+
+## 3. weekly: category A this period vs category B next period. 342 ordered pairs; half-A Bonferroni bar |t| >= 3.8
+   pairs past the bar in half A: 2; also nominal |t|>=2 in A: 27 (expected by chance ~16)
+leader follower  A_slope    A_t  B_slope    B_t  held
+   dex      rwa   -0.717 -4.484   -0.040 -0.447 False
+   dex  lending   -0.548 -4.343    0.104  0.960 False
+
+## 3. 4-weekly: category A this period vs category B next period. 342 ordered pairs; half-A Bonferroni bar |t| >= 3.8
+   pairs past the bar in half A: 2; also nominal |t|>=2 in A: 14 (expected by chance ~16)
+leader follower  A_slope    A_t  B_slope    B_t  held
+    ai  privacy   -0.174 -6.014   -0.208 -1.596 False
+ depin payments    0.478  3.892   -0.010 -0.043 False
+
+## 4. A category's own past excess vs its next-period excess (pooled across categories, non-overlapping periods)
+   past   7d -> next  7d: slope A +0.026 (t +0.50, n 1415) | B -0.010 (t -0.43, n 3537)
+   past  28d -> next 28d: slope A +0.061 (t +0.74, n 343) | B +0.044 (t +0.76, n 867)
+   past  28d -> next  7d: slope A +0.013 (t +0.53, n 1379) | B +0.015 (t +1.02, n 3528)
+   past  90d -> next 28d: slope A -0.038 (t -1.03, n 317) | B +0.017 (t +0.70, n 860)
+
+## 4b. Rank categories by past excess; next-period spread of the top third over the bottom third (non-overlapping)
+   past  7d -> next  7d half A: winners minus losers +0.56% per period, t +0.71, n 113
+   past  7d -> next  7d half B: winners minus losers +0.06% per period, t +0.31, n 195
+   past 28d -> next 28d half A: winners minus losers +3.26% per period, t +1.70, n 27
+   past 28d -> next 28d half B: winners minus losers +0.62% per period, t +0.72, n 48
+   past 90d -> next 28d half A: winners minus losers -1.95% per period, t -1.06, n 26
+   past 90d -> next 28d half B: winners minus losers -0.23% per period, t -0.28, n 48
+
+## 5. Rotation sequence: BTC -> ETH -> large caps -> small caps / memes (relative 4-week returns, non-overlapping)
+          BTC leads ETH        next 4w: slope A -0.062 (t -0.64) | B -0.177 (t -1.28, n 48)
+          ETH leads large alts next 4w: slope A +0.103 (t +0.53) | B -0.001 (t -0.01, n 48)
+   large alts leads small alts next 4w: slope A -0.272 (t -0.85) | B +0.098 (t +0.73, n 48)
+   small alts leads memes      next 4w: slope A +0.148 (t +0.58) | B +0.160 (t +0.47, n 48)
+
+## 5b. Same legs, weekly, does leg a's relative week predict leg b's relative week 1-4 weeks later?
+          BTC -> ETH        lag 1: t -1.21/+0.02 | lag 2: t +0.47/+0.19 | lag 3: t -0.98/-2.91 | lag 4: t -0.53/-0.00   (half A / half B)
+          ETH -> large alts lag 1: t -0.18/-1.51 | lag 2: t -0.84/-1.55 | lag 3: t +1.29/+1.32 | lag 4: t -0.92/+1.47   (half A / half B)
+   large alts -> small alts lag 1: t +0.87/+1.59 | lag 2: t +0.78/+1.54 | lag 3: t +0.24/+0.75 | lag 4: t -0.83/+0.05   (half A / half B)
+   small alts -> memes      lag 1: t -0.69/-0.07 | lag 2: t -0.76/+1.01 | lag 3: t -0.42/-1.03 | lag 4: t +0.95/+0.21   (half A / half B)
+
+## 6. Category excess by market phase (BTC above / below its 200-day average; phase known the day before)
+      category phase  A_bp_day   A_t  B_bp_day   B_t  B_days
+            ai  bull     16.11  0.92     -0.06 -0.02     897
+            ai  bear      6.66  1.01      2.25  0.62     473
+           gas  bull      2.00  0.32      5.85  1.83     897
+           gas  bear     -1.09 -0.30      2.56  0.70     473
+          meme  bull       NaN   NaN     -0.54 -0.05     726
+          meme  bear       NaN   NaN      6.39  0.90     460
+           dex  bull     -6.36 -0.38      2.74  0.85     897
+           dex  bear     -3.50 -0.59     10.89  2.57     473
+       scaling  bull      6.20  0.29      0.10  0.02     897
+       scaling  bear     -2.94 -0.50     -6.13 -1.71     473
+        gaming  bull     49.66  1.60     -7.04 -1.93     897
+        gaming  bear     -9.64 -0.82      3.16  0.65     473
+           rwa  bull       NaN   NaN     -3.54 -0.69     897
+           rwa  bear     -7.50 -0.85      7.54  1.42     473
+   derivatives  bull     -4.97 -0.16     -1.74 -0.43     897
+   derivatives  bear     -7.54 -0.85     -1.40 -0.33     473
+         depin  bull      7.73  0.58      3.44  1.02     897
+         depin  bear     -7.54 -1.34     -3.15 -0.74     473
+         yield  bull       NaN   NaN      6.66  1.26     897
+         yield  bear     -3.38 -0.27     -4.27 -0.71     473
+        oracle  bull    -39.77 -2.96     -0.27 -0.06     897
+        oracle  bear      3.96  0.53     11.06  2.22     473
+      payments  bull    -18.82 -1.56     17.98  3.21     897
+      payments  bear     11.28  1.76      5.04  0.89     473
+        social  bull    -23.67 -0.70     -1.08 -0.24     897
+        social  bear      5.71  0.64     -0.02 -0.00     473
+       interop  bull       NaN   NaN     -2.65 -0.51     544
+       interop  bear       NaN   NaN      3.45  0.58     401
+liquid-staking  bull       NaN   NaN     -8.26 -1.03     569
+liquid-staking  bear       NaN   NaN     -1.17 -0.14     401
+       privacy  bull     -4.97 -0.44     14.90  2.02     897
+       privacy  bear      3.20  0.57      5.93  0.60     473
+       lending  bull       NaN   NaN     10.30  1.94     897
+       lending  bear      1.13  0.13     13.85  2.24     473
+         infra  bull       NaN   NaN     -0.33 -0.07     897
+         infra  bear     23.55  1.79      2.59  0.42     473
+           nft  bull       NaN   NaN    -14.28 -2.88     770
+           nft  bear       NaN   NaN     -6.12 -0.83     460

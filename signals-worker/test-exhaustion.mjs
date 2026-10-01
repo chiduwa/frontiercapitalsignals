@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   tierOf, recentPrints, latestReading, marketGauge, describeGauge, exhaustionAlertBody,
   MAJOR_LIQUIDITY_30D, MAJOR_MARKET_CAP, EXHAUSTION_EVIDENCE, BREADTH_REFERENCE,
-  binanceDenomination, matchMarketCaps, runPosition
+  binanceDenomination, matchMarketCaps, runPosition, tokenizedStockSymbols, KNOWN_TOKENIZED_STOCKS
 } from './scripts/exhaustion-gauge.mjs';
 
 let seed = 11;
@@ -37,6 +37,13 @@ assert.equal(tierOf(null), null, 'unknown liquidity has no tier rather than a gu
 assert.equal(tierOf(26_000, 1e9), 'major', 'a $1B coin is major however thin its Binance book (QNT)');
 assert.equal(tierOf(26_000, MAJOR_MARKET_CAP - 1), 'thin');
 assert.equal(tierOf(26_000, null), 'thin', 'unknown market cap leaves the liquidity tier alone');
+
+// ---- tokenized stocks are not crypto ------------------------------------------------
+const tsx = tokenizedStockSymbols([{ symbol: 'newb', name: 'NewCo (bStocks Tokenized Stock)' }, { symbol: 'act', name: 'Act I: The AI Prophecy' }]);
+assert.ok(tsx.has('TSLAB') && tsx.has('SPYB'), 'the known bStocks are always excluded');
+assert.ok(tsx.has('NEWB'), 'a new listing CoinGecko names as a tokenized stock is picked up');
+assert.ok(!tsx.has('ACT'), 'a coin is never excluded just for being in the response');
+assert.ok(!['BTC', 'ETH', 'MOVR', 'QNT', 'BNB'].some((s) => KNOWN_TOKENIZED_STOCKS.has(s)));
 
 // ---- market caps matched to Binance symbols --------------------------------------
 assert.deepEqual(binanceDenomination('1000SATS'), { base: 'SATS', mult: 1e3 });

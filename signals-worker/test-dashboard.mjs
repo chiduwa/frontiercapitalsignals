@@ -84,14 +84,14 @@ function payload({ cryptoProven = false, stockProven = false, cryptoRows = null 
     },
     crypto: {
       universe: 211,
-      breakout: cryptoRows || [row('BTC', 'Bitcoin', 64210.5, 1.2, 3.4, 58, 31), row('SOL', 'Solana', 142.33, -2.1, 8.9, 71, 28), row('JUP', 'Jupiter', 0.8123, 0.4, -1.2, 44, 22)],
+      breakout: cryptoRows || [row('BTC', 'Bitcoin', 64210.5, 1.2, 3.4, 58, 31), row('SOL', 'Solana', 142.33, -2.1, 8.9, 71, 28), row('JUP', 'Jupiter', 0.8123, 0.4, -1.2, 44, 22, { utility: [{ id: 'dex', label: 'DEX trading', title: 'Decentralized trading (DEX)' }, { id: 'governance', label: 'Governance', title: 'Governance <voting>' }] })],
       breakdown: [row('DOGE', 'Dogecoin', 0.1234, -3.3, -9.1, 29, 26)],
       favorites: [row('ETH', 'Ethereum', 3120.44, 0.8, 2.2, 55, 24)],
       longTermPotential: []
     },
     stocks: {
       universe: 290,
-      breakout: [row('NVDA', 'NVIDIA Corporation', 121.4, 2.4, 5.5, 64, 30), row('SOFI', 'SoFi Technologies', 8.12, -0.4, 1.1, 48, 19)],
+      breakout: [row('NVDA', 'NVIDIA Corporation', 121.4, 2.4, 5.5, 64, 30), row('SOFI', 'SoFi Technologies', 8.12, -0.4, 1.1, 48, 19, { utility: [{ id: 'banking', label: 'Banking', title: 'Banking' }, { id: 'lending', label: 'Consumer lending', title: 'Consumer lending' }] })],
       breakdown: [row('INTC', 'Intel Corporation', 22.11, -1.9, -4.2, 33, 25)],
       favorites: [], longTermPotential: []
     },
@@ -223,6 +223,12 @@ ui.type('sol');
 check('search matches on ticker', ui.visibleRows().map((r) => r.getAttribute('data-symbol')).join(',') === 'SOL');
 ui.type('technolog');
 check('search matches on asset name too', ui.visibleRows().map((r) => r.getAttribute('data-symbol')).join(',') === 'SOFI');
+ui.type('dex');
+check('search matches on what an asset is used for', ui.visibleRows().map((r) => r.getAttribute('data-symbol')).join(',') === 'JUP');
+ui.type('lend');
+check('a use matches from the start of any of its words', ui.visibleRows().map((r) => r.getAttribute('data-symbol')).join(',') === 'SOFI');
+ui.type('ading');
+check('but not from the middle of a word (so "ai" cannot hit "trading")', ui.visibleRows().length === 0);
 ui.type('zzzz');
 check('a search with no hits says so rather than showing an empty page',
   ui.doc.getElementById('screenStatus').textContent.includes('Nothing listed matches'));
@@ -230,6 +236,11 @@ ui.type('<img src=x onerror=alert(1)>');
 check('typed input is escaped into the status line', !ui.doc.getElementById('screenStatus').querySelector('img'));
 ui.type('');
 check('clearing the search restores every row', ui.visibleRows().length === 8);
+const jupTags = [...ui.doc.querySelectorAll('#boards tr[data-symbol="JUP"] .utag')];
+check('each use renders as a chip under the asset name, with its longer description on hover',
+  jupTags.map((t) => t.textContent).join(',') === 'DEX trading,Governance' && jupTags[0].getAttribute('title') === 'Decentralized trading (DEX)');
+check('tag text is escaped', jupTags[1].getAttribute('title') === 'Governance <voting>' && !ui.doc.querySelector('#boards .utag voting'));
+check('an asset with no known use renders no empty chip row', !ui.doc.querySelector('#boards tr[data-symbol="BTC"] .utags'));
 
 ui.click('[data-class-filter="crypto"]');
 check('the crypto filter leaves only crypto rows',

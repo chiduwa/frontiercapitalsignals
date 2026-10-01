@@ -261,6 +261,29 @@ export function matchMarketCaps(rows, priceBySymbol, { priceKey = 'current_price
   return out;
 }
 
+// Binance "bStocks": tokenized US stocks and ETFs (TSLAB, NVDAB, SPYB, 3x
+// ETFs like SOXLB), listed as ordinary USDT spot pairs since June 2026. They
+// are not crypto: they follow stock prices and the US session, so they stay
+// out of every crypto scan, index and record (found 2026-10-01, when 65 silent
+// candidate casts had already landed on 13 of them). Binance marks them no
+// differently from coins, so live-scan asks CoinGecko's tokenized-stock list
+// each run and falls back to these, every one current on 2026-10-01.
+export const KNOWN_TOKENIZED_STOCKS = new Set(['AAOIB', 'AAPLB', 'ADBEB', 'AMATB', 'AMDB', 'AMZNB', 'ARMB', 'ASMLB', 'ASTSB', 'AVGOB',
+  'AXTIB', 'BABAB', 'BEB', 'BMNRB', 'BNCB', 'CBRSB', 'COHRB', 'COINB', 'CRCLB', 'CRDOB', 'CRWVB', 'CYPHB', 'DELLB', 'DJTB', 'DRAMB',
+  'EWYB', 'FLNCB', 'GLWB', 'GMEB', 'GOOGLB', 'HOODB', 'INTCB', 'INTWB', 'IRENB', 'KORUB', 'LITEB', 'METAB', 'MRVLB', 'MSFTB', 'MSTRB',
+  'MUB', 'NBISB', 'NFLXB', 'NOKB', 'NVDAB', 'ORCLB', 'PLTRB', 'QCOMB', 'RKLBB', 'SKHYB', 'SNDKB', 'SNXXB', 'SOXLB', 'SOXSB', 'SPCXB',
+  'SPYB', 'TQQQB', 'TSLAB', 'TSMB', 'USARB', 'WDCB']);
+
+// Symbols CoinGecko lists as tokenized stocks, from its tokenized-stock
+// category rows. The name check keeps a coin that merely shares a ticker out.
+export function tokenizedStockSymbols(rows) {
+  const out = new Set(KNOWN_TOKENIZED_STOCKS);
+  for (const r of rows || []) {
+    if (/tokenized stock|bstocks/i.test(String(r.name || ''))) out.add(String(r.symbol || '').toUpperCase());
+  }
+  return out;
+}
+
 function formatCap(x) {
   return x >= 1e9 ? `$${(x / 1e9).toFixed(1)}B` : `$${Math.round(x / 1e6)}M`;
 }

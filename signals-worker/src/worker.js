@@ -31,6 +31,7 @@
 // ===========================================================================
 
 import { dispatchTradeJournalAlerts, handleTradeJournalRequest } from './trade-journal.js';
+import { utilityTagsFor } from './utility-tags.js';
 
 const MOUNT = '/signals';
 export const CACHE_KEY = 'signals:latest';
@@ -6127,6 +6128,8 @@ function rankBoards(metrics, kind, reliability, ctx = {}) {
     return {
       symbol: x.m.symbol,
       name: x.m.name,
+      // What the asset is used for (utility-tags.js). Display and search only.
+      utility: utilityTagsFor(x.m.symbol, x.m.id),
       price: x.m.price,
       chg24h: x.m.chg24h,
       chg7d: x.m.chg7d,
@@ -7373,6 +7376,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .coil.coil-up{color:var(--up)}
   .coil.coil-down{color:var(--down)}
   .quality{display:block;color:var(--dim);font-size:10px;margin-top:3px;font-family:var(--disp);cursor:help}
+  .utags{display:block;margin-top:4px}.utag{display:inline-block;margin:0 4px 3px 0;padding:1px 6px;border:1px solid var(--line);border-radius:9px;color:var(--muted);font-size:9.5px;font-family:var(--disp);cursor:help;white-space:nowrap}
   .rotation{display:block;color:var(--amber);font-size:10px;letter-spacing:.04em;margin-top:3px;font-family:var(--disp);cursor:help;font-weight:600}
   .flip-note{display:block;color:var(--amber);font-size:10px;letter-spacing:.04em;margin-top:3px;font-family:var(--disp);cursor:help;font-weight:600}
   .ltp-note{display:block;color:var(--muted);font-size:10px;letter-spacing:.04em;margin-top:3px;font-family:var(--disp);cursor:help}
@@ -7807,7 +7811,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       <div class="sc-row">
         <label class="sc-search">
           <span class="sc-ico" aria-hidden="true">⌕</span>
-          <input id="assetSearch" type="search" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Search asset — ticker or name" aria-label="Search the screens by ticker or asset name">
+          <input id="assetSearch" type="search" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Search asset — ticker, name or use (e.g. lending)" aria-label="Search the screens by ticker, asset name or what the asset is used for">
           <button type="button" class="sc-clear" id="assetSearchClear" hidden aria-label="Clear asset search">×</button>
         </label>
         <div class="sc-seg" role="group" aria-label="Filter screens by asset class">
@@ -8369,7 +8373,16 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   function rowMatchesQuery(row,q){
     if(!q) return true;
     if((row.getAttribute('data-symbol')||'').toLowerCase().indexOf(q)>=0) return true;
-    return (row.getAttribute('data-name')||'').indexOf(q)>=0;
+    if((row.getAttribute('data-name')||'').indexOf(q)>=0) return true;
+    // A use matches from the start of any of its words ("lend", "ai", "fees"),
+    // so a short query like "ai" does not hit "cross-chain".
+    var tags=(row.getAttribute('data-tags')||'').split('|');
+    for(var i=0;i<tags.length;i++){
+      if(tags[i]===q||tags[i].indexOf(q)===0) return true;
+      var words=tags[i].split(/[^a-z0-9]+/);
+      for(var j=0;j<words.length;j++) if(words[j]&&words[j].indexOf(q)===0) return true;
+    }
+    return false;
   }
   function classLabel(cls){ return cls==='crypto'?'crypto':'US equities'; }
   function applyScreenFilters(){
@@ -8624,6 +8637,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           ? '<a class="sym-link" target="_blank" rel="noopener noreferrer" href="'+url+'" data-symbol="'+esc(r.symbol)+'" data-class="'+cfg.assetClass+'" data-side="'+rowSide+'" data-rank="'+(i+1)+'" data-score="'+r.score+'"><span class="sym">'+esc(r.symbol)+'</span></a>'
           : '<span class="sym">'+esc(r.symbol)+'</span>';
         var name = r.name && r.name!==r.symbol ? '<span class="nm">'+esc(r.name)+'</span>' : '';
+        var utags = (r.utility&&r.utility.length) ? '<span class="utags" aria-label="Used for">'+r.utility.map(function(t){ return '<span class="utag" title="'+esc(t.title)+'">'+esc(t.label)+'</span>'; }).join('')+'</span>' : '';
+        var tagText = (r.utility||[]).map(function(t){ return String(t.label).toLowerCase(); }).join('|');
         var why = (r.drivers&&r.drivers.length)?'<span class="why">'+esc(r.drivers.join(' · '))+'</span>':'';
         var topInd = r.topIndicator ? '<span class="topind" title="Best individually-proven indicator for '+esc(r.symbol)+' so far, out of '+r.topIndicator.total+' scored calls">Leans on '+esc(r.topIndicator.id)+' ('+Math.round(r.topIndicator.accuracy*100)+'%)</span>' : '';
         var coil = (r.consolidating===1||r.consolidating===-1)
@@ -8680,9 +8695,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
         var range = rowSide==='withheld'
           ? '<span class="dim" title="A projected price band is not shown without a validated current setup">withheld</span>'
           : r.range ? '<span class="range '+(r.range.basis==='historical'?'hz-hist':'hz-meth')+'" title="'+rangeTitle+'. This is an expected-move band, not an exact top, bottom, target, or stop.'+referencePrice+'">'+fmtPrice(r.range.low)+'–'+fmtPrice(r.range.high)+'</span>' : '<span class="dim">—</span>';
-        h+='<tr class="in" style="animation-delay:'+(i*30)+'ms" data-symbol="'+esc(r.symbol)+'" data-name="'+esc(String(r.name||'').toLowerCase())+'" data-class="'+cfg.assetClass+'">'
+        h+='<tr class="in" style="animation-delay:'+(i*30)+'ms" data-symbol="'+esc(r.symbol)+'" data-name="'+esc(String(r.name||'').toLowerCase())+'" data-tags="'+esc(tagText)+'" data-class="'+cfg.assetClass+'">'
           +'<td class="rk">#'+(i+1)+'</td>'
-          +'<td class="asset">'+symHtml+name+flipNote+'<details class="asset-details"><summary>Asset details</summary><div>'+why+topInd+coil+quality+rotation+ltpNote+profitNote+moveNote+'</div></details></td>'
+          +'<td class="asset">'+symHtml+name+utags+flipNote+'<details class="asset-details"><summary>Asset details</summary><div>'+why+topInd+coil+quality+rotation+ltpNote+profitNote+moveNote+'</div></details></td>'
           +'<td class="live-price-cell" data-label="Price"><span class="live-price">'+fmtPrice(r.price)+'</span></td>'
           +'<td class="live-chg-cell '+pctCls(r.chg24h)+'" data-label="24h"><span class="live-chg">'+fmtPct(r.chg24h)+'</span></td>'
           +'<td class="'+pctCls(r.chg7d)+'" data-label="7d">'+fmtPct(r.chg7d)+'</td>'
