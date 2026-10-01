@@ -26,6 +26,10 @@ import { changeLadder, formatLadder, formatPct, formatPrice } from './price-chan
 
 export const GAUGE_LOOKBACK_HOURS = 24;
 export const MAJOR_LIQUIDITY_30D = 400_000;   // median hourly quote volume, USD
+// A coin this large is treated as major however thin its Binance book is
+// (2026-10-01, docs/research-2026-10-01/EXHAUSTION_SQUEEZES.md): the same
+// ceiling SURGE_CONFIGS puts on the per-coin rule.
+export const MAJOR_MARKET_CAP = 500_000_000;
 
 // Measured reference levels for the breadth reading (share of scanned coins
 // with a print in the trailing 24h), so a reader can tell a busy day from an
@@ -53,7 +57,19 @@ export const EXHAUSTION_EVIDENCE = Object.freeze({
     'rule20Only|thin': { n: 938, excess24: -2.86, fellShare24: 0.74, pokedHigherShare24: 0.63, medianPokeHigher24: 5.4 },
     'rule20Only|mid': { n: 1208, excess24: -2.71, fellShare24: 0.70, pokedHigherShare24: 0.70, medianPokeHigher24: 6.3 }
   },
-  market: { surgeInRally72: 2.74, surgeInRally168: 4.83, days: 30 }
+  market: { surgeInRally72: 2.74, surgeInRally168: 4.83, days: 30 },
+  // 2026-10-01 (docs/research-2026-10-01/EXHAUSTION_SQUEEZES.md), 456 coins
+  // with a Binance perpetual incl. delisted, Jan 2024 - Oct 2026, prints that
+  // live-scan could push. Large coins by market cap but thin on Binance:
+  largeCap: { n: 719, excess24: -1.7, fellShare24: 0.61 },
+  // Where a print sits in the coin's run: how many prints it had in the 72h
+  // before. Later prints faded MORE and also ran away more often; both held in
+  // each half of the history, which is why repeats are still pushed.
+  byRunPosition: {
+    first: { n: 4326, medianExcess24: -5.0, ripShare24: 0.049 },
+    early: { n: 3513, medianExcess24: -7.5, ripShare24: 0.077 },   // 2nd to 4th
+    late: { n: 983, medianExcess24: -11.4, ripShare24: 0.122 }     // 5th onward
+  }
 });
 
 // What breadth counts: the per-coin rule's feature test on EVERY tier, exactly
@@ -63,27 +79,29 @@ const BREADTH_TEST = Object.freeze({ minRatio: 0, minVolZ: 3, minBarZ: 3, minRun
 
 const EXHAUSTION_CONFIGS = SURGE_CONFIGS.filter((c) => c.dir === -1 && c.proven);
 
-export function tierOf(liquidity30d) {
+export function tierOf(liquidity30d, marketCap = null) {
+  if (Number.isFinite(marketCap) && marketCap >= MAJOR_MARKET_CAP) return 'major';
   if (!Number.isFinite(liquidity30d)) return null;
   return liquidity30d >= MAJOR_LIQUIDITY_30D ? 'major' : liquidity30d < 33_000 ? 'thin' : 'mid';
 }
 
 // Every print in the last `lookback` CLOSED bars of one coin. The final bar is
 // still forming and is never read, the same rule scanSurgeConfigs follows.
-export function recentPrints(symbol, bars, { lookback = GAUGE_LOOKBACK_HOURS } = {}) {
+export function recentPrints(symbol, bars, { lookback = GAUGE_LOOKBACK_HOURS, marketCap = null } = {}) {
   const out = [];
   if (!Array.isArray(bars) || bars.length < 3) return out;
   const last = bars.length - 2;
   for (let i = last; i > last - lookback && i >= 0; i--) {
     const f = surgeFeatures(bars, i);
     if (!f) continue;
+    f.marketCap = Number.isFinite(marketCap) ? marketCap : null;
     const configs = EXHAUSTION_CONFIGS.filter((c) => surgeConfigMatches(c, f)).map((c) => c.id);
     const breadthHit = surgeConfigMatches(BREADTH_TEST, f);
     if (!configs.length && !breadthHit) continue;
     out.push({
       symbol, at: f.at, close: f.close, ratio: f.ratio, tradeRatio: f.tradeRatio, barPct: f.barPct,
       volZ: f.volZ, barZ: f.barZ, run24Z: f.run24Z, liquidity30d: f.liquidity30d,
-      tier: tierOf(f.liquidity30d), configs, breadthHit
+      marketCap: f.marketCap, tier: tierOf(f.liquidity30d, f.marketCap), configs, breadthHit
     });
   }
   return out;
@@ -91,14 +109,14 @@ export function recentPrints(symbol, bars, { lookback = GAUGE_LOOKBACK_HOURS } =
 
 // The latest closed bar's calibrated reading for one coin, printed or not, so
 // a coin you hold can show "quiet" as well as "exhausted".
-export function latestReading(symbol, bars) {
+export function latestReading(symbol, bars, { marketCap = null } = {}) {
   if (!Array.isArray(bars) || bars.length < 3) return null;
   const f = surgeFeatures(bars, bars.length - 2);
   if (!f) return null;
   const price = bars[bars.length - 1].close;
   return {
     symbol, at: f.at, price, barPct: f.barPct, volZ: f.volZ, barZ: f.barZ, run24Z: f.run24Z,
-    liquidity30d: f.liquidity30d, tier: tierOf(f.liquidity30d)
+    liquidity30d: f.liquidity30d, marketCap: Number.isFinite(marketCap) ? marketCap : null, tier: tierOf(f.liquidity30d, marketCap)
   };
 }
 
@@ -212,13 +230,69 @@ function runPct(bars, idx, hours) {
   return a && a.close > 0 ? (bars[idx].close / a.close - 1) * 100 : null;
 }
 
+// Market caps (CoinGecko rows or the D1 supply snapshot) matched to Binance
+// symbols for live-scan. A match must agree with the Binance price within
+// `tolerance`, so a coin sharing a ticker with a different one is skipped.
+// Binance lists some tokens per 1,000 or 1,000,000 units (1000SATS, 1MBABYDOGE).
+export function binanceDenomination(sym) {
+  const m = /^(1000000|1000|1M)(.+)$/.exec(sym);
+  return m ? { base: m[2], mult: m[1] === '1000' ? 1e3 : 1e6 } : { base: sym, mult: 1 };
+}
+
+export function matchMarketCaps(rows, priceBySymbol, { priceKey = 'current_price', capKey = 'market_cap', tolerance = 0.2, rescale = false } = {}) {
+  const bySymbol = new Map();
+  for (const r of rows || []) {
+    const k = String(r.symbol || '').toUpperCase();
+    if (!bySymbol.has(k)) bySymbol.set(k, []);
+    bySymbol.get(k).push(r);
+  }
+  const out = {};
+  for (const [sym, binPrice] of Object.entries(priceBySymbol || {})) {
+    const { base, mult } = binanceDenomination(sym);
+    for (const r of bySymbol.get(base) || []) {
+      const ref = Number(r[priceKey]) * mult, cap = Number(r[capKey]);
+      if (!(ref > 0) || !(cap > 0) || !(binPrice > 0)) continue;
+      const ratio = binPrice / ref;
+      if (ratio < 1 - tolerance || ratio > 1 / (1 - tolerance)) continue;
+      out[sym] = rescale ? cap * ratio : cap;
+      break;
+    }
+  }
+  return out;
+}
+
+function formatCap(x) {
+  return x >= 1e9 ? `$${(x / 1e9).toFixed(1)}B` : `$${Math.round(x / 1e6)}M`;
+}
+
+// Where this print sits in the coin's current run, read from the bars already
+// in hand: every exhaustion print in the 72 hours before it. A repeat is still
+// pushed, because later prints have faded more, not less; what changes is that
+// they have also run away more often, and the reader should know which this is.
+export function runPosition(symbol, bars, f) {
+  const earlier = recentPrints(symbol, bars, { lookback: 73, marketCap: f.marketCap })
+    .filter((p) => p.configs.length && p.at < f.at);
+  const r = EXHAUSTION_EVIDENCE.byRunPosition;
+  const oneIn = (share) => Math.max(2, Math.round(1 / share));
+  if (!earlier.length) {
+    return `This is the first exhaustion print on ${symbol} in 72 hours. First prints have faded least (median ${formatPct(r.first.medianExcess24)} against the market over a day), and about 1 in ${oneIn(r.first.ripShare24)} instead ran 20% or more past it.`;
+  }
+  const first = earlier[earlier.length - 1];
+  const nth = earlier.length + 1;
+  const ev = nth >= 5 ? r.late : r.early;
+  const now = bars[bars.length - 1].close;
+  const since = first.close > 0 ? ` at ${formatPrice(first.close)}, ${formatPct((now / first.close - 1) * 100)} since` : '';
+  return `This is exhaustion print ${nth} on ${symbol} in 72 hours (not every print is pushed); the first was the ${hourLabel(first.at)} on ${new Date(first.at).toISOString().slice(5, 10)}${since}. `
+    + `Prints this deep into a run have faded more (median ${formatPct(ev.medianExcess24)} against the market over a day) but about 1 in ${oneIn(ev.ripShare24)} kept running 20% or more past it.`;
+}
+
 // The message every exhaustion alert carries: the print with its anchors
 // stated, the move since then as a ladder, and what has followed prints like
 // it, taken from the measured record for coins of the same size.
 export function exhaustionAlertBody(h, bars, gateWhy, { rulesFired = [], nowTs = Date.now() } = {}) {
   const f = h.features;
   const idx = bars.length - 2;
-  const tier = tierOf(f.liquidity30d) || 'mid';
+  const tier = tierOf(f.liquidity30d, f.marketCap) || 'mid';
   const r24 = runPct(bars, idx, 24);
   const lines = [];
   lines.push(`${h.symbol} ${formatPrice(bars[bars.length - 1].close)} now.`);
@@ -231,13 +305,18 @@ export function exhaustionAlertBody(h, bars, gateWhy, { rulesFired = [], nowTs =
   lines.push('');
   const both = rulesFired.includes('exhaustion20') && rulesFired.includes('exhaustion_calibrated');
   const kind = both ? 'both' : rulesFired.includes('exhaustion_calibrated') ? 'perCoinOnly' : 'rule20Only';
-  if (tier === 'major') {
+  if (tier === 'major' && !(f.liquidity30d >= MAJOR_LIQUIDITY_30D)) {
+    const ev = EXHAUSTION_EVIDENCE.largeCap;
+    lines.push(`This is a large coin (about ${formatCap(f.marketCap)} market cap) even though it trades thinly on Binance. On coins this size a print like this has only weakly been followed by weakness (${formatPct(ev.excess24)} against the market over a day; the coin fell in ${Math.round(ev.fellShare24 * 100)}% of ${ev.n.toLocaleString('en-US')} past cases). Treat it as a caution, not a sell signal.`);
+  } else if (tier === 'major') {
     lines.push(`This is one of the most liquid coins, and on those a print like this has not reliably been followed by weakness (${formatPct(EXHAUSTION_EVIDENCE.byTier.major.excess24)} against the market over a day). Treat it as a caution, not a sell signal.`);
   } else {
     const ev = EXHAUSTION_EVIDENCE.byCase[`${kind}|${tier}`];
     const size = tier === 'thin' ? 'thin-volume' : 'mid-size';
     const lead = both ? `Strong: both exhaustion rules fired. On ${size} coins that combination` : `On ${size} coins a print like this`;
     lines.push(`${lead} has been followed by trailing the market by ${Math.abs(ev.excess24).toFixed(1)}% over the next day, and the coin fell outright in ${Math.round(ev.fellShare24 * 100)}% of ${ev.n.toLocaleString('en-US')} past cases. In ${Math.round(ev.pokedHigherShare24 * 100)}% of them it first traded higher (median ${formatPct(ev.medianPokeHigher24)}), so there is usually a chance to sell into strength.`);
+    const run = runPosition(h.symbol, bars, f);
+    if (run) lines.push(run);
   }
   lines.push(`Basis: ${gateWhy}. Not financial advice.`);
   return lines.join('\n');

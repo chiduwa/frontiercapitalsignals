@@ -3894,6 +3894,28 @@ console.log('\n== surge alerts are judged against the same-window market, not a 
     mod.surgeNotifyGate(longCfg, mod.surgeExcessRecord(rally.slice(0, 9))).allowed === false
     && mod.surgeNotifyGate(exhaustionCfg, mod.surgeExcessRecord(exhaust.slice(0, 9))).allowed === true);
   check('casts scored before the baseline existed are ignored, not counted as zero', mod.surgeExcessRecord([{ ...rally[0], market_move_pct: null }]).casts === 0);
+
+  // 2026-10-01: one squeeze counts at most SURGE_EXCESS_CAP_PCT against a rule,
+  // in either direction; the uncapped figure is still reported.
+  const squeeze = mod.surgeExcessRecord([{ dir: -1, move_pct: 141, market_move_pct: 1, outcome: 'wrong', cast_at: '2026-09-26T22:00:00Z' }]);
+  check('a +140% squeeze counts as -20% against an exhaustion warning, and the raw figure is kept',
+    squeeze.meanExcessPct === -mod.SURGE_EXCESS_CAP_PCT && Math.abs(squeeze.rawMeanExcessPct + 140) < 1e-9, JSON.stringify(squeeze));
+  const withSqueezes = mod.surgeExcessRecord([...exhaust.slice(0, 36),
+    ...['2026-09-21', '2026-09-22', '2026-09-23'].map((d) => ({ dir: -1, move_pct: 140, market_move_pct: 1, outcome: 'wrong', cast_at: `${d}T10:00:00Z` }))]);
+  check('three squeeze days do not wipe out twelve days of a working warning',
+    withSqueezes.meanExcessPct > -2 && withSqueezes.rawMeanExcessPct < -5 && mod.surgeNotifyGate(exhaustionCfg, withSqueezes).allowed === true, JSON.stringify(withSqueezes));
+  check('the gate note says each cast is capped', /each counted at most ±20%/.test(mod.surgeNotifyGate(exhaustionCfg, withSqueezes).why), mod.surgeNotifyGate(exhaustionCfg, withSqueezes).why);
+}
+
+console.log('\n== the per-coin exhaustion rule stays off large coins that trade thin on Binance (2026-10-01) ==');
+{
+  const cal = mod.SURGE_CONFIGS.find((c) => c.id === 'exhaustion_calibrated');
+  const f = { ratio: 3, tradeRatio: 3, rising: true, barPct: 6, liquidity: 50_000, volZ: 4.5, barZ: 4, run24Z: 2, liquidity30d: 26_000 };
+  check('a thin small coin still matches', mod.surgeConfigMatches(cal, { ...f, marketCap: 20e6 }) === true);
+  check('a $1B coin with a thin Binance book does not (QNT, 2026-09-26)', mod.surgeConfigMatches(cal, { ...f, marketCap: 1e9 }) === false);
+  check('an unknown market cap passes: outside the top 250 means small', mod.surgeConfigMatches(cal, { ...f, marketCap: null }) === true
+    && mod.surgeConfigMatches(cal, f) === true);
+  check('the 20x rule has no ceiling: large coins still get its caution', mod.SURGE_CONFIGS.find((c) => c.id === 'exhaustion20').maxMarketCap == null);
 }
 
 // Abstain rather than assume when the venue reports no trade counts.

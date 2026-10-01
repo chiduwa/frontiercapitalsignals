@@ -1,0 +1,10 @@
+
+## exhaustion_calibrated: 11004 casts over 936 cast-days; P(judge t <= -2) over rolling windows
+  10 days: current (raw mean):   0.0% demote /  45.9% confirm | winsorize +/-30%:   0.0% demote /  61.0% confirm | winsorize +/-20%:   0.0% demote /  72.6% confirm | winsorize +/-10%:   0.0% demote /  87.1% confirm | sign only (+1/-1):   0.0% demote /  90.1% confirm
+  20 days: current (raw mean):   0.0% demote /  54.0% confirm | winsorize +/-30%:   0.0% demote /  78.4% confirm | winsorize +/-20%:   0.0% demote /  91.3% confirm | winsorize +/-10%:   0.0% demote /  98.0% confirm | sign only (+1/-1):   0.0% demote /  97.2% confirm
+  30 days: current (raw mean):   0.0% demote /  59.7% confirm | winsorize +/-30%:   0.0% demote /  88.8% confirm | winsorize +/-20%:   0.0% demote /  96.0% confirm | winsorize +/-10%:   0.0% demote /  99.8% confirm | sign only (+1/-1):   0.0% demote / 100.0% confirm
+
+## exhaustion20: 7868 casts over 937 cast-days; P(judge t <= -2) over rolling windows
+  10 days: current (raw mean):   0.0% demote /  46.6% confirm | winsorize +/-30%:   0.0% demote /  57.3% confirm | winsorize +/-20%:   0.0% demote /  68.5% confirm | winsorize +/-10%:   0.0% demote /  80.2% confirm | sign only (+1/-1):   0.0% demote /  83.4% confirm
+  20 days: current (raw mean):   0.0% demote /  52.3% confirm | winsorize +/-30%:   0.0% demote /  78.6% confirm | winsorize +/-20%:   0.0% demote /  85.4% confirm | winsorize +/-10%:   0.0% demote /  93.9% confirm | sign only (+1/-1):   0.0% demote /  97.6% confirm
+  30 days: current (raw mean):   0.0% demote /  59.5% confirm | winsorize +/-30%:   0.0% demote /  86.8% confirm | winsorize +/-20%:   0.0% demote /  94.3% confirm | winsorize +/-10%:   0.0% demote / 100.0% confirm | sign only (+1/-1):   0.0% demote /  99.6% confirm

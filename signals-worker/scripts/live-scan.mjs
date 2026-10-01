@@ -34,10 +34,10 @@ import { d1, chunk, forEachConcurrent, readAllRows } from './d1-client.mjs';
 import {
   binanceGlobalTradablePairs, binanceGlobalKlines,
   SURGE_CONFIGS, scanSurgeConfigs, scoreSurgeCast, lowerConfidenceBound,
-  marketWindow, surgeExcessRecord, surgeNotifyGate, FAVORITE_SYMBOLS
+  marketWindow, surgeExcessRecord, surgeNotifyGate, FAVORITE_SYMBOLS, coingeckoHeaders
 } from '../worker.js';
 import {
-  recentPrints, latestReading, marketGauge, describeGauge, exhaustionAlertBody, hourLabel
+  recentPrints, latestReading, marketGauge, describeGauge, exhaustionAlertBody, hourLabel, tierOf, matchMarketCaps
 } from './exhaustion-gauge.mjs';
 import { formatPct } from './price-change.mjs';
 import { runDecouplingWatch } from './decoupling-watch-io.mjs';
@@ -180,6 +180,56 @@ async function loadWatchSet() {
   return watch;
 }
 
+// Market caps for the coins the scan can see, so a coin that is large but thin
+// on Binance is judged as large (SURGE_CONFIGS maxMarketCap, tierOf). One
+// CoinGecko page covers every coin above ~$130M, which is all the $500M
+// ceiling needs. Cheapest source first, and none of it writes anything:
+//   1. CoinGecko keyless              free, but CI IPs are sometimes throttled
+//   2. CoinGecko with the Demo key    only if 1 failed; at most ~720 calls a
+//                                     month of the build's monthly budget
+//   3. D1 asset_supply_daily, latest day, scaled to today's price
+//                                     ~131 indexed rows; fixed set, stale
+// A match must agree with the Binance price, so a small coin that shares a
+// ticker with a different large one is never mistaken for it. A coin missing
+// from the result is treated as small: SURGE_CONFIGS lets an unknown cap pass.
+async function fetchCoinGeckoTop(headers) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1',
+      { headers: { Accept: 'application/json', ...headers }, signal: ctrl.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const rows = await res.json();
+    if (!Array.isArray(rows) || !rows.length) throw new Error('empty');
+    return rows;
+  } finally { clearTimeout(timer); }
+}
+
+async function loadMarketCaps(priceBySymbol) {
+  const key = coingeckoHeaders();
+  for (const [label, headers] of [['keyless', {}], ...(Object.keys(key).length ? [['demo key', key]] : [])]) {
+    try {
+      const caps = matchMarketCaps(await fetchCoinGeckoTop(headers), priceBySymbol);
+      console.log(`market caps: CoinGecko ${label}, ${Object.keys(caps).length} scanned coins matched`);
+      return caps;
+    } catch (e) {
+      console.log(`market caps: CoinGecko ${label} unavailable (${e.message || e})`);
+    }
+  }
+  try {
+    // Supply barely moves day to day, so the stored cap is carried to today's
+    // price. The wider tolerance allows for weeks of drift since that day.
+    const rows = await d1(env, `SELECT symbol, market_cap, price_used FROM asset_supply_daily INDEXED BY idx_asset_supply_daily_date
+      WHERE date = (SELECT MAX(date) FROM asset_supply_daily) AND market_cap > 0`);
+    const caps = matchMarketCaps(rows, priceBySymbol, { priceKey: 'price_used', tolerance: 0.8, rescale: true });
+    console.log(`market caps: D1 snapshot fallback, ${Object.keys(caps).length} scanned coins matched`);
+    return caps;
+  } catch (e) {
+    console.log(`market caps: none this run (${e.message || e}); every coin judged on Binance liquidity alone`);
+    return {};
+  }
+}
+
 async function fetchAllBars(pairs) {
   const out = {};
   await forEachConcurrent(pairs, FETCH_CONCURRENCY, async (sym) => {
@@ -209,8 +259,13 @@ async function main() {
     if (!bars.length) continue;
     priceBySymbol[sym] = bars[bars.length - 1].close;
     closesBySymbol[sym] = new Map(bars.map((b) => [b.openTime, b.close]));
-    for (const hit of scanSurgeConfigs(bars)) fired.push({ symbol: sym, ...hit });
-    printsBySymbol[sym] = recentPrints(sym, bars);
+  }
+  const capBySymbol = await loadMarketCaps(priceBySymbol);
+  for (const [sym, bars] of Object.entries(barsBySymbol)) {
+    if (!bars.length) continue;
+    const marketCap = capBySymbol[sym] ?? null;
+    for (const hit of scanSurgeConfigs(bars, SURGE_CONFIGS, 48, { marketCap })) fired.push({ symbol: sym, ...hit });
+    printsBySymbol[sym] = recentPrints(sym, bars, { marketCap });
   }
   const scanned = Object.keys(priceBySymbol).length;
   console.log(`live-scan: scanned ${scanned}, ${fired.length} configuration hit(s)`);
@@ -227,12 +282,12 @@ async function main() {
         await d1(env, `
           INSERT INTO surge_signal_log
             (config_id, symbol, dir, cast_at, entry_price, horizon_hours, ratio, trade_ratio, bar_pct, liquidity, notified,
-             vol_z, bar_z, run24_z, liquidity_30d)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             vol_z, bar_z, run24_z, liquidity_30d, market_cap)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           ON CONFLICT(config_id, symbol, cast_at) DO NOTHING`,
           [f.config.id, f.symbol, f.config.dir, f.features.at, f.features.close, f.config.horizonHours,
            f.features.ratio, f.features.tradeRatio, f.features.barPct, f.features.liquidity, 0,
-           f.features.volZ, f.features.barZ, f.features.run24Z, f.features.liquidity30d]);
+           f.features.volZ, f.features.barZ, f.features.run24Z, f.features.liquidity30d, f.features.marketCap]);
       }
     });
   }
@@ -250,8 +305,9 @@ async function main() {
     const watchRows = [...watch].sort().map((sym) => {
       const bars = barsBySymbol[sym];
       if (!bars || !bars.length) return { symbol: sym, onVenue: false };
-      const reading = latestReading(sym, bars);
-      const last = recentPrints(sym, bars, { lookback: 72 }).find((p) => p.configs.length) || null;
+      const marketCap = capBySymbol[sym] ?? null;
+      const reading = latestReading(sym, bars, { marketCap });
+      const last = recentPrints(sym, bars, { lookback: 72, marketCap }).find((p) => p.configs.length) || null;
       return { ...reading, onVenue: true, lastPrint: last, moveSinceLastPrintPct: last && last.close > 0 ? (bars[bars.length - 1].close / last.close - 1) * 100 : null };
     });
     if (DRY_RUN) console.log('[dry run] gauge', JSON.stringify(gauge), JSON.stringify(state), `\n[dry run] ${prints.length} prints, e.g.`, JSON.stringify(prints.slice(0, 3)), '\n[dry run] watch', JSON.stringify(watchRows));
@@ -303,10 +359,13 @@ async function main() {
           + `; the ${hourLabel(h.features.at)} closed ${formatPct(h.features.barPct)} (open to close).\n\n`
           + `Read: strength ahead over ~${cfg.horizonHours}h. ${cfg.note}\n\nBasis: ${gate.why}. Not financial advice.`;
       const held = watch.has(h.symbol);
+      // A large coin's print is a caution, not a sell warning: the evidence on
+      // coins that size is weak (exhaustionAlertBody says so and why).
+      const caution = exhaustion && tierOf(h.features.liquidity30d, h.features.marketCap) === 'major';
       const ok = await notify({
-        title: `${h.symbol}: ${exhaustion ? (held ? 'sell warning, ' : '') + cfg.label.toLowerCase() : cfg.label}`,
+        title: `${h.symbol}: ${exhaustion ? (caution ? 'caution, ' : held ? 'sell warning, ' : '') + cfg.label.toLowerCase() : cfg.label}`,
         message,
-        priority: exhaustion ? 'high' : 'default',
+        priority: exhaustion && !caution ? 'high' : 'default',
         tags: [exhaustion ? 'warning' : 'chart_with_upwards_trend']
       });
       if (ok) {

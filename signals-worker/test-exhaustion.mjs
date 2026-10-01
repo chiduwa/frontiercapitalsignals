@@ -4,7 +4,8 @@
 import assert from 'node:assert/strict';
 import {
   tierOf, recentPrints, latestReading, marketGauge, describeGauge, exhaustionAlertBody,
-  MAJOR_LIQUIDITY_30D, EXHAUSTION_EVIDENCE, BREADTH_REFERENCE
+  MAJOR_LIQUIDITY_30D, MAJOR_MARKET_CAP, EXHAUSTION_EVIDENCE, BREADTH_REFERENCE,
+  binanceDenomination, matchMarketCaps, runPosition
 } from './scripts/exhaustion-gauge.mjs';
 
 let seed = 11;
@@ -33,6 +34,28 @@ assert.equal(tierOf(MAJOR_LIQUIDITY_30D), 'major');
 assert.equal(tierOf(100_000), 'mid');
 assert.equal(tierOf(10_000), 'thin');
 assert.equal(tierOf(null), null, 'unknown liquidity has no tier rather than a guessed one');
+assert.equal(tierOf(26_000, 1e9), 'major', 'a $1B coin is major however thin its Binance book (QNT)');
+assert.equal(tierOf(26_000, MAJOR_MARKET_CAP - 1), 'thin');
+assert.equal(tierOf(26_000, null), 'thin', 'unknown market cap leaves the liquidity tier alone');
+
+// ---- market caps matched to Binance symbols --------------------------------------
+assert.deepEqual(binanceDenomination('1000SATS'), { base: 'SATS', mult: 1e3 });
+assert.deepEqual(binanceDenomination('1MBABYDOGE'), { base: 'BABYDOGE', mult: 1e6 });
+assert.deepEqual(binanceDenomination('MOVR'), { base: 'MOVR', mult: 1 });
+const cg = [
+  { symbol: 'qnt', current_price: 100, market_cap: 1.2e9 },
+  { symbol: 'sats', current_price: 2e-8, market_cap: 4e8 },
+  { symbol: 'act', current_price: 50, market_cap: 9e8 },     // a different, larger coin with the same ticker
+  { symbol: 'movr', current_price: 2.2, market_cap: 2e7 }
+];
+const caps = matchMarketCaps(cg, { QNT: 101, '1000SATS': 2.1e-5, ACT: 0.05, MOVR: 2.25, NEW: 1 });
+assert.equal(caps.QNT, 1.2e9);
+assert.equal(caps['1000SATS'], 4e8, 'a per-1000 listing is priced per 1000 tokens');
+assert.equal(caps.ACT, undefined, 'a ticker shared with a coin at a different price is not taken for it');
+assert.equal(caps.MOVR, 2e7);
+assert.equal(caps.NEW, undefined, 'a coin outside the list stays unknown');
+const fallback = matchMarketCaps([{ symbol: 'QNT', price_used: 50, market_cap: 6e8 }], { QNT: 100 }, { priceKey: 'price_used', tolerance: 0.8, rescale: true });
+assert.equal(fallback.QNT, 1.2e9, 'the stored snapshot is carried to today\'s price');
 
 // ---- recent prints -------------------------------------------------------------
 const hot = series({ climax: true });
@@ -92,5 +115,22 @@ assert.match(twenty, /trailing the market by 2\.7%/, 'a 20x-only print quotes th
 const deepHit = { symbol: 'DEEP', features: { ...hit.features, liquidity30d: 5e6 } };
 assert.match(exhaustionAlertBody(deepHit, hot, 'proven', { nowTs, rulesFired: ['exhaustion20'] }), /caution, not a sell signal/,
   'on the most liquid coins the alert says the evidence is not there');
+
+// Where the print sits in the coin's run (2026-10-01).
+assert.match(body, /This is the first exhaustion print on HOT in 72 hours\. First prints have faded least \(median -5\.0% against the market over a day\), and about 1 in 20 instead ran 20% or more past it\./);
+const again = hot.map((b) => ({ ...b }));
+const k = again.length - 12;
+again[k] = { ...again[k], close: again[k].open * 1.03, high: again[k].open * 1.031, quoteVolume: 1e6 };
+const againHit = { symbol: 'HOT', features: { ...recentPrints('HOT', again)[0] } };
+assert.equal(recentPrints('HOT', again, { lookback: 73 }).filter((p) => p.configs.length).length, 2, 'the earlier climax is a print too');
+const second = runPosition('HOT', again, againHit.features);
+assert.match(second, /^This is exhaustion print 2 on HOT in 72 hours \(not every print is pushed\); the first was the \d\d:00 UTC hour on \d\d-\d\d at [\d.,]+, [+-][\d.]+% since\./, second);
+assert.match(second, /faded more \(median -7\.5% against the market over a day\) but about 1 in 13 kept running 20% or more past it\./, second);
+const bigHit = { symbol: 'QNT', features: { ...hit.features, liquidity30d: 26_000, marketCap: 1.05e9 } };
+const bigBody = exhaustionAlertBody(bigHit, hot, 'proven', { nowTs, rulesFired: ['exhaustion20'] });
+assert.match(bigBody, /large coin \(about \$1\.1B market cap\) even though it trades thinly on Binance/, bigBody);
+assert.match(bigBody, /fell in 61% of 719 past cases\)\. Treat it as a caution, not a sell signal\./);
+assert.doesNotMatch(bigBody, /exhaustion print/, 'a caution does not count the run as a sell sequence');
+for (const t of [second, bigBody]) assert.doesNotMatch(t, /—/, 'no em dashes in user-facing copy');
 
 console.log('EXHAUSTION GAUGE OK');

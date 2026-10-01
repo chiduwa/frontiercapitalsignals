@@ -1571,6 +1571,8 @@ CREATE TABLE IF NOT EXISTS surge_signal_log (
   bar_z REAL,
   run24_z REAL,
   liquidity_30d REAL,
+  -- Market cap the cast was judged with (migration 0060); NULL = unknown.
+  market_cap REAL,
   UNIQUE (config_id, symbol, cast_at)
 );
 

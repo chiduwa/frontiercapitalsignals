@@ -69,3 +69,6 @@ jobs:
           FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
           LIVE_SCAN_SYMBOLS: ${{ inputs.symbols || '500' }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          # Market caps for the $500M ceiling: tried keyless first, the key only
+          # if that is throttled (live-scan.mjs loadMarketCaps).
+          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}

@@ -2342,6 +2342,15 @@ export const SURGE_CONFIGS = [
     requireRising: true, minBarPct: null, maxBarPct: null, minLiquidity: 0,
     minVolZ: 3, minBarZ: 3, minRun24Z: 1.5,
     maxLiquidity30d: 400_000,
+    // 2026-10-01 (docs/research-2026-10-01/EXHAUSTION_SQUEEZES.md): Binance
+    // volume alone misses coins that are large but trade thin on Binance. QNT
+    // (~$1B, ~$26K/h on Binance) took 14 live casts at +39% against the market
+    // in two days. Over the history, pushable prints on coins above $500M fell
+    // only 61% of the time (-1.7% vs the market, halves not consistent), and
+    // this ceiling had the best discovery-half t of $200M-$3B (validation
+    // t -6.99 vs -6.80 without it). Unknown market cap passes: it means the
+    // coin is outside CoinGecko's top 250 (under ~$130M) or the lookup failed.
+    maxMarketCap: 500_000_000,
     dir: -1, horizonHours: 24,
     proven: true,
     note: 'volume this far above the coin\'s own 30-day norm, on an hour this large for it, after a run, has been followed by about -3% against the market over the next day on smaller coins. It usually pokes higher first, so there is often a chance to sell into strength'
@@ -2463,6 +2472,10 @@ export function surgeConfigMatches(cfg, f) {
   if (cfg.minBarZ != null && !(f.barZ >= cfg.minBarZ)) return false;
   if (cfg.minRun24Z != null && !(f.run24Z >= cfg.minRun24Z)) return false;
   if (cfg.maxLiquidity30d != null && !(f.liquidity30d < cfg.maxLiquidity30d)) return false;
+  // Unlike the calibrated tests, an unknown market cap PASSES: it is supplied
+  // from outside the bars (live-scan's lookup), and a coin missing from that
+  // lookup is almost always one too small to be listed in it.
+  if (cfg.maxMarketCap != null && Number.isFinite(f.marketCap) && f.marketCap >= cfg.maxMarketCap) return false;
   return true;
 }
 
@@ -2470,11 +2483,13 @@ export function surgeConfigMatches(cfg, f) {
 // Binance returns is still forming, so it is dropped: casting on a partial
 // bar would compare a fraction of an hour's volume against full-hour
 // medians and fire constantly on nothing.
-export function scanSurgeConfigs(bars, configs = SURGE_CONFIGS, baselineHours = 48) {
+// marketCap is not in the bars; the caller supplies it when it knows it.
+export function scanSurgeConfigs(bars, configs = SURGE_CONFIGS, baselineHours = 48, { marketCap = null } = {}) {
   if (!Array.isArray(bars) || bars.length < baselineHours + 2) return [];
   const idx = bars.length - 2;
   const f = surgeFeatures(bars, idx, baselineHours);
   if (!f) return [];
+  f.marketCap = Number.isFinite(marketCap) ? marketCap : null;
   return configs.filter((c) => surgeConfigMatches(c, f)).map((c) => ({ config: c, features: f }));
 }
 
@@ -2522,15 +2537,28 @@ export function marketWindow(closesBySymbol, castAt, priceNow, dir, { minSymbols
 // A configuration's live edge OVER the market in its called direction,
 // clustered by cast day: casts on one day share one market move, so counting
 // them as independent would overstate the evidence.
-export function surgeExcessRecord(rows) {
+//
+// Each cast counts at most +/-SURGE_EXCESS_CAP_PCT (2026-10-01). Thin coins'
+// outcomes are fat-tailed: two squeezes (QNT, MOVR; casts up to +140% against
+// the call) took a rule that never once trailed the market over any 10-day
+// window of 2.7 years of history to t = -2.22 in five days. Replayed over that
+// history, the capped judge still never demotes either exhaustion rule, and it
+// confirms one that works far sooner (10-day windows: 73% vs 46%; 30-day: 96%
+// vs 60%). A rule that has genuinely stopped working still fails it: the cap
+// trims how much one squeeze counts, not which way it counts.
+// docs/research-2026-10-01/EXHAUSTION_SQUEEZES.md.
+export const SURGE_EXCESS_CAP_PCT = 20;
+export function surgeExcessRecord(rows, capPct = SURGE_EXCESS_CAP_PCT) {
   const days = new Map();
-  let casts = 0, hits = 0, hitBase = 0, decided = 0;
+  let casts = 0, hits = 0, hitBase = 0, decided = 0, rawSum = 0;
   for (const r of rows || []) {
     const move = Number(r.move_pct), market = Number(r.market_move_pct);
     if (r.market_move_pct == null || r.move_pct == null || !Number.isFinite(move) || !Number.isFinite(market)) continue;
     const day = String(r.cast_at).slice(0, 10);
     if (!days.has(day)) days.set(day, []);
-    days.get(day).push(Number(r.dir) * (move - market));
+    const signed = Number(r.dir) * (move - market);
+    rawSum += signed;
+    days.get(day).push(Math.max(-capPct, Math.min(capPct, signed)));
     casts++;
     if ((r.outcome === 'correct' || r.outcome === 'wrong') && Number.isFinite(Number(r.base_rate))) {
       decided++; hits += r.outcome === 'correct' ? 1 : 0; hitBase += Number(r.base_rate);
@@ -2542,6 +2570,8 @@ export function surgeExcessRecord(rows) {
   const sd = n > 1 ? Math.sqrt(means.reduce((x, y) => x + (y - m) ** 2, 0) / (n - 1)) : null;
   return {
     casts, days: n, meanExcessPct: m,
+    // Uncapped, per cast rather than per day: what the casts actually did.
+    rawMeanExcessPct: casts ? rawSum / casts : null,
     t: sd > 0 ? m / (sd / Math.sqrt(n)) : null,
     hitRate: decided ? hits / decided : null,
     baseRate: decided ? hitBase / decided : null
@@ -2560,7 +2590,7 @@ export function surgeNotifyGate(cfg, excess) {
   const pct = (x) => `${x >= 0 ? '+' : ''}${x.toFixed(2)}%`;
   const enough = excess && excess.casts >= SURGE_MIN_BASELINE_CASTS && excess.days >= SURGE_MIN_BASELINE_DAYS
     && Number.isFinite(excess.t);
-  const record = enough ? `${pct(excess.meanExcessPct)} per cast vs the same-window market (t=${excess.t.toFixed(2)}, ${excess.days} days, ${excess.casts} casts)` : null;
+  const record = enough ? `${pct(excess.meanExcessPct)} per cast vs the same-window market (t=${excess.t.toFixed(2)}, ${excess.days} days, ${excess.casts} casts, each counted at most ±${SURGE_EXCESS_CAP_PCT}%)` : null;
   if (cfg.proven) {
     if (enough && excess.t <= -SURGE_EXCESS_T) return { allowed: false, why: `demoted: proven at discovery, but live it trails the market: ${record}` };
     return { allowed: true, why: enough ? `proven at discovery; live: ${record}`
