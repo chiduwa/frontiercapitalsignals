@@ -64,6 +64,8 @@ jobs:
           node --test test-lead-lag.mjs
           node --test test-model-tournament-io.mjs
           node --test test-big-move-watch-io.mjs
+          node --test test-day-zones.mjs
+          node --test test-push-batch.mjs
           node --test test-model-zoo.mjs
           node --test test-time-series.mjs
           node --test test-upsert-changed.mjs

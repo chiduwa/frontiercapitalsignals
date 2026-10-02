@@ -10,7 +10,8 @@
 // matching this project's established pattern for an optional,
 // user-provided credential (CMC_API_KEY, CRYPTOPANIC_API_TOKEN).
 import { d1, chunk } from './d1-client.mjs';
-import { summarise, formatSummary, formatPct } from './price-change.mjs';
+import { summarise, formatSummary, formatPct, formatPrice } from './price-change.mjs';
+import { combinePushes } from './push-batch.mjs';
 import { MIN_RELIABILITY_SAMPLES, currentSignalConfidence, noSkillBaseline, skillOverBaseline } from '../worker.js';
 
 const NTFY_TIMEOUT_MS = 10000;
@@ -66,9 +67,21 @@ async function sendNtfy(topic, { title, message, priority = 'default', tags = []
 // state per (kind, symbol) — see the Worker's /api/feed route.
 export async function notifyOnChange(env, kind, symbol, value, notification, nowIso) {
   if (!env.NTFY_TOPIC) return false;
-  const existing = await d1(env, 'SELECT last_value FROM notification_state WHERE kind = ? AND symbol = ?', [kind, symbol]);
-  if (existing.length && existing[0].last_value === value) return false;
+  if (!(await isNewNotification(env, kind, symbol, value))) return false;
   await sendNtfy(env.NTFY_TOPIC, notification);
+  await recordNotification(env, kind, symbol, value, notification, nowIso);
+  return true;
+}
+
+// The two halves of notifyOnChange, for a caller that sends several coins'
+// alerts as one push (checkAndNotifySuddenMoves): the same dedup read, and the
+// same per-coin state and log rows once the push has gone out.
+async function isNewNotification(env, kind, symbol, value) {
+  const existing = await d1(env, 'SELECT last_value FROM notification_state WHERE kind = ? AND symbol = ?', [kind, symbol]);
+  return !(existing.length && existing[0].last_value === value);
+}
+
+async function recordNotification(env, kind, symbol, value, notification, nowIso) {
   await d1(env, `
     INSERT INTO notification_state (kind, symbol, last_value, last_sent_at) VALUES (?, ?, ?, ?)
     ON CONFLICT (kind, symbol) DO UPDATE SET last_value = excluded.last_value, last_sent_at = excluded.last_sent_at
@@ -76,7 +89,6 @@ export async function notifyOnChange(env, kind, symbol, value, notification, now
   await d1(env, `
     INSERT INTO notification_log (kind, symbol, title, message, priority, click_url, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?)
   `, [kind, symbol, notification.title, notification.message, notification.priority || 'default', notification.click || null, nowIso]);
-  return true;
 }
 
 async function setNotificationState(env, kind, symbol, value, nowIso) {
@@ -378,6 +390,7 @@ export async function checkAndNotifySuddenMoves(env, nowIso, windowHours = 6, cr
   const seriesBySymbol = {};
   for (const r of ladderRows) (seriesBySymbol[r.symbol] ??= []).push({ ts: Date.parse(r.run_at), price: r.price });
 
+  const pending = [];
   for (const m of triggered) {
     const dir = m.pct > 0 ? 1 : -1;
     // The move that triggered the alert is measured over `windowHours`. What a
@@ -392,7 +405,13 @@ export async function checkAndNotifySuddenMoves(env, nowIso, windowHours = 6, cr
     });
     const detail = summary ? `\n\n${formatSummary(summary, { symbol: m.symbol })}` : '';
     const reversing = summary && summary.agreement === 'mixed';
-    const notified = await notifyOnChange(env, 'suddenmove', m.symbol, `${dir}@${dateBucket}`, {
+    const value = `${dir}@${dateBucket}`;
+    if (!(await isNewNotification(env, 'suddenmove', m.symbol, value))) continue;
+    const ladder = summary ? summary.rungs.map((r) => `${r.label} ${formatPct(r.pct)}`).join(', ') : '';
+    pending.push({ symbol: m.symbol, value,
+      line: `${m.symbol} ${formatPct(m.pct)} over ${windowHours}h${reversing ? ', now reversing' : ''}`
+        + `${summary ? ` — ${formatPrice(summary.price)} now (${ladder})` : ''}`,
+      push: {
       title: reversing
         ? `${m.symbol}: ${formatPct(m.pct)} over ${windowHours}h, now reversing`
         : `${m.symbol}: post-move ${dir === 1 ? 'spike' : 'drop'} detected`,
@@ -403,8 +422,19 @@ export async function checkAndNotifySuddenMoves(env, nowIso, windowHours = 6, cr
       priority: dir === 1 ? 'high' : 'urgent',
       tags: [dir === 1 ? 'rocket' : 'warning'],
       click: 'https://frontiercapitalsignals.com/signals/'
-    }, nowIso);
-    if (notified) sent++;
+    } });
+  }
+  // One push for the build's movers (push-batch.mjs); each coin keeps its own
+  // dedup state and its own log row, with its full message.
+  if (pending.length) {
+    const push = combinePushes(pending, {
+      noun: 'Post-move',
+      footer: `Observed after the moves, each against its price ~${windowHours}h ago. This does not predict continuation or reversal and is not an entry/exit signal; `
+        + 'check verified news, liquidity, spread, and volume before acting.'
+    });
+    await sendNtfy(env.NTFY_TOPIC, push);
+    for (const p of pending) await recordNotification(env, 'suddenmove', p.symbol, p.value, p.push, nowIso);
+    sent += pending.length;
   }
   return sent;
 }

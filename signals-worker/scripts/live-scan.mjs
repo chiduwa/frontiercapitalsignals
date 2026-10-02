@@ -39,7 +39,8 @@ import {
 import {
   recentPrints, latestReading, marketGauge, describeGauge, exhaustionAlertBody, hourLabel, tierOf, matchMarketCaps, tokenizedStockSymbols
 } from './exhaustion-gauge.mjs';
-import { formatPct } from './price-change.mjs';
+import { formatPct, formatPrice } from './price-change.mjs';
+import { combinePushes } from './push-batch.mjs';
 import { runDecouplingWatch } from './decoupling-watch-io.mjs';
 import { runCoinRotation } from './coin-rotation-io.mjs';
 
@@ -352,6 +353,8 @@ async function main() {
   // extreme prints the 20x rule did not already cover, so one hour never
   // produces two pushes for the same coin.
   let sent = 0;
+  const pending = [];                    // this run's alerts: one push for all of them (push-batch.mjs)
+  const bases = new Map();
   const byConfig = {};
   for (const f of fired) (byConfig[f.config.id] ??= []).push(f);
   const e20Syms = new Set((byConfig.exhaustion20 || []).map((h) => h.symbol));
@@ -366,7 +369,7 @@ async function main() {
     if (!gate.allowed || !hits.length) continue;
     // Coins you hold first, then the most extreme print.
     const key = (h) => (watch.has(h.symbol) ? 1e9 : 0) + (cfg.id === 'exhaustion_calibrated' ? (h.features.volZ ?? 0) : h.features.ratio);
-    const top = hits.sort((a, b) => key(b) - key(a)).slice(0, MAX_ALERTS - sent);
+    const top = hits.sort((a, b) => key(b) - key(a)).slice(0, MAX_ALERTS - pending.length);
     for (const h of top) {
       const bars = barsBySymbol[h.symbol];
       const exhaustion = cfg.dir === -1;
@@ -382,20 +385,41 @@ async function main() {
       // A large coin's print is a caution, not a sell warning: the evidence on
       // coins that size is weak (exhaustionAlertBody says so and why).
       const caution = exhaustion && tierOf(h.features.liquidity30d, h.features.marketCap) === 'major';
-      const ok = await notify({
-        title: `${h.symbol}: ${exhaustion ? (caution ? 'caution, ' : held ? 'sell warning, ' : '') + cfg.label.toLowerCase() : cfg.label}`,
-        message,
-        priority: exhaustion && !caution ? 'high' : 'default',
-        tags: [exhaustion ? 'warning' : 'chart_with_upwards_trend']
+      const last = bars && bars.length ? bars[bars.length - 1].close : null;
+      const role = exhaustion ? (caution ? 'caution (large coin)' : held ? 'SELL WARNING, you hold it' : 'warning') : `strength ahead ~${cfg.horizonHours}h`;
+      pending.push({
+        symbol: h.symbol, cfg, h,
+        line: `${h.symbol}${last ? ` ${formatPrice(last)}` : ''}: ${cfg.label.toLowerCase()}, ${role}. The ${hourLabel(h.features.at)} closed ${formatPct(h.features.barPct)}`
+          + `${Number.isFinite(h.features.volZ) ? ` on volume ${h.features.volZ.toFixed(1)} sd above its 30-day norm` : ''} (${h.features.ratio.toFixed(1)}x its 48h median).`,
+        push: {
+          title: `${h.symbol}: ${exhaustion ? (caution ? 'caution, ' : held ? 'sell warning, ' : '') + cfg.label.toLowerCase() : cfg.label}`,
+          message,
+          priority: exhaustion && !caution ? 'high' : 'default',
+          tags: [exhaustion ? 'warning' : 'chart_with_upwards_trend']
+        }
       });
-      if (ok) {
-        sent++;
-        await d1(env, 'UPDATE surge_signal_log SET notified = 1 WHERE config_id = ? AND symbol = ? AND cast_at = ?',
-          [cfg.id, h.symbol, h.features.at]);
-      }
-      if (sent >= MAX_ALERTS) break;
+      bases.set(cfg.label, gate.why);
+      if (pending.length >= MAX_ALERTS) break;
     }
-    if (sent >= MAX_ALERTS) break;
+    if (pending.length >= MAX_ALERTS) break;
+  }
+  if (pending.length) {
+    const exhaustionOnly = pending.every(p => p.cfg.dir === -1);
+    const ok = await notify(combinePushes(pending, {
+      noun: exhaustionOnly ? 'Volume exhaustion' : 'Volume signals',
+      footer: [
+        exhaustionOnly ? 'Read: weakness ahead over about a day on mid-size and thin coins; on the largest coins only a caution. Every print is listed under Recent exhaustion prints on the signals page.' : '',
+        ...[...bases].map(([label, why]) => `${label} basis: ${why}.`),
+        'Not financial advice.'
+      ].filter(Boolean).join('\n')
+    }));
+    if (ok) {
+      sent = pending.length;
+      for (const p of pending) {
+        await d1(env, 'UPDATE surge_signal_log SET notified = 1 WHERE config_id = ? AND symbol = ? AND cast_at = ?',
+          [p.cfg.id, p.h.symbol, p.h.features.at]);
+      }
+    }
   }
 
   // Roll up each configuration's standing so the dashboard and any human
