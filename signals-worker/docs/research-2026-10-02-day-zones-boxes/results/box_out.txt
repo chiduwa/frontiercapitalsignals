@@ -1,0 +1,151 @@
+/private/tmp/claude-501/-Users-owner-Documents-ship/29653096-786e-46e5-8cbd-fced52ee53a0/scratchpad/box/box.py:47: RuntimeWarning: The 'origin' keyword does not take effect when resampling with a 'freq' that is not Tick-like (h, m, s, ms, us, ns)
+  g = h.resample(rule, origin="epoch")
+/private/tmp/claude-501/-Users-owner-Documents-ship/29653096-786e-46e5-8cbd-fced52ee53a0/scratchpad/box/box.py:47: RuntimeWarning: The 'origin' keyword does not take effect when resampling with a 'freq' that is not Tick-like (h, m, s, ms, us, ns)
+  g = h.resample(rule, origin="epoch")
+/private/tmp/claude-501/-Users-owner-Documents-ship/29653096-786e-46e5-8cbd-fced52ee53a0/scratchpad/box/box.py:47: RuntimeWarning: The 'origin' keyword does not take effect when resampling with a 'freq' that is not Tick-like (h, m, s, ms, us, ns)
+  g = h.resample(rule, origin="epoch")
+/private/tmp/claude-501/-Users-owner-Documents-ship/29653096-786e-46e5-8cbd-fced52ee53a0/scratchpad/box/box.py:47: RuntimeWarning: The 'origin' keyword does not take effect when resampling with a 'freq' that is not Tick-like (h, m, s, ms, us, ns)
+  g = h.resample(rule, origin="epoch")
+/private/tmp/claude-501/-Users-owner-Documents-ship/29653096-786e-46e5-8cbd-fced52ee53a0/scratchpad/box/box.py:47: RuntimeWarning: The 'origin' keyword does not take effect when resampling with a 'freq' that is not Tick-like (h, m, s, ms, us, ns)
+  g = h.resample(rule, origin="epoch")
+
+### always-tracked coins, daily: 52-week-high boxes (classic)
+   signal -> excess move over the next h bars vs the asset's own average (pooled per date, Newey-West t)
+   breakout  h=1: A +2.48% t+1.8 up 65% n20, B +nan% t+nan up 44% n16 | h=5: A +3.51% t+1.2 up 60% n20, B +nan% t+nan up 38% n16 | h=10: A +8.52% t+1.8 up 70% n20, B +nan% t+nan up 56% n16 | h=20: A +11.12% t+2.9 up 65% n20, B +nan% t+nan up 56% n16
+   breakdown h=1: A +nan% t+nan up 61% n18, B +0.42% t+0.5 up 47% n30 | h=5: A +nan% t+nan up 61% n18, B -0.44% t-0.3 up 48% n29 | h=10: A +nan% t+nan up 72% n18, B -0.82% t-0.5 up 55% n29 | h=20: A +nan% t+nan up 67% n18, B -0.92% t-0.6 up 41% n29
+   Darvas trades (buy breakout, trailing box-bottom stop, net of costs) vs the same exits on random entries
+     A: 20 trades, mean +22.33% (median +1.40%, win 55%, held 24 bars) | random entries +11.48% (win 43%) | entry edge +10.85% per trade, t +0.97
+     B: 16 trades, mean -1.93% (median -5.71%, win 25%, held 12 bars) | random entries +8.07% (win 44%) | entry edge -10.00% per trade, t -2.57
+
+### always-tracked coins, daily: 52-week-high boxes (classic), breakout volume >= 1.5x its 50-bar average
+   signal -> excess move over the next h bars vs the asset's own average (pooled per date, Newey-West t)
+   breakout  h=1: A +nan% t+nan up 82% n11, B +nan% t+nan up 36% n14 | h=5: A +nan% t+nan up 73% n11, B +nan% t+nan up 29% n14 | h=10: A +nan% t+nan up 73% n11, B +nan% t+nan up 50% n14 | h=20: A +nan% t+nan up 82% n11, B +nan% t+nan up 57% n14
+   breakdown h=1: A +nan% t+nan up 61% n18, B +0.42% t+0.5 up 47% n30 | h=5: A +nan% t+nan up 61% n18, B -0.44% t-0.3 up 48% n29 | h=10: A +nan% t+nan up 72% n18, B -0.82% t-0.5 up 55% n29 | h=20: A +nan% t+nan up 67% n18, B -0.92% t-0.6 up 41% n29
+   Darvas trades (buy breakout, trailing box-bottom stop, net of costs) vs the same exits on random entries
+     A: 11 trades, mean +34.75% (median +22.02%, win 73%, held 42 bars) | random entries +9.53% (win 38%) | entry edge +25.22% per trade, t +1.62
+     B: 14 trades, mean -1.89% (median -5.71%, win 21%, held 11 bars) | random entries +11.41% (win 47%) | entry edge -13.30% per trade, t -2.94
+
+### always-tracked coins, daily: 20-bar boxes
+   signal -> excess move over the next h bars vs the asset's own average (pooled per date, Newey-West t)
+   breakout  h=1: A +1.68% t+1.9 up 62% n69, B +0.47% t+0.9 up 56% n75 | h=5: A +4.73% t+2.4 up 64% n69, B +0.82% t+0.6 up 49% n73 | h=10: A +10.47% t+2.4 up 62% n69, B +3.20% t+1.3 up 55% n73 | h=20: A +9.12% t+1.5 up 64% n69, B +4.37% t+1.3 up 47% n72
+   breakdown h=1: A -0.32% t-0.3 up 52% n87, B -0.55% t-1.5 up 39% n140 | h=5: A -1.29% t-0.8 up 53% n87, B -0.07% t-0.1 up 50% n138 | h=10: A -1.11% t-0.4 up 51% n87, B +0.11% t+0.1 up 54% n138 | h=20: A -0.95% t-0.2 up 47% n87, B +0.44% t+0.3 up 47% n137
+   Darvas trades (buy breakout, trailing box-bottom stop, net of costs) vs the same exits on random entries
+     A: 69 trades, mean +17.90% (median +1.01%, win 52%, held 26 bars) | random entries +11.58% (win 40%) | entry edge +6.32% per trade, t +1.18
+     B: 75 trades, mean +1.69% (median -4.86%, win 37%, held 20 bars) | random entries +2.77% (win 39%) | entry edge -1.08% per trade, t -0.40
+
+### always-tracked coins, daily: 20-bar boxes, breakout volume >= 1.5x its 50-bar average
+   signal -> excess move over the next h bars vs the asset's own average (pooled per date, Newey-West t)
+   breakout  h=1: A +1.85% t+1.3 up 60% n43, B +0.40% t+0.7 up 53% n58 | h=5: A +4.64% t+1.5 up 70% n43, B +0.55% t+0.4 up 48% n56 | h=10: A +12.23% t+2.5 up 60% n43, B +3.57% t+1.3 up 57% n56 | h=20: A +9.09% t+3.1 up 74% n43, B +5.62% t+1.8 up 53% n55
+   breakdown h=1: A -0.32% t-0.3 up 52% n87, B -0.55% t-1.5 up 39% n140 | h=5: A -1.29% t-0.8 up 53% n87, B -0.07% t-0.1 up 50% n138 | h=10: A -1.11% t-0.4 up 51% n87, B +0.11% t+0.1 up 54% n138 | h=20: A -0.95% t-0.2 up 47% n87, B +0.44% t+0.3 up 47% n137
+   Darvas trades (buy breakout, trailing box-bottom stop, net of costs) vs the same exits on random entries
+     A: 43 trades, mean +21.22% (median +5.75%, win 58%, held 31 bars) | random entries +11.12% (win 42%) | entry edge +10.11% per trade, t +1.51
+     B: 58 trades, mean +2.45% (median -4.85%, win 38%, held 20 bars) | random entries +2.50% (win 38%) | entry edge -0.05% per trade, t -0.02
+
+### major coins, daily: 52-week-high boxes (classic)
+   signal -> excess move over the next h bars vs the asset's own average (pooled per date, Newey-West t)
+   breakout  h=1: A +3.26% t+2.1 up 54% n26, B +nan% t+nan up 56% n16 | h=5: A +14.82% t+3.1 up 73% n26, B +nan% t+nan up 62% n16 | h=10: A +19.06% t+5.9 up 73% n26, B +nan% t+nan up 56% n16 | h=20: A +17.59% t+2.6 up 58% n26, B +nan% t+nan up 56% n16
+   breakdown h=1: A +nan% t+nan up 75% n24, B -0.96% t-1.2 up 48% n29 | h=5: A +nan% t+nan up 54% n24, B +0.67% t+0.9 up 55% n29 | h=10: A +nan% t+nan up 58% n24, B -1.90% t-0.9 up 31% n29 | h=20: A +nan% t+nan up 50% n24, B -3.19% t-2.8 up 38% n29
+   Darvas trades (buy breakout, trailing box-bottom stop, net of costs) vs the same exits on random entries
+     A: 26 trades, mean +53.56% (median +13.23%, win 62%, held 25 bars) | random entries +21.66% (win 44%) | entry edge +31.90% per trade, t +1.61
+     B: 16 trades, mean -2.46% (median +3.07%, win 56%, held 34 bars) | random entries +6.37% (win 53%) | entry edge -8.83% per trade, t -1.44
+
+### major coins, daily: 52-week-high boxes (classic), breakout volume >= 1.5x its 50-bar average
+   signal -> excess move over the next h bars vs the asset's own average (pooled per date, Newey-West t)
+   breakout  h=1: A +nan% t+nan up 55% n22, B +nan% t+nan up 55% n11 | h=5: A +nan% t+nan up 73% n22, B +nan% t+nan up 64% n11 | h=10: A +nan% t+nan up 73% n22, B +nan% t+nan up 55% n11 | h=20: A +nan% t+nan up 64% n22, B +nan% t+nan up 55% n11
+   breakdown h=1: A +nan% t+nan up 75% n24, B -0.96% t-1.2 up 48% n29 | h=5: A +nan% t+nan up 54% n24, B +0.67% t+0.9 up 55% n29 | h=10: A +nan% t+nan up 58% n24, B -1.90% t-0.9 up 31% n29 | h=20: A +nan% t+nan up 50% n24, B -3.19% t-2.8 up 38% n29
+   Darvas trades (buy breakout, trailing box-bottom stop, net of costs) vs the same exits on random entries
+     A: 22 trades, mean +60.41% (median +13.78%, win 59%, held 25 bars) | random entries +30.34% (win 47%) | entry edge +30.07% per trade, t +1.30
+     B: 11 trades, mean -0.36% (median +6.79%, win 55%, held 44 bars) | random entries +7.22% (win 56%) | entry edge -7.58% per trade, t -0.92
+
+### major coins, daily: 20-bar boxes
+   signal -> excess move over the next h bars vs the asset's own average (pooled per date, Newey-West t)
+   breakout  h=1: A +2.19% t+2.3 up 55% n110, B -0.25% t-0.6 up 41% n111 | h=5: A +6.20% t+3.1 up 62% n110, B +1.13% t+0.9 up 54% n111 | h=10: A +6.87% t+2.1 up 59% n110, B +1.85% t+0.9 up 50% n109 | h=20: A +5.64% t+1.0 up 55% n110, B +0.06% t+0.0 up 50% n107
+   breakdown h=1: A +1.89% t+1.8 up 66% n131, B +0.11% t+0.4 up 53% n172 | h=5: A +2.17% t+1.7 up 56% n131, B +0.24% t+0.3 up 47% n171 | h=10: A +1.25% t+0.7 up 60% n131, B -0.04% t-0.0 up 54% n171 | h=20: A -2.39% t-0.7 up 47% n131, B -0.59% t-0.4 up 47% n170
+   Darvas trades (buy breakout, trailing box-bottom stop, net of costs) vs the same exits on random entries
+     A: 110 trades, mean +23.42% (median +4.25%, win 55%, held 23 bars) | random entries +11.56% (win 40%) | entry edge +11.86% per trade, t +1.93
+     B: 111 trades, mean -0.12% (median -4.02%, win 45%, held 20 bars) | random entries +2.51% (win 43%) | entry edge -2.63% per trade, t -1.30
+
+### major coins, daily: 20-bar boxes, breakout volume >= 1.5x its 50-bar average
+   signal -> excess move over the next h bars vs the asset's own average (pooled per date, Newey-West t)
+   breakout  h=1: A +2.83% t+2.5 up 58% n85, B -0.34% t-0.6 up 38% n78 | h=5: A +7.86% t+3.0 up 66% n85, B +1.98% t+1.2 up 53% n78 | h=10: A +8.41% t+2.4 up 60% n85, B +3.27% t+1.1 up 53% n76 | h=20: A +9.29% t+1.3 up 58% n85, B +0.90% t+0.2 up 53% n74
+   breakdown h=1: A +1.89% t+1.8 up 66% n131, B +0.11% t+0.4 up 53% n172 | h=5: A +2.17% t+1.7 up 56% n131, B +0.24% t+0.3 up 47% n171 | h=10: A +1.25% t+0.7 up 60% n131, B -0.04% t-0.0 up 54% n171 | h=20: A -2.39% t-0.7 up 47% n131, B -0.59% t-0.4 up 47% n170
+   Darvas trades (buy breakout, trailing box-bottom stop, net of costs) vs the same exits on random entries
+     A: 85 trades, mean +28.71% (median +5.80%, win 55%, held 26 bars) | random entries +9.52% (win 43%) | entry edge +19.19% per trade, t +2.52
+     B: 78 trades, mean +1.33% (median -3.70%, win 49%, held 20 bars) | random entries +2.55% (win 43%) | entry edge -1.22% per trade, t -0.46
+
+### major stocks and ETFs, daily: 52-week-high boxes (classic)
+   signal -> excess move over the next h bars vs the asset's own average (pooled per date, Newey-West t)
+   breakout  h=1: A +0.11% t+0.5 up 57% n108, B +0.09% t+0.9 up 57% n351 | h=5: A +0.33% t+0.8 up 56% n108, B -0.03% t-0.1 up 59% n351 | h=10: A +0.38% t+0.5 up 59% n108, B -0.41% t-1.1 up 57% n351 | h=20: A +0.41% t+0.3 up 68% n108, B -0.47% t-0.7 up 64% n351
+   breakdown h=1: A -0.17% t-0.7 up 51% n114, B +0.08% t+0.5 up 61% n280 | h=5: A +0.19% t+0.6 up 53% n114, B -0.44% t-1.6 up 54% n280 | h=10: A +0.62% t+0.9 up 56% n114, B -0.14% t-0.4 up 61% n280 | h=20: A +1.03% t+0.9 up 61% n114, B -0.51% t-0.8 up 65% n280
+   Darvas trades (buy breakout, trailing box-bottom stop, net of costs) vs the same exits on random entries
+     A: 108 trades, mean +3.21% (median -0.36%, win 46%, held 26 bars) | random entries +2.81% (win 34%) | entry edge +0.41% per trade, t +0.30
+     B: 352 trades, mean +2.28% (median -0.59%, win 46%, held 23 bars) | random entries +4.13% (win 48%) | entry edge -1.85% per trade, t -2.56
+
+### major stocks and ETFs, daily: 52-week-high boxes (classic), breakout volume >= 1.5x its 50-bar average
+   signal -> excess move over the next h bars vs the asset's own average (pooled per date, Newey-West t)
+   breakout  h=1: A -0.91% t-1.1 up 43% n21, B +0.31% t+1.1 up 60% n60 | h=5: A +0.66% t+0.6 up 67% n21, B +0.30% t+0.5 up 70% n60 | h=10: A +2.98% t+1.8 up 76% n21, B -0.64% t-0.6 up 53% n60 | h=20: A +2.58% t+1.3 up 76% n21, B -2.09% t-1.2 up 70% n60
+   breakdown h=1: A -0.17% t-0.7 up 51% n114, B +0.08% t+0.5 up 61% n280 | h=5: A +0.19% t+0.6 up 53% n114, B -0.44% t-1.6 up 54% n280 | h=10: A +0.62% t+0.9 up 56% n114, B -0.14% t-0.4 up 61% n280 | h=20: A +1.03% t+0.9 up 61% n114, B -0.51% t-0.8 up 65% n280
+   Darvas trades (buy breakout, trailing box-bottom stop, net of costs) vs the same exits on random entries
+     A: 21 trades, mean +7.47% (median +3.50%, win 62%, held 33 bars) | random entries +4.66% (win 39%) | entry edge +2.81% per trade, t +0.79
+     B: 60 trades, mean +5.12% (median +1.54%, win 60%, held 28 bars) | random entries +6.76% (win 52%) | entry edge -1.64% per trade, t -0.64
+
+### major stocks and ETFs, daily: 20-bar boxes
+   signal -> excess move over the next h bars vs the asset's own average (pooled per date, Newey-West t)
+   breakout  h=1: A +0.14% t+1.0 up 56% n303, B +0.13% t+1.6 up 56% n556 | h=5: A -0.15% t-0.5 up 53% n303, B +0.10% t+0.5 up 58% n556 | h=10: A -0.31% t-0.5 up 55% n303, B -0.16% t-0.5 up 59% n554 | h=20: A -0.33% t-0.3 up 59% n303, B -0.21% t-0.4 up 64% n554
+   breakdown h=1: A -0.18% t-1.1 up 49% n298, B +0.06% t+0.5 up 58% n443 | h=5: A +0.34% t+0.9 up 53% n298, B -0.34% t-1.2 up 53% n443 | h=10: A +0.11% t+0.2 up 53% n298, B -0.25% t-0.6 up 59% n443 | h=20: A -0.99% t-0.7 up 56% n298, B -0.57% t-0.7 up 65% n443
+   Darvas trades (buy breakout, trailing box-bottom stop, net of costs) vs the same exits on random entries
+     A: 303 trades, mean +1.91% (median -0.75%, win 45%, held 24 bars) | random entries +2.13% (win 38%) | entry edge -0.22% per trade, t -0.29
+     B: 558 trades, mean +3.00% (median -0.25%, win 48%, held 24 bars) | random entries +3.22% (win 47%) | entry edge -0.22% per trade, t -0.37
+
+### major stocks and ETFs, daily: 20-bar boxes, breakout volume >= 1.5x its 50-bar average
+   signal -> excess move over the next h bars vs the asset's own average (pooled per date, Newey-West t)
+   breakout  h=1: A +0.29% t+0.8 up 58% n77, B +0.45% t+1.8 up 59% n105 | h=5: A -0.09% t-0.1 up 53% n77, B +0.39% t+0.8 up 67% n105 | h=10: A -0.30% t-0.3 up 55% n77, B -0.07% t-0.1 up 58% n104 | h=20: A -0.45% t-0.3 up 55% n77, B -1.01% t-1.0 up 65% n104
+   breakdown h=1: A -0.18% t-1.1 up 49% n298, B +0.06% t+0.5 up 58% n443 | h=5: A +0.34% t+0.9 up 53% n298, B -0.34% t-1.2 up 53% n443 | h=10: A +0.11% t+0.2 up 53% n298, B -0.25% t-0.6 up 59% n443 | h=20: A -0.99% t-0.7 up 56% n298, B -0.57% t-0.7 up 65% n443
+   Darvas trades (buy breakout, trailing box-bottom stop, net of costs) vs the same exits on random entries
+     A: 77 trades, mean +3.31% (median -0.05%, win 49%, held 25 bars) | random entries +3.91% (win 43%) | entry edge -0.60% per trade, t -0.31
+     B: 105 trades, mean +5.14% (median +0.84%, win 56%, held 28 bars) | random entries +4.41% (win 48%) | entry edge +0.73% per trade, t +0.39
+
+### always-tracked coins, 4-hour bars: new 90-day-high boxes
+   signal -> excess move over the next h bars vs the asset's own average (pooled per date, Newey-West t)
+   breakout  h=1: A +0.61% t+1.9 up 56% n86, B +0.23% t+0.8 up 54% n103 | h=5: A +2.20% t+3.0 up 59% n86, B +1.73% t+2.7 up 57% n103 | h=10: A +2.73% t+1.8 up 57% n86, B +2.47% t+2.6 up 56% n103 | h=20: A +5.74% t+3.7 up 64% n86, B +3.34% t+2.2 up 52% n103
+   breakdown h=1: A +0.46% t+1.4 up 66% n114, B +0.50% t+3.1 up 55% n148 | h=5: A +1.04% t+1.6 up 60% n114, B +0.70% t+1.7 up 60% n148 | h=10: A +2.36% t+3.3 up 64% n114, B -0.11% t-0.2 up 56% n147 | h=20: A +3.72% t+3.4 up 63% n114, B +0.29% t+0.3 up 52% n147
+   Darvas trades (buy breakout, trailing box-bottom stop, net of costs) vs the same exits on random entries
+     A: 86 trades, mean +4.75% (median -0.68%, win 49%, held 26 bars) | random entries +0.35% (win 30%) | entry edge +4.40% per trade, t +2.15
+     B: 103 trades, mean +8.50% (median -0.68%, win 46%, held 23 bars) | random entries +2.81% (win 40%) | entry edge +5.69% per trade, t +2.09
+
+### always-tracked coins, 4-hour bars: 20-bar boxes
+   signal -> excess move over the next h bars vs the asset's own average (pooled per date, Newey-West t)
+   breakout  h=1: A +0.21% t+1.5 up 48% n516, B -0.06% t-0.5 up 50% n596 | h=5: A +0.94% t+2.8 up 53% n516, B +0.31% t+1.2 up 50% n595 | h=10: A +0.92% t+1.7 up 51% n516, B +0.41% t+1.1 up 54% n595 | h=20: A +1.82% t+2.1 up 54% n516, B +0.62% t+0.9 up 49% n595
+   breakdown h=1: A +0.17% t+1.9 up 57% n749, B +0.25% t+3.3 up 52% n821 | h=5: A -0.04% t-0.2 up 52% n749, B +0.38% t+2.4 up 52% n821 | h=10: A -0.07% t-0.2 up 51% n749, B -0.02% t-0.1 up 50% n820 | h=20: A -0.06% t-0.1 up 51% n749, B +0.37% t+0.9 up 50% n820
+   Darvas trades (buy breakout, trailing box-bottom stop, net of costs) vs the same exits on random entries
+     A: 516 trades, mean +2.45% (median -1.58%, win 43%, held 22 bars) | random entries +1.17% (win 34%) | entry edge +1.28% per trade, t +2.00
+     B: 596 trades, mean +3.40% (median -1.25%, win 42%, held 20 bars) | random entries +0.92% (win 38%) | entry edge +2.48% per trade, t +3.18
+
+### buy and hold, mean daily log return x 365 (coins) / 252 (stocks), by period
+   BTC   A  +36.8%/yr  B  +43.2%/yr
+   ETH   A  +53.8%/yr  B  +21.6%/yr
+   SOL   A  +46.3%/yr  B  +65.9%/yr
+   XLM   A  -11.7%/yr  B  +31.1%/yr
+   XRP   A   -1.6%/yr  B  +39.6%/yr
+   HYPE  A   +nan%/yr  B  +73.8%/yr
+   HBAR  A   +0.8%/yr  B  +28.3%/yr
+   ARB   A   +nan%/yr  B  -52.8%/yr
+   BNB   A  +92.9%/yr  B  +30.3%/yr
+   DOGE  A  +83.0%/yr  B   +8.2%/yr
+   ADA   A  +44.2%/yr  B   +0.5%/yr
+   TRX   A  +26.0%/yr  B  +48.7%/yr
+   LINK  A  +61.4%/yr  B  +25.5%/yr
+   AVAX  A  +31.5%/yr  B   +0.5%/yr
+   LTC   A  +20.0%/yr  B   -1.0%/yr
+   BCH   A  -26.1%/yr  B  +30.8%/yr
+   DOT   A  +13.9%/yr  B  -32.9%/yr
+   SPY   A   +1.7%/yr  B  +14.0%/yr
+   QQQ   A   -2.4%/yr  B  +18.7%/yr
+   AAPL  A  +22.8%/yr  B  +22.1%/yr
+   MSFT  A   -3.9%/yr  B  +23.2%/yr
+   NVDA  A   +8.9%/yr  B  +49.1%/yr
+   GOOGL A  +23.4%/yr  B  +21.7%/yr
+   AMZN  A   +8.0%/yr  B  +21.9%/yr
+   META  A  -59.2%/yr  B  +24.2%/yr
+   TSLA  A  +13.9%/yr  B  +37.2%/yr
+   AVGO  A  +20.7%/yr  B  +36.8%/yr

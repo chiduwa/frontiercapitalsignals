@@ -1,0 +1,47 @@
+## 1-2. Per-alert outcome (window close vs alert price, bp; + = price came back), date-clustered t
+   R=00 k=1.0 top    A: all -17bp t-1.4 (n3336, near 20%, further 0.81) | solo -14 t-0.7 (n834, near 20%) | with market -23 t-1.5 (n1971, near 21%)  ||  B: all -16bp t-1.6 (n4706, near 18%, further 0.84) | solo -10 t-0.5 (n693, near 18%) | with market -20 t-1.8 (n3605, near 18%)
+   R=00 k=1.0 bottom A: all +2bp t+0.1 (n3267, near 18%, further 0.84) | solo +46 t+1.6 (n369, near 20%) | with market -16 t-0.8 (n2508, near 18%)  ||  B: all +15bp t+1.4 (n4596, near 18%, further 0.85) | solo +47 t+1.6 (n296, near 26%) | with market +11 t+1.0 (n4010, near 17%)
+   R=00 k=1.5 top    A: all -34bp t-2.5 (n2130, near 18%, further 0.85) | solo -10 t-0.3 (n458, near 14%) | with market -40 t-2.4 (n1397, near 19%)  ||  B: all -35bp t-2.9 (n3112, near 18%, further 0.89) | solo -35 t-1.1 (n346, near 16%) | with market -37 t-2.9 (n2541, near 19%)
+   R=00 k=1.5 bottom A: all +10bp t+0.5 (n2157, near 19%, further 0.82) | solo +13 t+0.3 (n138, near 23%) | with market +4 t+0.2 (n1872, near 18%)  ||  B: all +31bp t+2.5 (n3115, near 19%, further 0.80) | solo +59 t+0.8 (n76, near 16%) | with market +29 t+2.2 (n2941, near 19%)
+   R=08 k=1.0 top    A: all -8bp t-0.5 (n3330, near 18%, further 0.86) | solo -30 t-1.4 (n802, near 17%) | with market +7 t+0.4 (n2032, near 18%)  ||  B: all -26bp t-2.7 (n4643, near 17%, further 0.89) | solo -15 t-0.8 (n560, near 17%) | with market -31 t-2.9 (n3659, near 16%)
+   R=08 k=1.0 bottom A: all +11bp t+0.7 (n3334, near 18%, further 0.85) | solo +29 t+1.1 (n355, near 27%) | with market +0 t+0.0 (n2634, near 16%)  ||  B: all +9bp t+0.9 (n4611, near 19%, further 0.81) | solo +25 t+1.1 (n271, near 20%) | with market +7 t+0.6 (n4103, near 18%)
+   R=08 k=1.5 top    A: all -7bp t-0.4 (n2224, near 19%, further 0.85) | solo -34 t-1.2 (n451, near 16%) | with market +8 t+0.4 (n1479, near 19%)  ||  B: all -30bp t-2.8 (n3185, near 19%, further 0.91) | solo +13 t+0.4 (n272, near 19%) | with market -34 t-2.9 (n2710, near 19%)
+   R=08 k=1.5 bottom A: all +14bp t+0.7 (n2227, near 18%, further 0.89) | solo +34 t+0.8 (n167, near 24%) | with market +7 t+0.3 (n1911, near 17%)  ||  B: all +11bp t+0.9 (n2987, near 19%, further 0.86) | solo +53 t+0.9 (n79, near 32%) | with market +9 t+0.7 (n2839, near 18%)
+   R=14 k=1.0 top    A: all -8bp t-0.6 (n3317, near 18%, further 0.86) | solo -24 t-1.1 (n782, near 17%) | with market -5 t-0.3 (n2034, near 19%)  ||  B: all -26bp t-2.9 (n4703, near 18%, further 0.88) | solo +5 t+0.3 (n585, near 20%) | with market -30 t-2.9 (n3719, near 17%)
+   R=14 k=1.0 bottom A: all +2bp t+0.1 (n3379, near 19%, further 0.88) | solo +27 t+1.1 (n413, near 25%) | with market -8 t-0.4 (n2628, near 17%)  ||  B: all +11bp t+1.1 (n4618, near 18%, further 0.79) | solo +44 t+2.2 (n265, near 26%) | with market +6 t+0.5 (n4132, near 17%)
+   R=14 k=1.5 top    A: all -2bp t-0.1 (n2209, near 18%, further 0.85) | solo -10 t-0.3 (n408, near 20%) | with market +5 t+0.3 (n1503, near 17%)  ||  B: all -25bp t-2.4 (n3226, near 19%, further 0.85) | solo +13 t+0.6 (n312, near 16%) | with market -29 t-2.5 (n2713, near 19%)
+   R=14 k=1.5 bottom A: all +14bp t+0.7 (n2287, near 19%, further 0.89) | solo +14 t+0.3 (n175, near 19%) | with market +11 t+0.5 (n1982, near 18%)  ||  B: all +14bp t+1.2 (n3006, near 20%, further 0.81) | solo +32 t+1.2 (n78, near 31%) | with market +12 t+1.0 (n2864, near 20%)
+   R=20 k=1.0 top    A: all -13bp t-1.1 (n3275, near 19%, further 0.81) | solo -5 t-0.2 (n774, near 20%) | with market -15 t-0.9 (n1964, near 18%)  ||  B: all -19bp t-1.9 (n4735, near 18%, further 0.85) | solo -12 t-0.6 (n595, near 19%) | with market -17 t-1.5 (n3702, near 18%)
+   R=20 k=1.0 bottom A: all +12bp t+0.8 (n3350, near 20%, further 0.82) | solo +33 t+1.1 (n409, near 22%) | with market +6 t+0.3 (n2547, near 19%)  ||  B: all +6bp t+0.6 (n4659, near 19%, further 0.82) | solo +47 t+2.3 (n317, near 27%) | with market +3 t+0.3 (n4094, near 18%)
+   R=20 k=1.5 top    A: all -13bp t-0.9 (n2138, near 20%, further 0.78) | solo -35 t-1.2 (n387, near 17%) | with market -5 t-0.3 (n1449, near 20%)  ||  B: all -40bp t-3.4 (n3118, near 18%, further 0.91) | solo -2 t-0.1 (n307, near 19%) | with market -44 t-3.5 (n2593, near 18%)
+   R=20 k=1.5 bottom A: all +18bp t+0.9 (n2170, near 19%, further 0.84) | solo +31 t+0.8 (n178, near 19%) | with market +20 t+0.9 (n1828, near 19%)  ||  B: all +8bp t+0.7 (n3018, near 18%, further 0.81) | solo +11 t+0.3 (n88, near 19%) | with market +8 t+0.6 (n2845, near 18%)
+
+## 3. Forecast accuracy by reference hour: mean |U-U^|/U^ and |D-D^|/D^ (lower is better), pooled over coins
+        up            dn        cover_up        cover_dn       
+per      A      B      A      B        A      B        A      B
+R                                                              
+0    0.887  0.957  0.898  0.904    0.505  0.491    0.518  0.500
+1    0.927  0.963  0.915  0.912    0.503  0.486    0.506  0.505
+2    0.942  0.951  0.921  0.913    0.508  0.492    0.504  0.505
+3    0.922  0.957  0.946  0.936    0.508  0.493    0.504  0.502
+4    0.910  0.971  0.956  0.930    0.504  0.496    0.504  0.504
+5    0.917  0.992  0.953  0.904    0.508  0.492    0.509  0.502
+6    0.927  0.988  0.969  0.896    0.510  0.499    0.501  0.502
+7    0.916  0.986  0.956  0.910    0.504  0.499    0.507  0.502
+8    0.912  0.958  0.958  0.913    0.509  0.499    0.505  0.502
+9    0.899  0.949  0.964  0.893    0.509  0.498    0.506  0.508
+10   0.885  0.968  0.983  0.867    0.510  0.498    0.495  0.508
+11   0.899  0.975  0.962  0.885    0.507  0.495    0.501  0.509
+12   0.892  0.990  0.958  0.882    0.512  0.496    0.503  0.504
+13   0.896  0.985  0.971  0.891    0.509  0.494    0.499  0.498
+14   0.902  0.964  0.973  0.914    0.511  0.495    0.497  0.502
+15   0.865  0.961  0.933  0.922    0.510  0.496    0.505  0.497
+16   0.866  0.917  0.914  0.913    0.507  0.492    0.506  0.494
+17   0.870  0.902  0.895  0.909    0.509  0.497    0.503  0.495
+18   0.858  0.931  0.917  0.900    0.508  0.496    0.505  0.498
+19   0.847  0.934  0.906  0.900    0.515  0.490    0.507  0.496
+20   0.845  0.951  0.922  0.890    0.518  0.488    0.504  0.501
+21   0.876  0.950  0.902  0.917    0.506  0.490    0.510  0.493
+22   0.875  0.968  0.901  0.917    0.511  0.489    0.504  0.496
+23   0.875  0.972  0.889  0.902    0.510  0.492    0.511  0.499
+   (cover = share of days whose excursion stayed inside the forecast: 50% is a well-calibrated median)

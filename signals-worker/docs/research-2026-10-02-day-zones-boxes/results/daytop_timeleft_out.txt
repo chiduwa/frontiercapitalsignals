@@ -1,0 +1,16 @@
+
+## top: the day's high after the forecast top is reached, by hours left (00 UTC day)
+   under 4h left A: n  232, near 44%, further median 0.29 p75 0.73, back inside by the close 52%, mean -17bp (t -1.2) || B: n  330, near 38%, further median 0.37 p75 0.75, back inside by the close 55%, mean +1bp (t +0.1)
+   4-7h left     A: n  391, near 32%, further median 0.52 p75 1.03, back inside by the close 56%, mean +34bp (t +1.6) || B: n  481, near 22%, further median 0.62 p75 1.21, back inside by the close 47%, mean -49bp (t -2.9)
+   8-11h left    A: n  623, near 22%, further median 0.63 p75 1.32, back inside by the close 50%, mean -9bp (t -0.5) || B: n  963, near 20%, further median 0.64 p75 1.38, back inside by the close 57%, mean +3bp (t +0.1)
+   12-15h left   A: n  514, near 18%, further median 0.80 p75 1.61, back inside by the close 49%, mean -18bp (t -0.7) || B: n  804, near 18%, further median 0.83 p75 1.67, back inside by the close 51%, mean +6bp (t +0.4)
+   16h+ left     A: n 1576, near 14%, further median 1.10 p75 2.12, back inside by the close 51%, mean -33bp (t -1.6) || B: n 2128, near 14%, further median 1.16 p75 2.26, back inside by the close 51%, mean -28bp (t -1.7)
+   share of all top alerts by hours left (B): under 4h left 7%, 4-7h left 10%, 8-11h left 20%, 12-15h left 17%, 16h+ left 45%
+
+## bottom: the day's low after the forecast bottom is reached, by hours left (00 UTC day)
+   under 4h left A: n  227, near 34%, further median 0.46 p75 1.00, back inside by the close 47%, mean -15bp (t -0.9) || B: n  349, near 40%, further median 0.38 p75 0.90, back inside by the close 57%, mean +5bp (t +0.5)
+   4-7h left     A: n  376, near 28%, further median 0.49 p75 1.09, back inside by the close 57%, mean +0bp (t +0.0) || B: n  579, near 28%, further median 0.58 p75 1.12, back inside by the close 59%, mean +13bp (t +1.1)
+   8-11h left    A: n  567, near 22%, further median 0.65 p75 1.29, back inside by the close 54%, mean +21bp (t +0.9) || B: n 1024, near 19%, further median 0.73 p75 1.37, back inside by the close 50%, mean +1bp (t +0.1)
+   12-15h left   A: n  598, near 16%, further median 0.85 p75 1.49, back inside by the close 52%, mean -7bp (t -0.3) || B: n  715, near 15%, further median 0.82 p75 1.60, back inside by the close 52%, mean +10bp (t +0.5)
+   16h+ left     A: n 1499, near 13%, further median 1.11 p75 2.16, back inside by the close 52%, mean +1bp (t +0.0) || B: n 1929, near 12%, further median 1.19 p75 2.15, back inside by the close 52%, mean +26bp (t +1.4)
+   share of all bottom alerts by hours left (B): under 4h left 8%, 4-7h left 13%, 8-11h left 22%, 12-15h left 16%, 16h+ left 42%

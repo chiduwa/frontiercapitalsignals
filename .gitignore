@@ -56,6 +56,7 @@ next-env.d.ts
 /signals-worker/reports/tournament/
 /signals-worker/reports/big-move/
 /signals-worker/reports/rotation/
+/signals-worker/reports/day-zones/
 /signals-worker/__pycache__/
 /signals-worker/scripts/__pycache__/
 

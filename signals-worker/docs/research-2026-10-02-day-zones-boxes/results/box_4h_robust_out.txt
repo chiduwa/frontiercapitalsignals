@@ -1,0 +1,43 @@
+
+### 4-hour 20-bar boxes: per coin (net of 0.2% round trip)
+   coin  period trades  mean    median  win   | vs random entries  | vs momentum-matched entries
+   BTC   A       129   +2.47%  -1.50%  38% |  +1.33% t+1.2       |  +0.42% t+0.4
+   BTC   B        97   +1.56%  +0.07%  51% |  +0.24% t+0.4       |  -0.18% t-0.3
+   ETH   A       121   +2.80%  -0.38%  50% |  +1.04% t+0.9       |  +1.43% t+1.3
+   ETH   B        98   +0.46%  -1.48%  37% |  +0.06% t+0.1       |  -0.35% t-0.5
+   SOL   A        51   +3.00%  -1.59%  43% |  +2.15% t+0.9       |  +1.67% t+0.7
+   SOL   B        87   +0.36%  -1.24%  44% |  -0.22% t-0.2       |  -0.43% t-0.4
+   XLM   A        73   +2.41%  +0.44%  51% |  +2.32% t+1.6       |  +1.90% t+1.3
+   XLM   B        76   +8.22%  -1.81%  41% |  +6.89% t+2.0       |  +3.17% t+0.9
+   XRP   A        70   +5.42%  -1.01%  49% |  +3.01% t+1.2       |  +2.51% t+1.0
+   XRP   B        72   +3.59%  -1.32%  40% |  +2.23% t+1.0       |  +1.02% t+0.5
+   HYPE  B        32   +2.26%  -1.65%  38% |  +0.37% t+0.2       |  +1.30% t+0.7
+   HBAR  A        72   -1.43%  -3.59%  26% |  -1.48% t-1.0       |  -1.71% t-1.2
+   HBAR  B        69  +12.03%  -0.53%  48% |  +9.27% t+2.1       |  +6.30% t+1.4
+   ARB   B        65   +0.23%  -2.25%  38% |  +1.43% t+1.2       |  +0.64% t+0.5
+   pooled, and leaving each coin out (period B):
+   ALL  A: 516 trades (8.1/month), mean +2.45%, median -1.58%, win 43%, best 10% of trades = 144% of the total | vs random +1.29% t+2.03 | vs momentum-matched +0.94% t+1.48
+   ALL  B: 596 trades (13.3/month), mean +3.40%, median -1.25%, win 42%, best 10% of trades = 127% of the total | vs random +2.39% t+3.07 | vs momentum-matched +1.20% t+1.53
+   leave one out (B): -BTC: +3.0/+1.6 | -ETH: +3.1/+1.7 | -SOL: +3.2/+1.6 | -XLM: +2.3/+1.2 | -XRP: +2.9/+1.5 | -HYPE: +3.1/+1.5 | -HBAR: +2.4/+1.0 | -ARB: +2.9/+1.4
+   (t vs random / t vs momentum-matched)
+
+### 4-hour new 90-day-high boxes: per coin (net of 0.2% round trip)
+   coin  period trades  mean    median  win   | vs random entries  | vs momentum-matched entries
+   BTC   A        30   +5.04%  -2.29%  40% |  +4.86% t+1.7       |  +3.76% t+1.3
+   BTC   B        25   +1.05%  -0.67%  44% |  -0.72% t-0.6       |  -2.02% t-1.6
+   ETH   A        24   +0.67%  -1.05%  50% |  -1.23% t-0.3       |  -1.16% t-0.3
+   ETH   B        17   -0.58%  -0.85%  29% |  +0.19% t+0.1       |  -1.50% t-1.0
+   SOL   A        16   +1.56%  -0.12%  50% |  +5.24% t+1.1       |  +3.09% t+0.7
+   SOL   B        17   +3.33%  +1.26%  53% |  -0.91% t-0.3       |  -1.86% t-0.7
+   XLM   B        10  +36.93% +23.82%  60% | +24.52% t+1.5       | +22.36% t+1.3
+   XRP   A         6  +15.72%  +6.67%  67% |  -1.05% t-0.1       |  +7.21% t+0.7
+   XRP   B         7  +11.49%  +8.70%  86% |  +4.99% t+0.6       |  +3.65% t+0.4
+   HYPE  B         6   -3.22%  -3.14%   0% |  -3.57% t-2.4       |  -3.46% t-2.5
+   HBAR  A         6  +14.18%  +1.90%  50% | +10.73% t+0.8       | +11.98% t+0.9
+   HBAR  B        10  +29.32%  -3.22%  40% | +17.74% t+1.0       | +21.28% t+1.3
+   ARB   B        11   +7.21%  +6.72%  55% |  +8.82% t+2.0       |  +8.46% t+1.9
+   pooled, and leaving each coin out (period B):
+   ALL  A: 86 trades (1.8/month), mean +4.75%, median -0.68%, win 49%, best 10% of trades = 90% of the total | vs random +3.23% t+1.59 | vs momentum-matched +3.05% t+1.51
+   ALL  B: 103 trades (2.3/month), mean +8.50%, median -0.68%, win 46%, best 10% of trades = 90% of the total | vs random +5.26% t+1.95 | vs momentum-matched +4.41% t+1.63
+   leave one out (B): -BTC: +2.1/+1.9 | -ETH: +1.9/+1.8 | -SOL: +2.1/+1.8 | -XLM: +1.3/+1.0 | -XRP: +1.8/+1.6 | -HYPE: +2.0/+1.7 | -HBAR: +1.7/+1.1 | -ARB: +1.6/+1.3
+   (t vs random / t vs momentum-matched)

@@ -1,0 +1,22 @@
+
+## push when at/beyond the forecast zone with <= 8h of the UTC day left
+   real coins                         top    A: 32% of coin-days, near 27%, further median 0.55 (1.35%) p75 1.09, back inside 26%, from alert to close -20bp (t -2.4) || B: 33% of coin-days, near 24%, further median 0.59 (1.11%) p75 1.21, back inside 26%, from alert to close -32bp (t -4.1)
+   real coins                         bottom A: 31% of coin-days, near 27%, further median 0.54 (1.50%) p75 1.12, back inside 27%, from alert to close -8bp (t -0.6) || B: 33% of coin-days, near 27%, further median 0.55 (1.16%) p75 1.12, back inside 30%, from alert to close +5bp (t +0.6)
+   random-sign copies (closes)        top    A: 41% of coin-days, near 43%, further median 0.36 (0.72%) p75 0.94, back inside 27%, from alert to close +4bp (t +1.1) || B: 41% of coin-days, near 41%, further median 0.39 (0.59%) p75 1.01, back inside 27%, from alert to close +1bp (t +0.4)
+   random-sign copies (closes)        bottom A: 40% of coin-days, near 42%, further median 0.38 (0.73%) p75 0.97, back inside 27%, from alert to close +0bp (t +0.1) || B: 41% of coin-days, near 42%, further median 0.38 (0.57%) p75 0.99, back inside 27%, from alert to close +1bp (t +0.5)
+
+## push when at/beyond the forecast zone with <= 6h of the UTC day left
+   real coins                         top    A: 30% of coin-days, near 31%, further median 0.46 (1.15%) p75 0.93, back inside 22%, from alert to close -19bp (t -2.6) || B: 31% of coin-days, near 29%, further median 0.50 (0.93%) p75 1.02, back inside 22%, from alert to close -25bp (t -3.9)
+   real coins                         bottom A: 30% of coin-days, near 33%, further median 0.44 (1.18%) p75 0.94, back inside 23%, from alert to close -6bp (t -0.5) || B: 31% of coin-days, near 32%, further median 0.46 (0.96%) p75 0.97, back inside 25%, from alert to close +3bp (t +0.4)
+   random-sign copies (closes)        top    A: 38% of coin-days, near 47%, further median 0.30 (0.58%) p75 0.78, back inside 23%, from alert to close +3bp (t +1.0) || B: 38% of coin-days, near 47%, further median 0.30 (0.44%) p75 0.81, back inside 23%, from alert to close +0bp (t +0.2)
+   random-sign copies (closes)        bottom A: 37% of coin-days, near 47%, further median 0.30 (0.57%) p75 0.80, back inside 23%, from alert to close +2bp (t +0.6) || B: 39% of coin-days, near 47%, further median 0.30 (0.44%) p75 0.80, back inside 23%, from alert to close +1bp (t +0.5)
+
+## push when at/beyond the forecast zone with <= 4h of the UTC day left
+   real coins                         top    A: 29% of coin-days, near 34%, further median 0.41 (0.98%) p75 0.81, back inside 18%, from alert to close -23bp (t -3.7) || B: 29% of coin-days, near 38%, further median 0.36 (0.66%) p75 0.76, back inside 17%, from alert to close -13bp (t -2.4)
+   real coins                         bottom A: 28% of coin-days, near 38%, further median 0.37 (1.00%) p75 0.82, back inside 18%, from alert to close -10bp (t -1.0) || B: 29% of coin-days, near 40%, further median 0.33 (0.69%) p75 0.67, back inside 20%, from alert to close +14bp (t +2.0)
+   random-sign copies (closes)        top    A: 36% of coin-days, near 53%, further median 0.21 (0.40%) p75 0.60, back inside 19%, from alert to close +3bp (t +1.2) || B: 36% of coin-days, near 55%, further median 0.19 (0.28%) p75 0.59, back inside 18%, from alert to close +2bp (t +1.2)
+   random-sign copies (closes)        bottom A: 35% of coin-days, near 52%, further median 0.22 (0.41%) p75 0.64, back inside 19%, from alert to close -0bp (t -0.0) || B: 36% of coin-days, near 55%, further median 0.20 (0.29%) p75 0.60, back inside 18%, from alert to close +2bp (t +1.1)
+
+## for scale: every first touch, any hour
+   real coins, any hour               top    A: 38% of coin-days, near 23%, further median 0.73 (1.75%) p75 1.57, back inside 39%, from alert to close -22bp (t -1.9) || B: 40% of coin-days, near 20%, further median 0.81 (1.53%) p75 1.66, back inside 40%, from alert to close -20bp (t -2.0)
+   real coins, any hour               bottom A: 37% of coin-days, near 21%, further median 0.79 (2.12%) p75 1.59, back inside 39%, from alert to close -1bp (t -0.1) || B: 39% of coin-days, near 21%, further median 0.78 (1.62%) p75 1.53, back inside 40%, from alert to close +9bp (t +0.8)

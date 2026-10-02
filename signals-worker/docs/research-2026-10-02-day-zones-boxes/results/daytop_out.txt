@@ -1,0 +1,3 @@
+## 1. Forecasting the day's excursion: mean |U - U^| + |D - D^| (lower is better), relative to the 60-window median
+   period A: median, 30 windows 1.002 | median, 60 windows 1.000 | median, 90 windows 1.001 | 60 + vol scaling ^0.5 0.968 | 60 + vol scaling ^1 1.000 | 60 + weekday 0.997 | 60 + vol ^0.5 + weekday 0.966
+   period B: median, 30 windows 0.998 | median, 60 windows 1.000 | median, 90 windows 0.995 | 60 + vol scaling ^0.5 0.972 | 60 + vol scaling ^1 1.003 | 60 + weekday 0.989 | 60 + vol ^0.5 + weekday 0.964

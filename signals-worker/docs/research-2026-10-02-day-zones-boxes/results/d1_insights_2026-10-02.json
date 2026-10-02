@@ -1,0 +1,490 @@
+{
+ "source": "wrangler d1 insights frontier-capital-signals-reliability --time-period 1d, 2026-10-02 ~15:00 UTC",
+ "totals": {
+  "distinctQueries": 343,
+  "rowsReadDay": 1406985178,
+  "rowsWrittenDay": 1672849
+ },
+ "topQueries": [
+  {
+   "query": "\n    SELECT asset_class, symbol, horizon_minutes, series_kind, series_key, MAX(run_at) AS last_run_at\n    FROM forecast_outcomes\n    WHERE horizon_minutes = ?\n    GROUP BY asset_class, symbol, horizon_minutes, series_kind, series_key\n  ",
+   "numberOfTimesRun": 161,
+   "totalRowsRead": 721893822,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 4483812,
+   "avgDurationMs": 9199.873411180124
+  },
+  {
+   "query": "\n    SELECT asset_class, dir, horizon_minutes / 60 AS horizon_hours,\n           MIN(9, MAX(0, CAST(score / 10 AS INTEGER))) AS bucket,\n           SUM(correct) AS correct, COUNT(*) AS total,\n           COUNT(DISTINCT substr(run_at, 1, 10)) AS effective_samples\n    FROM forecast_outcomes\n    WHERE series_kind = 'technique' AND series_key = 'composite'\n      AND aggregated = 1 AND score IS NOT NULL AND dir IN (-1, 1)\n      AND model_version = ? AND label_version = ?\n    GROUP BY asset_class, dir, horizon_minutes,\n             MIN(9, MAX(0, CAST(score / 10 AS INTEGER)))\n  ",
+   "numberOfTimesRun": 62,
+   "totalRowsRead": 99159436,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 1599345,
+   "avgDurationMs": 4817.34565
+  },
+  {
+   "query": "\n    SELECT asset_class, COUNT(DISTINCT substr(run_at, 1, 10)) AS independent_periods\n    FROM forecast_outcomes\n    WHERE series_kind = 'technique' AND series_key = 'composite' AND aggregated = 1\n      AND model_version = ? AND label_version = ?\n    GROUP BY asset_class\n  ",
+   "numberOfTimesRun": 78,
+   "totalRowsRead": 86320213,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 1106669,
+   "avgDurationMs": 2703.200465384615
+  },
+  {
+   "query": "\n    SELECT asset_class, horizon_minutes / 60 AS horizon_hours,\n           SUM(CASE WHEN actual_dir = 1 THEN 1 ELSE 0 END) AS n_up,\n           SUM(CASE WHEN actual_dir = 0 THEN 1 ELSE 0 END) AS n_flat,\n           SUM(CASE WHEN actual_dir = -1 THEN 1 ELSE 0 END) AS n_down\n    FROM forecast_outcomes\n    WHERE series_kind = 'market' AND aggregated = 1\n      AND model_version IN (?) AND label_version = ?\n    GROUP BY asset_class, horizon_minutes\n  ",
+   "numberOfTimesRun": 31,
+   "totalRowsRead": 49757567,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 1605082,
+   "avgDurationMs": 3151.483361290322
+  },
+  {
+   "query": "\n    SELECT symbol, series_key, horizon_minutes / 60 AS horizon_hours,\n           SUM(correct) AS correct, COUNT(*) AS total\n    FROM forecast_outcomes\n    WHERE series_kind = 'combo' AND aggregated = 1\n      AND model_version IN (?) AND label_version = ?\n    GROUP BY symbol, series_key, horizon_minutes\n  ",
+   "numberOfTimesRun": 39,
+   "totalRowsRead": 45292577,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 1161348,
+   "avgDurationMs": 767.7408384615385
+  },
+  {
+   "query": "\n    SELECT symbol, series_key AS technique_id, regime,\n           horizon_minutes / 60 AS horizon_hours,\n           SUM(correct) AS correct, COUNT(*) AS total\n    FROM forecast_outcomes\n    WHERE series_kind = 'technique' AND aggregated = 1 AND regime IS NOT NULL\n      AND model_version IN (?) AND label_version = ?\n    GROUP BY symbol, series_key, regime, horizon_minutes\n  ",
+   "numberOfTimesRun": 26,
+   "totalRowsRead": 43264294,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 1664011,
+   "avgDurationMs": 3203.361823076923
+  },
+  {
+   "query": "\n    SELECT asset_class, symbol, series_key AS technique_id,\n           horizon_minutes / 60 AS horizon_hours,\n           SUM(correct) AS correct, COUNT(*) AS total,\n           SUM(CASE WHEN dir = 1 THEN 1 ELSE 0 END) AS votes_up,\n           SUM(CASE WHEN dir = -1 THEN 1 ELSE 0 END) AS votes_down\n    FROM forecast_outcomes\n    WHERE series_kind = 'technique' AND aggregated = 1\n      AND model_version IN (?) AND label_version = ?\n      AND (series_key != 'composite' OR model_version = ?)\n    GROUP BY asset_class, symbol, series_key, horizon_minutes\n  ",
+   "numberOfTimesRun": 25,
+   "totalRowsRead": 41530559,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 1661222,
+   "avgDurationMs": 14142.424468000001
+  },
+  {
+   "query": "\n    SELECT asset_class, symbol, series_key AS technique_id, dir,\n           horizon_minutes / 60 AS horizon_hours,\n           AVG(correct) AS accuracy, COUNT(*) AS total,\n           COUNT(DISTINCT substr(run_at, 1, 10)) AS effective_samples\n    FROM forecast_outcomes\n    WHERE series_kind = 'technique' AND aggregated = 1 AND dir IN (-1, 1)\n      AND model_version IN (?) AND label_version = ?\n      AND (series_key != 'composite' OR model_version = ?)\n    GROUP BY asset_class, symbol, series_key, dir, horizon_minutes\n  ",
+   "numberOfTimesRun": 22,
+   "totalRowsRead": 36553172,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 1661507,
+   "avgDurationMs": 5424.196327272727
+  },
+  {
+   "query": "SELECT symbol, date, close FROM asset_daily_bars\n                  WHERE asset_class = 'crypto' AND date >= ?1 AND close > 0 ORDER BY symbol, date",
+   "numberOfTimesRun": 63,
+   "totalRowsRead": 32725278,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 519448,
+   "avgDurationMs": 458.3601603174603
+  },
+  {
+   "query": "\n    SELECT MIN(9, MAX(0, CAST(score / 10 AS INTEGER))) AS bucket,\n           SUM(correct) AS correct, COUNT(*) AS total,\n           COUNT(DISTINCT substr(run_at, 1, 10)) AS effective_samples\n    FROM forecast_outcomes\n    WHERE series_kind = 'technique' AND series_key = 'composite'\n      AND aggregated = 1 AND score IS NOT NULL\n      AND model_version = ? AND label_version = ?\n    GROUP BY MIN(9, MAX(0, CAST(score / 10 AS INTEGER)))\n  ",
+   "numberOfTimesRun": 20,
+   "totalRowsRead": 31918754,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 1595937,
+   "avgDurationMs": 6646.639819999999
+  },
+  {
+   "query": "\n    SELECT asset_class, series_key AS technique_id, horizon_minutes,\n           AVG(correct) AS accuracy,\n           COUNT(DISTINCT substr(run_at, 1, 10)) AS effective_periods\n    FROM forecast_outcomes\n    WHERE series_kind = 'technique' AND aggregated = 1\n      AND model_version IN (?) AND label_version = ?\n    GROUP BY asset_class, series_key, horizon_minutes\n  ",
+   "numberOfTimesRun": 18,
+   "totalRowsRead": 29971048,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 1665058,
+   "avgDurationMs": 3602.3646111111107
+  },
+  {
+   "query": "\n    SELECT symbol, horizon_minutes / 60 AS horizon_hours, COUNT(*) AS n,\n           SUM(return_pct) AS sum_pct, SUM(return_pct * return_pct) AS sum_pct_sq,\n           SUM(ABS(return_pct)) AS sum_abs_pct\n    FROM forecast_outcomes\n    WHERE series_kind = 'market' AND aggregated = 1 AND return_pct IS NOT NULL\n      AND model_version IN (?) AND label_version = ?\n    GROUP BY symbol, horizon_minutes\n  ",
+   "numberOfTimesRun": 14,
+   "totalRowsRead": 22424878,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 1601777,
+   "avgDurationMs": 5269.121042857142
+  },
+  {
+   "query": "\n      WITH requested(origin_run_at, asset_class, symbol, start_at, max_at) AS (VALUES (?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?))\n      SELECT requested.origin_run_at, requested.asset_class, requested.symbol, p.run_at, p.price\n      FROM requested\n      JOIN asset_price_log p ON p.asset_class = requested.asset_class AND p.symbol = requested.symbol\n        AND p.run_at >= requested.start_at AND p.run_at <= requested.max_at\n      ORDER BY p.run_at\n    ",
+   "numberOfTimesRun": 10767,
+   "totalRowsRead": 18386260,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 1707,
+   "avgDurationMs": 6.320565487136619
+  },
+  {
+   "query": "SELECT symbol, MIN(date) AS minDate, MAX(date) AS maxDate, COUNT(*) AS count FROM asset_daily_bars GROUP BY symbol",
+   "numberOfTimesRun": 6,
+   "totalRowsRead": 17268942,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 2878157,
+   "avgDurationMs": 2540.1105
+  },
+  {
+   "query": "SELECT observed_at, corr, edge_bps, peak_at_zero, n\n    FROM microstructure_observations\n    WHERE method_version = ? AND symbol = ? AND family = ? AND leader = ? AND follower = ? AND lag_seconds = ?\n    ORDER BY observed_at",
+   "numberOfTimesRun": 22750,
+   "totalRowsRead": 14255537,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 626,
+   "avgDurationMs": 6.3211719076923085
+  },
+  {
+   "query": "\n    SELECT symbol, asset_class, dir, horizon_minutes / 60 AS horizon_hours,\n           SUM(correct) AS correct, COUNT(*) AS total\n    FROM forecast_outcomes\n    WHERE series_kind = 'technique' AND series_key = 'reversal'\n      AND aggregated = 1 AND symbol IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)\n    GROUP BY symbol, asset_class, dir, horizon_minutes\n  ",
+   "numberOfTimesRun": 4,
+   "totalRowsRead": 11185920,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 2796480,
+   "avgDurationMs": 678.3855
+  },
+  {
+   "query": "\n    SELECT asset_class, symbol, dir, horizon_minutes / 60 AS horizon_hours,\n           COUNT(*) AS n,\n           SUM(CASE WHEN dir = 1 THEN path_high_pct ELSE -path_low_pct END) AS sum_mfe,\n           SUM(CASE WHEN dir = 1 THEN path_low_pct ELSE -path_high_pct END) AS sum_mae,\n           SUM(CASE WHEN actual_dir = -dir\n                    THEN 1 ELSE 0 END) AS n_wrong,\n           SUM(CASE WHEN actual_dir = -dir\n                    THEN (CASE WHEN dir = 1 THEN path_low_pct ELSE -path_high_pct END)\n                    ELSE 0 END) AS sum_wrong_mae,\n           SUM(CASE WHEN dir = 1 THEN minutes_to_high ELSE minutes_to_low END) AS sum_minutes_to_peak,\n           SUM(CASE WHEN dir = 1 THEN return_pct ELSE -return_pct END) AS sum_signed_return,\n           SUM(CASE WHEN (CASE WHEN dir = 1 THEN minutes_to_high ELSE minutes_to_low END)\n                       < (CASE WHEN dir = 1 THEN minutes_to_low ELSE minutes_to_high END)\n                    THEN 1 ELSE 0 END) AS n_favorable_first\n    FROM forecast_outcomes\n    WHERE series_kind = 'technique' AND series_key = 'composite'\n      AND aggregated = 1 AND dir IN (-1, 1)\n      AND model_version = ? AND label_version = ?\n      AND return_pct IS NOT NULL\n      AND path_high_pct IS NOT NULL AND path_low_pct IS NOT NULL\n      AND minutes_to_high IS NOT NULL AND minutes_to_low IS NOT NULL\n      -- A window whose only known point is its own entry carries no path\n      -- information at all; counting it would drag every mean toward zero\n      -- and manufacture a \"no give-back, no heat\" reading out of missing\n      -- data. Same failure mode as the zero-median daily range (0004).\n      AND (path_high_pct > 0 OR path_low_pct < 0)\n    GROUP BY asset_class, symbol, dir, horizon_minutes\n  ",
+   "numberOfTimesRun": 10,
+   "totalRowsRead": 11178110,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 1117811,
+   "avgDurationMs": 9509.8293
+  },
+  {
+   "query": "SELECT symbol, family, leader, follower, lag_seconds AS lag, COUNT(*) AS windows\n    FROM microstructure_observations WHERE method_version = ?\n    GROUP BY symbol, family, leader, follower, lag_seconds\n    HAVING COUNT(*) >= 2",
+   "numberOfTimesRun": 61,
+   "totalRowsRead": 10677177,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 175035,
+   "avgDurationMs": 1377.1078327868852
+  },
+  {
+   "query": "\n        SELECT substr(run_at, 1, 10) AS d, COUNT(*) AS n, SUM(correct) AS corr,\n               SUM(CASE WHEN dir = 1 THEN 1 ELSE 0 END) AS up,\n               SUM(CASE WHEN actual_dir = 1 THEN 1 ELSE 0 END) AS au,\n               SUM(CASE WHEN actual_dir = -1 THEN 1 ELSE 0 END) AS ad\n          FROM forecast_outcomes\n         WHERE provenance = ? AND asset_class = ? AND horizon_minutes = ?\n           AND series_kind = 'technique' AND series_key = 'composite'\n           AND aggregated = 1 AND model_version = ?\n         GROUP BY substr(run_at, 1, 10) ORDER BY d\n      ",
+   "numberOfTimesRun": 12,
+   "totalRowsRead": 7147428,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 595619,
+   "avgDurationMs": 733.3424500000001
+  },
+  {
+   "query": "SELECT DISTINCT symbol FROM asset_daily_bars WHERE symbol NOT LIKE 'SECTOR:%' AND symbol NOT LIKE 'MCAP:%' ORDER BY symbol",
+   "numberOfTimesRun": 2,
+   "totalRowsRead": 5762754,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 2881377,
+   "avgDurationMs": 2883.2729
+  },
+  {
+   "query": "\n    SELECT asset_class, symbol, horizon_minutes / 60 AS horizon_hours,\n           SUM(correct) AS hits, COUNT(*) AS total,\n           COUNT(DISTINCT substr(run_at, 1, 10)) AS effective_samples\n    FROM forecast_outcomes\n    WHERE series_kind = 'range' AND aggregated = 1\n      AND model_version = ? AND label_version = 'range-containment-v1'\n    GROUP BY asset_class, symbol, horizon_minutes\n  ",
+   "numberOfTimesRun": 11,
+   "totalRowsRead": 5387316,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 489756,
+   "avgDurationMs": 5091.645681818181
+  },
+  {
+   "query": "SELECT symbol,MAX(ts) last_ts FROM oi_tick WHERE symbol IN (?,?,?,?,?,?,?,?) AND ts<=? GROUP BY symbol",
+   "numberOfTimesRun": 21,
+   "totalRowsRead": 5022426,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 239163,
+   "avgDurationMs": 267.00098571428566
+  },
+  {
+   "query": "INSERT OR REPLACE INTO direction_baseline\n              (asset_class, horizon_hours, n_up, n_flat, n_down, updated_at)\n            SELECT asset_class, horizon_minutes / 60,\n                   SUM(CASE WHEN actual_dir = 1 THEN 1 ELSE 0 END),\n                   SUM(CASE WHEN actual_dir = 0 THEN 1 ELSE 0 END),\n                   SUM(CASE WHEN actual_dir = -1 THEN 1 ELSE 0 END), ?3\n              FROM forecast_outcomes\n             WHERE series_kind = 'market' AND aggregated = 1 AND model_version IN (?1, ?2)\n             GROUP BY asset_class, horizon_minutes",
+   "numberOfTimesRun": 2,
+   "totalRowsRead": 4201526,
+   "totalRowsWritten": 16,
+   "avgRowsRead": 2100763,
+   "avgDurationMs": 2799.5071
+  },
+  {
+   "query": "SELECT symbol, slot, extreme_type, count, total_days FROM swing_time_stats WHERE total_days > 0",
+   "numberOfTimesRun": 48,
+   "totalRowsRead": 3907516,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 81406,
+   "avgDurationMs": 321.72470833333335
+  },
+  {
+   "query": "\n    SELECT symbol, funding_rate, open_interest, source, venue, contract_id FROM funding_snapshot_daily\n    WHERE source='coingecko' AND date<date('now')\n    UNION ALL\n    SELECT f.symbol, f.funding_rate, f.open_interest, f.source, NULL AS venue, NULL AS contract_id FROM funding_rate_daily f\n    WHERE f.source='coingecko' AND f.date<date('now') AND NOT EXISTS\n      (SELECT 1 FROM funding_snapshot_daily s WHERE s.symbol=f.symbol AND s.date=f.date AND s.source=f.source)",
+   "numberOfTimesRun": 12,
+   "totalRowsRead": 3477732,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 289811,
+   "avgDurationMs": 181.2555
+  },
+  {
+   "query": "SELECT symbol, asset_class, date, close, high, low, source FROM asset_daily_bars WHERE symbol IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ORDER BY symbol, date",
+   "numberOfTimesRun": 37,
+   "totalRowsRead": 3242009,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 87621,
+   "avgDurationMs": 407.52414864864863
+  },
+  {
+   "query": "SELECT symbol, MIN(date) lo, MAX(date) hi FROM funding_settlement_daily\n     WHERE source = 'binance-fapi-direct' GROUP BY symbol",
+   "numberOfTimesRun": 8,
+   "totalRowsRead": 2272944,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 284118,
+   "avgDurationMs": 242.3206
+  },
+  {
+   "query": "SELECT date, source, close FROM asset_daily_bars WHERE symbol = ?",
+   "numberOfTimesRun": 610,
+   "totalRowsRead": 2220538,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 3640,
+   "avgDurationMs": 12.03450262295082
+  },
+  {
+   "query": "SELECT symbol, asset_class, run_at, price FROM asset_price_log WHERE run_at >= ? ORDER BY symbol, run_at",
+   "numberOfTimesRun": 20,
+   "totalRowsRead": 2173292,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 108664,
+   "avgDurationMs": 32.910019999999996
+  },
+  {
+   "query": "SELECT symbol, asset_class, date, open, close FROM asset_daily_bars WHERE symbol IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) AND date < ? ORDER BY symbol, date",
+   "numberOfTimesRun": 22,
+   "totalRowsRead": 1771644,
+   "totalRowsWritten": 0,
+   "avgRowsRead": 80529,
+   "avgDurationMs": 295.82002727272726
+  },
+  {
+   "query": "INSERT OR REPLACE INTO technique_votes (run_at, asset_class, symbol, technique_id, dir, score, regime) VALUES (?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?)",
+   "numberOfTimesRun": 7031,
+   "totalRowsRead": 0,
+   "totalRowsWritten": 393736,
+   "avgRowsRead": 0,
+   "avgDurationMs": 0.48880228985919505
+  },
+  {
+   "query": "DELETE FROM oi_tick WHERE ts < ?",
+   "numberOfTimesRun": 313,
+   "totalRowsRead": 183241,
+   "totalRowsWritten": 182928,
+   "avgRowsRead": 585,
+   "avgDurationMs": 4.035748881789138
+  },
+  {
+   "query": "INSERT OR REPLACE INTO oi_tick (symbol, ts, oi_contracts, oi_usd, mark_price) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
+   "numberOfTimesRun": 4508,
+   "totalRowsRead": 0,
+   "totalRowsWritten": 180320,
+   "avgRowsRead": 0,
+   "avgDurationMs": 0.8999235803016861
+  },
+  {
+   "query": "INSERT OR REPLACE INTO oi_tick (symbol, ts, oi_contracts, oi_usd, mark_price) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
+   "numberOfTimesRun": 4060,
+   "totalRowsRead": 0,
+   "totalRowsWritten": 154280,
+   "avgRowsRead": 0,
+   "avgDurationMs": 0.5644404187192118
+  },
+  {
+   "query": "\n        INSERT INTO time_of_day_stats (symbol, asset_class, slot, horizon_hours, n, sum_pct, sum_pct_sq, updated_at)\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n        ON CONFLICT (symbol, slot, horizon_hours) DO UPDATE SET\n          n = time_of_day_stats.n + excluded.n,\n          sum_pct = time_of_day_stats.sum_pct + excluded.sum_pct,\n          sum_pct_sq = time_of_day_stats.sum_pct_sq + excluded.sum_pct_sq,\n          updated_at = excluded.updated_at\n      ",
+   "numberOfTimesRun": 109853,
+   "totalRowsRead": 109599,
+   "totalRowsWritten": 110107,
+   "avgRowsRead": 0,
+   "avgDurationMs": 0.3582978416611289
+  },
+  {
+   "query": "UPDATE technique_votes SET evaluated_168 = 1 WHERE run_at = ? AND asset_class = ? AND symbol IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+   "numberOfTimesRun": 822,
+   "totalRowsRead": 127025,
+   "totalRowsWritten": 102365,
+   "avgRowsRead": 154,
+   "avgDurationMs": 0.942059124087591
+  },
+  {
+   "query": "\n      INSERT INTO forecast_outcomes\n        (run_at, asset_class, symbol, horizon_minutes, series_kind, series_key,\n         dir, actual_dir, correct, score, regime, return_pct, target_at,\n         observed_at, entry_price, exit_price, path_high_pct, path_low_pct,\n         minutes_to_high, minutes_to_low, model_version, label_version, evaluated_at,\n         provenance, aggregated)\n      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)\n      ON CONFLICT(run_at, asset_class, symbol, horizon_minutes, series_kind, series_key) DO NOTHING\n    ",
+   "numberOfTimesRun": 2963,
+   "totalRowsRead": 57079,
+   "totalRowsWritten": 54893,
+   "avgRowsRead": 19,
+   "avgDurationMs": 0.804180087748903
+  },
+  {
+   "query": "UPDATE technique_votes SET evaluated_24 = 1 WHERE run_at = ? AND asset_class = ? AND symbol IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+   "numberOfTimesRun": 400,
+   "totalRowsRead": 64780,
+   "totalRowsWritten": 52780,
+   "avgRowsRead": 161,
+   "avgDurationMs": 1.29306275
+  },
+  {
+   "query": "INSERT OR REPLACE INTO range_log (run_at, asset_class, symbol, horizon_hours, low, high) VALUES (?,?,?,?,?,?),(?,?,?,?,?,?),(?,?,?,?,?,?),(?,?,?,?,?,?),(?,?,?,?,?,?),(?,?,?,?,?,?),(?,?,?,?,?,?),(?,?,?,?,?,?),(?,?,?,?,?,?),(?,?,?,?,?,?),(?,?,?,?,?,?),(?,?,?,?,?,?),(?,?,?,?,?,?),(?,?,?,?,?,?),(?,?,?,?,?,?)",
+   "numberOfTimesRun": 1714,
+   "totalRowsRead": 0,
+   "totalRowsWritten": 51420,
+   "avgRowsRead": 0,
+   "avgDurationMs": 0.35462444574095686
+  },
+  {
+   "query": "INSERT OR REPLACE INTO asset_price_log (run_at, asset_class, symbol, price) VALUES (?,?,?,?),(?,?,?,?),(?,?,?,?),(?,?,?,?),(?,?,?,?),(?,?,?,?),(?,?,?,?),(?,?,?,?),(?,?,?,?),(?,?,?,?),(?,?,?,?),(?,?,?,?),(?,?,?,?),(?,?,?,?),(?,?,?,?)",
+   "numberOfTimesRun": 865,
+   "totalRowsRead": 0,
+   "totalRowsWritten": 38925,
+   "avgRowsRead": 0,
+   "avgDurationMs": 2.2813873988439304
+  },
+  {
+   "query": "INSERT OR REPLACE INTO microstructure_observations\n      (window_id, observed_at, window_start, window_end, symbol, family, leader, follower, lag_seconds,\n       corr, n, edge_bps, edge_n, lag0_corr, peak_at_zero, traded_frac_leader, traded_frac_follower,\n       clock_skew_ms, method_version)\n      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+   "numberOfTimesRun": 9692,
+   "totalRowsRead": 0,
+   "totalRowsWritten": 38768,
+   "avgRowsRead": 0,
+   "avgDurationMs": 0.3558300247626909
+  },
+  {
+   "query": "\n      INSERT INTO asset_daily_bars (symbol, asset_class, date, open, close, high, low, volume, source)\n      VALUES (?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?)\n      ON CONFLICT (symbol, date) DO UPDATE SET\n        open = COALESCE(asset_daily_bars.open, excluded.open)\n    ",
+   "numberOfTimesRun": 3095,
+   "totalRowsRead": 24165,
+   "totalRowsWritten": 35235,
+   "avgRowsRead": 7,
+   "avgDurationMs": 0.11199179321486268
+  },
+  {
+   "query": "UPDATE research_registry SET status=?, oos_n=?, oos_effect=?, oos_z=?, oos_checks=oos_checks+1,\n        last_checked_at=?, status_changed_at=CASE WHEN ?<>status THEN ? ELSE status_changed_at END, notes=?\n        WHERE hypothesis=?",
+   "numberOfTimesRun": 12247,
+   "totalRowsRead": 12247,
+   "totalRowsWritten": 24494,
+   "avgRowsRead": 1,
+   "avgDurationMs": 0.3171995999020168
+  },
+  {
+   "query": "INSERT OR REPLACE INTO microstructure_findings\n      (hypothesis, symbol, family, leader, follower, lag_seconds, windows, mean_corr, pooled_z, z_bar,\n       tests_in_family, median_edge_bps, assumed_round_trip_cost_pct, trade_decision, decision_reason, updated_at)\n      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+   "numberOfTimesRun": 11694,
+   "totalRowsRead": 23388,
+   "totalRowsWritten": 23388,
+   "avgRowsRead": 2,
+   "avgDurationMs": 0.33683193090473745
+  },
+  {
+   "query": "INSERT INTO time_of_day_edge (symbol, asset_class, slot, n, mean_pct, t_stat, win_rate, h1_mean, h2_mean, consistent, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?)",
+   "numberOfTimesRun": 1432,
+   "totalRowsRead": 0,
+   "totalRowsWritten": 22912,
+   "avgRowsRead": 0,
+   "avgDurationMs": 0.2923687150837988
+  },
+  {
+   "query": "INSERT INTO account_journal_checkpoints\n      (market, symbol, stream, last_trade_id, cursor_time_ms, updated_at)\n      VALUES (?, ?, ?, ?, ?, ?)\n      ON CONFLICT(market, symbol, stream) DO UPDATE SET\n        last_trade_id = COALESCE(excluded.last_trade_id, account_journal_checkpoints.last_trade_id),\n        cursor_time_ms = excluded.cursor_time_ms,\n        updated_at = excluded.updated_at",
+   "numberOfTimesRun": 17714,
+   "totalRowsRead": 17704,
+   "totalRowsWritten": 17724,
+   "avgRowsRead": 0,
+   "avgDurationMs": 0.3009408038839335
+  },
+  {
+   "query": "\n      INSERT INTO asset_score_snapshots (symbol, asset_class, snapshot_date, score, samples)\n      VALUES (?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?),(?,?,?,?,?)\n      ON CONFLICT (symbol, snapshot_date) DO UPDATE SET\n        score = excluded.score,\n        samples = excluded.samples\n    ",
+   "numberOfTimesRun": 975,
+   "totalRowsRead": 14625,
+   "totalRowsWritten": 14625,
+   "avgRowsRead": 15,
+   "avgDurationMs": 0.5370873846153846
+  },
+  {
+   "query": "DELETE FROM range_log WHERE horizon_hours = ? AND run_at = ? AND asset_class = ? AND symbol IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+   "numberOfTimesRun": 933,
+   "totalRowsRead": 27990,
+   "totalRowsWritten": 13995,
+   "avgRowsRead": 30,
+   "avgDurationMs": 0.43354265809217574
+  },
+  {
+   "query": "INSERT INTO account_journal_orders\n      (market, symbol, order_id, client_order_id, side, order_type, status,\n       order_time, updated_time, ingested_at)\n      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n      ON CONFLICT(market, symbol, order_id) DO UPDATE SET\n        client_order_id = COALESCE(excluded.client_order_id, account_journal_orders.client_order_id),\n        side = COALESCE(excluded.side, account_journal_orders.side),\n        order_type = COALESCE(excluded.order_type, account_journal_orders.order_type),\n        status = COALESCE(excluded.status, account_journal_orders.status),\n        order_time = COALESCE(excluded.order_time, account_journal_orders.order_time),\n        updated_time = COALESCE(excluded.updated_time, account_journal_orders.updated_time),\n        ingested_at = excluded.ingested_at",
+   "numberOfTimesRun": 5685,
+   "totalRowsRead": 5654,
+   "totalRowsWritten": 11401,
+   "avgRowsRead": 0,
+   "avgDurationMs": 0.2981319788918206
+  },
+  {
+   "query": "INSERT INTO swing_time_stats\n        (symbol, asset_class, slot, extreme_type, count, total_days, updated_at)\n        VALUES (?, ?, ?, 'low', ?, ?, ?)",
+   "numberOfTimesRun": 5260,
+   "totalRowsRead": 0,
+   "totalRowsWritten": 10520,
+   "avgRowsRead": 0,
+   "avgDurationMs": 0.04604498098859316
+  },
+  {
+   "query": "INSERT INTO swing_time_stats\n        (symbol, asset_class, slot, extreme_type, count, total_days, updated_at)\n        VALUES (?, ?, ?, 'high', ?, ?, ?)",
+   "numberOfTimesRun": 4793,
+   "totalRowsRead": 0,
+   "totalRowsWritten": 9586,
+   "avgRowsRead": 0,
+   "avgDurationMs": 0.045397621531399965
+  },
+  {
+   "query": "UPDATE forecast_outcomes SET aggregated = 1 WHERE id = ? AND aggregated = -1",
+   "numberOfTimesRun": 7736,
+   "totalRowsRead": 15472,
+   "totalRowsWritten": 7736,
+   "avgRowsRead": 2,
+   "avgDurationMs": 0.08971715356773528
+  },
+  {
+   "query": "INSERT INTO asset_sr_levels (symbol, level, level_type, touches, first_seen, last_touched, updated_at) VALUES (?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?)",
+   "numberOfTimesRun": 357,
+   "totalRowsRead": 0,
+   "totalRowsWritten": 7140,
+   "avgRowsRead": 0,
+   "avgDurationMs": 0.2913288515406163
+  },
+  {
+   "query": "UPDATE trading_bot_entry_intents SET\n        status = ?, updated_at = ?, research_resolved_at = ?,\n        first_touch_bar_at = ?, observation_count = ?, observed_low = ?,\n        observed_high = ?, closest_distance_pct = ?, resolution_basis = ?\n        WHERE client_order_id = ? AND mode IN ('dry', 'shadow')\n          AND status IN ('proposed', 'awaiting-bars')",
+   "numberOfTimesRun": 2281,
+   "totalRowsRead": 2281,
+   "totalRowsWritten": 6843,
+   "avgRowsRead": 1,
+   "avgDurationMs": 0.111915957913196
+  },
+  {
+   "query": "UPDATE forecast_outcomes SET aggregated = -1 WHERE id = ? AND aggregated = 0",
+   "numberOfTimesRun": 6712,
+   "totalRowsRead": 13424,
+   "totalRowsWritten": 6712,
+   "avgRowsRead": 2,
+   "avgDurationMs": 0.0975231823599523
+  },
+  {
+   "query": "\n        INSERT INTO technique_reliability\n          (asset_class, symbol, technique_id, horizon_hours, correct, total, accuracy, votes_up, votes_down, updated_at)\n        SELECT ?, ?, ?, ?, ?, 1, ?, ?, ?, ? FROM forecast_outcomes WHERE id = ? AND aggregated = -1\n        ON CONFLICT (symbol, technique_id, horizon_hours) DO UPDATE SET\n          correct = technique_reliability.correct + excluded.correct,\n          total = technique_reliability.total + 1,\n          accuracy = CAST(technique_reliability.correct + excluded.correct AS REAL) / (technique_reliability.total + 1),\n          votes_up = technique_reliability.votes_up + excluded.votes_up,\n          votes_down = technique_reliability.votes_down + excluded.votes_down,\n          updated_at = excluded.updated_at\n      ",
+   "numberOfTimesRun": 6646,
+   "totalRowsRead": 13226,
+   "totalRowsWritten": 6712,
+   "avgRowsRead": 1,
+   "avgDurationMs": 0.1807281071321095
+  },
+  {
+   "query": "INSERT INTO model_registry (model_id, symbol, target, horizon, spec_json, status, alpha_index, admitted_at, epoch_start, incumbent_id, status_changed_at, e_value, e_worse, forward_n, forward_mean_diff, backtest_json, reason, updated_at)\n      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)\n      ON CONFLICT (model_id, symbol, horizon) DO UPDATE SET\n        status = excluded.status, alpha_index = excluded.alpha_index, epoch_start = excluded.epoch_start, incumbent_id = excluded.incumbent_id, status_changed_at = excluded.status_changed_at, e_value = excluded.e_value, e_worse = excluded.e_worse, forward_n = excluded.forward_n, forward_mean_diff = excluded.forward_mean_diff, reason = excluded.reason, updated_at = excluded.updated_at,\n        backtest_json = COALESCE(excluded.backtest_json, model_registry.backtest_json)",
+   "numberOfTimesRun": 664,
+   "totalRowsRead": 9960,
+   "totalRowsWritten": 6640,
+   "avgRowsRead": 15,
+   "avgDurationMs": 0.186394578313253
+  },
+  {
+   "query": "UPDATE model_forecasts SET outcome_json = ?, loss = ?, scored_at = ?\n      WHERE model_id = ? AND symbol = ? AND horizon = ? AND as_of = ? AND loss IS NULL",
+   "numberOfTimesRun": 3167,
+   "totalRowsRead": 3167,
+   "totalRowsWritten": 6334,
+   "avgRowsRead": 1,
+   "avgDurationMs": 0.10608771708241238
+  },
+  {
+   "query": "\n      INSERT INTO swing_time_stats (symbol, asset_class, slot, extreme_type, count, total_days, updated_at)\n      VALUES (?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?),(?,?,?,?,?,?,?)\n      ON CONFLICT (symbol, slot, extreme_type) DO UPDATE SET\n        count = swing_time_stats.count + excluded.count,\n        total_days = swing_time_stats.total_days + excluded.total_days,\n        updated_at = excluded.updated_at\n    ",
+   "numberOfTimesRun": 572,
+   "totalRowsRead": 5372,
+   "totalRowsWritten": 6068,
+   "avgRowsRead": 9,
+   "avgDurationMs": 0.6925749999999999
+  },
+  {
+   "query": "\n      INSERT INTO stable_value_observations\n        (obs_date, symbol, name, price, mcap, volume, median_bar_pct, chg24h, peak_deviation_pct, basis, last_seen_at)\n      VALUES (?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?)\n      ON CONFLICT(obs_date, symbol) DO UPDATE SET\n        price = excluded.price, mcap = excluded.mcap, volume = excluded.volume,\n        median_bar_pct = excluded.median_bar_pct, chg24h = excluded.chg24h,\n        peak_deviation_pct = MAX(COALESCE(stable_value_observations.peak_deviation_pct, 0), COALESCE(excluded.peak_deviation_pct, 0)),\n        basis = excluded.basis, last_seen_at = excluded.last_seen_at",
+   "numberOfTimesRun": 573,
+   "totalRowsRead": 5157,
+   "totalRowsWritten": 5157,
+   "avgRowsRead": 9,
+   "avgDurationMs": 0.3938912739965096
+  }
+ ]
+}
