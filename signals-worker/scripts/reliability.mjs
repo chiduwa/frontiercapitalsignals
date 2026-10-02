@@ -801,13 +801,35 @@ async function loadForecastPathRows(env, targets) {
   return out;
 }
 
-async function loadAcceptedOutcomeTimes(env, horizonMinutes) {
-  const rows = await d1(env, `
+// The last accepted forecast per series, for the one-per-horizon rule. Only a
+// forecast later than (the oldest candidate - one horizon) can make
+// selectNonOverlappingForecasts skip anything: an earlier one is at least a
+// horizon before every candidate, which the rule treats exactly like no prior
+// forecast. So the read stops there (an hour's margin covers run_at strings
+// without milliseconds, which sort after the same instant with them), through
+// the unique index, whose leading column is run_at. Left to itself the planner
+// walks idx_forecast_outcomes_latest end to end for the GROUP BY: 2.8M rows
+// per call, 722M a day, 53% of every D1 read (measured 2026-10-02). Bounded:
+// ~52k rows at 24h and ~224k at 168h, the same 11,555 / 18,921 series, the
+// same decisions (test-query-plans.mjs).
+export const ACCEPTED_TIMES_MARGIN_MS = 3600 * 1000;
+export function acceptedTimesSince(oldestCandidateAt, horizonMinutes) {
+  const oldest = Date.parse(oldestCandidateAt);
+  if (!Number.isFinite(oldest)) return null;
+  return new Date(oldest - Number(horizonMinutes) * 60 * 1000 - ACCEPTED_TIMES_MARGIN_MS).toISOString();
+}
+
+export const ACCEPTED_TIMES_SQL = `
     SELECT asset_class, symbol, horizon_minutes, series_kind, series_key, MAX(run_at) AS last_run_at
-    FROM forecast_outcomes
-    WHERE horizon_minutes = ?
+    FROM forecast_outcomes INDEXED BY idx_forecast_outcomes_unique
+    WHERE run_at >= ? AND horizon_minutes = ?
     GROUP BY asset_class, symbol, horizon_minutes, series_kind, series_key
-  `, [horizonMinutes]);
+  `;
+
+async function loadAcceptedOutcomeTimes(env, horizonMinutes, oldestCandidateAt) {
+  const since = acceptedTimesSince(oldestCandidateAt, horizonMinutes);
+  if (!since) return {};
+  const rows = await d1(env, ACCEPTED_TIMES_SQL, [since, horizonMinutes]);
   const out = {};
   for (const row of rows) out[outcomeSeriesIdentity(row)] = row.last_run_at;
   return out;
@@ -1114,7 +1136,10 @@ export async function evaluateMatured(env, nowIso) {
     }
 
     const horizonMinutes = h * 60;
-    let acceptedState = await loadAcceptedOutcomeTimes(env, horizonMinutes);
+    // Every candidate below (votes, market moves, combos, ranges) carries the
+    // run_at of a due vote or a due range.
+    const oldestCandidateAt = [...due, ...dueRanges].map(r => r.run_at).filter(Boolean).sort()[0];
+    let acceptedState = await loadAcceptedOutcomeTimes(env, horizonMinutes, oldestCandidateAt);
     const evaluableVotes = [];
     const moveByEvent = {};
     const evaluatedVotesByRunAndClass = {};

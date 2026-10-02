@@ -126,3 +126,46 @@ test('oi_tick WITHOUT ROWID migration leaves every reader result identical', () 
   // The fresh-database snapshot matches what the migration produces.
   assert.match(SCHEMA.match(/CREATE TABLE IF NOT EXISTS oi_tick \([\s\S]*?\)[^;]*;/)[0], /WITHOUT ROWID;$/);
 });
+
+// 2026-10-02: the one-per-horizon rule's lookup was 53% of every D1 read
+// (722M rows a day). Bounded to (oldest candidate - one horizon), through the
+// index that leads with run_at, it must make exactly the decisions the
+// whole-ledger read made.
+test('the accepted-forecast lookup seeks recent rows and decides exactly as the whole-ledger read did', async () => {
+  const { ACCEPTED_TIMES_SQL, acceptedTimesSince, selectNonOverlappingForecasts } = await import('./scripts/reliability.mjs');
+  assert.match(plan(ACCEPTED_TIMES_SQL.replace('?', "'2026-09-30'").replace('?', '1440')),
+    /SEARCH forecast_outcomes USING COVERING INDEX idx_forecast_outcomes_unique \(run_at>\?\)/);
+  const insert = db.prepare(`INSERT OR IGNORE INTO forecast_outcomes (run_at, asset_class, symbol, horizon_minutes, series_kind, series_key,
+    correct, evaluated_at, model_version, label_version) VALUES (?, 'crypto', ?, ?, ?, ?, 1, '2026-10-02', 'm', 'l')`);
+  let seed = 7;
+  const rand = () => (seed = (seed * 48271) % 2147483647) / 2147483647;
+  const t0 = Date.parse('2026-08-01T00:00:00Z');
+  const iso = (ms, plain) => { const s = new Date(ms).toISOString(); return plain ? s.replace('.000Z', 'Z') : s; };
+  for (const horizon of [1440, 10080]) {
+    for (let i = 0; i < 3000; i++) {
+      const at = t0 + Math.floor(rand() * 60 * 24) * 3600e3;            // any hour over 60 days
+      insert.run(iso(at, rand() < 0.1), `S${Math.floor(rand() * 12)}`, horizon, rand() < 0.5 ? 'technique' : 'market', `k${Math.floor(rand() * 3)}`);
+    }
+  }
+  const whole = db.prepare(`SELECT asset_class, symbol, horizon_minutes, series_kind, series_key, MAX(run_at) AS last_run_at
+    FROM forecast_outcomes WHERE horizon_minutes = ? GROUP BY asset_class, symbol, horizon_minutes, series_kind, series_key`);
+  const toMap = (rows) => Object.fromEntries(rows.map(r => [`${r.asset_class}|${r.symbol}|${r.horizon_minutes}|${r.series_kind}|${r.series_key}`, r.last_run_at]));
+  for (const horizon of [1440, 10080]) {
+    for (let trial = 0; trial < 40; trial++) {
+      const oldest = t0 + Math.floor(rand() * 70 * 24) * 3600e3;
+      const candidates = Array.from({ length: 60 }, () => ({
+        asset_class: 'crypto', symbol: `S${Math.floor(rand() * 12)}`, horizon_minutes: horizon,
+        series_kind: rand() < 0.5 ? 'technique' : 'market', series_key: `k${Math.floor(rand() * 3)}`,
+        run_at: iso(oldest + Math.floor(rand() * 10 * 24) * 3600e3) }));
+      const first = candidates.map(c => c.run_at).sort()[0];
+      const bounded = toMap(db.prepare(ACCEPTED_TIMES_SQL).all(acceptedTimesSince(first, horizon), horizon));
+      const full = toMap(whole.all(horizon));
+      const a = selectNonOverlappingForecasts(candidates, horizon, full);
+      const b = selectNonOverlappingForecasts(candidates, horizon, bounded);
+      assert.deepEqual(b.accepted, a.accepted);
+      assert.deepEqual(b.skipped, a.skipped);
+    }
+  }
+  assert.equal(acceptedTimesSince(undefined, 1440), null, 'no candidates, no read');
+  db.exec('DELETE FROM forecast_outcomes');
+});
