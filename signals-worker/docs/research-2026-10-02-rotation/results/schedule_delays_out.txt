@@ -1,0 +1,11 @@
+daily-intelligence.yml             cron 07:00 UTC  runs 30  start delay h: median  5.2  min  4.0  max  7.7  last 7 median  6.1
+signals-adaptive.yml               cron 06:23 UTC  runs 18  start delay h: median  5.5  min  4.8  max  7.8  last 7 median  6.4
+signals-big-move-watch.yml         cron 17:47 UTC  runs  8  start delay h: median  3.4  min  2.4  max  4.9  last 7 median  3.8
+signals-daily.yml                  cron 02:37 UTC  runs 30  start delay h: median  5.3  min  4.5  max  6.7  last 7 median  6.3
+signals-discovery.yml              cron 05:40 UTC  runs 30  start delay h: median  4.6  min  3.6  max  6.3  last 7 median  5.7
+signals-hierarchical.yml           cron 06:47 UTC  runs 15  start delay h: median  5.4  min  4.8  max  7.7  last 7 median  6.2
+signals-model-tournament.yml       cron 17:27 UTC  runs  8  start delay h: median  3.6  min  2.6  max  5.1  last 7 median  4.0
+signals-profit-growth.yml          cron 22:40 UTC  runs  6  start delay h: median  2.9  min  2.2  max  3.6  last 7 median  2.9
+signals-replay.yml                 cron 04:11 UTC  runs 14  start delay h: median  5.6  min  5.1  max  6.7  last 7 median  6.3
+signals-retrospective.yml          cron 04:20 UTC  runs 30  start delay h: median  5.0  min  4.1  max  6.7  last 7 median  6.2
+signals-tracked-research.yml       cron 09:21 UTC  runs 12  start delay h: median  5.3  min  4.3  max  8.4  last 7 median  6.6

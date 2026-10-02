@@ -1,0 +1,83 @@
+
+## 0. Traded value vs market cap (2026-09-30): Spearman 0.64 over 380 coins
+   tier   coins  median mcap $M  smallest $M
+   large     20           5353          768
+   mid       40            614           10
+   small     87             72            6
+   micro    230             32            4
+
+## 1. Describe the legs (daily log returns, B period)
+       mean bp/day  vol %/day  beta to BTC  corr to BTC  members (median)
+BTC          6.796      2.465        1.000        1.000               NaN
+ETH          1.650      3.532        1.179        0.823               NaN
+large      -18.141      4.077        1.343        0.812              20.0
+mid        -29.067      4.260        1.313        0.760              40.0
+small      -26.648      4.213        1.259        0.737              90.0
+micro      -16.129      3.713        1.107        0.735             196.0
+
+## 2. Price lead-lag between legs (absolute); next-k on last-k, own last-k controlled; Newey-West t
+   90 tests; Bonferroni bar |t| >= 3.26
+   k= 1d: |t|>=2 in A 4, in B 10 (chance ~1.5 each); same sign and |t|>=2 in both: 0; past the bar in either: 0
+   k= 7d: |t|>=2 in A 0, in B 2 (chance ~1.5 each); same sign and |t|>=2 in both: 0; past the bar in either: 0
+   k=28d: |t|>=2 in A 6, in B 1 (chance ~1.5 each); same sign and |t|>=2 in both: 0; past the bar in either: 0
+ k lead follow    A_b    A_t  A_n    B_b    B_t  B_n
+ 1  BTC  large  0.111  1.293 1095 -0.242 -2.547 1004
+ 1  BTC    mid  0.119  1.237 1095 -0.233 -2.908 1004
+ 1  BTC  small  0.077  0.848 1095 -0.219 -2.818 1004
+ 1  BTC  micro -0.154 -1.859  660 -0.202 -3.017 1004
+ 1  ETH    mid  0.007  0.099 1095 -0.207 -3.080 1004
+ 1  ETH  small -0.053 -0.781 1095 -0.177 -2.713 1004
+ 1  mid    ETH -0.113 -1.532 1095  0.123  2.612 1004
+28  BTC    ETH  0.513  2.514   40 -0.034 -0.082   34
+28  mid  large  0.922  2.925   40 -0.452 -0.835   34
+   the asked-about order (BTC/large -> micro -> mid), every horizon:
+       BTC -> large k=1: A t +1.29 / B t -2.55  k=7: A t -0.11 / B t +0.40  k=28: A t +0.98 / B t +1.25
+     large -> micro k=1: A t -1.15 / B t +0.35  k=7: A t -0.16 / B t -2.35  k=28: A t +2.06 / B t +1.25
+     micro -> mid   k=1: A t +0.21 / B t -0.92  k=7: A t -0.90 / B t +0.84  k=28: A t -0.75 / B t +0.43
+     large -> mid   k=1: A t +0.52 / B t -0.27  k=7: A t -0.80 / B t -0.94  k=28: A t -1.69 / B t +1.18
+       mid -> small k=1: A t -2.03 / B t -0.62  k=7: A t +0.26 / B t -0.96  k=28: A t +0.53 / B t -1.34
+     small -> micro k=1: A t +0.46 / B t +1.73  k=7: A t +0.58 / B t -0.36  k=28: A t +0.62 / B t +1.14
+       BTC -> micro k=1: A t -1.86 / B t -3.02  k=7: A t +1.41 / B t -0.13  k=28: A t +1.09 / B t +2.05
+       ETH -> large k=1: A t +0.19 / B t -2.38  k=7: A t -0.62 / B t +0.30  k=28: A t -0.40 / B t +0.64
+
+## 2. Price lead-lag between legs (relative to BTC); next-k on last-k, own last-k controlled; Newey-West t
+   60 tests; Bonferroni bar |t| >= 3.17
+   k= 1d: |t|>=2 in A 1, in B 0 (chance ~1.0 each); same sign and |t|>=2 in both: 0; past the bar in either: 0
+   k= 7d: |t|>=2 in A 0, in B 1 (chance ~1.0 each); same sign and |t|>=2 in both: 0; past the bar in either: 0
+   k=28d: |t|>=2 in A 7, in B 0 (chance ~1.0 each); same sign and |t|>=2 in both: 0; past the bar in either: 2
+ k  lead follow   A_b   A_t  A_n    B_b    B_t  B_n
+28 large  micro 0.653 3.114   24  0.294  1.718   34
+28   mid  large 0.583 4.027   40 -0.513 -1.325   34
+28   mid  micro 0.665 3.808   24  0.021  0.078   34
+28 small  large 0.402 2.593   40 -0.115 -0.426   34
+   the asked-about order (BTC/large -> micro -> mid), every horizon:
+     large -> micro k=1: A t -0.62 / B t +1.53  k=7: A t -0.45 / B t -1.96  k=28: A t +3.11 / B t +1.72
+     micro -> mid   k=1: A t +1.23 / B t -0.08  k=7: A t -1.03 / B t -0.38  k=28: A t -2.26 / B t -0.03
+     large -> mid   k=1: A t +0.42 / B t +1.10  k=7: A t -0.51 / B t -2.32  k=28: A t -1.54 / B t +1.49
+       mid -> small k=1: A t -0.83 / B t -0.40  k=7: A t +1.35 / B t +0.29  k=28: A t +0.74 / B t -1.23
+     small -> micro k=1: A t +2.15 / B t +1.71  k=7: A t +1.63 / B t -0.50  k=28: A t +1.68 / B t +1.07
+       ETH -> large k=1: A t +0.64 / B t -0.34  k=7: A t +0.10 / B t +0.81  k=28: A t -0.70 / B t +0.25
+
+## 3. The story itself: BTC and large caps pump, then cool. Then what?
+   event: pump week, then a down week; outcome = the leg's return minus BTC+large's, weeks +1..+4 after the event week (log %)
+     A:  5 events | ETH -2.5 vs +3.0 (t -1.16) | mid +0.6 vs -0.5 (t +0.33) | small +1.2 vs +1.8 (t -0.18) | micro +5.9 vs +1.8 (t +1.88)
+     B:  6 events | ETH -2.2 vs +2.0 (t -1.65) | mid -7.2 vs -6.5 (t -0.15) | small -7.8 vs -6.0 (t -0.36) | micro +0.5 vs -3.1 (t +0.86)
+   event: pump week (no cooling needed); outcome = the leg's return minus BTC+large's, weeks +1..+4 after the event week (log %)
+     A: 10 events | ETH -1.1 vs +3.0 (t -1.06) | mid +1.5 vs -0.5 (t +0.65) | small +4.2 vs +1.8 (t +0.75) | micro +6.2 vs +1.8 (t +1.56)
+     B: 12 events | ETH +3.5 vs +2.0 (t +0.38) | mid -5.3 vs -6.5 (t +0.26) | small -4.4 vs -6.0 (t +0.31) | micro -1.0 vs -3.1 (t +0.46)
+
+## 4. Capital rotation by traded value: share of all Binance spot traded value, rising vs its recent norm
+   (B period, mean share of traded value: BTC 25.9%, ETH 16.3%, large 33.0%, mid 11.6%, small 7.8%, micro 5.4%)
+   outcome = leg relative to BTC (BTC: relative to the mean alt tier); own past return controlled; Newey-West t
+   k=7d: |t|>=2 in A 0, in B 0 of 36 (chance ~1.8); same sign |t|>=2 both: 0; past the bar |t|>=3.39 in either: 0
+     own share -> own next: BTC A -0.16 B +1.01; ETH A -0.18 B -0.43; large A -1.11 B +0.31; mid A +0.94 B +0.49; small A +0.68 B -0.53; micro A +0.61 B +0.65
+   k=28d: |t|>=2 in A 15, in B 5 of 36 (chance ~1.8); same sign |t|>=2 both: 3; past the bar |t|>=3.39 in either: 1
+     own share -> own next: BTC A -1.83 B -0.52; ETH A -0.52 B +0.43; large A -2.42 B -2.22; mid A -1.25 B +1.65; small A -2.84 B +0.64; micro A -0.18 B +0.11
+share_of outcome    A_b    A_t    B_b    B_t  B_n
+     BTC     mid  0.161  2.826  0.069  0.777   34
+     mid     BTC  0.168  2.515 -0.093 -1.302   34
+     mid   large -0.157 -3.048  0.118  1.607   34
+   small     BTC  0.144  3.045 -0.039 -0.481   34
+   small   large -0.143 -3.633  0.082  1.154   34
+   small     mid -0.145 -2.806  0.002  0.024   34
+   small   small -0.152 -2.842  0.051  0.641   34

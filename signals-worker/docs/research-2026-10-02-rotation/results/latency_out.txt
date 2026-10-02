@@ -1,0 +1,11 @@
+## 9. Lateness: the watch's daily top 10, 2024-01..2026-08, 9,443 picks with a full hourly path
+   picks that ended >= 12% from the close after 48h: 32.5%; touched +-12% at any hour within 48h: 54.9%
+   hour after the close  | already touched +-12% (all picks) | share of the eventual touches already done | a NEW +-12% from that hour's price within the rest of the 48h | close-to-close >= 12% from that hour
+   + 1h                 |   1.1%                          |   2.1%                                    |  53.3%                                      |  31.4%
+   + 2h                 |   2.7%                          |   5.0%                                    |  52.1%                                      |  30.4%
+   + 4h                 |   6.1%                          |  11.1%                                    |  50.5%                                      |  29.4%
+   + 6h                 |   9.8%                          |  18.0%                                    |  48.2%                                      |  28.0%
+   +10h                 |  16.4%                          |  29.9%                                    |  43.7%                                      |  25.3%
+   +16h                 |  25.1%                          |  45.7%                                    |  35.7%                                      |  21.1%
+   +24h                 |  33.7%                          |  61.4%                                    |  27.5%                                      |  16.6%
+   (the digest has arrived at +9h to +10h)

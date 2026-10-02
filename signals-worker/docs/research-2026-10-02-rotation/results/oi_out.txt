@@ -1,0 +1,33 @@
+OI panel: 195 coins with Binance perps; 2023-01-02..2026-10-01
+
+## 5a. Tier OI flow vs BTC's -> tier vs BTC over the next k days (own past return controlled)
+              n            t      
+period        A      B     A     B
+k  tier                           
+1  large  668.0  685.0  0.67  0.23
+   micro  270.0  685.0  0.44 -0.46
+   mid    668.0  685.0  1.44  0.82
+   small  668.0  685.0  0.88 -0.49
+7  large   95.0   97.0 -1.24  0.96
+   micro   38.0   97.0 -1.42  1.09
+   mid     95.0   97.0 -0.39 -0.11
+   small   95.0   97.0 -1.19  0.51
+28 large   22.0   24.0 -0.22  1.02
+   micro    8.0   24.0   NaN  1.14
+   mid     22.0   24.0  1.12  1.13
+   small   22.0   24.0 -0.70  0.27
+
+## 5b. All-alt OI flow minus BTC's -> equal-weight alts vs BTC next k days
+   k= 1: A: slope +0.023 t +0.94 n 668 | B: slope +0.006 t +0.16 n 685
+   k= 7: A: slope -0.100 t -1.44 n 95 | B: slope +0.072 t +0.56 n 97
+   k=28: A: slope -0.111 t -0.82 n 22 | B: slope +0.352 t +1.19 n 24
+
+## 5c. Category OI flow (relative to all coins' flow) -> category excess next k days; Fama-MacBeth over 10 categories with >= 8 perps
+   k= 1: A: flow t +nan past t +nan (0 periods) | B: flow t +0.60 past t -1.20 (657 periods)
+   k= 7: A: flow t +nan past t +nan (0 periods) | B: flow t +1.49 past t +0.37 (92 periods)
+   k=28: A: flow t +nan past t +nan (0 periods) | B: flow t +0.44 past t +0.42 (22 periods)
+
+## 5d. Coin level, next day's excess return: own OI-vs-price divergence (the XS lane's selected feature) and its category's (leave-one-out)
+   A: ownDiv -15.4bp t -1.95 | catDiv -29.5bp t -2.53 | ownOi1 -5.6bp t -0.68 | catOi1 +27.5bp t +2.08 | ownR1 -11.2bp t -1.56 | catR1 -8.3bp t -0.71  (663 days, ~64 coins/day)
+   B: ownDiv +1.1bp t +0.16 | catDiv -10.3bp t -1.30 | ownOi1 -6.7bp t -1.04 | catOi1 +3.1bp t +0.41 | ownR1 -3.6bp t -0.42 | catR1 +1.1bp t +0.12  (685 days, ~115 coins/day)
+   (slope = next-day excess return, bp, from the bottom to the top of each feature's daily rank)

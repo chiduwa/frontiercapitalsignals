@@ -1,0 +1,30 @@
+
+### large caps beat BTC over 4 weeks -> micro beats BTC over the next 4 (price, relative)
+  A: off  0: t +2.11 (n 23) | off  7: t +1.39 (n 22) | off 14: t -0.32 (n 23) | off 21: t +1.14 (n 23) || every day, NW 56 lags: slope +0.269 t +1.14 (n 633 days)
+  B: off  0: t -0.94 (n 35) | off  7: t -0.81 (n 35) | off 14: t +0.35 (n 35) | off 21: t +1.33 (n 35) || every day, NW 56 lags: slope +0.028 t +0.15 (n 977 days)
+  whole window without 2022-05..2022-12: slope +0.169 t +0.92 (n 1365 days)
+  whole window without 2024-10..2025-03: slope +0.041 t +0.24 (n 1428 days)
+
+### large-cap share of traded value up over 4 weeks -> alts vs BTC next 4 weeks
+  A: off  0: t -2.17 (n 22) | off  7: t -1.76 (n 21) | off 14: t -1.81 (n 21) | off 21: t -1.50 (n 21) || every day, NW 56 lags: slope -0.098 t -1.87 (n 594 days)
+  B: off  0: t -1.71 (n 35) | off  7: t -0.92 (n 35) | off 14: t -2.12 (n 35) | off 21: t +0.34 (n 35) || every day, NW 56 lags: slope -0.099 t -1.14 (n 977 days)
+  whole window without 2022-05..2022-12: slope -0.027 t -0.60 (n 1342 days)
+  whole window without 2024-10..2025-03: slope -0.090 t -1.81 (n 1389 days)
+
+### large-cap share up -> large caps vs BTC next 4 weeks
+  A: off  0: t -2.42 (n 22) | off  7: t -2.76 (n 21) | off 14: t -2.30 (n 21) | off 21: t -1.61 (n 21) || every day, NW 56 lags: slope -0.112 t -2.40 (n 594 days)
+  B: off  0: t -1.94 (n 35) | off  7: t -0.76 (n 35) | off 14: t -4.05 (n 35) | off 21: t +0.23 (n 35) || every day, NW 56 lags: slope -0.129 t -1.65 (n 977 days)
+  whole window without 2022-05..2022-12: slope -0.065 t -1.53 (n 1342 days)
+  whole window without 2024-10..2025-03: slope -0.098 t -2.43 (n 1389 days)
+
+### all-alt share up (1 - BTC - ETH) -> alts vs BTC next 4 weeks
+  A: off  0: t -2.47 (n 22) | off  7: t -2.11 (n 21) | off 14: t -1.63 (n 21) | off 21: t -1.84 (n 21) || every day, NW 56 lags: slope -0.118 t -2.08 (n 594 days)
+  B: off  0: t -0.80 (n 35) | off  7: t -0.32 (n 35) | off 14: t -0.89 (n 35) | off 21: t +0.59 (n 35) || every day, NW 56 lags: slope -0.046 t -0.39 (n 977 days)
+  whole window without 2022-05..2022-12: slope -0.014 t -0.24 (n 1342 days)
+  whole window without 2024-10..2025-03: slope -0.101 t -1.81 (n 1389 days)
+
+### micro share up -> micro vs BTC next 4 weeks
+  A: off  0: t -0.18 (n 22) | off  7: t +1.53 (n 21) | off 14: t +0.35 (n 21) | off 21: t +0.60 (n 21) || every day, NW 56 lags: slope +0.009 t +0.51 (n 594 days)
+  B: off  0: t -1.01 (n 35) | off  7: t -1.01 (n 35) | off 14: t +0.07 (n 35) | off 21: t -0.09 (n 35) || every day, NW 56 lags: slope -0.025 t -0.85 (n 977 days)
+  whole window without 2022-05..2022-12: slope -0.002 t -0.10 (n 1342 days)
+  whole window without 2024-10..2025-03: slope -0.001 t -0.11 (n 1389 days)

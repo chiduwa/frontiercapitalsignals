@@ -1,0 +1,17 @@
+archive rows 522205; early pass: target 2026-10-01, eligible 263, topped up 263, skipped 0 in 8s
+identical to the later archive row: 249 of 263
+differences:
+  ARK: not archived
+  ASTR: not archived
+  DBR: not archived
+  CTC: not archived
+  DOLA: not archived
+  DCR: not archived
+  FIDD: not archived
+  GLM: not archived
+  SN120: not archived
+  SOSO: not archived
+  SN51: not archived
+  WIN: not archived
+  XVG: not archived
+  XVS: not archived

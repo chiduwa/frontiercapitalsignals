@@ -1,0 +1,5 @@
+big-move-watch-v1 as of 2026-10-01: watching 10 of 242 coins, 0 scored (early pass: ranking only), live {'days': 0, 'rows': 0, 'hitRate': None, 'baseRate': None, 'excess': None, 't': None}, notifying=True in 11s
+big-move-watch-v1 as of 2026-10-01: watching 10 of 230 coins, 0 scored, live {'days': 0, 'rows': 0, 'hitRate': None, 'baseRate': None, 'excess': None, 't': None}, notifying=True in 11s
+early as of 2026-10-01 ranked 242 coins: QNT KNTQ US SHFL ELF MUBARAK AKE SHX PHA PUMP
+full as of 2026-10-01 ranked 230 coins: QNT US KNTQ SHFL ELF SHX AKE MUBARAK PUMP MEGA
+recorded 2026-10-01 (pushed 09:37 UTC): QNT KNTQ US SHFL ELF SHX PUMP MUBARAK AKE MEGA
