@@ -6997,6 +6997,12 @@ export async function refreshLivePriceLayer(env) {
     // not notify a long/short entry until a separately scored setup earns that
     // direction; freshness cannot compensate for missing predictive evidence.
     await dispatchBestHourAlerts(env, cached, nowIso);
+    // Today's forecast top/bottom for the always-tracked coins (scripts/day-zones.mjs).
+    try {
+      await dispatchDayZoneAlerts(env, cached, body, nowIso);
+    } catch (error) {
+      console.error('Day-zone alerts failed:', error.message);
+    }
     return true;
   } catch (error) {
     console.error('Live price layer refresh failed:', error.message);
@@ -7082,6 +7088,140 @@ export async function dispatchBestHourAlerts(env, cached, nowIso) {
     console.error('Unable to persist best-hour alert state:', error.message);
   }
   return sent;
+}
+
+// ----------------------------- DAY ZONE ALERTS ------------------------------
+// Today's forecast top and bottom for each always-tracked coin, computed by the
+// hourly build (scripts/day-zones.mjs: 60-day median move from the 00:00 UTC
+// open, scaled by the last 24 hours' volatility) and checked here on every
+// 5-minute tick against the live price. Asked for 2026-10-02 as "notify me when
+// a forecasted top/near top or bottom/near bottom is detected".
+//
+// Measured before it shipped (docs/DAY_ZONES_AND_BOXES.md): reaching the
+// forecast level is NOT a top or bottom. Pushes start at 18:00 UTC, where the
+// odds of being near the day's extreme are best (6 hours or less left), and
+// every push quotes what followed in the past, so it cannot be read as a call
+// to sell the top or buy the bottom. One push per coin per side per UTC day;
+// coins reaching their levels on the same tick share one push.
+//
+// Cost: no I/O on a tick unless a coin is beyond a level after 18:00; then one
+// KV read, and on a new alert one KV write and one push.
+export const DAY_ZONE_ALERT_FROM_UTC_HOUR = 18;
+const DAY_ZONE_ALERT_STATE_KEY = 'signals:day-zone-alert-state';
+const DAY_ZONE_ALERT_TTL_SECONDS = 30 * 3600;
+// The rule exactly as it runs here (hourly closes standing in for 5-minute
+// ticks, the eight coins, 2023-01..2026-10; 2018-22 gave the same picture):
+// near = the day's extreme ended within a quarter of a typical move of the alert
+// price; further = the extreme's distance beyond the alert price, in typical
+// moves (median, and 1 in 4 times beyond p75); backInside = the coin closed the
+// UTC day back on the inside of the level; driftBp = mean close-of-day move
+// beyond the alert price (tops kept rising, t 3.9; bottoms: no drift either way).
+export const DAY_ZONE_EVIDENCE = Object.freeze({
+  top: Object.freeze({ near: 0.29, furtherMedian: 0.50, furtherP75: 1.02, backInside: 0.22, driftBp: 25 }),
+  bottom: Object.freeze({ near: 0.32, furtherMedian: 0.46, furtherP75: 0.97, backInside: 0.25, driftBp: 0 })
+});
+
+export function dueDayZoneAlerts(dayZones, prices, nowIso, fired = {}) {
+  if (!dayZones || !dayZones.bySymbol || typeof nowIso !== 'string') return [];
+  const date = nowIso.slice(0, 10);
+  if (dayZones.date !== date) return [];                       // yesterday's levels never fire today
+  const now = new Date(nowIso);
+  if (now.getUTCHours() < DAY_ZONE_ALERT_FROM_UTC_HOUR) return [];
+  const minutesLeft = 24 * 60 - (now.getUTCHours() * 60 + now.getUTCMinutes());
+  const due = [];
+  for (const [symbol, z] of Object.entries(dayZones.bySymbol)) {
+    const price = Number(prices && prices[symbol] && prices[symbol].price);
+    if (!(price > 0) || !(z && z.top > 0 && z.bottom > 0 && z.open > 0)) continue;
+    for (const side of ['top', 'bottom']) {
+      if (side === 'top' ? price < z.top : price > z.bottom) continue;
+      const stateKey = `${date}|${symbol}|${side}`;
+      if (fired && fired[stateKey]) continue;
+      due.push({
+        symbol, side, price, stateKey, minutesLeft,
+        level: side === 'top' ? z.top : z.bottom, open: z.open,
+        movePct: (price / z.open - 1) * 100,
+        unitLog: side === 'top' ? z.upLog : z.downLog
+      });
+    }
+  }
+  return due;
+}
+
+function zonePrice(v) {
+  if (!Number.isFinite(v)) return 'n/a';
+  if (v >= 1000) return `$${v.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  if (v >= 1) return `$${v.toFixed(v >= 100 ? 2 : 3)}`;
+  return `$${v.toPrecision(4)}`;
+}
+
+export function dayZoneNotification(due) {
+  if (!due || !due.length) return null;
+  due = due.slice().sort((a, b) => (a.side === b.side ? a.symbol.localeCompare(b.symbol) : a.side === 'top' ? -1 : 1));
+  const pct = (x) => `${x >= 0 ? '+' : ''}${x.toFixed(2)}%`;
+  const lines = due.map((d) => {
+    const ev = DAY_ZONE_EVIDENCE[d.side];
+    const further = (k) => (d.side === 'top' ? Math.expm1(d.unitLog * k) : -(1 - Math.exp(-d.unitLog * k))) * 100;
+    return `${d.symbol} ${zonePrice(d.price)} ${d.side === 'top' ? 'at or above' : 'at or below'} today's forecast ${d.side} ${zonePrice(d.level)} `
+      + `(${pct(d.movePct)} from the 00:00 UTC open). Past cases went a median ${pct(further(ev.furtherMedian))} further, 1 in 4 beyond ${pct(further(ev.furtherP75))}.`;
+  });
+  const sides = new Set(due.map(d => d.side));
+  const read = [];
+  if (sides.has('top')) {
+    const ev = DAY_ZONE_EVIDENCE.top;
+    read.push(`Not a top signal. Reaching the forecast top this late in the UTC day (8 coins, 2023-26), the day's high still ended clearly higher ${Math.round((1 - ev.near) * 100)}% of the time, `
+      + `the coin closed the day back below the level only ${Math.round(ev.backInside * 100)}% of the time, and on average it kept rising into the close.`);
+  }
+  if (sides.has('bottom')) {
+    const ev = DAY_ZONE_EVIDENCE.bottom;
+    read.push(`Not a bottom signal. Reaching the forecast bottom this late, the day's low still ended clearly lower ${Math.round((1 - ev.near) * 100)}% of the time `
+      + `and the coin closed back above the level only ${Math.round(ev.backInside * 100)}% of the time; no reliable bounce.`);
+  }
+  const left = due[0].minutesLeft;
+  const tops = due.filter(d => d.side === 'top').map(d => d.symbol);
+  const bottoms = due.filter(d => d.side === 'bottom').map(d => d.symbol);
+  const title = due.length === 1
+    ? `${due[0].symbol} at today's forecast ${due[0].side}`
+    : [tops.length && `Forecast top: ${tops.join(', ')}`, bottoms.length && `forecast bottom: ${bottoms.join(', ')}`].filter(Boolean).join(' · ');
+  return {
+    title,
+    message: [...lines, '', ...read, '',
+      `${Math.floor(left / 60)}h ${String(left % 60).padStart(2, '0')}m left in the UTC day. Levels: each coin's 60-day median move from the 00:00 UTC open, scaled by the last 24 hours' volatility. Not financial advice.`].join('\n'),
+    priority: 'default',
+    tags: ['dart']
+  };
+}
+
+export async function dispatchDayZoneAlerts(env, cached, live, nowIso) {
+  if (!env || !env.NTFY_TOPIC || !env.FCS_CACHE) return 0;
+  const candidates = dueDayZoneAlerts(cached && cached.dayZones, live && live.crypto, nowIso);
+  if (!candidates.length) return 0;
+  let fired = {};
+  try {
+    const raw = await env.FCS_CACHE.get(DAY_ZONE_ALERT_STATE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && parsed.fired) fired = parsed.fired;
+  } catch { /* a lost state key costs at most one repeated push */ }
+  const due = candidates.filter(d => !fired[d.stateKey]);
+  if (!due.length) return 0;
+  // Claimed before the push, so an overlapping tick cannot send it twice.
+  for (const d of due) fired[d.stateKey] = nowSeconds();
+  try {
+    await env.FCS_CACHE.put(DAY_ZONE_ALERT_STATE_KEY, JSON.stringify({ fired }), { expirationTtl: DAY_ZONE_ALERT_TTL_SECONDS });
+  } catch (error) {
+    console.error('Unable to persist day-zone alert state:', error.message);
+  }
+  const n = dayZoneNotification(due);
+  try {
+    const res = await fetch(`https://ntfy.sh/${env.NTFY_TOPIC}`, {
+      method: 'POST',
+      headers: { Title: n.title, Priority: n.priority, Tags: n.tags.join(','), Click: 'https://frontiercapitalsignals.com/signals/' },
+      body: n.message
+    });
+    return res.ok ? due.length : 0;
+  } catch (error) {
+    console.error('Day-zone alert failed:', error.message);
+    return 0;
+  }
 }
 
 // Flattens every board row in a payload into one symbol -> row map, so the

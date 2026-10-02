@@ -2700,6 +2700,50 @@ check('too far ahead is not yet due', mod.dueBestHourAlerts(mod.attachBestHours(
 // Once the window is already running the alert is useless, so it must not fire.
 check('an hour already in progress does NOT alert — too late to act on', mod.dueBestHourAlerts(mod.attachBestHours(edgePayload, '2026-08-30T20:10:00Z').bestHours, '2026-08-30T20:10:00Z', {}).length === 0);
 
+console.log('\n== day zones: today\'s forecast top/bottom for the always-tracked coins ==');
+{
+  const zone = (open, upPct, downPct) => ({ open, top: open * (1 + upPct / 100), bottom: open * (1 - downPct / 100),
+    upLog: Math.log(1 + upPct / 100), downLog: -Math.log(1 - downPct / 100) });
+  const zones = { date: '2026-10-02', bySymbol: { BTC: zone(85000, 1, 1), ETH: zone(2700, 1.5, 1.2), XLM: zone(0.22, 2, 2), HYPE: zone(88, 2.5, 2) } };
+  const px = (b, e, x, h) => ({ BTC: { price: b }, ETH: { price: e }, XLM: { price: x }, HYPE: { price: h } });
+  const above = px(86000, 2750, 0.215, 88);              // BTC and ETH above their tops, XLM below its bottom
+  check('nothing before 18:00 UTC, however far price has gone', mod.dueDayZoneAlerts(zones, above, '2026-10-02T17:55:00Z').length === 0);
+  const due = mod.dueDayZoneAlerts(zones, above, '2026-10-02T18:05:00Z');
+  check('from 18:00 UTC a coin at or beyond a level is due, each side on its own',
+    JSON.stringify(due.map(d => `${d.symbol}|${d.side}`).sort()) === JSON.stringify(['BTC|top', 'ETH|top', 'XLM|bottom']), JSON.stringify(due));
+  check('a coin inside both levels is not due', !due.some(d => d.symbol === 'HYPE'));
+  check('yesterday\'s levels never fire today', mod.dueDayZoneAlerts(zones, above, '2026-10-03T18:05:00Z').length === 0);
+  check('a side already pushed today is not repeated', mod.dueDayZoneAlerts(zones, above, '2026-10-02T19:00:00Z', { '2026-10-02|BTC|top': 1 }).every(d => !(d.symbol === 'BTC' && d.side === 'top')));
+  check('a missing live price never fires', mod.dueDayZoneAlerts(zones, { BTC: { price: null } }, '2026-10-02T18:05:00Z').length === 0);
+  check('the minutes left in the UTC day are measured from the tick', due[0].minutesLeft === 355);
+
+  const one = mod.dayZoneNotification([due.find(d => d.symbol === 'BTC')]);
+  check('one coin: a plain title naming the coin and the side', one.title === "BTC at today's forecast top", one.title);
+  check('every push says it is not a top signal and quotes what followed',
+    /Not a top signal/.test(one.message) && /71% of the time/.test(one.message) && /only 22% of the time/.test(one.message) && /kept rising/.test(one.message), one.message);
+  check('the further move is in the coin\'s own terms (median, and 1 in 4)', /went a median \+0\.50% further, 1 in 4 beyond \+1\.02%/.test(one.message), one.message);
+  const many = mod.dayZoneNotification(due);
+  check('several coins on one tick share one push', many.title === 'Forecast top: BTC, ETH · forecast bottom: XLM', many.title);
+  check('a bottom quotes its own odds', /Not a bottom signal/.test(many.message) && /no reliable bounce/.test(many.message));
+  const all8 = {}; const big = {};
+  for (const s of ['BTC', 'ETH', 'SOL', 'XLM', 'XRP', 'HYPE', 'HBAR', 'ARB']) { all8[s] = zone(100, 1, 1); big[s] = { price: 150 }; }
+  const worst = mod.dayZoneNotification(mod.dueDayZoneAlerts({ date: '2026-10-02', bySymbol: all8 }, big, '2026-10-02T18:05:00Z'));
+  check('all eight coins at once still fit one ntfy message (4,096 bytes)', new TextEncoder().encode(worst.message).length < 4096, String(worst.message.length));
+
+  const zoneCalls = [];
+  global.fetch = async (url, init) => { zoneCalls.push({ url: String(url), init }); return { ok: true, status: 200 }; };
+  class CountingKV extends MockKV { constructor() { super(); this.gets = 0; } async get(k) { this.gets++; return super.get(k); } }
+  const zenv = { NTFY_TOPIC: 'topic', FCS_CACHE: new CountingKV() };
+  check('a quiet tick touches neither KV nor ntfy',
+    await mod.dispatchDayZoneAlerts(zenv, { dayZones: zones }, { crypto: px(85000, 2700, 0.22, 88) }, '2026-10-02T18:05:00Z') === 0
+    && zenv.FCS_CACHE.gets === 0 && zoneCalls.length === 0);
+  const sentN = await mod.dispatchDayZoneAlerts(zenv, { dayZones: zones }, { crypto: above }, '2026-10-02T18:05:00Z');
+  check('three alerts on one tick go out as ONE push', sentN === 3 && zoneCalls.length === 1 && zoneCalls[0].url.endsWith('/topic'), String(zoneCalls.length));
+  await mod.dispatchDayZoneAlerts(zenv, { dayZones: zones }, { crypto: above }, '2026-10-02T18:10:00Z');
+  check('the next tick does not repeat them', zoneCalls.length === 1);
+  check('the state outlives the UTC day it covers', zenv.FCS_CACHE.ttls.get('signals:day-zone-alert-state') === 30 * 3600);
+}
+
 console.log('\n== dailyRangeStatsFromRows: the median daily high-low yardstick ==');
 const arch = await import('./scripts/archive.mjs');
 const mkBars = (symbol, ranges) => ranges.map((r, i) => ({

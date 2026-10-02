@@ -26,6 +26,7 @@ import { loadAdaptiveHealth } from './adaptive-research.mjs';
 import { loadHierarchicalHealth } from './hierarchical-research.mjs';
 import { loadTournamentHealth } from './model-tournament-io.mjs';
 import { loadBigMoveWatch } from './big-move-watch-io.mjs';
+import { buildDayZones } from './day-zones.mjs';
 import { loadDecouplingWatch } from './decoupling-watch-io.mjs';
 import { loadCoinRotation } from './coin-rotation-io.mjs';
 import { loadExhaustion } from './exhaustion-io.mjs';
@@ -282,6 +283,16 @@ if (FCS_D1_DATABASE_ID) {
   } catch (error) {
     payload.bigMoveWatch = { status: 'unavailable' };
     console.error('big-move watch unavailable:', error.message);
+  }
+  // Today's forecast top and bottom for each always-tracked coin, which the
+  // Worker checks against the live price every 5 minutes (dueDayZoneAlerts).
+  // Two public, keyless requests per coin; a failure leaves the field out and
+  // the Worker simply has nothing to check.
+  try {
+    payload.dayZones = await buildDayZones();
+    if (payload.dayZones.missing.length) console.warn(`day zones: no zone for ${payload.dayZones.missing.join(', ')}`);
+  } catch (error) {
+    console.error('day zones unavailable:', error.message);
   }
   // Large coins pulling away from the market on unusual volume, from the
   // hourly live scan; direction unknown, and the panel says so.
