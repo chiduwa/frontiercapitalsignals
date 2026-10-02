@@ -85,6 +85,32 @@ class Finds(unittest.TestCase):
             bases.append((day['fwd2'].abs() >= bw.BIG).mean())
         self.assertGreater(np.mean(hits), 2 * np.mean(bases), f'watch {np.mean(hits):.2f} vs base {np.mean(bases):.2f}')
 
+    def test_the_early_pass_ranks_the_same_close_and_scores_nothing(self):
+        series = synthetic()
+        D = bw.panel(series)
+        open_rows = [{'as_of': str((D['date'].max() - pd.Timedelta(days=10)).date()), 'symbol': 'C5'}]
+        full = bw.run(series, {'open': open_rows, 'scored': []}, 'r1')
+        early = bw.run(series, {'open': open_rows, 'scored': []}, 'r2', provisional=True)
+        self.assertEqual(len(full['scores']), 1)
+        self.assertEqual(early['scores'], [], 'scoring waits for the archive')
+        self.assertEqual([w['symbol'] for w in early['watch']], [w['symbol'] for w in full['watch']])
+        self.assertTrue(early['summary']['earlyPass']); self.assertFalse(full['summary']['earlyPass'])
+
+    def test_a_recovered_outcome_scores_a_dropped_coin_and_never_overrides_the_archive(self):
+        series = synthetic()
+        D = bw.panel(series)
+        d = str((D['date'].max() - pd.Timedelta(days=10)).date())
+        state = {'open': [{'as_of': d, 'symbol': 'GONE'}, {'as_of': d, 'symbol': 'C5'}], 'scored': [],
+                 'recovered': [{'as_of': d, 'symbol': 'GONE', 'fwd2': -0.3}, {'as_of': d, 'symbol': 'C5', 'fwd2': 9.0}]}
+        plain = bw.run(series, {'open': state['open'], 'scored': []}, 'r0')
+        out = bw.run(series, state, 'r1')
+        s = {x['symbol']: x for x in out['scores']}
+        self.assertEqual(s['GONE']['big'], 1); self.assertAlmostEqual(s['GONE']['move_pct'], -30.0)
+        c5 = {x['symbol']: x for x in plain['scores']}['C5']
+        self.assertEqual(s['C5']['move_pct'], c5['move_pct'], 'the archive outcome stands')
+        self.assertEqual(s['GONE']['day_base_rate'], c5['day_base_rate'], "the base rate is the archive's")
+        self.assertNotIn('GONE', {x['symbol'] for x in plain['scores']})
+
     def test_missing_values_are_reported_as_missing(self):
         self.assertIsNone(bw.num(float('nan'))); self.assertIsNone(bw.num(None)); self.assertEqual(bw.num(0.5, 100), 50.0)
 

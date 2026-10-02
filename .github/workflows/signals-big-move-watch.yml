@@ -1,9 +1,17 @@
 name: Signals Big-Move Watch
 
-# Daily, after the archive is current: rank every archived coin by its chance
-# of a >= 12% move either way over the next two days, log the top 10 before
-# those days happen, score earlier days against what every coin did, and push
-# one digest. See signals-worker/docs/MISSED_MOVES.md. Places nothing.
+# Daily: rank every archived coin by its chance of a >= 12% move either way
+# over the next two days, log the top 10 before those days happen, score
+# earlier days against what every coin did, and push one digest. See
+# signals-worker/docs/MISSED_MOVES.md. Places nothing.
+#
+# Three triggers, one record per close (the first ranking wins, one push):
+#   * the Worker's cron dispatches it at 00:20 UTC (CADENCE_DISPATCHES). This
+#     early pass adds the just-closed day in memory, ranks, and scores nothing
+#     (big-move-watch-io.mjs EARLY, docs/ROTATION.md section 9)
+#   * after Signals Daily, on the archive: scores, and issues the watch if the
+#     early pass did not
+#   * the evening schedule, if both of those failed
 on:
   workflow_run:
     workflows: [Signals Daily]
@@ -51,13 +59,13 @@ jobs:
           FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
         run: |
           mkdir -p reports/big-move
-          node scripts/big-move-watch-io.mjs series reports/big-move/series.json
+          node scripts/big-move-watch-io.mjs series reports/big-move/series.json reports/big-move/series-meta.json
           node scripts/big-move-watch-io.mjs export reports/big-move/state.json
       - name: Score, rank and write today's watch
         working-directory: signals-worker
         env:
           OPENBLAS_NUM_THREADS: '1'
-        run: python scripts/big-move-watch.py --series reports/big-move/series.json --state reports/big-move/state.json --output reports/big-move/results.json
+        run: python scripts/big-move-watch.py --series reports/big-move/series.json --series-meta reports/big-move/series-meta.json --state reports/big-move/state.json --output reports/big-move/results.json
       - name: Write to D1 and push the digest
         working-directory: signals-worker
         env:

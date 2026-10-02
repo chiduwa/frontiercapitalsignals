@@ -125,6 +125,18 @@ predicts it will lag the market.
   walk-forward half beat the base rate), so it notifies from day one, and is
   demoted if its live record trails the same-day base rate at t ≤ −2 over
   ≥ 30 days.
+
+  **Since 2026-10-02 the digest goes out at about 00:30 UTC,** not 08:45–09:42.
+  GitHub started the archive job about six hours late every day, and by ten
+  hours after the close 30% of the moves the watch flags had already
+  happened. The Worker's cron now runs an early pass at 00:20 UTC. It adds the
+  just-closed day in memory from each coin's own supplier and ranks, but does
+  not score. The run after the archive job then scores, and the first
+  ranking of a close is its record.
+  - **Scoring fix, same day:** a flagged coin that left the archive's universe
+    right after was never scored (6 of the first ~75; 3 of those 6 were 12%
+    moves). It is now scored from its own supplier.
+  - Evidence: [ROTATION.md](ROTATION.md) section 9.
 - **Volume exhaustion warning**, hourly, unchanged: "weakness ahead" on a
   coin that just ran on a volume spike.
 - **Quiet accumulation and moderate surge** stay logged and scored, silent

@@ -171,12 +171,19 @@ def num(x, scale=1.0, transform=None):
     return (transform(x) if transform else x) * scale
 
 
-def run(series, state, run_at=None):
+def run(series, state, run_at=None, provisional=False):
+    """provisional: the newest close was added in memory before the archive had
+    it (big-move-watch-io.mjs, the early pass). Rank and record, but score
+    nothing: earlier rows are judged on the archive alone, as they always were."""
     D = panel(series)
     asof = D['date'].max()
     top, meta = fit_and_rank(D, asof)
     outcome, base = realized(D), day_base_rates(D)
-    scored_now = score(state.get('open', []), outcome, base)
+    # A flagged coin that left the archive right after is scored from its own
+    # supplier (big-move-watch-io.mjs recoverOutcomes); the base rate is not.
+    recovered = {(r['as_of'], r['symbol']): float(r['fwd2']) for r in state.get('recovered', []) if math.isfinite(float(r['fwd2']))}
+    outcome = {**recovered, **outcome}
+    scored_now = [] if provisional else score(state.get('open', []), outcome, base)
     record = live_record(state.get('scored', []) + scored_now)
     allowed, why = notify_gate(record)
     asof_s = asof.strftime('%Y-%m-%d')
@@ -194,7 +201,7 @@ def run(series, state, run_at=None):
     recall = (sum(1 for k in movers if k in watched) / len(movers)) if movers else None
     summary = {'version': VERSION, 'asOf': asof_s, 'generatedAt': run_at, 'horizonDays': HORIZON_DAYS,
                'threshold': BIG, 'watch': watch, 'model': meta, 'live': record, 'recall': recall,
-               'movers': len(movers), 'notifying': allowed, 'statusNote': why,
+               'movers': len(movers), 'notifying': allowed, 'statusNote': why, 'earlyPass': bool(provisional),
                'direction': 'unknown: 52% of flagged movers rose in the walk-forward; no direction model held up'}
     return {'version': VERSION, 'asOf': asof_s, 'runAt': run_at, 'watch': watch, 'scores': scored_now, 'summary': summary}
 
@@ -202,12 +209,15 @@ def run(series, state, run_at=None):
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--series', required=True); ap.add_argument('--state', required=True); ap.add_argument('--output', required=True)
+    ap.add_argument('--series-meta', help='written by big-move-watch-io.mjs series; marks an early-pass (provisional) series')
     a = ap.parse_args()
     raw = Path(a.series).read_bytes()
+    provisional = bool(a.series_meta and Path(a.series_meta).exists() and json.loads(Path(a.series_meta).read_text()).get('provisional'))
     t0 = time.time()
-    out = run(json.loads(raw), json.loads(Path(a.state).read_text()), time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()))
+    out = run(json.loads(raw), json.loads(Path(a.state).read_text()), time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), provisional)
     out['inputHash'] = hashlib.sha256(raw).hexdigest()
     Path(a.output).write_text(json.dumps(out, allow_nan=False))
     s = out['summary']
     print(f"{VERSION} as of {s['asOf']}: watching {len(s['watch'])} of {s['model']['coins'] if s['model'] else 0} coins, "
-          f"{len(out['scores'])} scored, live {s['live']}, notifying={s['notifying']} in {time.time() - t0:.0f}s", flush=True)
+          f"{len(out['scores'])} scored{' (early pass: ranking only)' if provisional else ''}, live {s['live']}, "
+          f"notifying={s['notifying']} in {time.time() - t0:.0f}s", flush=True)

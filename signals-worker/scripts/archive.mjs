@@ -58,7 +58,21 @@ export async function yahooFullHistory(ticker) {
   const period2 = Math.floor(Date.now() / 1000);
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}`
     + `?period1=0&period2=${period2}&interval=1d`;
-  const j = await fetchJson(url);
+  return yahooChartBars(await fetchJson(url));
+}
+
+// The last `days` of daily bars: the same parsing and the same explicit epoch
+// bounds (never `range=`), for a reader that needs only the newest close. The
+// big-move watch's early pass (big-move-watch-io.mjs) asks for ~40 days, not
+// the whole history, of each Yahoo-sourced coin once a day.
+export async function yahooRecentBars(ticker, days = 40, { nowMs = Date.now(), fetcher = fetchJson } = {}) {
+  const period2 = Math.floor(nowMs / 1000);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}`
+    + `?period1=${period2 - days * 86400}&period2=${period2}&interval=1d`;
+  return yahooChartBars(await fetcher(url), nowMs);
+}
+
+function yahooChartBars(j, nowMs = Date.now()) {
   const r = j && j.chart && j.chart.result && j.chart.result[0];
   if (!r || !r.timestamp || !r.timestamp.length) throw new Error('empty chart');
   const q = r.indicators.quote[0];
@@ -79,7 +93,7 @@ export async function yahooFullHistory(ticker) {
     }
   }
   if (bars.length < 30) throw new Error(`thin history (${bars.length} bars)`);
-  return completedDailyBars(bars);
+  return completedDailyBars(bars, nowMs);
 }
 
 // Yahoo's {SYMBOL}-USD ticker construction (backfill-history.mjs's universe

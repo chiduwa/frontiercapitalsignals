@@ -103,6 +103,17 @@ const GITHUB_REFRESH_DISPATCH_URL = GITHUB_WORKFLOW_DISPATCH_BASE + 'signals-ref
 // unreliable below a daily cadence, which is why the daily research jobs stay
 // on their own GitHub schedules and are deliberately NOT listed here.
 //
+// Delivered is not on time, though (measured 2026-10-02, last 30 runs each):
+// every daily cron here STARTS hours late: medians +2.9h to +5.6h, the
+// morning ones worst. Signals Daily (02:37) +5.3h, last week +6.3h. For a
+// research job that is harmless (and Signals Daily's 08:30-09:20
+// start happens to land just after Binance's portal publishes the previous
+// day's derivatives files, 06:50-09:19 UTC), so they stay where they are. The
+// one daily job whose value decays by the hour is the big-move watch: its
+// digest reached the phone 9-10 hours after the close it ranks, by which time
+// 30% of the moves it flags had already happened (docs/ROTATION.md section 9).
+// It gets a day-aligned lane below; nothing else daily belongs here.
+//
 // Both jobs listed here are idempotent against an extra firing by construction
 // -- microstructure rejects an overlapping window at write time, live-scan's
 // UNIQUE (config_id, symbol, cast_at) rejects a duplicate cast -- so the
@@ -147,6 +158,19 @@ export const CADENCE_DISPATCHES = Object.freeze([
     // after minute 1, so the scan reads a bar that closed a few minutes ago.
     alignToHour: true,
     afterMinute: 1
+  }),
+  Object.freeze({
+    workflow: 'signals-big-move-watch.yml',
+    // Once per UTC day, on the first tick at or after 00:20: the 00:00 close
+    // it ranks is final, and the early pass adds it in memory from Binance or
+    // Yahoo (big-move-watch-io.mjs EARLY). Idempotent against the other two
+    // triggers by construction: the first ranking of a close is its record,
+    // and one push goes out per close.
+    key: 'signals:cadence:big-move-watch',
+    intervalSeconds: 24 * 3600,
+    alignToDay: true,
+    afterHour: 0,
+    afterMinute: 20
   })
 ]);
 // 250, raised from 100 on 2026-09-06. The old value's stated reason was that
@@ -6820,6 +6844,14 @@ export async function dispatchWorkflowOnCadence(env, spec, nowMs = Date.now()) {
     if (now.getUTCMinutes() < (spec.afterMinute || 0)) return false;
     key = `${spec.key}:${now.toISOString().slice(0, 13)}`;
     ttl = 2 * 3600;
+  }
+  // The same, by UTC day: once per day, on the first tick at or after
+  // afterHour:afterMinute. A failed dispatch retries later the same day.
+  if (spec.alignToDay) {
+    const now = new Date(nowMs);
+    if (now.getUTCHours() * 60 + now.getUTCMinutes() < (spec.afterHour || 0) * 60 + (spec.afterMinute || 0)) return false;
+    key = `${spec.key}:${now.toISOString().slice(0, 10)}`;
+    ttl = 2 * 86400;
   }
   if (await env.FCS_CACHE.get(key)) return false;
   try {

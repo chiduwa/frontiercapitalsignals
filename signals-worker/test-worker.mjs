@@ -532,8 +532,13 @@ console.log('\n== cadence dispatch: the Worker cron drives the sub-daily workflo
 // is the discipline that makes an unreliable trigger safe to replace: one
 // dispatch per interval, the slot claimed before the call, and a failure that
 // backs off without holding the lane shut.
-check('only sub-daily workflows are dispatched from the Worker cron; the daily research jobs keep their own schedules',
-  mod.CADENCE_DISPATCHES.every((spec) => spec.intervalSeconds <= 3600)
+// One daily exception, measured 2026-10-02: GitHub delivers daily crons, but
+// hours late, and the big-move watch's value decays by the hour. It is the
+// only day-aligned lane; every other lane stays sub-daily.
+check('the Worker cron dispatches sub-daily workflows, plus the big-move watch once a day; the daily research jobs keep their own schedules',
+  mod.CADENCE_DISPATCHES.every((spec) => spec.intervalSeconds <= 3600
+    || (spec.alignToDay === true && spec.workflow === 'signals-big-move-watch.yml'))
+  && mod.CADENCE_DISPATCHES.filter((s2) => s2.alignToDay).length === 1
   && mod.CADENCE_DISPATCHES.some((s2) => s2.workflow === 'signals-microstructure.yml')
   && mod.CADENCE_DISPATCHES.some((s2) => s2.workflow === 'signals-live-scan.yml')
   && !mod.CADENCE_DISPATCHES.some((s2) => /discovery|retrospective|daily|replay|backfill/.test(s2.workflow)),
@@ -576,6 +581,31 @@ check('the KV slot carries the interval as its own TTL, so the key expiring IS t
     await mod.dispatchWorkflowOnCadence(alignedEnv, liveSpec, at('2026-09-26T14:55:00Z')) === false && alignedCalls.length === 1);
   check('the next hour dispatches on its own first tick, however recent the last run was',
     await mod.dispatchWorkflowOnCadence(alignedEnv, liveSpec, at('2026-09-26T15:05:00Z')) === true && alignedCalls.length === 2);
+}
+
+// The big-move watch is aligned to the UTC day: once, on the first tick at or
+// after 00:20, when the close it ranks is final.
+{
+  const watchSpec = mod.CADENCE_DISPATCHES.find((s2) => s2.workflow === 'signals-big-move-watch.yml');
+  const dayCalls = [];
+  global.fetch = async (url) => { dayCalls.push(String(url)); return { ok: true, status: 204 }; };
+  const dayEnv = { FCS_CACHE: new MockKV(), GITHUB_ACTIONS_TOKEN: 'test-dispatch-token' };
+  const at = (iso) => Date.parse(iso);
+  check('the big-move watch is day-aligned shortly after the 00:00 UTC close',
+    watchSpec && watchSpec.alignToDay === true && watchSpec.afterHour === 0 && watchSpec.afterMinute >= 5 && watchSpec.afterMinute <= 59);
+  check('a tick before 00:20 waits',
+    await mod.dispatchWorkflowOnCadence(dayEnv, watchSpec, at('2026-10-03T00:15:00Z')) === false && dayCalls.length === 0);
+  check('the first tick at or after 00:20 dispatches the watch',
+    await mod.dispatchWorkflowOnCadence(dayEnv, watchSpec, at('2026-10-03T00:20:04Z')) === true && dayCalls.length === 1
+    && dayCalls[0].endsWith('/actions/workflows/signals-big-move-watch.yml/dispatches'));
+  check('later ticks the same day do not dispatch again',
+    await mod.dispatchWorkflowOnCadence(dayEnv, watchSpec, at('2026-10-03T00:25:00Z')) === false
+    && await mod.dispatchWorkflowOnCadence(dayEnv, watchSpec, at('2026-10-03T23:55:00Z')) === false && dayCalls.length === 1);
+  check('the next day dispatches on its own first tick after 00:20',
+    await mod.dispatchWorkflowOnCadence(dayEnv, watchSpec, at('2026-10-04T00:10:00Z')) === false
+    && await mod.dispatchWorkflowOnCadence(dayEnv, watchSpec, at('2026-10-04T00:21:00Z')) === true && dayCalls.length === 2);
+  check('the day slot is keyed by date and outlives the day',
+    dayEnv.FCS_CACHE.ttls.get(`${watchSpec.key}:2026-10-03`) === 2 * 86400);
 }
 
 const cadenceFailEnv = { FCS_CACHE: new MockKV(), GITHUB_ACTIONS_TOKEN: 'test-dispatch-token' };
