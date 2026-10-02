@@ -1,0 +1,23 @@
+## 1b. One feature at a time (within-coin sd units, coin intercepts, date-clustered t)
+   size ~ vol24     first +0.040 (t +4.8, n 8572) | second +0.029 (t +3.1, n 9869)
+   size ~ absret24  first +0.070 (t +9.1, n 8595) | second +0.060 (t +7.0, n 9869)
+   size ~ absoi24   first +0.023 (t +2.0, n 2573) | second +0.015 (t +1.2, n 3144)
+   size ~ oi24      first +0.021 (t +1.6, n 2573) | second +0.026 (t +2.2, n 3144)
+   skew ~ ret24     first -0.026 (t -2.5, n 8595) | second +0.005 (t +0.4, n 9869)
+   skew ~ oi24      first +0.018 (t +1.1, n 2573) | second +0.023 (t +1.8, n 3144)
+   skew ~ oidiv     first +0.007 (t +0.3, n 2573) | second +0.002 (t +0.1, n 3144)
+   skew ~ taker     first +0.038 (t +2.1, n 2573) | second +0.017 (t +1.0, n 3144)
+   skew ~ vol24     first +0.009 (t +0.9, n 8572) | second +0.004 (t +0.4, n 9869)
+
+## 2. Baking volume into the size forecast: U^' = U^ x ratio^g (ratio = last-24h volume / its 30-day median)
+   fitted on 2018-22: g = 0.08 (loss 0.9985 of g=0)
+   2023-26 with g = 0.08: loss 0.9984 of the forecast without volume
+   paired difference -0.00006 (t -2.61), 9869 coin-days
+
+## 3. Volume and yesterday's move size together: U^' = U^ x ratio^g x exp(h x |yesterday's move| in typical moves)
+   fitted on 2018-22: g = 0.04, h = 0.025 (loss 0.9977 of none)
+   2023-26: loss 0.9985 of none; paired -0.00006 (t -1.69, 9869 coin-days)
+   calibration 2023-26 (days inside each side, ~50% is right): with 0.508/0.517, without 0.500/0.505
+   busiest 10% of days (by volume and yesterday's move): multiplier ~1.12x; days exceeding the plain forecast top 56% / bottom 57%; with the multiplier 52% / 52%
+   next 15%: multiplier ~1.06x; days exceeding the plain forecast top 52% / bottom 52%; with the multiplier 49% / 50%
+   quietest 25%: multiplier ~0.98x; days exceeding the plain forecast top 51% / bottom 48%; with the multiplier 52% / 49%

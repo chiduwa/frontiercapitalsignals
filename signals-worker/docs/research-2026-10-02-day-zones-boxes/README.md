@@ -22,6 +22,10 @@ python fetch_hype_perp.py     # HYPE hourly from the Binance USD-M perpetual (sp
 | `daytop_final.py` | 2: reference hours paired against midnight UTC | `daytop_final_out.txt` |
 | `daytop_timeleft.py` | 2: odds by hours left in the UTC day | `daytop_timeleft_out.txt` |
 | `daytop_rule.py` | 2-3: the alert rule as it runs live, vs random-sign copies | `daytop_rule_out.txt` |
+| `activity.py` | 2b: activity at the open vs the day's range and tilt (needs `DZ_PERP`: the decoupling study's `fetch_um.py` output) | `activity_out.txt` |
+| `activity2.py` | 2b: one measure at a time; fitting the volume/move widening on 2018-22, judged on 2023-26 | `activity2_out.txt` |
+| `activity3.py` | 2b: late-day alerts by volume, open interest and taker flow since the open | `activity3_out.txt` |
+| `activity4.py` | 2b-3: the alert odds by volume with the widened band (the numbers in `worker.js` DAY_ZONE_EVIDENCE) | `activity4_out.txt` |
 | (`wrangler d1 insights`) | 5: the heaviest D1 queries on 2026-10-02 | `d1_insights_2026-10-02.json` |
 
 `scripts/day-zones.mjs` is the live forecast. `test-day-zones.mjs` checks it

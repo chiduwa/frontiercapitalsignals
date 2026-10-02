@@ -1,0 +1,31 @@
+## 3. Late-day alerts by what happened since the open
+
+   top, by volsofar:
+     volume so far below normal             first: n 1000, near 38%, back inside 27%, further 0.36, close vs alert -9bp (t -1.2) || second: n 1234, near 35%, back inside 27%, further 0.41, close vs alert -6bp (t -0.9)
+     1-2x normal                            first: n 1031, near 30%, back inside 20%, further 0.49, close vs alert -26bp (t -2.7) || second: n 1213, near 27%, back inside 19%, further 0.51, close vs alert -20bp (t -2.3)
+     over 2x normal                         first: n 530, near 21%, back inside 16%, further 0.70, close vs alert -32bp (t -1.5) || second: n 594, near 20%, back inside 16%, further 0.72, close vs alert -73bp (t -4.1)
+
+   bottom, by volsofar:
+     volume so far below normal             first: n 1139, near 39%, back inside 27%, further 0.38, close vs alert +6bp (t +0.7) || second: n 1368, near 37%, back inside 29%, further 0.40, close vs alert +5bp (t +0.6)
+     1-2x normal                            first: n 982, near 30%, back inside 19%, further 0.48, close vs alert -21bp (t -1.7) || second: n 1317, near 29%, back inside 23%, further 0.51, close vs alert +1bp (t +0.1)
+     over 2x normal                         first: n 386, near 26%, back inside 21%, further 0.54, close vs alert -5bp (t -0.1) || second: n 382, near 24%, back inside 21%, further 0.65, close vs alert +7bp (t +0.3)
+
+   top, by oichg:
+     open interest FELL since the open      first: n 194, near 32%, back inside 22%, further 0.43, close vs alert +3bp (t +0.1) || second: n 269, near 33%, back inside 22%, further 0.47, close vs alert -9bp (t -0.6)
+     roughly flat (+-1%)                    first: n 167, near 31%, back inside 26%, further 0.42, close vs alert -10bp (t -0.5) || second: n 277, near 31%, back inside 23%, further 0.45, close vs alert -5bp (t -0.3)
+     open interest ROSE                     first: n 437, near 26%, back inside 21%, further 0.59, close vs alert -64bp (t -3.5) || second: n 395, near 27%, back inside 21%, further 0.47, close vs alert -7bp (t -0.5)
+
+   bottom, by oichg:
+     open interest FELL since the open      first: n 335, near 30%, back inside 26%, further 0.53, close vs alert -1bp (t -0.0) || second: n 345, near 33%, back inside 25%, further 0.42, close vs alert +11bp (t +0.7)
+     roughly flat (+-1%)                    first: n 193, near 27%, back inside 27%, further 0.56, close vs alert -10bp (t -0.5) || second: n 255, near 40%, back inside 22%, further 0.36, close vs alert +10bp (t +0.8)
+     open interest ROSE                     first: n 307, near 28%, back inside 23%, further 0.51, close vs alert -16bp (t -0.6) || second: n 425, near 33%, back inside 20%, further 0.47, close vs alert -7bp (t -0.3)
+
+   top, by taker:
+     sellers dominated (taker buy < 49%)    first: n 160, near 28%, back inside 22%, further 0.45, close vs alert -28bp (t -1.4) || second: n 136, near 38%, back inside 25%, further 0.44, close vs alert +0bp (t +0.0)
+     balanced                               first: n 490, near 29%, back inside 24%, further 0.49, close vs alert -45bp (t -2.7) || second: n 505, near 31%, back inside 24%, further 0.46, close vs alert -9bp (t -0.7)
+     buyers dominated (> 51%)               first: n 148, near 27%, back inside 16%, further 0.56, close vs alert -18bp (t -0.8) || second: n 295, near 25%, back inside 18%, further 0.50, close vs alert -9bp (t -0.6)
+
+   bottom, by taker:
+     sellers dominated (taker buy < 49%)    first: n 662, near 27%, back inside 22%, further 0.56, close vs alert -16bp (t -0.8) || second: n 771, near 34%, back inside 20%, further 0.44, close vs alert +7bp (t +0.5)
+     balanced                               first: n 170, near 32%, back inside 35%, further 0.42, close vs alert +21bp (t +1.2) || second: n 232, near 37%, back inside 28%, further 0.41, close vs alert -11bp (t -0.5)
+     buyers dominated (> 51%)               first: n 3 || second: n 11

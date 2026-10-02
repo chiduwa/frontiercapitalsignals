@@ -7110,16 +7110,39 @@ export const DAY_ZONE_ALERT_FROM_UTC_HOUR = 18;
 const DAY_ZONE_ALERT_STATE_KEY = 'signals:day-zone-alert-state';
 const DAY_ZONE_ALERT_TTL_SECONDS = 30 * 3600;
 // The rule exactly as it runs here (hourly closes standing in for 5-minute
-// ticks, the eight coins, 2023-01..2026-10; 2018-22 gave the same picture):
-// near = the day's extreme ended within a quarter of a typical move of the alert
-// price; further = the extreme's distance beyond the alert price, in typical
-// moves (median, and 1 in 4 times beyond p75); backInside = the coin closed the
-// UTC day back on the inside of the level; driftBp = mean close-of-day move
-// beyond the alert price (tops kept rising, t 3.9; bottoms: no drift either way).
+// ticks, the eight coins, 2023-01..2026-10; 2018-22 gave the same picture),
+// with the activity-widened band, split by today's volume so far against the
+// same hours' norm (asked 2026-10-02 to account for unusual activity):
+// near = the day's extreme ended within a quarter of a typical move of the
+// alert price; further = how far the extreme went beyond the alert price, in
+// the band's own units (median, and 1 in 4 beyond p75); backInside = the coin
+// closed the UTC day back inside the level; driftBp = mean move from the alert
+// to the close, beyond the level for a top (it kept rising) and back off it for
+// a bottom (a bounce). Volume was the one activity measure that changed these
+// odds in both periods; open interest and taker flow did not.
 export const DAY_ZONE_EVIDENCE = Object.freeze({
-  top: Object.freeze({ near: 0.29, furtherMedian: 0.50, furtherP75: 1.02, backInside: 0.22, driftBp: 25 }),
-  bottom: Object.freeze({ near: 0.32, furtherMedian: 0.46, furtherP75: 0.97, backInside: 0.25, driftBp: 0 })
+  top: Object.freeze({
+    all: Object.freeze({ near: 0.29, backInside: 0.22, furtherMedian: 0.48, furtherP75: 0.99, driftBp: 25 }),
+    light: Object.freeze({ near: 0.35, backInside: 0.27, furtherMedian: 0.41, furtherP75: 0.82, driftBp: 6 }),
+    normal: Object.freeze({ near: 0.28, backInside: 0.20, furtherMedian: 0.49, furtherP75: 0.97, driftBp: 21 }),
+    heavy: Object.freeze({ near: 0.21, backInside: 0.15, furtherMedian: 0.67, furtherP75: 1.44, driftBp: 75 })
+  }),
+  bottom: Object.freeze({
+    all: Object.freeze({ near: 0.33, backInside: 0.25, furtherMedian: 0.45, furtherP75: 0.93, driftBp: 5 }),
+    light: Object.freeze({ near: 0.37, backInside: 0.29, furtherMedian: 0.39, furtherP75: 0.79, driftBp: 6 }),
+    normal: Object.freeze({ near: 0.30, backInside: 0.23, furtherMedian: 0.50, furtherP75: 1.06, driftBp: 3 }),
+    heavy: Object.freeze({ near: 0.28, backInside: 0.23, furtherMedian: 0.58, furtherP75: 1.11, driftBp: 10 })
+  })
 });
+
+// Today's volume so far against the same hours' norm (from the hourly build);
+// older than two hours it is not used and the alert quotes the overall odds.
+export function dayZoneVolumeGroup(zone, nowIso) {
+  const v = zone && zone.volumeSoFar;
+  if (!v || !Number.isFinite(v.ratio) || !(v.ratio >= 0)) return { group: 'all', ratio: null };
+  if (new Date(nowIso).getUTCHours() - v.throughHourUtc > 2) return { group: 'all', ratio: null };
+  return { group: v.ratio < 1 ? 'light' : v.ratio < 2 ? 'normal' : 'heavy', ratio: v.ratio };
+}
 
 export function dueDayZoneAlerts(dayZones, prices, nowIso, fired = {}) {
   if (!dayZones || !dayZones.bySymbol || typeof nowIso !== 'string') return [];
@@ -7136,11 +7159,14 @@ export function dueDayZoneAlerts(dayZones, prices, nowIso, fired = {}) {
       if (side === 'top' ? price < z.top : price > z.bottom) continue;
       const stateKey = `${date}|${symbol}|${side}`;
       if (fired && fired[stateKey]) continue;
+      const volume = dayZoneVolumeGroup(z, nowIso);
       due.push({
         symbol, side, price, stateKey, minutesLeft,
         level: side === 'top' ? z.top : z.bottom, open: z.open,
         movePct: (price / z.open - 1) * 100,
-        unitLog: side === 'top' ? z.upLog : z.downLog
+        unitLog: side === 'top' ? z.upLog : z.downLog,
+        volumeGroup: volume.group, volumeRatio: volume.ratio,
+        widenedPct: z.activity && Number.isFinite(z.activity.multiplier) ? (z.activity.multiplier - 1) * 100 : 0
       });
     }
   }
@@ -7159,22 +7185,26 @@ export function dayZoneNotification(due) {
   due = due.slice().sort((a, b) => (a.side === b.side ? a.symbol.localeCompare(b.symbol) : a.side === 'top' ? -1 : 1));
   const pct = (x) => `${x >= 0 ? '+' : ''}${x.toFixed(2)}%`;
   const lines = due.map((d) => {
-    const ev = DAY_ZONE_EVIDENCE[d.side];
+    const ev = DAY_ZONE_EVIDENCE[d.side][d.volumeGroup] || DAY_ZONE_EVIDENCE[d.side].all;
     const further = (k) => (d.side === 'top' ? Math.expm1(d.unitLog * k) : -(1 - Math.exp(-d.unitLog * k))) * 100;
+    const widened = d.widenedPct >= 5 ? `; band widened ${Math.round(d.widenedPct)}% for yesterday's heavy volume and move` : '';
+    const volume = d.volumeRatio != null ? ` Volume so far ${d.volumeRatio.toFixed(1)}x normal for the time of day (${d.volumeGroup}).` : '';
     return `${d.symbol} ${zonePrice(d.price)} ${d.side === 'top' ? 'at or above' : 'at or below'} today's forecast ${d.side} ${zonePrice(d.level)} `
-      + `(${pct(d.movePct)} from the 00:00 UTC open). Past cases went a median ${pct(further(ev.furtherMedian))} further, 1 in 4 beyond ${pct(further(ev.furtherP75))}.`;
+      + `(${pct(d.movePct)} from the 00:00 UTC open${widened}).${volume} Past cases like this went a median ${pct(further(ev.furtherMedian))} further, `
+      + `1 in 4 beyond ${pct(further(ev.furtherP75))}, and closed the day back ${d.side === 'top' ? 'below' : 'above'} the level ${Math.round(ev.backInside * 100)}% of the time.`;
   });
   const sides = new Set(due.map(d => d.side));
   const read = [];
+  const odds = (side) => ['light', 'normal', 'heavy'].map(g => `${Math.round(DAY_ZONE_EVIDENCE[side][g].near * 100)}% on ${g}`).join(', ');
   if (sides.has('top')) {
-    const ev = DAY_ZONE_EVIDENCE.top;
-    read.push(`Not a top signal. Reaching the forecast top this late in the UTC day (8 coins, 2023-26), the day's high still ended clearly higher ${Math.round((1 - ev.near) * 100)}% of the time, `
-      + `the coin closed the day back below the level only ${Math.round(ev.backInside * 100)}% of the time, and on average it kept rising into the close.`);
+    const t = DAY_ZONE_EVIDENCE.top;
+    read.push(`Not a top signal. Late in the UTC day, reaching the forecast top was near the day's high ${odds('top')} volume (8 coins, 2023-26); `
+      + `on normal and heavy volume price kept rising into the close on average (+${(t.normal.driftBp / 100).toFixed(2)}%, +${(t.heavy.driftBp / 100).toFixed(2)}%). `
+      + 'Open interest and taker buying made no reliable difference.');
   }
   if (sides.has('bottom')) {
-    const ev = DAY_ZONE_EVIDENCE.bottom;
-    read.push(`Not a bottom signal. Reaching the forecast bottom this late, the day's low still ended clearly lower ${Math.round((1 - ev.near) * 100)}% of the time `
-      + `and the coin closed back above the level only ${Math.round(ev.backInside * 100)}% of the time; no reliable bounce.`);
+    read.push(`Not a bottom signal. Reaching the forecast bottom late in the day was near the day's low ${odds('bottom')} volume; `
+      + 'no reliable bounce either way. Open interest and taker selling made no reliable difference.');
   }
   const left = due[0].minutesLeft;
   const tops = due.filter(d => d.side === 'top').map(d => d.symbol);
@@ -7185,7 +7215,7 @@ export function dayZoneNotification(due) {
   return {
     title,
     message: [...lines, '', ...read, '',
-      `${Math.floor(left / 60)}h ${String(left % 60).padStart(2, '0')}m left in the UTC day. Levels: each coin's 60-day median move from the 00:00 UTC open, scaled by the last 24 hours' volatility. Not financial advice.`].join('\n'),
+      `${Math.floor(left / 60)}h ${String(left % 60).padStart(2, '0')}m left in the UTC day. Levels: each coin's 60-day median move from the 00:00 UTC open, scaled by the last 24 hours' volatility, widened after a heavy-volume or big-move day. Not financial advice.`].join('\n'),
     priority: 'default',
     tags: ['dart']
   };

@@ -7,9 +7,9 @@ import { readFileSync } from 'node:fs';
 import { dayZoneForecast, buildDayZones, DAY_ZONE } from './scripts/day-zones.mjs';
 
 const fixture = JSON.parse(readFileSync(new URL('./test-fixtures/day-zones-2026-09-30.json', import.meta.url), 'utf8'));
-const toBars = (rows) => rows.map(([t, o, h, l, c]) => ({ t, o, h, l, c }));
+const toBars = (rows) => rows.map(([t, o, h, l, c, qv]) => ({ t, o, h, l, c, qv }));
 
-test('the forecast reproduces the study (docs/research-2026-10-02-day-zones, daytop.py) on real BTC and HBAR bars', () => {
+test('the forecast reproduces the study (docs/research-2026-10-02-day-zones-boxes, daytop.py + activity.py) on real BTC and HBAR bars', () => {
   for (const [sym, f] of Object.entries(fixture)) {
     const z = dayZoneForecast(toBars(f.bars), f.now);
     assert.ok(z, `${sym}: a zone`);
@@ -19,7 +19,21 @@ test('the forecast reproduces the study (docs/research-2026-10-02-day-zones, day
     assert.ok(Math.abs(z.downLog - f.downLog) < 1e-12, `${sym} down ${z.downLog} vs ${f.downLog}`);
     assert.ok(Math.abs(z.top - f.open * Math.exp(f.upLog)) < 1e-9 * f.open);
     assert.equal(z.windows, DAY_ZONE.windows);
+    // activity: yesterday's volume and move widen the band; today's volume so far
+    assert.ok(Math.abs(z.activity.multiplier - f.multiplier) < 1e-12, `${sym} multiplier ${z.activity.multiplier} vs ${f.multiplier}`);
+    assert.ok(Math.abs(z.activity.volume24Ratio - f.volume24Ratio) < 1e-9 * f.volume24Ratio, `${sym} volume ratio`);
+    assert.ok(Math.abs(z.activity.yesterdayMoveTypical - f.yesterdayMoveTypical) < 1e-12, `${sym} yesterday's move`);
+    assert.equal(z.volumeSoFar.throughHourUtc, f.throughHourUtc);
+    assert.ok(Math.abs(z.volumeSoFar.ratio - f.volumeSoFarRatio) < 1e-9 * f.volumeSoFarRatio, `${sym} volume so far ${z.volumeSoFar.ratio} vs ${f.volumeSoFarRatio}`);
   }
+  assert.ok(fixture.HBAR.multiplier > 1.3, 'HBAR on 2026-09-30 (10.8x volume after an 8.8-typical-move day) gets a wider band');
+});
+
+test('an unfinished hour never counts toward today\'s volume so far', () => {
+  const f = fixture.BTC;
+  const z = dayZoneForecast(toBars(f.bars), Date.parse('2026-09-30T02:59:00Z'));
+  assert.equal(z.volumeSoFar.throughHourUtc, 1);
+  assert.equal(dayZoneForecast(toBars(f.bars), Date.parse('2026-09-30T00:30:00Z')).volumeSoFar, null);
 });
 
 test('nothing after today\'s open changes the zone', () => {

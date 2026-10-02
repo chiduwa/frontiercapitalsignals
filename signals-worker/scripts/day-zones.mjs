@@ -28,12 +28,26 @@
 // Binance spot lists too recently, HYPE for now), all public and keyless.
 import { BINANCE_GLOBAL_BASE, FAVORITE_SYMBOLS } from '../worker.js';
 
-export const DAY_ZONE_VERSION = 'day-zones-v1';
+export const DAY_ZONE_VERSION = 'day-zones-v2';
 export const DAY_ZONE = Object.freeze({
   windows: 60,           // past UTC days in the median
   volPower: 0.5,         // partial adjustment toward the last 24 hours' volatility
   refHourUtc: 0,
-  historyDays: 62        // 60 windows, the 24 hours before the oldest, and today
+  historyDays: 62,       // 60 windows, the 24 hours before the oldest, and today
+  // Activity (asked 2026-10-02: "look out for unusual activity ... bake that
+  // into the forecast or the notification"). Measured on the 8 coins: the day's
+  // range ran larger than the forecast after heavy volume (t 4.8 / 3.1 in
+  // 2018-22 / 2023-26) and after a big move (t 9.1 / 7.0); on the busiest tenth
+  // of days the plain levels were broken 56-57% of the time instead of 50%.
+  // band x exp(volumeWeight x log(24h volume / its 30-day median)
+  //            + moveWeight x |yesterday's move| in typical moves),
+  // fitted on 2018-22: the busiest tenth back to 52%. Open interest and taker
+  // flow did not move the range or tilt it up or down reliably (t 1.1-1.8 at
+  // best, signs that change between halves), so they are not in it.
+  volumeWeight: 0.04,
+  moveWeight: 0.025,
+  volumeDays: 30,
+  typicalDays: 60
 });
 
 const HOUR = 3600 * 1000;
@@ -50,6 +64,16 @@ function std(xs) {
   if (v.length < 12) return NaN;
   const m = v.reduce((a, b) => a + b, 0) / v.length;
   return Math.sqrt(v.reduce((a, b) => a + (b - m) * (b - m), 0) / v.length);
+}
+
+// Quote volume over the 24 hours that end at `startMs` (at least 20 bars).
+function preWindowVolume(byTime, startMs) {
+  let sum = 0, n = 0;
+  for (let k = 1; k <= 24; k++) {
+    const b = byTime.get(startMs - k * HOUR);
+    if (b && Number.isFinite(b.qv)) { sum += b.qv; n++; }
+  }
+  return n >= 20 ? sum : NaN;
 }
 
 // Hourly volatility over the 24 hours that END at `startMs`: the 24 log
@@ -90,16 +114,41 @@ export function dayZoneForecast(bars, nowMs, { windows = DAY_ZONE.windows, volPo
     }
     if (!ok) continue;
     const o = byTime.get(d).o;
-    past.push({ up: Math.log(hi / o), down: Math.log(o / lo), vol: preWindowVol(byTime, d) });
+    const cum = [];                                       // quote volume from the day's open through each hour
+    for (let k = 0, acc = 0; k < 24; k++) { acc += Number(byTime.get(d + k * HOUR).qv); cum.push(acc); }
+    past.push({ up: Math.log(hi / o), down: Math.log(o / lo), vol: preWindowVol(byTime, d), qPrev: preWindowVolume(byTime, d), cum });
   }
   if (past.length < windows) return null;
   const medUp = median(past.map(p => p.up)), medDown = median(past.map(p => p.down));
   const typical = median(past.map(p => p.vol));
   const now = preWindowVol(byTime, today);
   const scale = Number.isFinite(now) && typical > 0 ? Math.pow(now / typical, volPower) : 1;
-  const up = medUp * scale, down = medDown * scale;
+  // Activity at the open: yesterday's volume against its norm, yesterday's move
+  // against a typical day. A missing input counts as ordinary (no widening).
+  const recentQ = past.slice(0, DAY_ZONE.volumeDays).map(p => p.qPrev).filter(Number.isFinite);
+  const qNorm = recentQ.length >= 20 ? median(recentQ) : NaN;
+  const qNow = preWindowVolume(byTime, today);
+  const volume24Log = Number.isFinite(qNow) && qNorm > 0 ? Math.log(qNow / qNorm) : 0;
+  const typicalMove = median(past.slice(0, DAY_ZONE.typicalDays).map(p => (p.up + p.down) / 2));
+  const ago = byTime.get(today - 25 * HOUR);
+  const yesterdayMove = ago && ago.c > 0 && typicalMove > 0 ? Math.abs(Math.log(first.o / ago.c)) / typicalMove : 0;
+  const multiplier = Math.exp(DAY_ZONE.volumeWeight * volume24Log + DAY_ZONE.moveWeight * yesterdayMove);
+  const up = medUp * scale * multiplier, down = medDown * scale * multiplier;
   if (!(up > 0) || !(down > 0)) return null;
   const open = first.o;
+  // Volume so far today against the same hours' median over the 30 days before:
+  // the alert quotes different odds on light, normal and heavy days.
+  let volumeSoFar = null;
+  let k = -1, acc = 0;
+  for (let j = 0; j < 24; j++) {
+    const b = byTime.get(today + j * HOUR);
+    if (!b || today + (j + 1) * HOUR > nowMs || !Number.isFinite(b.qv)) break;
+    acc += b.qv; k = j;
+  }
+  if (k >= 0) {
+    const norm = median(past.slice(0, DAY_ZONE.volumeDays).map(p => p.cum[k]).filter(Number.isFinite));
+    if (norm > 0) volumeSoFar = { ratio: acc / norm, throughHourUtc: k };
+  }
   return {
     date: new Date(today).toISOString().slice(0, 10),
     open,
@@ -107,7 +156,9 @@ export function dayZoneForecast(bars, nowMs, { windows = DAY_ZONE.windows, volPo
     upLog: up, downLog: down,
     upPct: Math.expm1(up) * 100, downPct: (1 - Math.exp(-down)) * 100,
     medianUpPct: Math.expm1(medUp) * 100, medianDownPct: (1 - Math.exp(-medDown)) * 100,
-    volScale: scale, windows: past.length
+    volScale: scale, windows: past.length,
+    activity: { volume24Ratio: Math.exp(volume24Log), yesterdayMoveTypical: yesterdayMove, multiplier },
+    volumeSoFar
   };
 }
 
@@ -129,7 +180,7 @@ export async function binanceHourly(symbol, startMs, { fetcher = getJson } = {})
   for (let page = 0; page < 3; page++) {
     const j = await fetcher(`${BINANCE_GLOBAL_BASE}/klines?symbol=${encodeURIComponent(symbol)}USDT&interval=1h&startTime=${from}&limit=1000`);
     if (!Array.isArray(j) || !j.length) break;
-    for (const k of j) out.push({ t: Number(k[0]), o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]) });
+    for (const k of j) out.push({ t: Number(k[0]), o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]), qv: Number(k[7]) });
     if (j.length < 1000) break;
     from = Number(j[j.length - 1][0]) + HOUR;
   }
@@ -144,7 +195,8 @@ export async function hyperliquidHourly(coin, startMs, endMs, { fetcher = getJso
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ type: 'candleSnapshot', req: { coin, interval: '1h', startTime: startMs, endTime: endMs } })
   });
-  return (Array.isArray(j) ? j : []).map(k => ({ t: Number(k.t), o: Number(k.o), h: Number(k.h), l: Number(k.l), c: Number(k.c) }));
+  // Volume in coins; times the close it is the quote volume the ratios need.
+  return (Array.isArray(j) ? j : []).map(k => ({ t: Number(k.t), o: Number(k.o), h: Number(k.h), l: Number(k.l), c: Number(k.c), qv: Number(k.v) * Number(k.c) }));
 }
 
 /** The payload block: one zone per always-tracked coin for today. Never throws. */

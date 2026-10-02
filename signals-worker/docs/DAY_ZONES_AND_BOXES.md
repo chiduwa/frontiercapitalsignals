@@ -33,6 +33,19 @@ effectiveness, or efficiency"
   forecast top or bottom. Each push quotes what followed in the past and says
   it is not a top or bottom signal. Coins reaching their levels together
   share one push.
+- **Unusual activity (asked the same day):**
+  - **Volume and yesterday's move size.** Heavy volume and a big move the
+    day before widen the day's range. The band now widens for both, about
+    9% on the busiest tenth of days, where the plain forecast was broken
+    56-57% of the time instead of 50%.
+  - **Volume so far today** is the one measure that changes the alert's odds,
+    in both periods. On light volume a forecast top was near the day's high
+    35% of the time; on heavy volume 21%, with price on average rising
+    another 0.75% into the close. Each push now quotes the odds for its own
+    volume.
+  - **Open interest and taker buying/selling** showed no reliable tilt up or
+    down and changed no odds consistently, so they are reported as such and
+    not used.
 - **The best reference time is midnight UTC, the one already in use.** No hour
   beat it significantly. 16:00-20:00 UTC were 1.5-3% better (not
   significant). 08:00 and 14:00 UTC were measurably worse.
@@ -157,6 +170,58 @@ pattern was suggestive: a coin hitting its bottom ALONE bounced in every cell
 tested (+20 to +70 bp). It is too thin to rely on (t 0.9-2.6, 80-400 cases a
 cell), so it is noted, not used.
 
+## 2b. Unusual activity: what skews the range, and what does not
+
+Asked mid-study: "look out for unusual activity (volume, open interest, etc).
+if any of those has been seen to affect movement, bake that into the forecast
+or the notification ... in what direction and/or by what magnitude". Tested on
+the eight coins: spot volume from 2018, and perpetual open interest and taker
+flow for 2024-09..2026-09 (halves split at 2025-09-01)
+(`results/activity_out.txt`, `activity2_out.txt`, `activity3_out.txt`,
+`activity4_out.txt`).
+
+**At the open, one feature at a time.** The size row is the day's range
+against the forecast; the tilt row is the share of the day's move that was up.
+
+| measure at 00:00 UTC (last 24h) | size, earlier half | later half | tilt up/down, earlier | later |
+|---|---|---|---|---|
+| volume vs its 30-day norm | +0.040 (t 4.8) | +0.029 (t 3.1) | +0.009 (t 0.9) | +0.004 (t 0.4) |
+| size of yesterday's move | +0.070 (t 9.1) | +0.060 (t 7.0) | | |
+| yesterday's move, signed | | | -0.026 (t -2.5) | +0.005 (t 0.4) |
+| open interest change | +0.021 (t 1.6) | +0.026 (t 2.2) | +0.018 (t 1.1) | +0.023 (t 1.8) |
+| open interest vs price | | | +0.007 (t 0.3) | +0.002 (t 0.1) |
+| taker buy share | | | +0.038 (t 2.1) | +0.017 (t 1.0) |
+
+Slopes are per standard deviation, within each coin, date-clustered.
+
+- **Magnitude, yes.** Heavy volume and big moves come before bigger days, even
+  after the volatility scaling.
+- **Direction, no.** Nothing tilts the day up or down consistently. Rising open
+  interest pointed up in both halves, but at t 1.1 and 1.8.
+
+**Baked into the band:** x exp(0.04 x log(volume ratio) + 0.025 x |yesterday's
+move in typical moves|), fitted on 2018-22.
+- On 2023-26 the overall accuracy barely moves (0.15%).
+- The busiest tenth of days goes from 56-57% of levels broken to 52%.
+- The median widening is 2%, 9% at the 90th percentile; HBAR on 2026-09-30
+  (10.8x volume after an 8.8-typical-move day) got 37%.
+
+**At the alert: today's volume so far against the same hours' norm**
+(the activity-widened band, the late-day rule):
+
+| top alert, 2023-26 (2018-22 alike) | share of alerts | near the day's high | closed back below | further, median | close vs alert |
+|---|---|---|---|---|---|
+| light volume (under 1x) | 41% | 35% | 27% | 0.41 | -0.06% (t 0.9) |
+| normal (1-2x) | 40% | 28% | 20% | 0.49 | **+0.21% (t 2.3)** |
+| heavy (2x and up) | 19% | 21% | 15% | 0.67 | **+0.75% (t 4.3)** |
+
+Bottoms ran the same way, weaker: near the low 37% light, 30% normal, 28%
+heavy, with no bounce either way. Open interest falling into a top (shorts
+closing, which reversed in the flush study) did not make it more often the top
+here (back inside 22% vs 21% with open interest rising). Taker flow changed
+nothing consistently. Volume is therefore the activity measure the alert
+quotes.
+
 ## 3. What now notifies you
 
 `scripts/day-zones.mjs` (hourly build) puts each tracked coin's forecast top
@@ -168,17 +233,21 @@ candles until Binance spot has 60 days of it. The Worker's 5-minute tick
 - From 18:00 UTC, a coin at or beyond its top or bottom is due once per side
   per UTC day.
 - Coins due on the same tick go out as one push.
-- Each push gives the price, the level, the move from the open, how far past
-  cases went further (median and 1 in 4, in that coin's own percent), and the
-  odds above, ending "Not a top signal" or "Not a bottom signal".
+- Each push gives:
+  - the price, the level, and the move from the open;
+  - how much the band was widened for yesterday's activity;
+  - today's volume so far against normal;
+  - how far past cases with that much volume went further (median and 1 in 4,
+    in that coin's own percent) and how often price closed back inside;
+  - "Not a top signal" or "Not a bottom signal".
 
 An example:
 
 ```
-Forecast top: BTC, ETH · forecast bottom: XLM
-BTC $85,805 at or above today's forecast top $85,634 (+1.09% from the 00:00 UTC open). Past cases went a median +0.44% further, 1 in 4 beyond +0.91%.
+Forecast top: BTC, HBAR · forecast bottom: XRP
+HBAR $0.1052 at or above today's forecast top $0.1051 (+2.47% from the 00:00 UTC open; band widened 7% for yesterday's heavy volume and move). Volume so far 2.3x normal for the time of day (heavy). Past cases like this went a median +1.58% further, 1 in 4 beyond +3.43%, and closed the day back below the level 15% of the time.
 ...
-Not a top signal. Reaching the forecast top this late in the UTC day (8 coins, 2023-26), the day's high still ended clearly higher 71% of the time, the coin closed the day back below the level only 22% of the time, and on average it kept rising into the close.
+Not a top signal. Late in the UTC day, reaching the forecast top was near the day's high 35% on light, 28% on normal, 21% on heavy volume (8 coins, 2023-26); on normal and heavy volume price kept rising into the close on average (+0.21%, +0.75%). Open interest and taker buying made no reliable difference.
 ```
 
 Expect about 2 pushes a day. On 2023-26 the rule fired 4.5 alerts a day
@@ -186,8 +255,9 @@ across the eight coins, which share pushes: median 2 pushes a day, 3 on one
 day in ten, none on 5% of days. That is counted by the hour; the live check
 runs every 5 minutes, so coins arriving minutes apart can make it slightly
 more. The JavaScript
-forecast reproduces the study's Python to 12 decimal places on real BTC and
-HBAR bars (`test-day-zones.mjs`).
+forecast, its activity widening and the volume-so-far ratio reproduce the
+study's Python to 12 decimal places on real BTC and HBAR bars
+(`test-day-zones.mjs`).
 
 **Cost:**
 - no D1 at all;

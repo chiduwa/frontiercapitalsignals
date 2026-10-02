@@ -1,0 +1,16 @@
+18,464 coin-days; with perp activity 5,717
+
+## 1. Does activity at the open change the size of the day's move (vs the forecast) or tilt it up/down?
+   slope per 1 sd of the feature (within coin); size in log points of range, skew in units of (U-D)/(U+D); date-clustered t
+   size | spot volume and the last day's move
+        first (n 8572): vol24 +0.041 (t +4.8), ret24 -0.008 (t -0.8)
+        second (n 9869): vol24 +0.029 (t +3.1), ret24 -0.001 (t -0.1)
+   skew | spot volume and the last day's move
+        first (n 8572): vol24 +0.012 (t +1.1), ret24 -0.029 (t -2.7)
+        second (n 9869): vol24 +0.003 (t +0.3), ret24 +0.004 (t +0.4)
+   size | + open interest and taker flow (perps)
+        first (n 2573): vol24 +0.034 (t +1.9), ret24 +0.222 (t +3.9), oi24 -0.187 (t -3.2), oidiv +0.250 (t +3.6), taker -0.061 (t -4.0)
+        second (n 3144): vol24 +0.022 (t +1.3), ret24 +0.134 (t +2.3), oi24 -0.161 (t -2.5), oidiv +0.237 (t +3.0), taker -0.006 (t -0.4)
+   skew | + open interest and taker flow (perps)
+        first (n 2573): vol24 +0.009 (t +0.4), ret24 +0.051 (t +0.8), oi24 -0.056 (t -0.8), oidiv +0.076 (t +0.9), taker +0.042 (t +2.3)
+        second (n 3144): vol24 -0.024 (t -1.1), ret24 +0.097 (t +1.6), oi24 -0.065 (t -0.9), oidiv +0.104 (t +1.2), taker +0.006 (t +0.3)
