@@ -123,6 +123,40 @@ none comes, the final firing before the week closes buys the tranche anyway,
 logged as `week-end-guarantee`. `SPOT_WEEKLY_GUARANTEE=false` restores
 dips-only.
 
+## Risk-weighted core sleeve (optional, off by default, 2026-10-03)
+
+`SPOT_RISK_MODE` = `off` (default) | `shadow` | `on`. Code: `src/risk-weights.mjs`.
+
+Instead of splitting each tranche evenly, `on` buys the triggered coins that sit
+furthest below a **minimum-variance target**: long-only, at most 20% per coin
+(`SPOT_RISK_CAP`), covariance from 180 daily returns (sample volatility times a
+Ledoit-Wolf shrunk correlation). Only the core sleeve is weighted; the 75/25
+sleeve split stays, and satellites stay equal (three coins cannot bind a 20% cap).
+No expected return is used, so no withheld directional call can leak in.
+
+**Evidence** (`optimization-portfolio/crypto-risk-portfolio`, rule fixed before the
+run): six yearly windows 2020-2026, the 10 most-traded established coins at each
+start, weekly buys at this bot's real size ($13, $5 minimum order). Against today's
+even split, steering to these targets had lower volatility in 5 of 6 windows and a
+smaller worst drawdown in 5 of 6 (e.g. -40% vs -51%, -52% vs -65%). Sharpe was
+higher in 4 of 6; the pooled gain of +0.15 has a 90% interval of -0.03 to +0.34.
+**Lower risk is shown; a higher return is not.** Steering to *equal* targets
+changed nothing (+0.00), so the gain comes from the targets themselves.
+
+**Caveat the numbers cannot show:** minimum variance leans on the calmest coins,
+which in every window included BNB and TRX, single-company tokens. FTT showed that
+an exchange token can go to zero in days, and price history does not price that.
+
+**How it is solved:** an exact active-set method in plain JavaScript. Every
+solution must pass the optimality (KKT) conditions or the cycle falls back to the
+even split. It matches Gurobi to 1e-9 on 61 cases. HiGHS is deliberately not used:
+its QP solver returned a non-optimal corner, labelled optimal, in 2 of 1,248
+research solves (`test-fixtures/risk-weights.json` keeps one).
+
+**Suggested rollout:** `shadow` for a few weeks. Each tranche cycle logs
+`risk_shadow` with the targets, current holdings, the orders risk mode would
+place, and the even-split orders actually placed. Then `on`.
+
 ## Sell side
 
 There isn't one, and `sellEnabled` is a hard `false`. An exit needs either a

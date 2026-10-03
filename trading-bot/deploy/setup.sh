@@ -162,6 +162,9 @@ FCS_D1_DATABASE_ID=b07a4faa-8330-4b13-bf94-99fc662d4d6e
 # SPOT_TRANCHE_PCT=0.05
 # SPOT_TRANCHE_PERIOD_DAYS=7
 # SPOT_DROP_SIGMAS=1.0
+# Risk-weighted core sleeve (see spot-bot/README.md): off | shadow | on
+# SPOT_RISK_MODE=off
+# SPOT_RISK_CAP=0.20
 SPOTEOF
 fi
 chown root:"$RUN_USER" "$SPOT_ENV_FILE"

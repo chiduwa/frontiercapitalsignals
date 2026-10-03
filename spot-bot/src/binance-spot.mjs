@@ -117,6 +117,12 @@ export async function getPrice(symbol) {
 // Weekly candles, oldest first. The measured basis for both buy triggers:
 // this asset's own weekly return distribution and its own typical drawdown
 // from weekly open to weekly low.
+// Daily candles for the risk-weights covariance (the last one is in progress).
+export async function getDailyKlines(symbol, days) {
+  const raw = await publicRequest('/api/v3/klines', { symbol, interval: '1d', limit: days });
+  return (raw || []).map((k) => ({ openTime: k[0], close: Number(k[4]) }));
+}
+
 export async function getWeeklyKlines(symbol, weeks) {
   const raw = await publicRequest('/api/v3/klines', { symbol, interval: '1w', limit: weeks });
   return (raw || []).map((k) => ({

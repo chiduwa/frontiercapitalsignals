@@ -17,6 +17,11 @@ export function parseBoolean(name, value, defaultValue) {
   throw new Error(`${name} must be exactly true, false, 1, or 0; received ${JSON.stringify(value)}`);
 }
 
+export function parseRiskMode(value) {
+  if (value == null || value === '') return 'off';
+  if (value === 'off' || value === 'shadow' || value === 'on') return value;
+  throw new Error(`SPOT_RISK_MODE must be off, shadow or on; received ${JSON.stringify(value)}`);
+}
 const { BINANCE_SPOT_API_KEY, BINANCE_SPOT_API_SECRET, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID } = process.env;
 
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
@@ -101,5 +106,13 @@ export const config = {
   // The timer's firing interval: the "final firing of the week" is the one
   // that lands inside this many hours of the week's close.
   firingIntervalHours: num(process.env.SPOT_FIRING_INTERVAL_HOURS, 4),
+  // Risk-based weights for the core sleeve (src/risk-weights.mjs).
+  //   off     today's behaviour: the pool is split evenly over funded assets
+  //   shadow  compute min-variance targets and log the orders they WOULD
+  //           place; still buy exactly as "off" does
+  //   on      buy the most under-target coins first
+  // The evidence is lower risk, not higher return; the owner decides.
+  riskMode: parseRiskMode(process.env.SPOT_RISK_MODE),
+  riskCap: num(process.env.SPOT_RISK_CAP, 0.20),
   sellEnabled: false
 };

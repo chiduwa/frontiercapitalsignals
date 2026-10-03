@@ -13,9 +13,10 @@
 // would be invented rather than measured.
 import { config } from './config.mjs';
 import {
-  getExchangeInfo, getFreeBalance, getPrice, getWeeklyKlines, makeClientOrderId,
+  getAccount, getDailyKlines, getExchangeInfo, getFreeBalance, getPrice, getWeeklyKlines, makeClientOrderId,
   marketBuyReconciled, roundQuantity, terminalSpotOrder
 } from './binance-spot.mjs';
+import { planRiskOrders } from './risk-weights.mjs';
 import { selectAssets, weeklyProfile, evaluateTrigger, tranchePool, trancheDue, periodsElapsed, allocate, boughtThisWeek, isFinalFiringOfWeek } from './strategy.mjs';
 import {
   acquireExecutionLease, releaseExecutionLease, loadState, saveState,
@@ -195,7 +196,27 @@ async function runCycle() {
   // too small for the exchange to accept.
   const minNotionalFor = (symbol) =>
     Math.max(config.minOrderQuote, tradable[symbol]?.minNotional || 0);
-  const funded = allocate(triggered, pool, minNotionalFor);
+  let funded = allocate(triggered, pool, minNotionalFor);
+  if (config.riskMode !== 'off' && triggered.length) {
+    try {
+      const plan = await planRiskOrders({
+        selected, triggered, measured, pool, minNotionalFor,
+        cap: config.riskCap, coreWeight: config.coreWeight,
+        fetchDaily: (symbol) => getDailyKlines(symbol, 182), fetchAccount: getAccount, fetchPrice: getPrice
+      });
+      const round = (o) => Object.fromEntries(Object.entries(o || {}).map(([k, v]) => [k, Number(Number(v).toFixed(4))]));
+      log(config.riskMode === 'on' ? 'risk_allocation' : 'risk_shadow', plan.ok ? {
+        targets: round(plan.targets), held: round(plan.values), core: plan.detail.core, days: plan.detail.days,
+        cap: plan.detail.cap, kkt: plan.detail.kkt,
+        riskOrders: plan.orders.map((a) => ({ symbol: a.symbol, quote: Number(a.quote.toFixed(2)) })),
+        evenSplitOrders: funded.map((a) => ({ symbol: a.symbol, quote: Number(a.quote.toFixed(2)) })),
+        used: config.riskMode === 'on' && plan.orders.length ? 'risk' : 'even split'
+      } : { reason: plan.reason, used: 'even split' });
+      if (config.riskMode === 'on' && plan.ok && plan.orders.length) funded = plan.orders;
+    } catch (e) {
+      log('risk_error', { error: e.message, used: 'even split' });
+    }
+  }
   let trancheReserved = false;
 
   if (triggered.length && !funded.length) {

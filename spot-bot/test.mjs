@@ -269,5 +269,113 @@ check('exactly one of the six daily firings (00:11 .. 20:11) is final each week'
   return finals === 1;
 })());
 
+console.log('\n== risk weights: min-variance targets and steering (SPOT_RISK_MODE) ==');
+{
+  const { readFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { minVariance, kktViolation, covariance, alignedReturns, riskTargets, steer } = await import('./src/risk-weights.mjs');
+  const fx = JSON.parse(readFileSync(new URL('./test-fixtures/risk-weights.json', import.meta.url)));
+
+  // index.mjs runs the bot when imported, so it is syntax-checked instead: the
+  // updater only promotes a checkout whose test.mjs passes.
+  let syntaxOk = true;
+  try { execFileSync(process.execPath, ['--check', new URL('./src/index.mjs', import.meta.url).pathname], { stdio: 'pipe' }); }
+  catch (e) { syntaxOk = false; }
+  check('index.mjs parses', syntaxOk);
+
+  // Exact optimiser vs Gurobi (fixtures from crypto-risk-portfolio, incl. the
+  // case where HiGHS 1.15 stops at a corner 1.16% worse and calls it optimal).
+  let worstDiff = 0, worstKkt = 0, mvOk = true;
+  for (const c of fx.minVariance) {
+    const r = minVariance(c.S, c.cap);
+    for (let i = 0; i < c.w.length; i++) worstDiff = Math.max(worstDiff, Math.abs(r.weights[i] - c.w[i]));
+    worstKkt = Math.max(worstKkt, r.kkt);
+    if (!(r.kkt < 1e-6)) mvOk = false;
+  }
+  check(`min-variance matches Gurobi on ${fx.minVariance.length} cases (max weight diff ${worstDiff.toExponential(1)})`, worstDiff < 1e-6);
+  check(`every solution carries its optimality proof (worst KKT ${worstKkt.toExponential(1)})`, mvOk);
+  const hb = fx.minVariance[fx.minVariance.length - 1];
+  check('the HiGHS failure case is solved to Gurobi\'s optimum',
+    Math.abs(minVariance(hb.S, hb.cap).weights[4] - hb.w[4]) < 1e-6 && hb.w[4] > 0.05);
+  check('a deliberately wrong point fails the optimality check',
+    kktViolation(hb.S, [0.3, 0.3, 0.1, 0.3, 0, 0, 0, 0, 0, 0], 0.3) > 1e-3);
+  check('a cap below 1/n is lifted to 1/n instead of being infeasible',
+    Math.abs(minVariance([[1, 0, 0], [0, 2, 0], [0, 0, 3]], 0.2).weights.reduce((a, b) => a + b, 0) - 1) < 1e-12);
+
+  let covDiff = 0;
+  for (const c of fx.covariance) {
+    const S = covariance(c.R);
+    for (let i = 0; i < S.length; i++) for (let j = 0; j < S.length; j++)
+      covDiff = Math.max(covDiff, Math.abs(S[i][j] - c.S[i][j]) / Math.abs(c.S[i][i]));
+  }
+  check(`covariance matches the research code (max rel diff ${covDiff.toExponential(1)})`, covDiff < 1e-9);
+
+  let steerOk = true, steerBad = '';
+  for (const [k, c] of fx.steer.entries()) {
+    const cands = Object.keys(c.targets).map((s) => ({ symbol: s }));
+    const got = Object.fromEntries(steer(cands, c.targets, c.values, c.budget, () => 5).map((a) => [a.symbol, a.quote]));
+    const want = c.alloc;
+    const keys = new Set([...Object.keys(got), ...Object.keys(want)]);
+    for (const s of keys) if (Math.abs((got[s] || 0) - (want[s] || 0)) > 1e-9) { steerOk = false; steerBad = `case ${k} ${s}`; }
+  }
+  check(`steering matches the simulated policy on ${fx.steer.length} cases`, steerOk, steerBad);
+
+  const tooSmall = steer([{ symbol: 'A' }, { symbol: 'B' }], { A: 0.5, B: 0.5 }, {}, 4, () => 5);
+  check('a budget below every minimum buys nothing', tooSmall.length === 0);
+  const funded = steer([{ symbol: 'A' }, { symbol: 'B' }, { symbol: 'C' }], { A: 0.6, B: 0.2, C: 0.2 }, { A: 0, B: 30, C: 30 }, 13, () => 5);
+  check('the most under-target coin is funded first', funded[0]?.symbol === 'A' && funded.every((a) => a.quote >= 5),
+    JSON.stringify(funded));
+  check('orders never exceed the budget', Math.abs(funded.reduce((a, b) => a + b.quote, 0) - 13) < 1e-9);
+
+  // riskTargets end to end on synthetic daily klines; in-progress day excluded.
+  const day = 86400000;
+  const mk = (vol, seed) => {
+    let p = 100, s = seed;
+    const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647 - 0.5; };
+    return Array.from({ length: 182 }, (_, i) => { p *= Math.exp(vol * rnd()); return { openTime: i * day, close: p }; });
+  };
+  const sel = [
+    { symbol: 'LOWUSDT', sleeve: 'core' }, { symbol: 'MIDUSDT', sleeve: 'core' }, { symbol: 'HIGHUSDT', sleeve: 'core' },
+    { symbol: 'S1USDT', sleeve: 'satellite' }, { symbol: 'S2USDT', sleeve: 'satellite' }
+  ];
+  const kl = { LOWUSDT: mk(0.02, 7), MIDUSDT: mk(0.05, 11), HIGHUSDT: mk(0.12, 13) };
+  const rt = riskTargets(sel, kl, { cap: 0.5 });
+  check('targets are set from 180 completed days', rt.ok && rt.detail.days === 180, JSON.stringify(rt).slice(0, 160));
+  check('the calmer coin gets the larger core target', rt.ok && rt.targets.LOWUSDT > rt.targets.MIDUSDT && rt.targets.MIDUSDT >= rt.targets.HIGHUSDT);
+  check('sleeves keep their 75/25 split, satellites equal',
+    rt.ok && Math.abs(rt.targets.LOWUSDT + rt.targets.MIDUSDT + rt.targets.HIGHUSDT - 0.75) < 1e-9
+    && Math.abs(rt.targets.S1USDT - 0.125) < 1e-12 && Math.abs(rt.targets.S2USDT - 0.125) < 1e-12);
+  const { R } = alignedReturns({ A: mk(0.02, 3) });
+  check('the in-progress daily candle is never used', R.length === 180);
+  const short = riskTargets(sel, { LOWUSDT: mk(0.02, 7).slice(0, 50), MIDUSDT: mk(0.05, 11), HIGHUSDT: mk(0.12, 13) });
+  check('too little shared history means no targets (bot keeps its even split)', !short.ok && /aligned daily returns/.test(short.reason));
+  check('risk mode is off unless the owner turns it on', config.riskMode === 'off');
+
+  // The full plan against fake exchange data.
+  const { planRiskOrders } = await import('./src/risk-weights.mjs');
+  const selFull = sel.map((a) => ({ ...a, signalSymbol: a.symbol.replace('USDT', '') }));
+  const priced = [];
+  const plan = await planRiskOrders({
+    selected: selFull,
+    triggered: selFull.filter((a) => a.sleeve === 'core').map((a) => ({ ...a, price: 10 })),
+    measured: selFull.filter((a) => a.symbol !== 'S2USDT').map((a) => ({ ...a, price: 10 })),
+    pool: 13, minNotionalFor: () => 5, cap: 0.5,
+    fetchDaily: async (s) => kl[s],
+    fetchAccount: async () => ({ balances: [
+      { asset: 'LOW', free: '0', locked: '0' }, { asset: 'MID', free: '3', locked: '0.5' },
+      { asset: 'S2', free: '1', locked: '0' }, { asset: 'USDT', free: '263', locked: '0' }] }),
+    fetchPrice: async (s) => { priced.push(s); return 20; }
+  });
+  check('plan: holdings valued from free + locked balances', plan.ok && plan.values.MIDUSDT === 35, JSON.stringify(plan.values));
+  check('plan: a held coin without a measured price is priced on demand', priced.join() === 'S2USDT' && plan.values.S2USDT === 20);
+  check('plan: orders respect the pool and the minimum', plan.ok && plan.orders.length > 0
+    && Math.abs(plan.orders.reduce((a, b) => a + b.quote, 0) - 13) < 1e-9 && plan.orders.every((o) => o.quote >= 5));
+  check('plan: the empty core holding (LOW) is bought first', plan.ok && plan.orders[0].symbol === 'LOWUSDT', JSON.stringify(plan.orders));
+  check('plan: orders keep the triggered asset fields the buyer needs', plan.ok && plan.orders.every((o) => o.price === 10 && o.sleeve === 'core'));
+  const noHist = await planRiskOrders({ selected: selFull, triggered: [], measured: [], pool: 13, minNotionalFor: () => 5,
+    fetchDaily: async () => [], fetchAccount: async () => { throw new Error('should not be called'); }, fetchPrice: async () => 0 });
+  check('plan: no history -> no plan, and the account is never queried', !noHist.ok);
+}
+
 console.log(failures === 0 ? '\nSPOT BOT OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);
