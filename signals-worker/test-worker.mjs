@@ -1041,6 +1041,7 @@ check('venue discovery failing degrades to exactly the old 250 universe rather t
   check('a failed perp lookup drops nobody for venue', mod.admitsCryptoCandidate(big, { binancePairs: spotSet, binancePerps: new Set() }) === true
     && mod.binanceGlobalTradable('OKB', { spot: spotSet, perps: null }) === null);
   check('a failed spot lookup drops nobody for venue either', mod.binanceGlobalTradable('OKB', { spot: new Set(), perps: perpSet }) === null);
+  check('a coin Binance lists under another ticker is kept (Beam trades as BEAMX)', mod.binanceGlobalTradable('BEAM', { spot: new Set(['BTC', 'BEAMX']), perps: perpSet }) === true);
 }
 check('the widened universe and its boundary are the measured values', mod.CRYPTO_UNIVERSE === 500 && mod.CRYPTO_CHEAP_TAIL_RANK === 250);
 

@@ -5088,8 +5088,14 @@ export function admitsCryptoCandidate(coin, { favorite = false, binancePairs = n
 export function binanceGlobalTradable(symbol, { spot = null, perps = null } = {}) {
   if (!(spot instanceof Set) || !spot.size || !(perps instanceof Set) || !perps.size) return null;
   const sym = String(symbol || '').toUpperCase();
-  return spot.has(sym) || perps.has(sym);
+  const venue = BINANCE_TICKER_ALIASES[sym] || sym;
+  return spot.has(sym) || perps.has(sym) || spot.has(venue) || perps.has(venue);
 }
+
+// Coins Binance lists under a different ticker from CoinGecko's. Found
+// 2026-10-04 by matching the 115 purge candidates to Binance by CoinGecko coin
+// id (/exchanges/binance/tickers), not by ticker: exactly these three trade.
+export const BINANCE_TICKER_ALIASES = Object.freeze({ BEAM: 'BEAMX', RON: 'RONIN', BTT: 'BTTC' });
 
 // Binance USD-M perpetuals, read from the website's copy of the futures listing.
 // fapi.binance.com answers HTTP 451 to US addresses, GitHub's runners included;
