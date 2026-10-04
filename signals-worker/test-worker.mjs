@@ -1021,6 +1021,27 @@ check('an unranked coin is judged on its floors, not silently dropped by a field
 // venue-discovery call: the tail is admitted because it is cheap, and it is only
 // cheap if that venue answered.
 check('venue discovery failing degrades to exactly the old 250 universe rather than admitting an expensive tail', mod.admitsCryptoCandidate(mid, { binancePairs: null }) === false && mod.admitsCryptoCandidate({ ...mid, market_cap_rank: 200 }, { binancePairs: null }) === true);
+{
+  // 2026-10-04 purge rule: neither a Binance spot USDT pair nor a perp -> out, at any rank.
+  const spotSet = new Set(['BTC', 'ETH', 'GLM']);
+  const perpSet = mod.perpBasesFromExchangeInfo({ symbols: [
+    { baseAsset: 'XMR', status: 'TRADING', contractType: 'PERPETUAL' },
+    { baseAsset: '1000PEPE', status: 'TRADING', contractType: 'PERPETUAL' },
+    { baseAsset: '1MBABYDOGE', status: 'TRADING', contractType: 'PERPETUAL' },
+    { baseAsset: 'LUNA', status: 'SETTLING', contractType: 'PERPETUAL' },
+    { baseAsset: 'BTC', status: 'TRADING', contractType: 'CURRENT_QUARTER' }
+  ] });
+  check('perp bases are read past the 1000x / 1M contract scaling', perpSet.has('PEPE') && perpSet.has('BABYDOGE') && perpSet.has('XMR'));
+  check('a settling or dated contract is not a tradable perp', !perpSet.has('LUNA') && !perpSet.has('BTC'));
+  const big = { symbol: 'OKB', market_cap: 4e9, total_volume: 2e7, market_cap_rank: 40 };
+  check('a top-50 coin Binance lists nowhere is NOT admitted', mod.admitsCryptoCandidate(big, { binancePairs: spotSet, binancePerps: perpSet }) === false);
+  check('a perp-only coin IS admitted: it trades on Binance futures', mod.admitsCryptoCandidate({ ...big, symbol: 'XMR' }, { binancePairs: spotSet, binancePerps: perpSet }) === true);
+  check('a scaled perp counts as its base coin', mod.admitsCryptoCandidate({ ...big, symbol: 'BABYDOGE' }, { binancePairs: spotSet, binancePerps: perpSet }) === true);
+  check('a favorite stays whatever Binance lists', mod.admitsCryptoCandidate({ ...big, symbol: 'HYPE' }, { favorite: true, binancePairs: spotSet, binancePerps: perpSet }) === true);
+  check('a failed perp lookup drops nobody for venue', mod.admitsCryptoCandidate(big, { binancePairs: spotSet, binancePerps: new Set() }) === true
+    && mod.binanceGlobalTradable('OKB', { spot: spotSet, perps: null }) === null);
+  check('a failed spot lookup drops nobody for venue either', mod.binanceGlobalTradable('OKB', { spot: new Set(), perps: perpSet }) === null);
+}
 check('the widened universe and its boundary are the measured values', mod.CRYPTO_UNIVERSE === 500 && mod.CRYPTO_CHEAP_TAIL_RANK === 250);
 
 console.log('\n== getCryptoMarkets: pages, because CoinGecko caps per_page at 250 ==');

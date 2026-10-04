@@ -16,9 +16,13 @@ export const PORTAL = 'https://data.binance.vision/data/futures/um/daily/metrics
 // (1000X, 1000000X, X-USDC, 1MX) found no others. The scaling matters only for
 // oi_qty_close -- oi_usd_* is already denominated in dollars and needs no
 // adjustment, which is why the features read the USD column.
+// BABYDOGE (1MBABYDOGE) and MOG (1000000MOG) joined the tracked universe later
+// and were recorded 'unavailable' under their bare tickers until 2026-10-04,
+// found by checking the live futures listing for every scaled base we hold.
 export const VENUE_SYMBOL_OVERRIDES = {
   BONK: '1000BONKUSDT', FLOKI: '1000FLOKIUSDT', LUNC: '1000LUNCUSDT',
-  PEPE: '1000PEPEUSDT', SHIB: '1000SHIBUSDT', XEC: '1000XECUSDT'
+  PEPE: '1000PEPEUSDT', SHIB: '1000SHIBUSDT', XEC: '1000XECUSDT',
+  BABYDOGE: '1MBABYDOGEUSDT', MOG: '1000000MOGUSDT'
 };
 
 export function venueSymbol(symbol) {

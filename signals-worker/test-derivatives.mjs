@@ -16,6 +16,7 @@ const near = (a, b, eps = 1e-6) => a != null && Math.abs(a - b) < eps;
 console.log('\n== venue symbol mapping ==');
 check('plain symbol gets USDT suffix', A.venueSymbol('ZEC') === 'ZECUSDT');
 check('scaled listing uses the 1000x ticker', A.venueSymbol('PEPE') === '1000PEPEUSDT');
+check('the 1M and 1000000x listings map too', A.venueSymbol('BABYDOGE') === '1MBABYDOGEUSDT' && A.venueSymbol('MOG') === '1000000MOGUSDT');
 check('unmapped symbol does not silently become 1000x', A.venueSymbol('SOL') === 'SOLUSDT');
 
 console.log('\n== zip reader ==');

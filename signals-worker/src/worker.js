@@ -5063,14 +5063,53 @@ export const CRYPTO_MARKETS_PAGE_SIZE = 250;
 // gate reject everything past the boundary, which degrades to exactly the
 // pre-widening universe. That is the right failure: the tail is only admitted
 // because it is cheap, and it is only cheap if that venue answered.
-export function admitsCryptoCandidate(coin, { favorite = false, binancePairs = null } = {}) {
+//
+// Since 2026-10-04 (owner's call, to cut the Cloudflare bill) a fourth rule sits
+// above the rank tiers: a coin Binance global lists neither as a spot USDT pair
+// nor as a perpetual is not admitted at any rank. Those were ~115 symbols
+// (exchange tokens like OKB/CRO/KCS/HTX, tokenized stocks, Bittensor subnets,
+// pegged coins) that no bot here can trade, paid for in daily bars, hourly votes
+// and ledger rows. Perp-only coins (XMR, KAS, FARTCOIN...) stay: they trade on
+// Binance futures. See binanceGlobalTradable for the fail-open contract.
+export function admitsCryptoCandidate(coin, { favorite = false, binancePairs = null, binancePerps = null } = {}) {
   if (!coin) return false;
   if (favorite) return true;
   if (!((coin.market_cap || 0) >= CRYPTO_MIN_MCAP && (coin.total_volume || 0) >= CRYPTO_MIN_VOLUME)) return false;
+  if (binanceGlobalTradable(coin.symbol, { spot: binancePairs, perps: binancePerps }) === false) return false;
   const rank = Number(coin.market_cap_rank);
   if (!Number.isFinite(rank) || rank <= CRYPTO_CHEAP_TAIL_RANK) return true;
   const pairs = binancePairs instanceof Set ? binancePairs : new Set();
   return pairs.has(String(coin.symbol || '').toUpperCase());
+}
+
+// true / false when both Binance listings answered this run, null when either
+// lookup failed. Callers treat null as "keep the coin": one failed fetch must
+// not drop a third of the universe for an hour and then re-add it with a gap.
+export function binanceGlobalTradable(symbol, { spot = null, perps = null } = {}) {
+  if (!(spot instanceof Set) || !spot.size || !(perps instanceof Set) || !perps.size) return null;
+  const sym = String(symbol || '').toUpperCase();
+  return spot.has(sym) || perps.has(sym);
+}
+
+// Binance USD-M perpetuals, read from the website's copy of the futures listing.
+// fapi.binance.com answers HTTP 451 to US addresses, GitHub's runners included;
+// www.binance.com serves the same document (checked 2026-10-04: byte-identical
+// to the Oracle host's fapi read). Bases are normalised past the 1000x, 1000000x
+// and 1M contract scaling, so 1000PEPE counts as PEPE and 1MBABYDOGE as BABYDOGE.
+export const BINANCE_PERP_LISTING_URL = 'https://www.binance.com/fapi/v1/exchangeInfo';
+export function perpBasesFromExchangeInfo(j) {
+  const set = new Set();
+  for (const s of (j && j.symbols) || []) {
+    if (s.status !== 'TRADING' || s.contractType !== 'PERPETUAL' || !s.baseAsset) continue;
+    const base = String(s.baseAsset).toUpperCase();
+    set.add(base);
+    const m = /^(1000000|1000|1M)(.+)$/.exec(base);
+    if (m) set.add(m[2]);
+  }
+  return set;
+}
+export async function binanceGlobalPerpBases() {
+  return perpBasesFromExchangeInfo(await fetchJson(BINANCE_PERP_LISTING_URL));
 }
 
 export async function getCryptoMarkets() {
@@ -6293,7 +6332,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   const nowIso = new Date().toISOString();
   const overrides = parseTrefisOverrides(env && env.TREFIS_OVERRIDES);
 
-  const [cryptoR, globalR, fngR, trendR, fundR, stocksR, overviewR, valR, benchR, binR, binGlobalR] = await Promise.allSettled([
+  const [cryptoR, globalR, fngR, trendR, fundR, stocksR, overviewR, valR, benchR, binR, binGlobalR, binPerpR] = await Promise.allSettled([
     getCryptoMarkets(),
     getGlobal(),
     getFearGreed(),
@@ -6317,7 +6356,8 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     // the live-price split, this one is the global data mirror and drives
     // daily history. The two listings differ substantially, so neither
     // substitutes for the other.
-    binanceGlobalTradablePairs()
+    binanceGlobalTradablePairs(),
+    binanceGlobalPerpBases()
   ]);
 
   const trending = trendR.status === 'fulfilled' ? trendR.value : new Set();
@@ -6327,6 +6367,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
   // 1 is empty this build and every coin falls through to Yahoo/CoinGecko,
   // i.e. degraded but not broken — same contract binanceUsSymbols has.
   const binanceGlobalPairs = binGlobalR.status === 'fulfilled' ? binGlobalR.value : new Set();
+  const binancePerps = binPerpR.status === 'fulfilled' ? binPerpR.value : new Set();
 
   // Market-wide context, computed once and handed to every asset's
   // scoring (see the "reversal" technique): Fear & Greed for crypto, and
@@ -6437,7 +6478,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
     // has to mean always, and the rescue pass below exists for precisely the
     // favorite whose venue lookup fails.
     const qualifying = directional
-      .filter(c => admitsCryptoCandidate(c, { favorite: isFavorite(c), binancePairs: binanceGlobalPairs }));
+      .filter(c => admitsCryptoCandidate(c, { favorite: isFavorite(c), binancePairs: binanceGlobalPairs, binancePerps }));
     // Favorites first, before anything else spends the per-IP rate-limit
     // budget. "Always tracked" has to mean always, and until now the pinned
     // assets queued in whatever order CoinGecko's market-cap page returned and
@@ -6638,6 +6679,7 @@ export async function buildPayload(env, reliability, reliabilityByHorizon, moveS
       funding: fundR.status === 'fulfilled',
       binance_us: binR.status === 'fulfilled' && binanceUsSymbols.length > 0,
       binance_global: binGlobalR.status === 'fulfilled' && binanceGlobalPairs.size > 0,
+      binance_perps: binPerpR.status === 'fulfilled' && binancePerps.size > 0,
       valuation_ok: valR.status === 'fulfilled' ? valR.value.ok : 0,
       stocks_ok: STOCK_WATCHLIST.length - stockFailures.length,
       stocks_total: STOCK_WATCHLIST.length,

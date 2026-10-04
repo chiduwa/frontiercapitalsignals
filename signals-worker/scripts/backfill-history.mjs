@@ -10,7 +10,7 @@
 //   account's Workers Paid D1 allowance, see the constant's own docs;
 //   raise once Workers Paid is confirmed active, see the plan),
 //   BINANCE_ROW_BUDGET (default 120000, same reasoning)
-import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, BENCHMARK_SYMBOLS, ARCHIVED_OVERVIEW_SYMBOLS, computeTimeOfDayTallies, hasCrossClassTickerCollision, binanceGlobalTradablePairs } from '../worker.js';
+import { getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, BENCHMARK_SYMBOLS, ARCHIVED_OVERVIEW_SYMBOLS, computeTimeOfDayTallies, hasCrossClassTickerCollision, binanceGlobalTradablePairs, binanceGlobalPerpBases, binanceGlobalTradable, FAVORITE_SYMBOLS } from '../worker.js';
 import {
   yahooFullHistory, coingeckoDailyBars, getExistingCoverage,
   upsertDailyBars, fundingSnapshotToRows, upsertFundingDaily,
@@ -104,10 +104,23 @@ async function main() {
   console.log(`backfill-history starting, price budget ${PRICE_ROW_BUDGET}, funding budget ${FUNDING_ROW_BUDGET}`);
 
   const cryptoRaw = await getCryptoMarkets();
+  // Which coins Binance lists, asked once: spot pairs pick the price supplier
+  // below, and spot + perps together decide whether a coin is archived at all
+  // (the same rule as admitsCryptoCandidate). A failed lookup keeps every coin.
+  let binancePairs = new Set(), binancePerps = new Set();
+  try { binancePairs = await binanceGlobalTradablePairs(); } catch (e) { console.warn(`Binance pair discovery failed (${e.message}); CoinGecko remains the only fallback this run`); }
+  try { binancePerps = await binanceGlobalPerpBases(); } catch (e) { console.warn(`Binance perp listing failed (${e.message}); no coin is dropped for venue this run`); }
+  const notOnBinance = [];
   const cryptoUniverse = cryptoRaw
     .filter((c) => !CRYPTO_BLOCKLIST.has((c.symbol || '').toLowerCase()))
     .filter((c) => !hasCrossClassTickerCollision(c.symbol))
     .filter((c) => (c.market_cap || 0) >= CRYPTO_MIN_MCAP && (c.total_volume || 0) >= CRYPTO_MIN_VOLUME)
+    .filter((c) => {
+      const sym = (c.symbol || '').toUpperCase();
+      if (FAVORITE_SYMBOLS.has(sym) || binanceGlobalTradable(sym, { spot: binancePairs, perps: binancePerps }) !== false) return true;
+      notOnBinance.push(sym);
+      return false;
+    })
     .map((c) => ({ symbol: (c.symbol || '').toUpperCase(), id: c.id, assetClass: 'crypto', yahooTicker: `${(c.symbol || '').toUpperCase()}-USD`, refPrice: c.current_price ?? null }));
   const stockUniverse = STOCK_WATCHLIST.map((s) => ({ symbol: s, assetClass: 'stock', yahooTicker: s }));
   // Macro benchmarks (DXY/Gold/Oil) — archived alongside crypto/stocks so
@@ -151,10 +164,7 @@ async function main() {
 
   let yahooOk = 0, binanceFirst = 0, binanceFallback = 0, cgFallback = 0;
   const priceFailed = [];
-  // Which coins Binance lists, asked once. An empty set (a failed discovery
-  // call) just means every Yahoo failure goes straight to CoinGecko, as before.
-  let binancePairs = new Set();
-  try { binancePairs = await binanceGlobalTradablePairs(); } catch (e) { console.warn(`Binance pair discovery failed (${e.message}); CoinGecko remains the only fallback this run`); }
+  if (notOnBinance.length) console.log(`not archived, not tradable on Binance global (spot or perp): ${notOnBinance.length} — ${notOnBinance.slice(0, 20).join(' ')}${notOnBinance.length > 20 ? ' …' : ''}`);
   const deferredHistory = [];
   for (const a of universe) {
     if (priceBudgetLeft() <= 0) { console.log('price budget exhausted — stopping price backfill early, resume next run'); break; }
