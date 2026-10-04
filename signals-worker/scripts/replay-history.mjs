@@ -958,13 +958,21 @@ async function flush(rows, dryRun) {
 // WEIGHT_INDEPENDENT_MODEL_VERSIONS because a technique's own directional
 // record is unaffected by the v7 -> v8 weighting change, while the composite-
 // derived mirrors pin the active version only. Same split the loaders use.
-export async function refreshRollups(dryRun = false) {
-  if (dryRun) return;
-  const now = new Date().toISOString();
-  const versions = WEIGHT_INDEPENDENT_MODEL_VERSIONS;
-  const statements = [
+//
+// Each mirror is an UPSERT that writes only a row whose counts changed. The old
+// INSERT OR REPLACE rewrote all ~21k technique rows every night (a REPLACE is a
+// delete plus an insert, plus the index), ~296k billed writes a day for figures
+// that had mostly not moved; an UPSERT whose WHERE is false writes nothing. The
+// resulting counts are identical (test-replay pins it). updated_at now means
+// "last changed", as it already does for the account-journal summaries.
+const changedOnly = (key, cols) => `ON CONFLICT (${key}) DO UPDATE SET `
+  + [...cols, 'updated_at'].map((c) => `${c} = excluded.${c}`).join(', ')
+  + ' WHERE ' + cols.map((c) => `${c} IS NOT excluded.${c}`).join(' OR ');
+
+export function rollupStatements(now, versions = WEIGHT_INDEPENDENT_MODEL_VERSIONS, modelVersion = OUTCOME_MODEL_VERSION) {
+  return [
     {
-      sql: `INSERT OR REPLACE INTO technique_reliability
+      sql: `INSERT INTO technique_reliability
               (asset_class, symbol, technique_id, horizon_hours, correct, total, accuracy, votes_up, votes_down, updated_at)
             SELECT asset_class, symbol, series_key, horizon_minutes / 60,
                    SUM(correct), COUNT(*), CAST(SUM(correct) AS REAL) / COUNT(*),
@@ -973,21 +981,23 @@ export async function refreshRollups(dryRun = false) {
               FROM forecast_outcomes
              WHERE series_kind = 'technique' AND aggregated = 1 AND dir IN (-1, 1)
                AND model_version IN (?1, ?2)
-             GROUP BY asset_class, symbol, series_key, horizon_minutes`,
+             GROUP BY asset_class, symbol, series_key, horizon_minutes
+            ${changedOnly('symbol, technique_id, horizon_hours', ['asset_class', 'correct', 'total', 'accuracy', 'votes_up', 'votes_down'])}`,
       params: [versions[0], versions[1], now]
     },
     {
-      sql: `INSERT OR REPLACE INTO range_reliability
+      sql: `INSERT INTO range_reliability
               (asset_class, symbol, horizon_hours, hits, total, accuracy, updated_at)
             SELECT asset_class, symbol, horizon_minutes / 60,
                    SUM(correct), COUNT(*), CAST(SUM(correct) AS REAL) / COUNT(*), ?2
               FROM forecast_outcomes
              WHERE series_kind = 'range' AND aggregated = 1 AND model_version = ?1
-             GROUP BY asset_class, symbol, horizon_minutes`,
-      params: [OUTCOME_MODEL_VERSION, now]
+             GROUP BY asset_class, symbol, horizon_minutes
+            ${changedOnly('symbol, horizon_hours', ['asset_class', 'hits', 'total', 'accuracy'])}`,
+      params: [modelVersion, now]
     },
     {
-      sql: `INSERT OR REPLACE INTO direction_baseline
+      sql: `INSERT INTO direction_baseline
               (asset_class, horizon_hours, n_up, n_flat, n_down, updated_at)
             SELECT asset_class, horizon_minutes / 60,
                    SUM(CASE WHEN actual_dir = 1 THEN 1 ELSE 0 END),
@@ -995,11 +1005,12 @@ export async function refreshRollups(dryRun = false) {
                    SUM(CASE WHEN actual_dir = -1 THEN 1 ELSE 0 END), ?3
               FROM forecast_outcomes
              WHERE series_kind = 'market' AND aggregated = 1 AND model_version IN (?1, ?2)
-             GROUP BY asset_class, horizon_minutes`,
+             GROUP BY asset_class, horizon_minutes
+            ${changedOnly('asset_class, horizon_hours', ['n_up', 'n_flat', 'n_down'])}`,
       params: [versions[0], versions[1], now]
     },
     {
-      sql: `INSERT OR REPLACE INTO score_calibration_detail
+      sql: `INSERT INTO score_calibration_detail
               (asset_class, dir, horizon_hours, bucket, correct, total, updated_at)
             SELECT asset_class, dir, horizon_minutes / 60,
                    MIN(9, MAX(0, CAST(score / 10 AS INTEGER))),
@@ -1009,21 +1020,27 @@ export async function refreshRollups(dryRun = false) {
                AND aggregated = 1 AND score IS NOT NULL AND dir IN (-1, 1)
                AND model_version = ?1
              GROUP BY asset_class, dir, horizon_minutes,
-                      MIN(9, MAX(0, CAST(score / 10 AS INTEGER)))`,
-      params: [OUTCOME_MODEL_VERSION, now]
+                      MIN(9, MAX(0, CAST(score / 10 AS INTEGER)))
+            ${changedOnly('asset_class, dir, horizon_hours, bucket', ['correct', 'total'])}`,
+      params: [modelVersion, now]
     },
     {
-      sql: `INSERT OR REPLACE INTO score_calibration (bucket, correct, total, updated_at)
+      sql: `INSERT INTO score_calibration (bucket, correct, total, updated_at)
             SELECT MIN(9, MAX(0, CAST(score / 10 AS INTEGER))), SUM(correct), COUNT(*), ?2
               FROM forecast_outcomes
              WHERE series_kind = 'technique' AND series_key = 'composite'
                AND aggregated = 1 AND score IS NOT NULL AND dir IN (-1, 1)
                AND model_version = ?1
-             GROUP BY MIN(9, MAX(0, CAST(score / 10 AS INTEGER)))`,
-      params: [OUTCOME_MODEL_VERSION, now]
+             GROUP BY MIN(9, MAX(0, CAST(score / 10 AS INTEGER)))
+            ${changedOnly('bucket', ['correct', 'total'])}`,
+      params: [modelVersion, now]
     }
   ];
-  for (const st of statements) await d1(env, st.sql, st.params);
+}
+
+export async function refreshRollups(dryRun = false) {
+  if (dryRun) return;
+  for (const st of rollupStatements(new Date().toISOString())) await d1(env, st.sql, st.params);
   console.log('[replay] rollup mirrors rebuilt from the ledger');
 }
 

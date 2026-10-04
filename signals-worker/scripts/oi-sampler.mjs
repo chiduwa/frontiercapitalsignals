@@ -373,6 +373,35 @@ async function watchlist() {
 // taken; it measures what the setup did.
 export const RESOLVE_AFTER_MIN = 30;
 
+// What reaches D1. Measured 2026-10-04: this table was the largest writer in
+// the account, ~570k billed row writes a day (insert + ts index + the retention
+// delete), about 30% of the total and the reason the month ran past the 50M
+// included writes. The classifier never needed it at 20 seconds: detection runs
+// on the in-memory history. The stored copy serves the next firing's seed, the
+// 30-minute scoring of an event, the market-explanation panel and the audits.
+//
+// So: one tick per symbol per minute, and every tick for a symbol that has made
+// a half-trigger excursion, held for as long as an event from it can still be
+// scored. A real flush keeps its full-resolution path; a quiet tape costs a third.
+export const TICK_PERSIST_EVERY_SEC = 60;
+export const HOT_EXCURSION_PCT = MOVE_PCT_TRIGGER / 2;
+export const HOT_HOLD_MIN = MOVE_LOOKBACK_MIN + RESOLVE_AFTER_MIN;
+
+export function shouldPersistTick(row, { lastPersistedTs = null, hotUntilTs = null } = {},
+  everySec = TICK_PERSIST_EVERY_SEC) {
+  if (hotUntilTs != null && row.ts <= hotUntilTs) return true;
+  return lastPersistedTs == null || row.ts - lastPersistedTs >= everySec * 1000;
+}
+
+// Called after the tick has joined the symbol's history. Returns the new hold.
+export function updateHotUntil(history, hotUntilTs = null) {
+  const now = history && history.length ? history[history.length - 1].ts : null;
+  if (now == null) return hotUntilTs;
+  return detectMove(history, { triggerPct: HOT_EXCURSION_PCT })
+    ? Math.max(hotUntilTs ?? 0, now + HOT_HOLD_MIN * 60000)
+    : hotUntilTs;
+}
+
 async function resolveMaturedEvents() {
   const cutoffTs = Date.now() - RESOLVE_AFTER_MIN * 60000;
   const pending = await d1(env,
@@ -434,11 +463,22 @@ async function main() {
     'SELECT symbol, ts, oi_usd, mark_price FROM oi_tick INDEXED BY idx_oi_tick_ts WHERE ts >= ? ORDER BY symbol, ts', [seedFrom]);
   const history = new Map(symbols.map((s) => [s, []]));
   for (const r of seed) if (history.has(r.symbol)) history.get(r.symbol).push(r);
+  const persistState = new Map(symbols.map((s) => {
+    const h = history.get(s);
+    return [s, { lastPersistedTs: h.length ? h[h.length - 1].ts : null, hotUntilTs: updateHotUntil(h) }];
+  }));
+  // An event from the previous firing is still being scored for HOT_HOLD_MIN.
+  const recentEvents = await d1(env, 'SELECT symbol, MAX(first_ts) AS first_ts FROM flush_event WHERE first_ts >= ? GROUP BY symbol',
+    [Date.now() - HOT_HOLD_MIN * 60000]);
+  for (const e of recentEvents) {
+    const s = persistState.get(e.symbol);
+    if (s) s.hotUntilTs = Math.max(s.hotUntilTs ?? 0, Number(e.first_ts) + HOT_HOLD_MIN * 60000);
+  }
 
   const deadline = Date.now() + DURATION_MIN * 60000;
   const announced = new Set();
   const alertState = await loadAlertState(symbols);
-  let samples = 0, detections = 0;
+  let samples = 0, persisted = 0, detections = 0;
 
   while (Date.now() < deadline) {
     const started = Date.now();
@@ -453,14 +493,17 @@ async function main() {
         const price = Number(mark.markPrice);
         const ts = Number(oi.time);
         if (!(contracts > 0) || !(price > 0) || !Number.isFinite(ts)) return;
+        samples++;
         const row = { symbol, ts, oi_contracts: contracts, oi_usd: contracts * price, mark_price: price };
-        batch.push(row);
         const h = history.get(symbol);
         h.push(row);
         while (h.length && h[0].ts < ts - (MOVE_LOOKBACK_MIN + 5) * 60000) h.shift();
+        const ps = persistState.get(symbol);
+        ps.hotUntilTs = updateHotUntil(h, ps.hotUntilTs);
+        if (shouldPersistTick(row, ps)) { batch.push(row); ps.lastPersistedTs = ts; }
       } catch { /* one symbol failing must not stop the sweep */ }
     }));
-    samples += batch.length;
+    persisted += batch.length;
 
     if (batch.length) {
       const statements = chunk(batch, 20).map((g) => ({
@@ -527,7 +570,7 @@ async function main() {
   const scored = await resolveMaturedEvents();
   const cutoff = Date.now() - RETENTION_DAYS * 86400000;
   await d1(env, 'DELETE FROM oi_tick WHERE ts < ?', [cutoff]);
-  console.log(`done: ${samples} samples, ${detections} events detected, ${scored} resolved`);
+  console.log(`done: ${samples} samples (${persisted} stored), ${detections} events detected, ${scored} resolved`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

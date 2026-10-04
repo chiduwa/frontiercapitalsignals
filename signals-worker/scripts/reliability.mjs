@@ -463,9 +463,29 @@ export function buildPublicationSnapshots(publicPayload, prices, runAt) {
   });
 }
 
+// US equities trade 13:30-20:00 UTC in summer and 14:30-21:00 in winter; this
+// window covers both and the first build after the close. Outside it a stock's
+// quote is the last close, so every stock vote, range and time-of-day delta an
+// hourly build wrote there repeated the previous one. Measured 2026-10-04: 72%
+// of stock technique_votes rows were cast outside it, and a weekend cast was
+// then scored on a window with no move at all. Stock PRICES are still logged
+// every hour: a Friday cast matures against Saturday's logged price (the close).
+export function usEquityQuoteMayMove(at) {
+  const d = new Date(at);
+  const dow = d.getUTCDay(), hour = d.getUTCHours();
+  return dow >= 1 && dow <= 5 && hour >= 13 && hour <= 21;
+}
+
+export function sessionScopedRunLog(log, runAt) {
+  if (usEquityQuoteMayMove(runAt)) return log;
+  const live = (rows) => (rows || []).filter((r) => r.asset_class !== 'stock');
+  return { ...log, votes: live(log.votes), ranges: live(log.ranges) };
+}
+
 // Persists this run's per-asset price and per-technique directional votes,
 // to be scored once they mature (see evaluateMatured).
 export async function logRun(env, runAt, log) {
+  log = sessionScopedRunLog(log, runAt);
   await d1(env, 'INSERT OR IGNORE INTO forecast_run_versions(run_at,model_version) VALUES(?,?)', [runAt, OUTCOME_MODEL_VERSION]);
   await forEachConcurrent(chunk(log.prices, CHUNK), D1_WRITE_CONCURRENCY, async (batch) => {
     const placeholders = batch.map(() => '(?,?,?,?)').join(',');
@@ -1506,6 +1526,10 @@ export async function evaluateTimeOfDay(env, nowIso, thisRunPrices) {
       const after = thisRunPrices[symbol];
       if (!after || after.price == null || !before.price) continue;
       const pct = ((after.price / before.price) - 1) * 100;
+      // A closed market is not an observation of that hour (see usEquityQuoteMayMove).
+      // The Yahoo bootstrap never held these slots; the live path was adding zeros.
+      if (after.assetClass === 'stock' && pct === 0
+        && !usEquityQuoteMayMove(before.run_at) && !usEquityQuoteMayMove(nowIso)) continue;
       for (const slot of slotsForTimestamp(before.run_at)) {
         const key = `${symbol}|${slot}`;
         if (!deltas[key]) deltas[key] = { sumPct: 0, sumPctSq: 0, n: 0, assetClass: after.assetClass };

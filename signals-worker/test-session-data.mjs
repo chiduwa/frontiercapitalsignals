@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { parseHourlyKlines,collectSessionData } from './scripts/session-data.mjs';
 import { marketFlowSnapshot,evaluateTechniques,buildCryptoMetrics } from './worker.js';
 import { loadSessionHealth,persistSessionReport } from './scripts/session-health.mjs';
-import { loadFundingHistory,loadMaturedForecastRows,OUTCOME_MODEL_VERSION,logRun } from './scripts/reliability.mjs';
+import { loadFundingHistory,loadMaturedForecastRows,OUTCOME_MODEL_VERSION,logRun,usEquityQuoteMayMove,sessionScopedRunLog } from './scripts/reliability.mjs';
 const t=Date.parse('2025-03-09T13:00:00Z');
 const line=(scale=1)=>[t*scale,100,102,99,101,10,(t+3599999)*scale,1000,5,5,500,0].join(',');
 test('hourly parser recognizes milliseconds and microseconds, incomplete bars, conflicts and blanks',()=>{
@@ -98,4 +98,16 @@ test('twenty mixed-contract days cannot masquerade as twenty days for the curren
  const old=globalThis.fetch;globalThis.fetch=async(_u,o)=>{const {sql,params}=JSON.parse(o.body);return Response.json({success:true,result:[{results:db.prepare(sql).all(...params)}]});};
  try{const x=await loadFundingHistory({});assert.equal(x.BTC.byVenue['venue-A'].fundingRates.length,20);assert.equal(x.BTC.byInstrument['["venue-A","BTCUSDT"]'].fundingRates,null);assert.equal(x.BTC.byInstrument['["venue-A","BTCUSD"]'].fundingRates,null);}
  finally{globalThis.fetch=old;db.close();}
+});
+test('stock votes and ranges are written only while a US quote can move; prices always',()=>{
+ // Summer session 13:30-20:00 UTC, winter 14:30-21:00; the window covers both.
+ for(const at of ['2026-07-06T13:40:00Z','2026-07-06T19:59:00Z','2026-01-05T20:59:00Z','2026-01-05T21:30:00Z'])assert.ok(usEquityQuoteMayMove(at),at);
+ for(const at of ['2026-07-06T12:59:00Z','2026-07-06T22:00:00Z','2026-07-04T15:00:00Z','2026-07-05T15:00:00Z'])assert.ok(!usEquityQuoteMayMove(at),at);
+ const log={prices:[{asset_class:'stock',symbol:'AAPL',price:1},{asset_class:'crypto',symbol:'BTC',price:2}],
+  votes:[{asset_class:'stock',symbol:'AAPL',technique_id:'rsi',dir:1},{asset_class:'crypto',symbol:'BTC',technique_id:'rsi',dir:1}],
+  ranges:[{asset_class:'stock',symbol:'AAPL'},{asset_class:'crypto',symbol:'BTC'}]};
+ const night=sessionScopedRunLog(log,'2026-07-06T03:00:00Z');
+ assert.deepEqual(night.votes.map(v=>v.symbol),['BTC']);assert.deepEqual(night.ranges.map(v=>v.symbol),['BTC']);
+ assert.equal(night.prices.length,2,'stock prices are still logged so a Friday cast can mature on Saturday');
+ assert.equal(sessionScopedRunLog(log,'2026-07-06T15:00:00Z'),log,'in session the log is untouched');
 });

@@ -11,7 +11,9 @@
 // both columns, and several set them in OPPOSITE directions on purpose: that is
 // the case the old code got wrong in production.
 import { classifyMove, detectMove, shouldAlert, buildAlert, EXPECTED_RECOVERY, MOVE_PCT_TRIGGER,
-  OI_DECISIVE_CONTRACTS_PCT, ALERT_COOLDOWN_MIN, decomposeOi, formatOiVsPrice } from './scripts/oi-sampler.mjs';
+  OI_DECISIVE_CONTRACTS_PCT, ALERT_COOLDOWN_MIN, decomposeOi, formatOiVsPrice,
+  shouldPersistTick, updateHotUntil, TICK_PERSIST_EVERY_SEC, HOT_EXCURSION_PCT, HOT_HOLD_MIN,
+  RESOLVE_AFTER_MIN, MOVE_LOOKBACK_MIN } from './scripts/oi-sampler.mjs';
 import { findFlushes, dedupeEpisodes } from './scripts/flush-research.mjs';
 import { planEntry, continuationCall, ENTRY_DEPTH_PCT, STOP_DEPTH_PCT } from './scripts/flush-entry.mjs';
 
@@ -286,6 +288,44 @@ check('a real positioning change is described as one', /a real \nchange|a real c
 check('unmeasurable price degrades to contracts only, saying so',
   /cannot be compared/.test(formatOiVsPrice({ oiChangePct: 1, priceChangePct: null })));
 console.log('\n--- the comparison, rendered ---\n' + words + '\n');
+
+// --- what reaches D1 (2026-10-04 write-cost cut) ---
+{
+  const at = (sec) => ({ ts: 1_700_000_000_000 + sec * 1000 });
+  check('the first tick of a symbol is always stored', shouldPersistTick(at(0), {}));
+  check('a quiet symbol stores one tick a minute, not three',
+    !shouldPersistTick(at(20), { lastPersistedTs: at(0).ts }) && !shouldPersistTick(at(40), { lastPersistedTs: at(0).ts })
+    && shouldPersistTick(at(60), { lastPersistedTs: at(0).ts }));
+  check('a hot symbol stores every tick', shouldPersistTick(at(20), { lastPersistedTs: at(0).ts, hotUntilTs: at(600).ts }));
+  check('the hold expires', !shouldPersistTick(at(620), { lastPersistedTs: at(600).ts, hotUntilTs: at(600).ts }));
+  check('the hold covers the whole window an event is scored over',
+    HOT_HOLD_MIN >= RESOLVE_AFTER_MIN + MOVE_LOOKBACK_MIN, String(HOT_HOLD_MIN));
+  check('a symbol turns hot below the trigger, so the path into a flush is kept', HOT_EXCURSION_PCT < MOVE_PCT_TRIGGER);
+  check('the baseline is coarser than the 20-second sampling it replaces', TICK_PERSIST_EVERY_SEC >= 60);
+  const quiet = [tick(4, 1e9, 100), tick(3, 1e9, 100.2), tick(2, 1e9, 100.1), tick(1, 1e9, 100.3)];
+  check('a quiet tape sets no hold', updateHotUntil(quiet, null) === null);
+  const warm = [tick(4, 1e9, 100), tick(3, 1e9, 101), tick(2, 1e9, 102.6)];
+  const hold = updateHotUntil(warm, null);
+  check('a 2.6% excursion sets a hold of HOT_HOLD_MIN from the last tick',
+    hold === warm[2].ts + HOT_HOLD_MIN * 60000, String(hold));
+  check('a later quiet tick never shortens an existing hold', updateHotUntil(quiet, hold) === hold);
+  // A simulated hour: 40 symbols, 3 samples a minute, one symbol flushes.
+  let stored = 0, sampled = 0, flushStored = 0;
+  for (let s = 0; s < 40; s++) {
+    const h = [], st = { lastPersistedTs: null, hotUntilTs: null };
+    for (let k = 0; k < 180; k++) {
+      const price = s === 0 && k >= 90 && k < 96 ? 100 * (1 - 0.01 * (k - 89)) : 100;
+      const row = { ts: 1_700_000_000_000 + k * 20000, oi_usd: 1e9, oi_contracts: 1e7, mark_price: price };
+      h.push(row); while (h[0].ts < row.ts - (MOVE_LOOKBACK_MIN + 5) * 60000) h.shift();
+      st.hotUntilTs = updateHotUntil(h, st.hotUntilTs);
+      sampled++;
+      if (shouldPersistTick(row, st)) { stored++; st.lastPersistedTs = row.ts; if (s === 0 && k >= 92) flushStored++; }
+    }
+  }
+  check('a quiet hour stores about a third of what it samples', stored / sampled < 0.4, `${stored}/${sampled}`);
+  check('the flushing symbol keeps full resolution from the excursion through its scoring window',
+    flushStored === 180 - 92, `${flushStored}`);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

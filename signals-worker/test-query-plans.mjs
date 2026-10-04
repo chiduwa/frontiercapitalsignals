@@ -169,3 +169,39 @@ test('the accepted-forecast lookup seeks recent rows and decides exactly as the 
   assert.equal(acceptedTimesSince(undefined, 1440), null, 'no candidates, no read');
   db.exec('DELETE FROM forecast_outcomes');
 });
+
+// D1 write-cost fix of 2026-10-04: the nightly rollup rebuild used INSERT OR
+// REPLACE over every row (~296k billed writes a day). It is now an UPSERT that
+// writes only a changed row. Same figures, and an unchanged re-run writes nothing.
+test('rollup mirrors: change-only upserts match the old rebuild and re-run for free', async () => {
+  const { rollupStatements } = await import('./scripts/replay-history.mjs');
+  const mk = () => { const d = new DatabaseSync(':memory:'); d.exec(SCHEMA); return d; };
+  const fresh = mk(), legacy = mk();
+  const ins = `INSERT INTO forecast_outcomes (run_at, asset_class, symbol, horizon_minutes, series_kind, series_key,
+    dir, actual_dir, correct, score, evaluated_at, aggregated, model_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`;
+  const rows = [];
+  for (let i = 0; i < 60; i++) {
+    const sym = ['BTC', 'ETH', 'AAPL'][i % 3], cls = sym === 'AAPL' ? 'stock' : 'crypto';
+    const h = i % 2 ? 1440 : 10080, run = `2026-09-${String(1 + (i % 28)).padStart(2, '0')}T0${i % 10}:00:00Z`;
+    rows.push([run, cls, sym, h, 'technique', i % 4 ? 'rsi' : 'composite', i % 3 ? 1 : -1, i % 5 ? 1 : -1, i % 5 && i % 3 ? 1 : 0, (i * 7) % 100, run, 1, 'confluence-v9']);
+    rows.push([run, cls, sym, h, 'market', 'market', null, [1, 0, -1][i % 3], 1, null, run, 1, 'confluence-v9']);
+    rows.push([run, cls, sym, h, 'range', 'range', null, null, i % 2, null, run, 1, 'confluence-v9']);
+  }
+  for (const d of [fresh, legacy]) for (const r of rows) d.prepare(ins).run(...r);
+  const stmts = rollupStatements('2026-10-04T00:00:00Z', ['confluence-v9', null], 'confluence-v9');
+  const toLegacy = (sql) => sql.replace('INSERT INTO', 'INSERT OR REPLACE INTO').replace(/ON CONFLICT[\s\S]*$/, '');
+  for (const st of stmts) { fresh.prepare(st.sql).run(...st.params); legacy.prepare(toLegacy(st.sql)).run(...st.params); }
+  const tables = ['technique_reliability', 'range_reliability', 'direction_baseline', 'score_calibration_detail', 'score_calibration'];
+  const dump = (d, t) => d.prepare(`SELECT * FROM ${t}`).all().map(({ updated_at, ...r }) => JSON.stringify(r)).sort();
+  for (const t of tables) {
+    assert.ok(dump(fresh, t).length > 0, `${t} is populated by the fixture`);
+    assert.deepEqual(dump(fresh, t), dump(legacy, t), `${t} matches the INSERT OR REPLACE rebuild`);
+  }
+  let written = 0;
+  for (const st of rollupStatements('2026-10-05T00:00:00Z', ['confluence-v9', null], 'confluence-v9')) written += Number(fresh.prepare(st.sql).run(...st.params).changes);
+  assert.equal(written, 0, 'an unchanged ledger re-runs with zero writes');
+  fresh.prepare(ins).run('2026-09-30T05:00:00Z', 'crypto', 'BTC', 1440, 'technique', 'rsi', 1, 1, 1, 50, '2026-09-30T05:00:00Z', 1, 'confluence-v9');
+  written = 0;
+  for (const st of rollupStatements('2026-10-06T00:00:00Z', ['confluence-v9', null], 'confluence-v9')) written += Number(fresh.prepare(st.sql).run(...st.params).changes);
+  assert.equal(written, 1, 'one new outcome rewrites exactly its one technique row');
+});
