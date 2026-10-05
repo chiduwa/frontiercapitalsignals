@@ -1,0 +1,17 @@
+BTC: quietest-fifth 4h blocks n=2227: big4 0.070 vs 0.169, big12 0.084 vs 0.162, next-4h up share 0.517 vs 0.504
+ETH: quietest-fifth 4h blocks n=2227: big4 0.074 vs 0.158, big12 0.086 vs 0.152, next-4h up share 0.509 vs 0.499
+SOL: quietest-fifth 4h blocks n=2227: big4 0.072 vs 0.137, big12 0.068 vs 0.123, next-4h up share 0.498 vs 0.494
+asset          BTC   ETH   SOL
+pred  y                       
+rel24 big12   1.11  1.33  0.23
+      big4    0.89  2.23 -0.76
+      dir12   1.10  0.83  1.45
+      dir4    0.84  0.82  1.33
+      size12 -0.16  0.90  0.35
+      size4   0.89  2.49  0.44
+relH  big12   1.43  1.65  1.27
+      big4    3.49  2.32  1.37
+      dir12   0.74  0.95  1.69
+      dir4    1.23  1.37  1.96
+      size12  1.01  1.50  1.44
+      size4   3.54  3.25  1.43

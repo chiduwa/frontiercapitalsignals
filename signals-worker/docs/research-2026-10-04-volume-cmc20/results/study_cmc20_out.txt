@@ -1,0 +1,107 @@
+alignment: corr(CMC20 D-1->D, BTC day D-1) = 0.98 | corr with BTC day D = -0.046
+
+196 tests; surviving Holm + both halves: 0
+target  h source  signal    n  edge_pct       t      p  halves_agree  p_holm  survives
+   ETH  1  CMC20    ma50  959    0.2123  1.9304 0.0536          True     1.0     False
+   ETH  1  CMC20    mom7 1001    0.1904  1.7803 0.0750          True     1.0     False
+   ARB  7  CMC20 breadth  995   -1.0526 -1.5095 0.1312          True     1.0     False
+   ETH  1    BTC    ma20  989    0.1697  1.5056 0.1322          True     1.0     False
+   BTC  1  CMC20    ma50  959    0.1021  1.4098 0.1586          True     1.0     False
+   ETH  1    BTC    ma50  959    0.1589  1.4041 0.1603          True     1.0     False
+ CMC20  1  CMC20    ma50  958    0.1086  1.3876 0.1652          True     1.0     False
+   ETH  7    BTC   mom30  972    0.8431  1.3720 0.1701          True     1.0     False
+   ETH  7  CMC20    mom7  995    0.7058  1.3660 0.1719          True     1.0     False
+  DOGE  1  CMC20    ma50  959    0.2075  1.3564 0.1750          True     1.0     False
+   ETH  7  CMC20   mom30  971    0.8292  1.3521 0.1764          True     1.0     False
+   ETH  7  CMC20 breadth  995   -0.6651 -1.3459 0.1783          True     1.0     False
+   BTC  1    BTC    ma50  959    0.0969  1.3040 0.1922          True     1.0     False
+  HBAR  1  CMC20 breadth 1001    0.2086  1.2764 0.2018          True     1.0     False
+   ETH  7    BTC    ma50  953    0.8397  1.2579 0.2084          True     1.0     False
+
+mean |t| by source: {'BTC': 0.54, 'CMC20': 0.56}
+
+CMC20 vs BTC version of the same trend signal (t):
+source            BTC  CMC20
+target h signal             
+ADA    1 ma20   -0.25  -0.50
+         ma50    0.11   0.49
+         mom30   0.37  -0.16
+         mom7   -0.71   0.12
+       7 ma20   -0.60  -0.90
+         ma50   -0.00  -0.06
+         mom30   0.36   0.25
+         mom7   -1.06  -0.73
+ARB    1 ma20    0.49   0.49
+         ma50    0.32   0.36
+         mom30   0.45   0.01
+         mom7   -0.24   0.57
+       7 ma20   -0.64  -0.81
+         ma50    0.08  -0.37
+         mom30   0.06   0.07
+         mom7   -1.00  -0.42
+BTC    1 ma20    0.85   0.23
+         ma50    1.30   1.41
+         mom30   0.37   0.39
+         mom7   -0.38   0.40
+       7 ma20    0.48   0.16
+         ma50    0.77   0.49
+         mom30   0.72   0.49
+         mom7    0.01   0.61
+CMC20  1 ma20    0.81   0.31
+         ma50    1.11   1.39
+         mom30   0.38   0.32
+         mom7   -0.22   0.69
+       7 ma20    0.34   0.03
+         ma50    0.73   0.44
+         mom30   0.74   0.59
+         mom7   -0.01   0.67
+DOGE   1 ma20    0.72   0.39
+         ma50    0.83   1.36
+         mom30   0.85   0.31
+         mom7    0.01   0.65
+       7 ma20    0.07  -0.38
+         ma50    0.66   0.58
+         mom30   0.85   0.87
+         mom7   -0.75   0.10
+ETH    1 ma20    1.51   1.15
+         ma50    1.40   1.93
+         mom30   1.01   0.97
+         mom7    1.03   1.78
+       7 ma20    0.96   0.67
+         ma50    1.26   0.92
+         mom30   1.37   1.35
+         mom7    1.00   1.37
+HBAR   1 ma20    1.21   0.44
+         ma50    0.35   0.75
+         mom30   0.48   0.31
+         mom7   -0.19   1.22
+       7 ma20    0.30   0.11
+         ma50    0.43   0.25
+         mom30   0.67   0.74
+         mom7   -0.43   0.71
+SOL    1 ma20    0.34   0.16
+         ma50    0.66   0.98
+         mom30  -0.36  -0.57
+         mom7   -0.09   1.10
+       7 ma20   -0.76  -0.89
+         ma50   -0.14  -0.25
+         mom30  -0.89  -0.45
+         mom7   -0.52   0.29
+XLM    1 ma20    0.26   0.08
+         ma50    0.14   0.40
+         mom30   0.22  -0.17
+         mom7    0.08   0.75
+       7 ma20   -0.08  -0.19
+         ma50    0.66   0.24
+         mom30   0.66   0.44
+         mom7    0.14   0.33
+XRP    1 ma20    0.83   0.47
+         ma50    0.37   0.79
+         mom30   0.35  -0.07
+         mom7   -0.70   0.91
+       7 ma20   -0.06  -0.19
+         ma50    0.24   0.23
+         mom30   0.24  -0.03
+         mom7   -0.26   0.50
+
+corr(CMC20, BTC) daily: 0.98  R2 on BTC+ETH: 0.989

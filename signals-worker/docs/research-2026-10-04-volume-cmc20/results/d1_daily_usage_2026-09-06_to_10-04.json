@@ -1,0 +1,176 @@
+[
+ {
+  "date": "2026-09-06",
+  "rows_read": 86182534,
+  "rows_written": 1063129,
+  "db_bytes": 255991800
+ },
+ {
+  "date": "2026-09-07",
+  "rows_read": 72444355,
+  "rows_written": 1418073,
+  "db_bytes": 313774080
+ },
+ {
+  "date": "2026-09-08",
+  "rows_read": 83500902,
+  "rows_written": 1410131,
+  "db_bytes": 364384260
+ },
+ {
+  "date": "2026-09-09",
+  "rows_read": 101539124,
+  "rows_written": 1389288,
+  "db_bytes": 403370000
+ },
+ {
+  "date": "2026-09-10",
+  "rows_read": 109294584,
+  "rows_written": 1477700,
+  "db_bytes": 437964800
+ },
+ {
+  "date": "2026-09-11",
+  "rows_read": 119959062,
+  "rows_written": 1841144,
+  "db_bytes": 498307070
+ },
+ {
+  "date": "2026-09-12",
+  "rows_read": 356183343,
+  "rows_written": 8589134,
+  "db_bytes": 1315553300
+ },
+ {
+  "date": "2026-09-13",
+  "rows_read": 708572607,
+  "rows_written": 2556058,
+  "db_bytes": 1388396500
+ },
+ {
+  "date": "2026-09-14",
+  "rows_read": 839634603,
+  "rows_written": 3118009,
+  "db_bytes": 1487978500
+ },
+ {
+  "date": "2026-09-15",
+  "rows_read": 691454672,
+  "rows_written": 1675406,
+  "db_bytes": 1539055600
+ },
+ {
+  "date": "2026-09-16",
+  "rows_read": 706726146,
+  "rows_written": 1669354,
+  "db_bytes": 1591550000
+ },
+ {
+  "date": "2026-09-17",
+  "rows_read": 703610621,
+  "rows_written": 1501480,
+  "db_bytes": 1635737600
+ },
+ {
+  "date": "2026-09-18",
+  "rows_read": 727629789,
+  "rows_written": 1441102,
+  "db_bytes": 1674752000
+ },
+ {
+  "date": "2026-09-19",
+  "rows_read": 734270409,
+  "rows_written": 1557796,
+  "db_bytes": 1707528200
+ },
+ {
+  "date": "2026-09-20",
+  "rows_read": 445086368,
+  "rows_written": 3204867,
+  "db_bytes": 1778335700
+ },
+ {
+  "date": "2026-09-21",
+  "rows_read": 499654479,
+  "rows_written": 3704909,
+  "db_bytes": 1980813300
+ },
+ {
+  "date": "2026-09-22",
+  "rows_read": 637782786,
+  "rows_written": 3221910,
+  "db_bytes": 2171060200
+ },
+ {
+  "date": "2026-09-23",
+  "rows_read": 898003598,
+  "rows_written": 4987372,
+  "db_bytes": 2502430700
+ },
+ {
+  "date": "2026-09-24",
+  "rows_read": 997906261,
+  "rows_written": 3392702,
+  "db_bytes": 2686296000
+ },
+ {
+  "date": "2026-09-25",
+  "rows_read": 1072230592,
+  "rows_written": 2646266,
+  "db_bytes": 2769612800
+ },
+ {
+  "date": "2026-09-26",
+  "rows_read": 1202536447,
+  "rows_written": 3892493,
+  "db_bytes": 3018743800
+ },
+ {
+  "date": "2026-09-27",
+  "rows_read": 1434522955,
+  "rows_written": 4194630,
+  "db_bytes": 3255189500
+ },
+ {
+  "date": "2026-09-28",
+  "rows_read": 1607230719,
+  "rows_written": 2919492,
+  "db_bytes": 3311931400
+ },
+ {
+  "date": "2026-09-29",
+  "rows_read": 1527814722,
+  "rows_written": 2806443,
+  "db_bytes": 3351244800
+ },
+ {
+  "date": "2026-09-30",
+  "rows_read": 1068539139,
+  "rows_written": 4549803,
+  "db_bytes": 3351519200
+ },
+ {
+  "date": "2026-10-01",
+  "rows_read": 1035250331,
+  "rows_written": 1940565,
+  "db_bytes": 3329368000
+ },
+ {
+  "date": "2026-10-02",
+  "rows_read": 999993094,
+  "rows_written": 1979501,
+  "db_bytes": 3356610600
+ },
+ {
+  "date": "2026-10-03",
+  "rows_read": 867414297,
+  "rows_written": 1953966,
+  "db_bytes": 3382268000
+ },
+ {
+  "date": "2026-10-04",
+  "rows_read": 821091773,
+  "rows_written": 1793802,
+  "db_bytes": 3413672000
+ }
+]

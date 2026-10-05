@@ -1,0 +1,11 @@
+=== what came BEFORE the big moves (|move| > 2x usual) ===
+MARKET big days 117 (up 62, down 55) | preceded by a quiet day: 23% (all days: 35%) | quiet->big went down 15/27
+BTC    big days 118 (up 67, down 51) | preceded by a quiet day: 23% (all days: 35%) | quiet->big went down 13/27
+ETH    big days 113 (up 61, down 52) | preceded by a quiet day: 23% (all days: 35%) | quiet->big went down 14/26
+SOL    big days 102 (up 60, down 42) | preceded by a quiet day: 25% (all days: 35%) | quiet->big went down 14/26
+
+=== direction of the break after a quiet day: does it follow the prior 7-day trend? ===
+MARKET quiet days 564: next-3d move agrees with prior-7d trend 48%; beta -0.00% t -0.02
+BTC    quiet days 564: next-3d move agrees with prior-7d trend 46%; beta -0.22% t -1.20
+ETH    quiet days 564: next-3d move agrees with prior-7d trend 45%; beta -0.31% t -1.11
+SOL    quiet days 564: next-3d move agrees with prior-7d trend 47%; beta -0.40% t -1.22

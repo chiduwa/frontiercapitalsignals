@@ -1,0 +1,63 @@
+=== era split: t on rel (relative volume) ===
+MARKET  big2022: +2.49  size2022: +2.18  swing32022: +2.93  big2024: +2.50  size2024: +2.74  swing32024: +0.86
+BTC  big2022: +2.54  size2022: +3.44  swing32022: +2.62  big2024: +2.06  size2024: +2.02  swing32024: +0.19
+ETH  big2022: +2.50  size2022: +1.51  swing32022: +2.99  big2024: +2.74  size2024: +3.29  swing32024: +0.65
+SOL  big2022: +2.17  size2022: +1.96  swing32022: +2.11  big2024: +2.79  size2024: +0.81  swing32024: +1.40
+
+=== low60 next-7d return by year (raw mean %, share of days below 60B) ===
+MARKET
+low60   0.0   1.0  share_low
+ts                          
+2022  -2.65  0.10       0.31
+2023   1.87  1.29       0.82
+2024   1.42  1.23       0.24
+2025  -0.34  2.86       0.04
+2026  -0.73  1.85       0.21
+  low60 -> next-7d return, year-demeaned: beta +0.96%  t +1.46
+BTC
+low60   0.0   1.0  share_low
+ts                          
+2022  -2.79  0.23       0.31
+2023   2.52  1.70       0.82
+2024   1.47  1.72       0.24
+2025  -0.27  2.92       0.04
+2026  -0.75  1.93       0.21
+  low60 -> next-7d return, year-demeaned: beta +1.08%  t +1.54
+
+=== quiet streaks: consecutive days with relative volume in its bottom third (trailing cut) ===
+MARKET
+     days  big_rate  move_vs_usual  swing7
+sb                                        
+0    1162     0.085          0.561   0.883
+1     226     0.049          0.466   0.851
+2     155     0.084          0.607   0.802
+3-4   100     0.010          0.419   0.652
+5+     84     0.024          0.436   0.708
+  within quiet spells, each extra quiet day -> big-move prob -0.21 pts, t -0.98 (n=565)
+BTC
+     days  big_rate  move_vs_usual  swing7
+sb                                        
+0    1162     0.086          0.512   0.844
+1     226     0.049          0.453   0.751
+2     155     0.090          0.621   0.783
+3-4   100     0.000          0.444   0.689
+5+     84     0.024          0.437   0.610
+  within quiet spells, each extra quiet day -> big-move prob -0.18 pts, t -0.85 (n=565)
+ETH
+     days  big_rate  move_vs_usual  swing7
+sb                                        
+0    1162     0.082          0.539   0.858
+1     226     0.049          0.423   0.837
+2     155     0.071          0.591   0.789
+3-4   100     0.020          0.387   0.709
+5+     84     0.024          0.465   0.696
+  within quiet spells, each extra quiet day -> big-move prob -0.24 pts, t -1.04 (n=565)
+SOL
+     days  big_rate  move_vs_usual  swing7
+sb                                        
+0    1162     0.072          0.632   0.921
+1     226     0.053          0.574   0.821
+2     155     0.052          0.624   0.843
+3-4   100     0.040          0.480   0.823
+5+     84     0.024          0.545   0.809
+  within quiet spells, each extra quiet day -> big-move prob -0.43 pts, t -3.09 (n=565)

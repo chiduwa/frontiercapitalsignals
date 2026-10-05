@@ -1,0 +1,14 @@
+ asset                             model    n  qlike_change_pct      t  t_first_half  t_second_half
+MARKET      GARCH+weekday + total volume 1436            -2.644 -1.603        -1.324         -0.910
+   BTC      GARCH+weekday + total volume 1438            -3.214 -2.566        -2.449         -1.299
+   BTC        GARCH+weekday + own volume 1438            -4.103 -3.531        -2.563         -2.430
+   BTC     GARCH+weekday + own AND total 1438            -2.911 -1.899        -1.042         -1.816
+   BTC total volume ON TOP of own volume 1438             1.243  1.248           NaN            NaN
+   ETH      GARCH+weekday + total volume 1438             0.465  0.329         0.191          0.299
+   ETH        GARCH+weekday + own volume 1438            -0.185 -0.155        -0.578          0.364
+   ETH     GARCH+weekday + own AND total 1438             1.583  0.939         0.795          0.501
+   ETH total volume ON TOP of own volume 1438             1.771  1.704           NaN            NaN
+   SOL      GARCH+weekday + total volume 1438            -1.369 -1.114        -1.014         -0.508
+   SOL        GARCH+weekday + own volume 1438            -2.907 -2.797        -3.374         -0.527
+   SOL     GARCH+weekday + own AND total 1438            -2.841 -2.644        -3.200         -0.516
+   SOL total volume ON TOP of own volume 1438             0.068  0.153           NaN            NaN

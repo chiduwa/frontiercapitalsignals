@@ -1,0 +1,78 @@
+/opt/anaconda3/lib/python3.13/site-packages/pandas/core/arraylike.py:399: RuntimeWarning: divide by zero encountered in log
+  result = getattr(ufunc, method)(*inputs, **kwargs)
+/opt/anaconda3/lib/python3.13/site-packages/pandas/core/arraylike.py:399: RuntimeWarning: divide by zero encountered in log
+  result = getattr(ufunc, method)(*inputs, **kwargs)
+/opt/anaconda3/lib/python3.13/site-packages/pandas/core/arraylike.py:399: RuntimeWarning: divide by zero encountered in log
+  result = getattr(ufunc, method)(*inputs, **kwargs)
+/opt/anaconda3/lib/python3.13/site-packages/pandas/core/arraylike.py:399: RuntimeWarning: divide by zero encountered in log
+  result = getattr(ufunc, method)(*inputs, **kwargs)
+glitch days blanked since 2022-01-10: 1
+
+=== raw: low-volume days vs the rest ===
+ asset  flag  value  days  mean_abs_move_pct  move_vs_usual  big_move_rate  next1_mean_pct  next7_mean_pct  next7_up_share
+MARKET low60      0  1157              1.942          0.571          0.076          -0.005          -0.355           0.500
+MARKET low60      1   569              1.502          0.494          0.067           0.078           1.154           0.541
+MARKET  lowq      0  1290              1.819          0.553          0.082          -0.001           0.168           0.526
+MARKET  lowq      1   360              1.557          0.481          0.044           0.104           0.007           0.464
+   BTC low60      0  1157              1.928          0.543          0.075          -0.009          -0.322           0.500
+   BTC low60      1   570              1.567          0.444          0.070           0.144           1.481           0.554
+   BTC  lowq      0  1290              1.842          0.513          0.082          -0.005           0.250           0.519
+   BTC  lowq      1   361              1.541          0.477          0.044           0.198           0.257           0.504
+   ETH low60      0  1157              2.698          0.539          0.073          -0.091          -0.853           0.476
+   ETH low60      1   570              1.985          0.471          0.063           0.156           1.471           0.542
+   ETH  lowq      0  1290              2.511          0.529          0.080          -0.065          -0.159           0.494
+   ETH  lowq      1   361              2.130          0.441          0.042           0.186           0.114           0.507
+   SOL low60      0  1157              3.554          0.625          0.063          -0.114          -1.345           0.461
+   SOL low60      1   570              3.285          0.579          0.065           0.186           2.353           0.521
+   SOL  lowq      0  1290              3.545          0.632          0.071           0.009           0.063           0.496
+   SOL  lowq      1   361              2.997          0.526          0.042          -0.013          -0.361           0.424
+
+=== HAC regressions (controls: recent vol, last move, weekday) ===
+asset          BTC   ETH  MARKET   SOL
+pred  y                               
+low60 big     0.80 -0.31    0.28  0.74
+      dir1    0.67  1.29    0.41  1.26
+      dir3    1.65  1.79    1.31  1.71
+      dir7    2.88  3.01    2.54  2.62
+      size   -2.20 -0.38   -1.27  0.20
+      swing3 -1.55 -1.13   -1.38 -1.31
+      swing7 -0.55  0.05   -0.49 -0.41
+lowq  big    -1.97 -2.76   -2.23 -1.74
+      dir1    0.58  0.84    0.26 -0.17
+      dir3    0.34  0.95    0.18 -0.16
+      dir7   -0.02  0.45   -0.43 -0.58
+      size   -1.66 -1.24   -1.75 -1.06
+      swing3 -1.16 -2.26   -2.05 -1.74
+      swing7 -1.57 -1.46   -2.22 -1.67
+rel   big     3.23  3.68    3.44  3.41
+      dir1    1.11  0.50    1.44  1.03
+      dir3    1.21  0.35    1.53  1.14
+      dir7    0.88  0.02    1.13  0.68
+      size    3.53  3.35    3.40  1.82
+      swing3  1.81  2.15    2.49  2.49
+      swing7  1.29  0.64    1.73  1.91
+
+betas:
+asset            BTC     ETH  MARKET     SOL
+pred  y                                     
+low60 big     0.0119 -0.0044  0.0040  0.0114
+      dir1    0.0939  0.2209  0.0536  0.3367
+      dir3    0.5873  0.7743  0.4313  1.2315
+      dir7    1.9999  2.5776  1.6732  4.0820
+      size   -0.1502 -0.0283 -0.0862  0.0126
+      swing3 -0.1051 -0.0782 -0.0910 -0.0711
+      swing7 -0.0425  0.0035 -0.0359 -0.0295
+lowq  big    -0.0348 -0.0487 -0.0376 -0.0284
+      dir1    0.1104  0.2040  0.0468 -0.0539
+      dir3    0.1444  0.4773  0.0685 -0.1164
+      dir7   -0.0099  0.3814 -0.2682 -0.7751
+      size   -0.1581 -0.1123 -0.1428 -0.0903
+      swing3 -0.0855 -0.1566 -0.1475 -0.1095
+      swing7 -0.1204 -0.1101 -0.1631 -0.1278
+rel   big     0.0756  0.0962  0.0839  0.0931
+      dir1    0.2630  0.1560  0.3192  0.5397
+      dir3    0.6479  0.2251  0.7538  1.2904
+      dir7    0.9328  0.0257  1.1471  1.6035
+      size    0.3749  0.3647  0.3572  0.1782
+      swing3  0.1655  0.2061  0.2279  0.2032
+      swing7  0.1432  0.0752  0.1806  0.1966
