@@ -146,7 +146,7 @@ test('a pass that reaches too few coins is refused, so the archive-backed run is
   const coins = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`C${i}`, 'binance']));
   await assert.rejects(topUpLatestDay(archive({ coins }), { nowMs: NOW,
     fetchBinance: async (s) => { if (Number(s.slice(1)) < 3) throw new Error('HTTP 503'); return fresh(s); },
-    fetchYahoo: async () => { throw new Error('unused'); } }), /early pass refused: 7 of 10/);
+    fetchYahoo: async () => { throw new Error('unused'); } }), e => /early pass refused: 7 of 10/.test(e.message) && e.refused === true);
   assert.ok(EARLY.minCoverage >= 0.8);
 });
 

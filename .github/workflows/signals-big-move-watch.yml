@@ -51,7 +51,10 @@ jobs:
         run: |
           python test-big-move-watch.py
           node --test test-big-move-watch-io.mjs
-      - name: Read every crypto series and the watch's open rows
+      # A refused early pass sets refused=true and ends the job as a skip; the
+      # run after Signals Daily issues the watch instead.
+      - name: Read every crypto series
+        id: series
         working-directory: signals-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -60,13 +63,22 @@ jobs:
         run: |
           mkdir -p reports/big-move
           node scripts/big-move-watch-io.mjs series reports/big-move/series.json reports/big-move/series-meta.json
-          node scripts/big-move-watch-io.mjs export reports/big-move/state.json
+      - name: Read the watch's open rows
+        if: steps.series.outputs.refused != 'true'
+        working-directory: signals-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+        run: node scripts/big-move-watch-io.mjs export reports/big-move/state.json
       - name: Score, rank and write today's watch
+        if: steps.series.outputs.refused != 'true'
         working-directory: signals-worker
         env:
           OPENBLAS_NUM_THREADS: '1'
         run: python scripts/big-move-watch.py --series reports/big-move/series.json --series-meta reports/big-move/series-meta.json --state reports/big-move/state.json --output reports/big-move/results.json
       - name: Write to D1 and push the digest
+        if: steps.series.outputs.refused != 'true'
         working-directory: signals-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -75,7 +87,7 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: node scripts/big-move-watch-io.mjs import reports/big-move/results.json
       - name: Preserve results, including failed runs
-        if: always()
+        if: always() && steps.series.outputs.refused != 'true'
         uses: actions/upload-artifact@v7
         with:
           name: big-move-watch-${{ github.run_id }}

@@ -9,7 +9,7 @@
 //
 // A watch row is written once, before its two days have passed, and scored
 // in place later; nothing here can rewrite what was flagged.
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, appendFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { d1, d1Batch, chunk, readAllDailyBars, pageAll } from './d1-client.mjs';
@@ -94,8 +94,8 @@ export async function topUpLatestDay(rows, {
   meta.toppedUp = added.length;
   meta.provisional = added.length > 0;
   if (added.length < EARLY.minCoverage * meta.eligible) {
-    throw new Error(`early pass refused: ${added.length} of ${meta.eligible} coins have a completed ${target} close `
-      + `(first misses: ${meta.skipped.slice(0, 5).join('; ')}); the run after Signals Daily will issue the watch`);
+    throw Object.assign(new Error(`early pass refused: ${added.length} of ${meta.eligible} coins have a completed ${target} close `
+      + `(first misses: ${meta.skipped.slice(0, 5).join('; ')}); the run after Signals Daily will issue the watch`), { refused: true });
   }
   return { rows: rows.concat(added), meta };
 }
@@ -269,7 +269,17 @@ async function main() {
   const env = { CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID,
     FCS_D1_DATABASE_ID: process.env.FCS_D1_DATABASE_ID };
   if (cmd === 'series') {
-    const { series, meta } = await loadSeries(env);
+    // A refused early pass is the designed hand-off to the archive-backed run,
+    // not a fault: it ends the job as a skip, so it no longer reads as a failed
+    // run (2026-10-03 and 10-04, 186 of 242 while Yahoo's bars were not final).
+    const loaded = await loadSeries(env).catch(e => {
+      if (!e.refused) throw e;
+      console.log(`::notice title=Early pass skipped::${e.message}`);
+      return null;
+    });
+    if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `refused=${loaded ? 'false' : 'true'}\n`);
+    if (!loaded) return;
+    const { series, meta } = loaded;
     await writeFile(a, JSON.stringify(series));
     if (b) await writeFile(b, JSON.stringify(meta));
     console.log(`big-move series: ${Object.keys(series).length} coins`
