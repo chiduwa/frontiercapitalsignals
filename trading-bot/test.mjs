@@ -11,6 +11,7 @@ process.env.ROI_EXIT_POLICY = 'true'; // exercise the opt-in policy without exch
 process.env.TOURNAMENT_TRADING = 'true'; // the operator switch, on in production since 2026-09-24
 await import('./test-policy-replay.mjs');
 await import('./test-policy-history.mjs');
+await import('./test-pump-fade.mjs');
 
 const { config, parseBoolean } = await import('./src/config.mjs');
 const {

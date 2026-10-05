@@ -74,4 +74,5 @@ INSERT OR IGNORE INTO d1_migrations (name) VALUES
   ('0057_coin_rotation.sql'),
   ('0058_drop_redundant_technique_votes_run_at_index.sql'),
   ('0059_oi_tick_without_rowid.sql'),
-  ('0060_surge_market_cap.sql');
+  ('0060_surge_market_cap.sql'),
+  ('0061_pump_fade_shadow.sql');

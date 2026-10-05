@@ -1,0 +1,17 @@
+[Unit]
+Description=Record pump-fade shadow shorts just after each hourly bar closes
+Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/signals-worker/docs/PUMP_FADE_EVIDENCE.md
+
+[Timer]
+# 90 seconds after every hour, so the bar that just closed is final on
+# Binance. The replay entered at that close; a one-hour-late entry was
+# measured separately, and the run records at most one bar late.
+# In UTC, not the host's local clock, so a daylight-saving change can never
+# shift or double this schedule (test.mjs pins it).
+OnCalendar=*:01:30 UTC
+AccuracySec=5s
+Persistent=false
+Unit=fcs-pump-fade.service
+
+[Install]
+WantedBy=timers.target

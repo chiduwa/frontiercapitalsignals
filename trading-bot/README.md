@@ -265,6 +265,50 @@ no service restart or timer change is needed. Verify `bot_entry_risk`,
 resting order is not proof of a fill. This release does not change the server's
 activation settings automatically.
 
+## Pump-fade shadow ledger (2026-10-05)
+
+`src/pump-fade.mjs`, run hourly at :01:30 UTC by `fcs-pump-fade.timer`.
+**Shadow only: it records trades and places none.** The file has no order code
+and imports none.
+
+The owner asked for the bot to trade the "now reversing" post-move alert. A
+two-year replay of that alert (2,302 of them, 258 perp coins) found no edge
+either way: fading it lost 0.53% a trade. The same replay found the ordinary
+pump alert falling back afterwards. That is a coin up 10% or more over 6
+hours, with the 1h, 3h, 6h and 1d changes all positive. Shorting it for 24
+hours with a 15% stop made +0.25% a trade after 0.15% costs (t = 4.3,
+clustered by day). It held in both halves of the period and in both listing
+cohorts. Funding was not in that test. Evidence:
+`signals-worker/docs/PUMP_FADE_EVIDENCE.md`.
+
+Each run:
+
+- **Records** the day's first aligned pump per coin at the perp's mark price
+  into D1 `pump_fade_shadow` (migration 0061). It uses the same rule and the
+  same once-per-UTC-day dedup as the alert. If a coin's first qualifying hour
+  was "now reversing", it is skipped for that day. A missed run records one
+  bar late and says so (`lag_bars`); anything later is skipped.
+- **Settles** every record whose 24-hour hold has finished. It uses 5-minute
+  bars and a 15% stop, filled at the bar's open when the price gaps through
+  it. It adds the funding a short would have received or paid, and 0.15%
+  costs.
+
+`PUMP_FADE_MODE=off` stops it; any value other than `shadow` or `off` is
+refused.
+
+Read the record with:
+
+```bash
+cd /opt/fcs/trading-bot && sudo systemd-run --quiet --wait --pipe -p User=fcsbot \
+  -p EnvironmentFile=/etc/fcs-trading-bot.env -p WorkingDirectory=/opt/fcs/trading-bot \
+  /usr/bin/node src/pump-fade.mjs --report
+```
+
+**Going live** is a separate change, made on this ledger's forward record. It
+would add floor-size orders, a stop placed on the exchange, a 24-hour time
+exit, the futures runtime lock, and a cap on concurrent positions. One
+market-wide day in the replay had 136 signals.
+
 ## Tournament-promoted per-asset models (2026-09-24)
 
 A third authorized source, `tournament-v1`, switched on by the operator with
