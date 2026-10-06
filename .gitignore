@@ -57,6 +57,9 @@ next-env.d.ts
 /signals-worker/reports/big-move/
 /signals-worker/reports/rotation/
 /signals-worker/reports/day-zones/
+/signals-worker/reports/mean-median/
+/signals-worker/reports/confusion/
+/signals-worker/docs/research-*/scripts/__pycache__/
 /signals-worker/__pycache__/
 /signals-worker/scripts/__pycache__/
 

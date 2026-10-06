@@ -230,6 +230,72 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual(max(w['groupShare'], key=w['groupShare'].get), 'momentum')
 
 
+class CallMetrics(unittest.TestCase):
+    """The precision / NPV / sensitivity / specificity readout (2026-10-06):
+    counted right, honest about a model that always says up, and never part
+    of a promotion decision."""
+
+    def test_counts_on_a_hand_example(self):
+        m = mt.call_metrics([(0.6, 1.0), (0.6, -1.0), (0.4, -1.0), (0.4, 2.0), (0.7, 3.0)])
+        self.assertEqual((m['n'], m['upRate'], m['callsUp']), (5, 0.6, 0.6))
+        self.assertEqual((m['precision'], m['npv']), (round(2 / 3, 4), 0.5))
+        self.assertEqual((m['sensitivity'], m['specificity']), (round(2 / 3, 4), 0.5))
+        self.assertAlmostEqual(m['informedness'], round(2 / 3, 4) + 0.5 - 1, places=4)
+        self.assertIsNone(mt.call_metrics([]))
+        # P(up) of exactly 0.5 says nothing, so it is not an "up" call.
+        e = mt.call_metrics([(0.6, 1.0), (0.6, -1.0), (0.4, -1.0), (0.4, 2.0), (0.7, 3.0), (0.5, 1.0)])
+        self.assertEqual((e['callsUp'], e['sensitivity'], e['npv']), (0.5, 0.5, round(1 / 3, 4)))
+
+    def test_a_model_that_always_says_up_shows_no_skill(self):
+        rng = np.random.default_rng(3)
+        m = mt.call_metrics([(0.55, float(r)) for r in rng.normal(size=400)])
+        self.assertEqual((m['sensitivity'], m['specificity'], m['informedness']), (1.0, 0.0, 0.0))
+        self.assertEqual(m['precision'], m['upRate'])          # precision is just the up-rate
+        self.assertIsNone(m['npv'])                            # it never said down
+
+    def test_precision_and_npv_lifts_always_share_a_sign(self):
+        rng = np.random.default_rng(4)
+        for _ in range(300):
+            n = int(rng.integers(20, 200))
+            m = mt.call_metrics(list(zip(rng.random(n), rng.normal(size=n))))
+            if m['precision'] is None or m['npv'] is None: continue
+            a, b = m['precision'] - m['upRate'], m['npv'] - (1 - m['upRate'])
+            if abs(a) > 2e-4 and abs(b) > 2e-4: self.assertEqual(np.sign(a), np.sign(b))
+
+    def test_the_summary_reports_forward_calls_for_direction_slots_only(self):
+        rows = synthetic_rows(n=260)
+        asof = rows[-1]['date']
+        for r in rows:
+            if r['date'] == asof: r['target'] = None
+        data = {'symbols': ['A'], 'rows': rows, 'klines': {}}
+        bench, good = mt.BENCHMARKS['direction']['id'], mt.candidate_grid('direction')[0]
+        start = mt.add_days(asof, -70)
+        t = mt.Tournament(data, [], [], asof, '2026-01-01T00:00:00Z')
+        for target, h in mt.SLOTS:
+            for sym in [mt.POOLED, 'A']:
+                if t.slot_symbols(sym, target): t.register(mt.BENCHMARKS[target], sym, h, 'benchmark', 'production method')
+        for h in (1, 7):
+            t.register(good, 'A', h, 'challenger', 'test')['epoch_start'] = start
+        mag = t.register(mt.candidate_grid('magnitude')[0], 'A', 1, 'challenger', 'test'); mag['epoch_start'] = start
+        ledger = []
+        for k in range(70):
+            d = mt.add_days(start, k)
+            for h in (1, 7):
+                for mid, p in ((good['id'], 0.6 if k % 2 else 0.4), (bench, 0.55)):
+                    row = ledger_row(mid, 'A', h, d, 0.25); row['forecast_json'] = json.dumps({'pUp': p}); ledger.append(row)
+        t2 = mt.Tournament(data, list(t.registry.values()), ledger, asof, '2026-01-01T00:00:00Z')
+        s = t2.summary()['assets']['A']
+        c1 = s['direction:1']['challengers'][0]['calls']
+        matured = [mt.add_days(start, k) for k in range(70) if (('A', 1, mt.add_days(start, k)) in t2.outcome)]
+        self.assertEqual(c1['n'], len(matured))
+        self.assertAlmostEqual(c1['callsUp'], round(sum(1 for d in matured if (mt.day(d) - mt.day(start)) // mt.DAY % 2) / len(matured), 4), places=4)
+        self.assertEqual(s['direction:1']['incumbentCalls']['sensitivity'], 1.0)    # the base rate says up every day here
+        weekly = [mt.add_days(start, k) for k in range(0, 70, 7) if ('A', 7, mt.add_days(start, k)) in t2.outcome]
+        self.assertEqual(s['direction:7']['challengers'][0]['calls']['n'], len(weekly))   # one 7-day outcome per week, never 70
+        self.assertLess(len(weekly), 11)
+        self.assertNotIn('calls', s['magnitude:1']['challengers'][0])
+
+
 class Stocks(unittest.TestCase):
     def rows(self, symbol, dates, h_list, seed):
         rng = np.random.default_rng(seed)

@@ -6,13 +6,32 @@
 // top/near top or bottom/near bottom for the asset has been detected. figure
 // out the best time to use as a reference".
 //
-// The forecast, chosen on 2018-26 hourly bars of the eight coins:
-//   top    = today's 00:00 UTC open x exp(U^),  U^ = median up-move from the open
-//   bottom = today's 00:00 UTC open x exp(-D^), D^ = median down-move
-// over the last 60 UTC days, each scaled by (the last 24 hours' hourly
-// volatility / its median before those 60 days) ^ 0.5. The scaling cut the
-// error by about 3% in both periods; window length (30/60/90) and a weekday
-// factor changed little. Calibrated: about half of days stay inside each side.
+// The forecast (day-zones-v3, 2026-10-06, docs/DAY_ZONE_METHODS_AND_CONFUSION.md):
+//   top    = today's 00:00 UTC open x exp(U^),  bottom = open x exp(-D^)
+//   U^ = (median up-move from the open over the last 60 UTC days)
+//        x exp(a + b . x),  D^ likewise with its own coefficients,
+// a median (quantile) regression pooled over the eight coins, fitted on every
+// coin-day 2018-26, of log(the day's move / its 60-day median) on: the last
+// 24 hours' volatility vs usual, 24h volume vs its 30-day median, yesterday's
+// move in typical moves, the last 7 days' moves vs the median, how far the
+// 60-day MEAN sits above the median (a fat recent tail), and the weekday.
+// Asked 2026-10-06 to try the mean, the "flaw of averages" and simulation
+// instead of the median. Judged on 2019-26, every model fitted only on days
+// before the ones it forecast:
+//   - the plain mean: 9-10% WORSE (t +14/+15). It sits above the median, so
+//     65% of days stay inside it: a different level, not a better one;
+//   - Monte Carlo days stitched from past hours or 6-hour blocks: 1.5-5% worse
+//     (stitching breaks up trend days); a Brownian-motion (reflection
+//     principle) level from EWMA or GARCH volatility: -1.5% to +0.2%, mixed;
+//   - this regression: 1.7% better in 2019-22 (t -3.7) and 2.4% in 2023-26
+//     (t -5.2), better on every coin; fitted on 2019-22 alone and frozen, still
+//     2.4% better on 2023-26 (t -5.2), HYPE included. The mean helps as an
+//     INPUT (the mean/median gap), not as a replacement for the median.
+//   - one model per coin was worse than this pooled one (picking each coin's
+//     best method on 2019-22 scored 0.971 on 2025-26 vs 0.965 for this).
+// Calibrated: 49-50% of days stay inside each side. It replaces v2 (60-day
+// median x (24h vol / usual)^0.5 x the 2026-10-02 activity multiplier), whose
+// volume and yesterday's-move inputs it keeps, refitted.
 //
 // The reference hour: midnight UTC. No hour beat it significantly (16-20 UTC
 // were 1.5-3% better, t -0.1 to -0.7); 08 and 14 UTC were measurably worse.
@@ -28,27 +47,40 @@
 // Binance spot lists too recently, HYPE for now), all public and keyless.
 import { BINANCE_GLOBAL_BASE, FAVORITE_SYMBOLS } from '../worker.js';
 
-export const DAY_ZONE_VERSION = 'day-zones-v2';
+export const DAY_ZONE_VERSION = 'day-zones-v3';
 export const DAY_ZONE = Object.freeze({
   windows: 60,           // past UTC days in the median
-  volPower: 0.5,         // partial adjustment toward the last 24 hours' volatility
   refHourUtc: 0,
   historyDays: 62,       // 60 windows, the 24 hours before the oldest, and today
-  // Activity (asked 2026-10-02: "look out for unusual activity ... bake that
-  // into the forecast or the notification"). Measured on the 8 coins: the day's
-  // range ran larger than the forecast after heavy volume (t 4.8 / 3.1 in
-  // 2018-22 / 2023-26) and after a big move (t 9.1 / 7.0); on the busiest tenth
-  // of days the plain levels were broken 56-57% of the time instead of 50%.
-  // band x exp(volumeWeight x log(24h volume / its 30-day median)
-  //            + moveWeight x |yesterday's move| in typical moves),
-  // fitted on 2018-22: the busiest tenth back to 52%. Open interest and taker
-  // flow did not move the range or tilt it up or down reliably (t 1.1-1.8 at
-  // best, signs that change between halves), so they are not in it.
-  volumeWeight: 0.04,
-  moveWeight: 0.025,
   volumeDays: 30,
-  typicalDays: 60
+  typicalDays: 60,
+  lastWeekDays: 7,
+  // Extrapolation guard: no level beyond 4x its 60-day median move (0.6% of
+  // coin-days). Uncapped, the top 1% of adjustments (median 3.6x) left 55% of
+  // those days inside instead of 50% and erred 14% more than v2 there. On
+  // 2019-22 the cap ties (0.9782 vs 0.9779 of v2's error) with a steadier gain
+  // (t -8.4 vs -7.5); on 2023-26 0.973 vs 0.977. A guard, not a fitted value.
+  maxVsMedian: 4,
+  // log(move / 60-day median) = const + vol x log(last 24h hourly vol / its
+  // 60-day median) + volume x log(24h volume / its 30-day median) + move x
+  // |yesterday's move| in typical moves + lastWeek x log(mean of the last 7
+  // days' moves / median) + tailGap x log(60-day mean / median) + the weekday
+  // (Monday..Saturday against Sunday). Exact median regression (HiGHS) on
+  // 18,496 coin-days through 2026-10-05; research-2026-10-06-mean-median-sim/
+  // scripts/ablate.py prints these. Activity (2026-10-02) is still in it: heavy
+  // volume widens the DOWNSIDE most (0.27 vs -0.04 up), recent volatility the
+  // upside (0.40 vs 0.05). Open interest and taker flow stay out (no reliable
+  // effect, docs/DAY_ZONES_AND_BOXES.md 2b).
+  model: Object.freeze({
+    up: Object.freeze({ const: -0.3057899399322884, vol: 0.40248427693923927, volume: -0.03532565679523615, move: 0.07292214532219643,
+      lastWeek: 0.22890500618962445, tailGap: 0.4147058930392093,
+      weekday: Object.freeze([0.24836784234710008, -0.0571291043738949, 0.13782809159545165, -0.05462736140513508, 0.06838191381926845, -0.1722126646214736, 0]) }),
+    down: Object.freeze({ const: -0.37723122664871384, vol: 0.047470318693529696, volume: 0.26516647457934894, move: 0.05795785859689604,
+      lastWeek: 0.32347251683324874, tailGap: 0.6779763611663253,
+      weekday: Object.freeze([0.1838254199799428, 0.08982304041147476, 0.06884106705971033, 0.1069795808852183, -0.01957961101028538, -0.44618034319605865, 0]) })
+  })
 });
+// weekday[] is indexed Monday = 0 .. Sunday = 6 (the study's pandas dayofweek).
 
 const HOUR = 3600 * 1000;
 const DAY = 24 * HOUR;
@@ -94,7 +126,7 @@ function preWindowVol(byTime, startMs) {
  * history is missing. Every input is from before today's open except the
  * open itself.
  */
-export function dayZoneForecast(bars, nowMs, { windows = DAY_ZONE.windows, volPower = DAY_ZONE.volPower } = {}) {
+export function dayZoneForecast(bars, nowMs, { windows = DAY_ZONE.windows, model = DAY_ZONE.model } = {}) {
   const byTime = new Map();
   for (const b of bars || []) {
     if ([b.t, b.o, b.h, b.l, b.c].every(Number.isFinite) && b.o > 0 && b.l > 0) byTime.set(b.t, b);
@@ -119,12 +151,14 @@ export function dayZoneForecast(bars, nowMs, { windows = DAY_ZONE.windows, volPo
     past.push({ up: Math.log(hi / o), down: Math.log(o / lo), vol: preWindowVol(byTime, d), qPrev: preWindowVolume(byTime, d), cum });
   }
   if (past.length < windows) return null;
-  const medUp = median(past.map(p => p.up)), medDown = median(past.map(p => p.down));
+  const ups = past.map(p => p.up), downs = past.map(p => p.down);
+  const medUp = median(ups), medDown = median(downs);
+  if (!(medUp > 0) || !(medDown > 0)) return null;
   const typical = median(past.map(p => p.vol));
   const now = preWindowVol(byTime, today);
-  const scale = Number.isFinite(now) && typical > 0 ? Math.pow(now / typical, volPower) : 1;
-  // Activity at the open: yesterday's volume against its norm, yesterday's move
-  // against a typical day. A missing input counts as ordinary (no widening).
+  // The regression's inputs, every one known at today's open. A missing input
+  // counts as ordinary (0), as it did in the study.
+  const volLog = Number.isFinite(now) && now > 0 && typical > 0 ? Math.log(now / typical) : 0;
   const recentQ = past.slice(0, DAY_ZONE.volumeDays).map(p => p.qPrev).filter(Number.isFinite);
   const qNorm = recentQ.length >= 20 ? median(recentQ) : NaN;
   const qNow = preWindowVolume(byTime, today);
@@ -132,8 +166,17 @@ export function dayZoneForecast(bars, nowMs, { windows = DAY_ZONE.windows, volPo
   const typicalMove = median(past.slice(0, DAY_ZONE.typicalDays).map(p => (p.up + p.down) / 2));
   const ago = byTime.get(today - 25 * HOUR);
   const yesterdayMove = ago && ago.c > 0 && typicalMove > 0 ? Math.abs(Math.log(first.o / ago.c)) / typicalMove : 0;
-  const multiplier = Math.exp(DAY_ZONE.volumeWeight * volume24Log + DAY_ZONE.moveWeight * yesterdayMove);
-  const up = medUp * scale * multiplier, down = medDown * scale * multiplier;
+  const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const weekday = (new Date(today).getUTCDay() + 6) % 7;       // Monday = 0
+  const side = (m, med, xs) => {
+    const lastWeek = Math.log(mean(xs.slice(0, DAY_ZONE.lastWeekDays)) / med);
+    const tailGap = Math.log(mean(xs) / med);
+    const lin = m.const + m.vol * volLog + m.volume * volume24Log + m.move * yesterdayMove
+      + m.lastWeek * lastWeek + m.tailGap * tailGap + m.weekday[weekday];
+    return { move: med * Math.min(Math.exp(lin), DAY_ZONE.maxVsMedian), lastWeek, tailGap };
+  };
+  const U = side(model.up, medUp, ups), D = side(model.down, medDown, downs);
+  const up = U.move, down = D.move;
   if (!(up > 0) || !(down > 0)) return null;
   const open = first.o;
   // Volume so far today against the same hours' median over the 30 days before:
@@ -156,8 +199,12 @@ export function dayZoneForecast(bars, nowMs, { windows = DAY_ZONE.windows, volPo
     upLog: up, downLog: down,
     upPct: Math.expm1(up) * 100, downPct: (1 - Math.exp(-down)) * 100,
     medianUpPct: Math.expm1(medUp) * 100, medianDownPct: (1 - Math.exp(-medDown)) * 100,
-    volScale: scale, windows: past.length,
-    activity: { volume24Ratio: Math.exp(volume24Log), yesterdayMoveTypical: yesterdayMove, multiplier },
+    windows: past.length,
+    // Each level against the plain 60-day median move (1 = no adjustment).
+    vsMedian: { up: up / medUp, down: down / medDown },
+    inputs: { volRatio: Math.exp(volLog), lastWeekUp: Math.exp(U.lastWeek), lastWeekDown: Math.exp(D.lastWeek),
+      tailGapUp: Math.exp(U.tailGap), tailGapDown: Math.exp(D.tailGap), weekday },
+    activity: { volume24Ratio: Math.exp(volume24Log), yesterdayMoveTypical: yesterdayMove },
     volumeSoFar
   };
 }

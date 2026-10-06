@@ -7140,9 +7140,11 @@ export async function dispatchBestHourAlerts(env, cached, nowIso) {
 
 // ----------------------------- DAY ZONE ALERTS ------------------------------
 // Today's forecast top and bottom for each always-tracked coin, computed by the
-// hourly build (scripts/day-zones.mjs: 60-day median move from the 00:00 UTC
-// open, scaled by the last 24 hours' volatility) and checked here on every
-// 5-minute tick against the live price. Asked for 2026-10-02 as "notify me when
+// hourly build (scripts/day-zones.mjs, day-zones-v3: the 60-day median move
+// from the 00:00 UTC open, adjusted by a median regression on last week's
+// moves, the 60-day mean/median gap, the last 24 hours' volatility and volume,
+// yesterday's move and the weekday) and checked here on every 5-minute tick
+// against the live price. Asked for 2026-10-02 as "notify me when
 // a forecasted top/near top or bottom/near bottom is detected".
 //
 // Measured before it shipped (docs/DAY_ZONES_AND_BOXES.md): reaching the
@@ -7159,8 +7161,11 @@ const DAY_ZONE_ALERT_STATE_KEY = 'signals:day-zone-alert-state';
 const DAY_ZONE_ALERT_TTL_SECONDS = 30 * 3600;
 // The rule exactly as it runs here (hourly closes standing in for 5-minute
 // ticks, the eight coins, 2023-01..2026-10; 2018-22 gave the same picture),
-// with the activity-widened band, split by today's volume so far against the
-// same hours' norm (asked 2026-10-02 to account for unusual activity):
+// with the v3 band (2026-10-06; docs/research-2026-10-06-mean-median-sim
+// evidence.py, which reproduces v2's odds within a point), split by today's
+// volume so far against the same hours' norm (asked 2026-10-02 to account for
+// unusual activity). The better range forecast did not make the level a top:
+// near the high 30% vs 29% before, the same continuation after.
 // near = the day's extreme ended within a quarter of a typical move of the
 // alert price; further = how far the extreme went beyond the alert price, in
 // the band's own units (median, and 1 in 4 beyond p75); backInside = the coin
@@ -7170,16 +7175,16 @@ const DAY_ZONE_ALERT_TTL_SECONDS = 30 * 3600;
 // odds in both periods; open interest and taker flow did not.
 export const DAY_ZONE_EVIDENCE = Object.freeze({
   top: Object.freeze({
-    all: Object.freeze({ near: 0.29, backInside: 0.22, furtherMedian: 0.48, furtherP75: 0.99, driftBp: 25 }),
-    light: Object.freeze({ near: 0.35, backInside: 0.27, furtherMedian: 0.41, furtherP75: 0.82, driftBp: 6 }),
-    normal: Object.freeze({ near: 0.28, backInside: 0.20, furtherMedian: 0.49, furtherP75: 0.97, driftBp: 21 }),
-    heavy: Object.freeze({ near: 0.21, backInside: 0.15, furtherMedian: 0.67, furtherP75: 1.44, driftBp: 75 })
+    all: Object.freeze({ near: 0.30, backInside: 0.23, furtherMedian: 0.48, furtherP75: 0.95, driftBp: 23 }),
+    light: Object.freeze({ near: 0.35, backInside: 0.29, furtherMedian: 0.39, furtherP75: 0.81, driftBp: 4 }),
+    normal: Object.freeze({ near: 0.29, backInside: 0.19, furtherMedian: 0.50, furtherP75: 0.98, driftBp: 22 }),
+    heavy: Object.freeze({ near: 0.23, backInside: 0.16, furtherMedian: 0.67, furtherP75: 1.34, driftBp: 74 })
   }),
   bottom: Object.freeze({
-    all: Object.freeze({ near: 0.33, backInside: 0.25, furtherMedian: 0.45, furtherP75: 0.93, driftBp: 5 }),
-    light: Object.freeze({ near: 0.37, backInside: 0.29, furtherMedian: 0.39, furtherP75: 0.79, driftBp: 6 }),
-    normal: Object.freeze({ near: 0.30, backInside: 0.23, furtherMedian: 0.50, furtherP75: 1.06, driftBp: 3 }),
-    heavy: Object.freeze({ near: 0.28, backInside: 0.23, furtherMedian: 0.58, furtherP75: 1.11, driftBp: 10 })
+    all: Object.freeze({ near: 0.31, backInside: 0.25, furtherMedian: 0.45, furtherP75: 0.93, driftBp: 4 }),
+    light: Object.freeze({ near: 0.34, backInside: 0.29, furtherMedian: 0.41, furtherP75: 0.81, driftBp: 6 }),
+    normal: Object.freeze({ near: 0.30, backInside: 0.22, furtherMedian: 0.47, furtherP75: 0.99, driftBp: 0 }),
+    heavy: Object.freeze({ near: 0.28, backInside: 0.26, furtherMedian: 0.56, furtherP75: 1.14, driftBp: 12 })
   })
 });
 
@@ -7214,7 +7219,9 @@ export function dueDayZoneAlerts(dayZones, prices, nowIso, fired = {}) {
         movePct: (price / z.open - 1) * 100,
         unitLog: side === 'top' ? z.upLog : z.downLog,
         volumeGroup: volume.group, volumeRatio: volume.ratio,
-        widenedPct: z.activity && Number.isFinite(z.activity.multiplier) ? (z.activity.multiplier - 1) * 100 : 0
+        // The level against the plain 60-day median move (v3 zones carry it; an
+        // older payload does not, and then nothing is said about it).
+        vsMedianPct: z.vsMedian && Number.isFinite(z.vsMedian[side === 'top' ? 'up' : 'down']) ? (z.vsMedian[side === 'top' ? 'up' : 'down'] - 1) * 100 : 0
       });
     }
   }
@@ -7235,7 +7242,8 @@ export function dayZoneNotification(due) {
   const lines = due.map((d) => {
     const ev = DAY_ZONE_EVIDENCE[d.side][d.volumeGroup] || DAY_ZONE_EVIDENCE[d.side].all;
     const further = (k) => (d.side === 'top' ? Math.expm1(d.unitLog * k) : -(1 - Math.exp(-d.unitLog * k))) * 100;
-    const widened = d.widenedPct >= 5 ? `; band widened ${Math.round(d.widenedPct)}% for yesterday's heavy volume and move` : '';
+    const widened = Math.abs(d.vsMedianPct) >= 5
+      ? `; level ${Math.round(Math.abs(d.vsMedianPct))}% ${d.vsMedianPct > 0 ? 'wider' : 'narrower'} than its 60-day median move` : '';
     const volume = d.volumeRatio != null ? ` Volume so far ${d.volumeRatio.toFixed(1)}x normal for the time of day (${d.volumeGroup}).` : '';
     return `${d.symbol} ${zonePrice(d.price)} ${d.side === 'top' ? 'at or above' : 'at or below'} today's forecast ${d.side} ${zonePrice(d.level)} `
       + `(${pct(d.movePct)} from the 00:00 UTC open${widened}).${volume} Past cases like this went a median ${pct(further(ev.furtherMedian))} further, `
@@ -7263,7 +7271,7 @@ export function dayZoneNotification(due) {
   return {
     title,
     message: [...lines, '', ...read, '',
-      `${Math.floor(left / 60)}h ${String(left % 60).padStart(2, '0')}m left in the UTC day. Levels: each coin's 60-day median move from the 00:00 UTC open, scaled by the last 24 hours' volatility, widened after a heavy-volume or big-move day. Not financial advice.`].join('\n'),
+      `${Math.floor(left / 60)}h ${String(left % 60).padStart(2, '0')}m left in the UTC day. Levels: each coin's 60-day median move from the 00:00 UTC open, adjusted for last week's moves, how far its average move sits above the median, the last 24 hours' volatility and volume, yesterday's move and the weekday. Not financial advice.`].join('\n'),
     priority: 'default',
     tags: ['dart']
   };
@@ -9331,7 +9339,14 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           ?ch.length+' challenger'+(ch.length===1?'':'s')+' logging forecasts; leader '+esc(lead.label||lead.model)+', '
             +Math.round(mtProgress(lead)*100)+'% of the way to promotion ('+(lead.forwardN||0)+' scored)'
           :'no challenger has beaten it on history yet';
-        return head+(fc?' · '+fc:'')+'<br><small>'+testing+'</small>';
+        // Direction only: the leader's forward calls in confusion-matrix terms,
+        // always next to the share of up days they must beat. A readout; the
+        // promotion test above never uses it (docs/DAY_ZONE_METHODS_AND_CONFUSION.md).
+        var lc=key.indexOf('direction')===0&&lead&&lead.calls&&lead.calls.n>0?lead.calls:null;
+        var calls=lc?'<br><small data-mt-calls>leader’s forward calls ('+lc.n+'): precision '+mtPct(lc.precision)+' vs '+mtPct(lc.upRate)+' up days · NPV '+mtPct(lc.npv)
+            +' · sensitivity '+mtPct(lc.sensitivity)+' · specificity '+mtPct(lc.specificity)
+            +' · informedness '+(typeof lc.informedness==='number'?(lc.informedness>=0?'+':'−')+Math.abs(lc.informedness).toFixed(2):'—')+'</small>':'';
+        return head+(fc?' · '+fc:'')+'<br><small>'+testing+'</small>'+calls;
       };
       var mtWeights=function(w){
         if(!w)return '<small>not fitted</small>';
@@ -9365,7 +9380,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           eyebrow:'PER-ASSET MODELS &middot; <b>FORWARD-TESTED</b>',
           title:'Models that have to earn their place, asset by asset',
           meta:esc(mt.asOf||'')+(mt.status==='stale'?' · <span class="amber-t">stale</span>':'')+' · '+(mtc.champions||0)+' promoted · '+(mtc.challengers||0)+' testing'})
-        +'<div class="dr-note">Every always-tracked asset has its own models for direction, move size and the cheapest of the spot bot’s six daily buying times (4-hour firings, for the day after the latest close). Each is fitted to that asset alone, so it learns that asset’s own weights for momentum, volatility, volume, derivatives, funding, calendar and the other tracked coins. New challengers are proposed weekly from history, but <b>a challenger replaces the current method only on forecasts it logged before their outcomes existed</b>, through a test that stays valid however often it is read; one that later falls behind is demoted the same way. Weights describe what a fitted model leans on, not proof that it helps. <b>Research only; nothing here places a trade.</b></div>'
+        +'<div class="dr-note">Every always-tracked asset has its own models for direction, move size and the cheapest of the spot bot’s six daily buying times (4-hour firings, for the day after the latest close). Each is fitted to that asset alone, so it learns that asset’s own weights for momentum, volatility, volume, derivatives, funding, calendar and the other tracked coins. New challengers are proposed weekly from history, but <b>a challenger replaces the current method only on forecasts it logged before their outcomes existed</b>, through a test that stays valid however often it is read; one that later falls behind is demoted the same way. Weights describe what a fitted model leans on, not proof that it helps. For direction, the leader’s forward calls are also shown as precision (said up: how often up), NPV (said down: how often down), sensitivity and specificity; read precision against the share of up days, and informedness near 0 as no skill. They never decide a promotion: tested on 1.6 million past forecasts, choosing models by them gave worse forecasts than the test used here. <b>Research only; nothing here places a trade.</b></div>'
         +'<div class="bh-list"><div class="bh-head"><span>Asset</span><span>Direction</span><span>Move size</span><span>Cheapest buy time</span><span>What its models weigh</span></div>'+mtRows+'</div>'
         +mtWide
         +PANEL_END;

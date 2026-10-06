@@ -1,0 +1,222 @@
+1,576,533 walk-forward forecasts, 80 assets (39 crypto), 21 models, 2023-12-09 .. 2026-10-04; split at 2025-04-01
+   horizons: crypto 1: 793,023, crypto 7: 113,064, stock 1: 557,844, stock 5: 112,602
+
+######## threshold: P(up) > 0.5 ########
+
+## 1. Skill, mean over asset x model cells (excluding the base rate), earlier | later half
+   crypto 1d
+      early: P(up) 0.488, calls up 0.48, PPV 0.494 (lift +0.005), NPV 0.518 (lift +0.006), sens 0.49, spec 0.52, J +0.010, mark +0.012, Brier skill -0.0407, long/short +0.029%
+      late:  P(up) 0.479, calls up 0.41, PPV 0.480 (lift +0.001), NPV 0.520 (lift -0.001), sens 0.41, spec 0.59, J +0.000, mark +0.000, Brier skill -0.0293, long/short -0.028%
+   crypto 7d
+      early: P(up) 0.469, calls up 0.52, PPV 0.459 (lift -0.009), NPV 0.533 (lift +0.002), sens 0.52, spec 0.47, J -0.009, mark -0.008, Brier skill -0.1049, long/short -0.017%
+      late:  P(up) 0.466, calls up 0.42, PPV 0.461 (lift -0.005), NPV 0.528 (lift -0.006), sens 0.42, spec 0.57, J -0.009, mark -0.010, Brier skill -0.0733, long/short -0.450%
+   stock 1d
+      early: P(up) 0.521, calls up 0.75, PPV 0.521 (lift -0.001), NPV 0.474 (lift -0.006), sens 0.75, spec 0.25, J +0.000, mark -0.007, Brier skill -0.0412, long/short +0.056%
+      late:  P(up) 0.531, calls up 0.75, PPV 0.532 (lift +0.001), NPV 0.461 (lift -0.009), sens 0.75, spec 0.26, J +0.001, mark -0.007, Brier skill -0.0196, long/short +0.117%
+   stock 5d
+      early: P(up) 0.544, calls up 0.76, PPV 0.537 (lift -0.007), NPV 0.419 (lift -0.038), sens 0.75, spec 0.23, J -0.021, mark -0.046, Brier skill -0.0923, long/short +0.011%
+      late:  P(up) 0.577, calls up 0.76, PPV 0.572 (lift -0.005), NPV 0.380 (lift -0.043), sens 0.75, spec 0.23, J -0.016, mark -0.050, Brier skill -0.0523, long/short +0.557%
+
+## 2. Persistence earlier -> later, same asset and model (Spearman across cells; 0 = none)
+   crypto 1d (780 cells): callUp +0.49, tpr +0.51, tnr +0.45, ppv +0.25, npv +0.42, ppvLift +0.11, npvLift +0.13, J +0.14, mark +0.11, mcc +0.13, acc +0.07, bss +0.43, ls +0.16
+   crypto 7d (780 cells): callUp +0.43, tpr +0.41, tnr +0.38, ppv +0.22, npv +0.08, ppvLift -0.03, npvLift -0.06, J -0.04, mark -0.06, mcc -0.05, acc +0.02, bss +0.29, ls -0.01
+   stock 1d (820 cells): callUp +0.69, tpr +0.67, tnr +0.70, ppv -0.17, npv -0.00, ppvLift -0.06, npvLift -0.03, J -0.06, mark -0.03, mcc -0.04, acc -0.06, bss +0.59, ls +0.05
+   stock 5d (820 cells): callUp +0.68, tpr +0.62, tnr +0.66, ppv -0.09, npv -0.12, ppvLift +0.06, npvLift +0.07, J +0.05, mark +0.08, mcc +0.07, acc +0.08, bss +0.45, ls -0.01
+   within asset (each asset's models ranked against each other, then averaged):
+   crypto 1d: tpr +0.38 (t +8.2), tnr +0.28 (t +5.1), ppvLift +0.10 (t +2.0), npvLift +0.10 (t +1.9), J +0.11 (t +2.2), mark +0.09 (t +1.8), bss +0.55 (t +16.9), ls +0.09 (t +1.9)
+   crypto 7d: tpr +0.11 (t +2.0), tnr +0.01 (t +0.2), ppvLift +0.02 (t +0.4), npvLift -0.02 (t -0.4), J -0.00 (t -0.0), mark -0.00 (t -0.1), bss +0.40 (t +9.2), ls +0.01 (t +0.2)
+   stock 1d: tpr +0.57 (t +12.3), tnr +0.62 (t +15.9), ppvLift -0.06 (t -1.3), npvLift -0.06 (t -1.2), J -0.06 (t -1.3), mark -0.05 (t -1.1), bss +0.68 (t +18.8), ls -0.05 (t -0.9)
+   stock 5d: tpr +0.50 (t +10.5), tnr +0.53 (t +11.2), ppvLift -0.02 (t -0.4), npvLift +0.02 (t +0.3), J -0.02 (t -0.4), mark -0.02 (t -0.3), bss +0.52 (t +10.5), ls -0.04 (t -0.7)
+
+## 3. Selection: each asset's best model on the earlier half by a metric, scored on the later half
+   (needs >= 20 calls each way in the earlier half for PPV/NPV-based picks; later-half Brier skill vs the base rate,
+    informedness J, and the long/short return of its calls, % per call; t over assets)
+   crypto 1d:
+      by bss      (38 assets): Brier skill -0.0101 (t -4.5), J +0.003 (t +0.7), long/short -0.014% (t -0.6)
+      by acc      (38 assets): Brier skill -0.0226 (t -6.2), J +0.013 (t +2.4), long/short +0.027% (t +1.0)
+      by ppvLift  (38 assets): Brier skill -0.0245 (t -7.4), J +0.010 (t +1.6), long/short +0.045% (t +1.3)
+      by npvLift  (38 assets): Brier skill -0.0357 (t -5.1), J +0.016 (t +2.7), long/short +0.069% (t +2.1)
+      by tpr      (38 assets): Brier skill -0.0254 (t -4.3), J +0.007 (t +1.2), long/short +0.029% (t +1.0)
+      by tnr      (38 assets): Brier skill -0.0174 (t -4.7), J -0.005 (t -1.2), long/short -0.053% (t -2.5)
+      by J        (38 assets): Brier skill -0.0248 (t -7.2), J +0.017 (t +2.8), long/short +0.060% (t +1.7)
+      by mark     (38 assets): Brier skill -0.0232 (t -6.5), J +0.019 (t +2.9), long/short +0.087% (t +2.5)
+      by mcc      (38 assets): Brier skill -0.0235 (t -6.7), J +0.019 (t +3.1), long/short +0.073% (t +2.1)
+      by f1       (38 assets): Brier skill -0.0281 (t -4.9), J +0.009 (t +1.6), long/short +0.039% (t +1.3)
+      by ls       (38 assets): Brier skill -0.0293 (t -5.6), J +0.012 (t +2.3), long/short +0.052% (t +1.7)
+   crypto 7d:
+      by bss      (38 assets): Brier skill -0.0438 (t -6.5), J -0.002 (t -0.1), long/short -0.151% (t -0.6)
+      by acc      (38 assets): Brier skill -0.0883 (t -6.1), J -0.002 (t -0.1), long/short -0.589% (t -3.0)
+      by ppvLift  (33 assets): Brier skill -0.1210 (t -6.5), J -0.016 (t -0.9), long/short -0.595% (t -2.7)
+      by npvLift  (33 assets): Brier skill -0.1110 (t -6.6), J -0.005 (t -0.3), long/short -0.606% (t -2.7)
+      by tpr      (38 assets): Brier skill -0.0628 (t -3.6), J -0.013 (t -1.1), long/short -0.361% (t -1.3)
+      by tnr      (38 assets): Brier skill -0.0736 (t -5.0), J -0.012 (t -0.8), long/short -0.523% (t -2.8)
+      by J        (33 assets): Brier skill -0.1072 (t -6.5), J -0.006 (t -0.3), long/short -0.660% (t -2.9)
+      by mark     (33 assets): Brier skill -0.1059 (t -6.4), J -0.008 (t -0.4), long/short -0.669% (t -3.0)
+      by mcc      (33 assets): Brier skill -0.1059 (t -6.4), J -0.008 (t -0.4), long/short -0.669% (t -3.0)
+      by f1       (33 assets): Brier skill -0.0940 (t -5.9), J -0.000 (t -0.0), long/short -0.642% (t -2.7)
+      by ls       (38 assets): Brier skill -0.0852 (t -5.4), J -0.009 (t -0.6), long/short -0.384% (t -1.6)
+   stock 1d:
+      by bss      (41 assets): Brier skill -0.0043 (t -3.1), J +0.004 (t +1.0), long/short +0.193% (t +6.0)
+      by acc      (41 assets): Brier skill -0.0233 (t -4.8), J -0.000 (t -0.0), long/short +0.125% (t +4.3)
+      by ppvLift  (40 assets): Brier skill -0.0291 (t -6.3), J +0.004 (t +0.5), long/short +0.099% (t +4.2)
+      by npvLift  (40 assets): Brier skill -0.0246 (t -5.1), J -0.005 (t -0.5), long/short +0.111% (t +3.8)
+      by tpr      (41 assets): Brier skill -0.0008 (t -1.5), J -0.001 (t -0.4), long/short +0.186% (t +4.6)
+      by tnr      (41 assets): Brier skill -0.0462 (t -7.4), J -0.002 (t -0.4), long/short +0.065% (t +2.0)
+      by J        (40 assets): Brier skill -0.0281 (t -6.0), J -0.000 (t -0.0), long/short +0.097% (t +3.3)
+      by mark     (40 assets): Brier skill -0.0244 (t -5.9), J +0.003 (t +0.4), long/short +0.134% (t +5.0)
+      by mcc      (40 assets): Brier skill -0.0277 (t -6.1), J +0.000 (t +0.0), long/short +0.100% (t +3.6)
+      by f1       (40 assets): Brier skill -0.0151 (t -4.1), J -0.009 (t -1.2), long/short +0.097% (t +2.9)
+      by ls       (41 assets): Brier skill -0.0272 (t -5.4), J +0.007 (t +1.1), long/short +0.117% (t +4.4)
+   stock 5d:
+      by bss      (41 assets): Brier skill -0.0185 (t -2.4), J -0.009 (t -0.7), long/short +0.794% (t +4.1)
+      by acc      (41 assets): Brier skill -0.0600 (t -5.4), J -0.018 (t -1.1), long/short +0.704% (t +4.4)
+      by ppvLift  (31 assets): Brier skill -0.0911 (t -5.0), J +0.017 (t +0.8), long/short +0.665% (t +3.5)
+      by npvLift  (31 assets): Brier skill -0.0922 (t -5.1), J +0.014 (t +0.6), long/short +0.658% (t +3.4)
+      by tpr      (41 assets): Brier skill -0.0133 (t -1.6), J -0.012 (t -2.4), long/short +0.931% (t +4.8)
+      by tnr      (41 assets): Brier skill -0.1184 (t -7.4), J -0.025 (t -1.4), long/short +0.494% (t +3.8)
+      by J        (31 assets): Brier skill -0.0920 (t -5.0), J +0.018 (t +0.8), long/short +0.667% (t +3.5)
+      by mark     (31 assets): Brier skill -0.0920 (t -5.0), J +0.018 (t +0.8), long/short +0.667% (t +3.5)
+      by mcc      (31 assets): Brier skill -0.0920 (t -5.0), J +0.018 (t +0.8), long/short +0.667% (t +3.5)
+      by f1       (31 assets): Brier skill -0.0763 (t -4.5), J +0.033 (t +1.4), long/short +0.696% (t +3.8)
+      by ls       (41 assets): Brier skill -0.0694 (t -5.7), J -0.010 (t -0.7), long/short +0.652% (t +4.9)
+
+## 4. One-sided skill. PPV lift and NPV lift share a sign in 100.0% of 6678 cells (an identity), so it is checked in money:
+   long side = mean return on up calls - the asset's mean return; short side = the asset's mean - mean on down calls (%); rank corr earlier -> later
+   crypto 1d (750 cells): long side +0.14, short side +0.11, long minus short +0.07
+   crypto 7d (381 cells): long side -0.04, short side -0.04, long minus short +0.03
+   stock 1d (580 cells): long side +0.06, short side +0.08, long minus short +0.09
+   stock 5d (171 cells): long side -0.21, short side -0.21, long minus short -0.00
+
+## 3b. The best-looking picks again, with calls on the same day pooled (coins move together) and costs
+   per date: mean signed return of the picked models' calls across assets; Newey-West t over dates; cost 0.1% a side
+   charged whenever a call flips (crypto) -- stocks are shown gross
+   crypto 1d by bss     : 552 dates, gross -0.014% (t -0.2), net -0.039% (t -0.6), calls flip 13%
+   crypto 1d by J       : 552 dates, gross +0.060% (t +1.0), net +0.001% (t +0.0), calls flip 29%
+   crypto 1d by mark    : 552 dates, gross +0.087% (t +1.5), net +0.027% (t +0.5), calls flip 30%
+   crypto 1d by mcc     : 552 dates, gross +0.073% (t +1.2), net +0.012% (t +0.2), calls flip 30%
+   crypto 1d by npvLift : 552 dates, gross +0.069% (t +1.1), net +0.007% (t +0.1), calls flip 31%
+   crypto 7d by bss     : 234 dates, gross -0.181% (t -0.2), net -0.211% (t -0.3), calls flip 16%
+   crypto 7d by J       : 156 dates, gross -1.547% (t -2.0), net -1.587% (t -2.1), calls flip 21%
+   crypto 7d by mark    : 156 dates, gross -1.551% (t -2.0), net -1.592% (t -2.1), calls flip 21%
+   crypto 7d by mcc     : 156 dates, gross -1.551% (t -2.0), net -1.592% (t -2.1), calls flip 21%
+   crypto 7d by npvLift : 156 dates, gross -1.518% (t -2.0), net -1.560% (t -2.0), calls flip 23%
+   stock 1d by bss     : 379 dates, gross +0.193% (t +3.6), net +0.193% (t +3.6), calls flip 7%
+   stock 1d by J       : 379 dates, gross +0.097% (t +2.6), net +0.097% (t +2.6), calls flip 22%
+   stock 1d by mark    : 379 dates, gross +0.134% (t +3.1), net +0.134% (t +3.1), calls flip 21%
+   stock 1d by mcc     : 379 dates, gross +0.100% (t +2.7), net +0.100% (t +2.7), calls flip 21%
+   stock 1d by npvLift : 379 dates, gross +0.111% (t +2.6), net +0.111% (t +2.6), calls flip 21%
+   stock 5d by bss     : 75 dates, gross +0.794% (t +3.4), net +0.794% (t +3.4), calls flip 11%
+   stock 5d by J       : 75 dates, gross +0.667% (t +4.0), net +0.667% (t +4.0), calls flip 22%
+   stock 5d by mark    : 75 dates, gross +0.667% (t +4.0), net +0.667% (t +4.0), calls flip 22%
+   stock 5d by mcc     : 75 dates, gross +0.667% (t +4.0), net +0.667% (t +4.0), calls flip 22%
+   stock 5d by npvLift : 75 dates, gross +0.658% (t +4.0), net +0.658% (t +4.0), calls flip 22%
+
+######## threshold: P(up) > training up-rate ########
+
+## 1. Skill, mean over asset x model cells (excluding the base rate), earlier | later half
+   crypto 1d
+      early: P(up) 0.488, calls up 0.50, PPV 0.497 (lift +0.009), NPV 0.521 (lift +0.009), sens 0.51, spec 0.51, J +0.017, mark +0.018, Brier skill -0.0407, long/short +0.054%
+      late:  P(up) 0.479, calls up 0.49, PPV 0.480 (lift +0.001), NPV 0.522 (lift +0.001), sens 0.49, spec 0.51, J +0.002, mark +0.002, Brier skill -0.0293, long/short -0.003%
+   crypto 7d
+      early: P(up) 0.469, calls up 0.49, PPV 0.468 (lift -0.000), NPV 0.539 (lift +0.008), sens 0.49, spec 0.51, J +0.007, mark +0.007, Brier skill -0.1049, long/short +0.088%
+      late:  P(up) 0.466, calls up 0.50, PPV 0.467 (lift +0.001), NPV 0.535 (lift +0.001), sens 0.51, spec 0.49, J +0.000, mark +0.002, Brier skill -0.0733, long/short -0.252%
+   stock 1d
+      early: P(up) 0.521, calls up 0.48, PPV 0.521 (lift +0.000), NPV 0.481 (lift +0.002), sens 0.48, spec 0.52, J +0.001, mark +0.003, Brier skill -0.0412, long/short +0.003%
+      late:  P(up) 0.531, calls up 0.45, PPV 0.536 (lift +0.006), NPV 0.473 (lift +0.004), sens 0.45, spec 0.55, J +0.008, mark +0.010, Brier skill -0.0196, long/short +0.004%
+   stock 5d
+      early: P(up) 0.544, calls up 0.50, PPV 0.544 (lift -0.001), NPV 0.459 (lift +0.003), sens 0.50, spec 0.50, J +0.000, mark +0.002, Brier skill -0.0923, long/short -0.080%
+      late:  P(up) 0.577, calls up 0.45, PPV 0.581 (lift +0.003), NPV 0.423 (lift -0.000), sens 0.45, spec 0.55, J +0.003, mark +0.003, Brier skill -0.0523, long/short -0.152%
+
+## 2. Persistence earlier -> later, same asset and model (Spearman across cells; 0 = none)
+   crypto 1d (780 cells): callUp +0.11, tpr +0.15, tnr +0.07, ppv +0.29, npv +0.37, ppvLift +0.12, npvLift +0.14, J +0.13, mark +0.13, mcc +0.14, acc +0.08, bss +0.43, ls +0.07
+   crypto 7d (780 cells): callUp +0.01, tpr -0.02, tnr +0.01, ppv +0.15, npv +0.13, ppvLift -0.14, npvLift -0.13, J -0.14, mark -0.14, mcc -0.14, acc -0.09, bss +0.29, ls -0.18
+   stock 1d (820 cells): callUp +0.21, tpr +0.22, tnr +0.21, ppv -0.18, npv -0.04, ppvLift -0.01, npvLift +0.01, J -0.00, mark -0.00, mcc -0.00, acc +0.02, bss +0.59, ls -0.02
+   stock 5d (820 cells): callUp +0.24, tpr +0.23, tnr +0.25, ppv -0.07, npv -0.28, ppvLift +0.02, npvLift +0.01, J +0.01, mark +0.02, mcc +0.02, acc +0.03, bss +0.45, ls -0.08
+   within asset (each asset's models ranked against each other, then averaged):
+   crypto 1d: tpr +0.17 (t +3.2), tnr +0.08 (t +1.3), ppvLift +0.07 (t +1.5), npvLift +0.08 (t +1.9), J +0.08 (t +1.8), mark +0.08 (t +1.8), bss +0.55 (t +16.9), ls +0.07 (t +1.4)
+   crypto 7d: tpr +0.01 (t +0.1), tnr -0.05 (t -0.9), ppvLift -0.05 (t -0.9), npvLift -0.04 (t -0.7), J -0.05 (t -0.9), mark -0.05 (t -0.8), bss +0.40 (t +9.2), ls -0.08 (t -1.6)
+   stock 1d: tpr +0.26 (t +6.3), tnr +0.24 (t +5.8), ppvLift -0.10 (t -2.0), npvLift -0.08 (t -1.7), J -0.09 (t -1.9), mark -0.10 (t -1.9), bss +0.68 (t +18.8), ls -0.01 (t -0.2)
+   stock 5d: tpr +0.25 (t +5.6), tnr +0.28 (t +6.9), ppvLift -0.01 (t -0.2), npvLift -0.00 (t -0.0), J +0.00 (t +0.0), mark +0.01 (t +0.3), bss +0.52 (t +10.5), ls -0.01 (t -0.3)
+
+## 3. Selection: each asset's best model on the earlier half by a metric, scored on the later half
+   (needs >= 20 calls each way in the earlier half for PPV/NPV-based picks; later-half Brier skill vs the base rate,
+    informedness J, and the long/short return of its calls, % per call; t over assets)
+   crypto 1d:
+      by bss      (38 assets): Brier skill -0.0101 (t -4.5), J +0.002 (t +0.4), long/short +0.002% (t +0.1)
+      by acc      (38 assets): Brier skill -0.0336 (t -5.7), J +0.001 (t +0.2), long/short -0.020% (t -0.7)
+      by ppvLift  (38 assets): Brier skill -0.0284 (t -7.4), J +0.008 (t +1.3), long/short +0.016% (t +0.5)
+      by npvLift  (38 assets): Brier skill -0.0347 (t -5.9), J +0.014 (t +2.3), long/short +0.071% (t +2.4)
+      by tpr      (38 assets): Brier skill -0.0330 (t -5.9), J +0.010 (t +1.6), long/short +0.052% (t +2.0)
+      by tnr      (38 assets): Brier skill +0.0000 (t +nan), J +0.000 (t +nan), long/short -0.081% (t -2.9)
+      by J        (38 assets): Brier skill -0.0283 (t -7.0), J +0.010 (t +1.6), long/short +0.060% (t +1.9)
+      by mark     (38 assets): Brier skill -0.0290 (t -7.0), J +0.012 (t +1.8), long/short +0.060% (t +1.9)
+      by mcc      (38 assets): Brier skill -0.0284 (t -7.0), J +0.011 (t +1.8), long/short +0.055% (t +1.7)
+      by f1       (38 assets): Brier skill -0.0323 (t -5.7), J +0.014 (t +2.2), long/short +0.066% (t +2.3)
+      by ls       (38 assets): Brier skill -0.0270 (t -7.2), J -0.001 (t -0.2), long/short +0.022% (t +0.9)
+   crypto 7d:
+      by bss      (38 assets): Brier skill -0.0438 (t -6.5), J -0.019 (t -1.3), long/short -0.211% (t -1.0)
+      by acc      (38 assets): Brier skill -0.0729 (t -4.3), J -0.015 (t -1.2), long/short -0.477% (t -2.8)
+      by ppvLift  (33 assets): Brier skill -0.0924 (t -4.9), J -0.029 (t -1.7), long/short -0.768% (t -3.2)
+      by npvLift  (33 assets): Brier skill -0.0763 (t -4.7), J +0.006 (t +0.3), long/short -0.094% (t -0.4)
+      by tpr      (38 assets): Brier skill -0.0726 (t -5.4), J +0.009 (t +0.6), long/short -0.179% (t -0.7)
+      by tnr      (38 assets): Brier skill +0.0000 (t +nan), J +0.000 (t +nan), long/short -0.673% (t -2.9)
+      by J        (33 assets): Brier skill -0.0891 (t -4.7), J -0.018 (t -1.1), long/short -0.204% (t -0.9)
+      by mark     (33 assets): Brier skill -0.0895 (t -4.7), J -0.012 (t -0.7), long/short -0.292% (t -1.2)
+      by mcc      (33 assets): Brier skill -0.0874 (t -4.6), J -0.015 (t -1.0), long/short -0.187% (t -0.8)
+      by f1       (33 assets): Brier skill -0.0725 (t -4.9), J -0.008 (t -0.5), long/short -0.180% (t -0.7)
+      by ls       (38 assets): Brier skill -0.0983 (t -5.3), J -0.017 (t -1.1), long/short -0.668% (t -2.5)
+   stock 1d:
+      by bss      (41 assets): Brier skill -0.0043 (t -3.1), J +0.011 (t +2.8), long/short -0.073% (t -1.7)
+      by acc      (41 assets): Brier skill -0.0358 (t -5.8), J -0.002 (t -0.2), long/short +0.016% (t +0.5)
+      by ppvLift  (40 assets): Brier skill -0.0328 (t -5.6), J +0.004 (t +0.5), long/short +0.058% (t +2.4)
+      by npvLift  (40 assets): Brier skill -0.0304 (t -5.8), J -0.003 (t -0.4), long/short +0.042% (t +1.6)
+      by tpr      (41 assets): Brier skill -0.0290 (t -6.3), J -0.000 (t -0.0), long/short +0.014% (t +0.5)
+      by tnr      (41 assets): Brier skill +0.0000 (t +nan), J +0.000 (t +nan), long/short -0.251% (t -7.1)
+      by J        (40 assets): Brier skill -0.0295 (t -5.2), J +0.004 (t +0.5), long/short +0.051% (t +2.0)
+      by mark     (40 assets): Brier skill -0.0329 (t -5.3), J +0.002 (t +0.2), long/short +0.047% (t +1.8)
+      by mcc      (40 assets): Brier skill -0.0329 (t -5.3), J +0.002 (t +0.2), long/short +0.047% (t +1.8)
+      by f1       (40 assets): Brier skill -0.0275 (t -5.9), J -0.003 (t -0.5), long/short -0.001% (t -0.0)
+      by ls       (41 assets): Brier skill -0.0239 (t -5.0), J -0.007 (t -0.8), long/short -0.031% (t -0.9)
+   stock 5d:
+      by bss      (41 assets): Brier skill -0.0185 (t -2.4), J +0.021 (t +1.2), long/short -0.308% (t -1.6)
+      by acc      (41 assets): Brier skill -0.0581 (t -4.9), J +0.016 (t +0.7), long/short -0.079% (t -0.4)
+      by ppvLift  (40 assets): Brier skill -0.0540 (t -4.2), J +0.015 (t +0.7), long/short +0.025% (t +0.2)
+      by npvLift  (40 assets): Brier skill -0.0478 (t -4.4), J +0.019 (t +1.0), long/short -0.014% (t -0.1)
+      by tpr      (41 assets): Brier skill -0.0727 (t -6.7), J +0.010 (t +0.6), long/short -0.189% (t -1.2)
+      by tnr      (41 assets): Brier skill +0.0000 (t +nan), J +0.000 (t +nan), long/short -1.315% (t -7.1)
+      by J        (40 assets): Brier skill -0.0532 (t -4.3), J +0.015 (t +0.7), long/short -0.117% (t -0.6)
+      by mark     (40 assets): Brier skill -0.0545 (t -4.4), J +0.007 (t +0.3), long/short -0.145% (t -0.8)
+      by mcc      (40 assets): Brier skill -0.0545 (t -4.4), J +0.007 (t +0.3), long/short -0.145% (t -0.8)
+      by f1       (40 assets): Brier skill -0.0525 (t -4.6), J +0.019 (t +1.0), long/short +0.016% (t +0.1)
+      by ls       (41 assets): Brier skill -0.0542 (t -4.2), J +0.025 (t +1.3), long/short -0.018% (t -0.1)
+
+## 4. One-sided skill. PPV lift and NPV lift share a sign in 100.0% of 6678 cells (an identity), so it is checked in money:
+   long side = mean return on up calls - the asset's mean return; short side = the asset's mean - mean on down calls (%); rank corr earlier -> later
+   crypto 1d (754 cells): long side +0.08, short side +0.09, long minus short +0.03
+   crypto 7d (561 cells): long side -0.21, short side -0.20, long minus short -0.03
+   stock 1d (720 cells): long side -0.03, short side -0.03, long minus short +0.08
+   stock 5d (538 cells): long side -0.01, short side -0.00, long minus short +0.04
+
+## 3b. The best-looking picks again, with calls on the same day pooled (coins move together) and costs
+   per date: mean signed return of the picked models' calls across assets; Newey-West t over dates; cost 0.1% a side
+   charged whenever a call flips (crypto) -- stocks are shown gross
+   crypto 1d by bss     : 552 dates, gross +0.002% (t +0.0), net -0.028% (t -0.4), calls flip 15%
+   crypto 1d by J       : 552 dates, gross +0.060% (t +1.1), net -0.004% (t -0.1), calls flip 32%
+   crypto 1d by mark    : 552 dates, gross +0.060% (t +1.1), net -0.003% (t -0.1), calls flip 32%
+   crypto 1d by mcc     : 552 dates, gross +0.055% (t +1.0), net -0.009% (t -0.2), calls flip 32%
+   crypto 1d by npvLift : 552 dates, gross +0.071% (t +1.2), net +0.006% (t +0.1), calls flip 33%
+   crypto 7d by bss     : 234 dates, gross -0.147% (t -0.2), net -0.184% (t -0.3), calls flip 19%
+   crypto 7d by J       : 156 dates, gross -0.190% (t -0.2), net -0.237% (t -0.3), calls flip 25%
+   crypto 7d by mark    : 156 dates, gross -0.236% (t -0.3), net -0.285% (t -0.4), calls flip 26%
+   crypto 7d by mcc     : 156 dates, gross -0.180% (t -0.2), net -0.228% (t -0.3), calls flip 25%
+   crypto 7d by npvLift : 156 dates, gross -0.131% (t -0.2), net -0.181% (t -0.2), calls flip 27%
+   stock 1d by bss     : 379 dates, gross -0.073% (t -1.5), net -0.073% (t -1.5), calls flip 13%
+   stock 1d by J       : 379 dates, gross +0.051% (t +1.6), net +0.051% (t +1.6), calls flip 32%
+   stock 1d by mark    : 379 dates, gross +0.047% (t +1.5), net +0.047% (t +1.5), calls flip 31%
+   stock 1d by mcc     : 379 dates, gross +0.047% (t +1.5), net +0.047% (t +1.5), calls flip 31%
+   stock 1d by npvLift : 379 dates, gross +0.042% (t +1.3), net +0.042% (t +1.3), calls flip 32%
+   stock 5d by bss     : 75 dates, gross -0.308% (t -1.3), net -0.308% (t -1.3), calls flip 25%
+   stock 5d by J       : 75 dates, gross -0.117% (t -0.7), net -0.117% (t -0.7), calls flip 36%
+   stock 5d by mark    : 75 dates, gross -0.145% (t -0.8), net -0.145% (t -0.8), calls flip 36%
+   stock 5d by mcc     : 75 dates, gross -0.145% (t -0.8), net -0.145% (t -0.8), calls flip 36%
+   stock 5d by npvLift : 75 dates, gross -0.014% (t -0.1), net -0.014% (t -0.1), calls flip 35%

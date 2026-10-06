@@ -1,0 +1,17 @@
+   BTC: 3170 days, GARCH 3s
+   BTC done 9s
+   ETH: 3170 days, GARCH 2s
+   ETH done 17s
+   SOL: 2235 days, GARCH 1s
+   SOL done 23s
+   XLM: 3023 days, GARCH 2s
+   XLM done 31s
+   XRP: 3050 days, GARCH 2s
+   XRP done 39s
+   HYPE: 492 days, GARCH 0s
+   HYPE done 40s
+   HBAR: 2545 days, GARCH 2s
+   HBAR done 46s
+   ARB: 1291 days, GARCH 1s
+   ARB done 49s
+saved 18,976 coin-days to /Users/owner/Documents/ship/frontiercapitalsignals/signals-worker/reports/mean-median/zone_methods.pkl in 49s

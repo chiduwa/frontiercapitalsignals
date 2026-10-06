@@ -526,7 +526,25 @@ console.log('\n== the model-tournament panel shows who is in force and what is b
     el.querySelectorAll('.dir-arrow, .dir-up, .dir-down').length === 0 && !/\bBUY\b|\bSELL\b|\bLONG\b|\bSHORT\b/.test(text));
   check('only the promoted slot is actionable', tournament.assets.BTC['magnitude:1'].actionable === true
     && tournament.assets.ETH['direction:1'].actionable === false && tournament.actionable === true);
+  check('a summary from before the call readout renders none (no empty line, no NaN)',
+    !el.querySelector('[data-mt-calls]') && !/NaN|undefined/.test(text));
   mtView.dom.window.close();
+
+  // The forward-call readout (2026-10-06): shown for a direction leader, next
+  // to the up-rate, and stated as a readout that never decides a promotion.
+  const withCalls = JSON.parse(JSON.stringify(tournament));
+  const eth1 = withCalls.assets.ETH['direction:1'];
+  eth1.challengers = (eth1.challengers && eth1.challengers.length ? eth1.challengers : [{ model: 'm', label: 'boosted trees', eValue: 1.1, threshold: 33, forwardN: 12 }]);
+  eth1.challengers[0] = { ...eth1.challengers[0], calls: { n: 12, upRate: 0.4167, callsUp: 0.5, precision: 0.5, npv: 0.6667, sensitivity: 0.6, specificity: 0.5714, informedness: 0.1714 } };
+  withCalls.assets.ETH['magnitude:1'].challengers = (withCalls.assets.ETH['magnitude:1'].challengers || []).map(c => ({ ...c, calls: { n: 5, precision: 1 } }));
+  const cView = await render({ ...payload(), modelTournament: withCalls }, { settleMs: 1200 });
+  const cEl = cView.doc.getElementById('panel-modelTournament');
+  const ethText = cEl?.querySelector('[data-mt="ETH"]')?.textContent || '';
+  check('a direction leader\'s forward calls read as precision vs up days, NPV, sensitivity, specificity, informedness',
+    cView.pageErrors.length === 0 && ethText.includes('leader’s forward calls (12): precision 50% vs 42% up days · NPV 67% · sensitivity 60% · specificity 57% · informedness +0.17'), ethText.slice(0, 400));
+  check('only direction slots carry it', cEl.querySelector('[data-mt="ETH"]').querySelectorAll('[data-mt-calls]').length === 1);
+  check('the panel says the readout never decides a promotion', /They never decide a promotion/.test(cEl.textContent));
+  cView.dom.window.close();
 
   // Widened to 40 coins and 40 stocks: a promoted stock shows in sessions,
   // with no buying-time slot, under a line naming what else was promoted.

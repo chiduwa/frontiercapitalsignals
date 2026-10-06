@@ -1,0 +1,38 @@
+
+## v2 (live)
+   top    all     2018-22: n 1992, near 31%, back 21%, further 0.46/0.90 (1.10%), drift +25bp (t +3.1) || 2023-26: n 2828, near 29%, back 22%, further 0.48/1.01 (0.90%), drift +24bp (t +3.7)
+   top    light   2018-22: n 801, near 37%, back 25%, further 0.37/0.73 (0.84%), drift +14bp (t +1.7) || 2023-26: n 1166, near 34%, back 27%, further 0.42/0.83 (0.68%), drift +5bp (t +0.8)
+   top    normal  2018-22: n 794, near 31%, back 20%, further 0.48/0.91 (1.08%), drift +29bp (t +2.7) || 2023-26: n 1125, near 28%, back 20%, further 0.49/0.99 (0.92%), drift +19bp (t +2.1)
+   top    heavy   2018-22: n 397, near 22%, back 16%, further 0.67/1.21 (1.96%), drift +38bp (t +1.7) || 2023-26: n 537, near 21%, back 15%, further 0.68/1.46 (1.53%), drift +75bp (t +4.0)
+   bottom all     2018-22: n 1962, near 34%, back 22%, further 0.42/0.92 (1.12%), drift -7bp (t -0.6) || 2023-26: n 2827, near 32%, back 25%, further 0.45/0.95 (0.94%), drift +3bp (t +0.4)
+   bottom light   2018-22: n 915, near 38%, back 26%, further 0.37/0.81 (0.93%), drift +8bp (t +0.8) || 2023-26: n 1277, near 36%, back 29%, further 0.40/0.81 (0.80%), drift +4bp (t +0.5)
+   bottom normal  2018-22: n 768, near 31%, back 20%, further 0.46/0.99 (1.26%), drift -19bp (t -1.4) || 2023-26: n 1209, near 30%, back 23%, further 0.50/1.07 (0.99%), drift +1bp (t +0.1)
+   bottom heavy   2018-22: n 279, near 32%, back 18%, further 0.50/1.27 (1.70%), drift -25bp (t -0.5) || 2023-26: n 341, near 28%, back 23%, further 0.58/1.12 (1.50%), drift +6bp (t +0.3)
+   2018-22: 3954 alerts, 3.18 per alert day; share light/normal/heavy 43%/40%/17%
+   2023-26: 5655 alerts, 4.41 per alert day; share light/normal/heavy 43%/41%/16%
+
+## v3 (median regression)
+   top    all     2018-22: n 2108, near 31%, back 22%, further 0.47/0.90 (1.07%), drift +20bp (t +2.7) || 2023-26: n 2870, near 30%, back 23%, further 0.48/0.95 (0.87%), drift +23bp (t +3.7)
+   top    light   2018-22: n 899, near 37%, back 25%, further 0.38/0.74 (0.76%), drift +10bp (t +1.3) || 2023-26: n 1234, near 35%, back 29%, further 0.39/0.81 (0.63%), drift +4bp (t +0.6)
+   top    normal  2018-22: n 812, near 29%, back 20%, further 0.49/0.89 (1.08%), drift +23bp (t +2.3) || 2023-26: n 1119, near 29%, back 19%, further 0.50/0.98 (0.93%), drift +22bp (t +2.4)
+   top    heavy   2018-22: n 397, near 21%, back 17%, further 0.66/1.24 (1.96%), drift +38bp (t +1.7) || 2023-26: n 517, near 23%, back 16%, further 0.67/1.34 (1.59%), drift +74bp (t +4.0)
+   bottom all     2018-22: n 2007, near 35%, back 24%, further 0.41/0.88 (1.05%), drift -7bp (t -0.6) || 2023-26: n 2915, near 31%, back 25%, further 0.45/0.93 (0.90%), drift +4bp (t +0.5)
+   bottom light   2018-22: n 963, near 39%, back 29%, further 0.37/0.75 (0.86%), drift +11bp (t +1.1) || 2023-26: n 1385, near 34%, back 29%, further 0.41/0.81 (0.79%), drift +6bp (t +0.7)
+   bottom normal  2018-22: n 767, near 33%, back 19%, further 0.44/0.96 (1.14%), drift -24bp (t -1.8) || 2023-26: n 1193, near 30%, back 22%, further 0.47/0.99 (0.94%), drift -0bp (t -0.0)
+   bottom heavy   2018-22: n 277, near 29%, back 18%, further 0.50/1.17 (1.65%), drift -18bp (t -0.4) || 2023-26: n 337, near 28%, back 26%, further 0.56/1.14 (1.44%), drift +12bp (t +0.6)
+   2018-22: 4115 alerts, 3.25 per alert day; share light/normal/heavy 45%/38%/16%
+   2023-26: 5785 alerts, 4.42 per alert day; share light/normal/heavy 45%/40%/15%
+
+## v3 fitted on 2019-22 only
+   top    all     2018-22: n 2128, near 30%, back 21%, further 0.48/0.93 (1.09%), drift +23bp (t +2.9) || 2023-26: n 2933, near 29%, back 22%, further 0.50/1.00 (0.87%), drift +24bp (t +3.7)
+   top    light   2018-22: n 890, near 35%, back 24%, further 0.39/0.77 (0.82%), drift +13bp (t +1.5) || 2023-26: n 1262, near 34%, back 27%, further 0.41/0.83 (0.66%), drift +4bp (t +0.7)
+   top    normal  2018-22: n 842, near 29%, back 19%, further 0.51/0.94 (1.09%), drift +27bp (t +2.7) || 2023-26: n 1149, near 27%, back 19%, further 0.52/1.04 (0.91%), drift +21bp (t +2.3)
+   top    heavy   2018-22: n 396, near 20%, back 17%, further 0.67/1.31 (1.97%), drift +36bp (t +1.6) || 2023-26: n 522, near 21%, back 16%, further 0.71/1.38 (1.54%), drift +75bp (t +4.0)
+   bottom all     2018-22: n 2028, near 35%, back 24%, further 0.41/0.89 (1.05%), drift -7bp (t -0.6) || 2023-26: n 2949, near 31%, back 25%, further 0.46/0.94 (0.91%), drift +4bp (t +0.5)
+   bottom light   2018-22: n 969, near 40%, back 29%, further 0.36/0.75 (0.85%), drift +12bp (t +1.2) || 2023-26: n 1405, near 34%, back 28%, further 0.41/0.81 (0.79%), drift +5bp (t +0.7)
+   bottom normal  2018-22: n 777, near 32%, back 20%, further 0.44/0.97 (1.14%), drift -24bp (t -1.8) || 2023-26: n 1202, near 29%, back 22%, further 0.48/1.01 (0.95%), drift -1bp (t -0.1)
+   bottom heavy   2018-22: n 282, near 28%, back 18%, further 0.53/1.21 (1.72%), drift -24bp (t -0.5) || 2023-26: n 342, near 27%, back 25%, further 0.56/1.14 (1.47%), drift +12bp (t +0.5)
+   2018-22: 4156 alerts, 3.28 per alert day; share light/normal/heavy 45%/39%/16%
+   2023-26: 5882 alerts, 4.48 per alert day; share light/normal/heavy 45%/40%/15%
+
+v3 DAY_ZONE_EVIDENCE: {"top": {"all": {"n": 2870, "near": 0.3, "backInside": 0.23, "furtherMedian": 0.48, "furtherP75": 0.95, "driftBp": 23, "driftT": 3.7}, "light": {"n": 1234, "near": 0.35, "backInside": 0.29, "furtherMedian": 0.39, "furtherP75": 0.81, "driftBp": 4, "driftT": 0.6}, "normal": {"n": 1119, "near": 0.29, "backInside": 0.19, "furtherMedian": 0.5, "furtherP75": 0.98, "driftBp": 22, "driftT": 2.4}, "heavy": {"n": 517, "near": 0.23, "backInside": 0.16, "furtherMedian": 0.67, "furtherP75": 1.34, "driftBp": 74, "driftT": 4.0}}, "bottom": {"all": {"n": 2915, "near": 0.31, "backInside": 0.25, "furtherMedian": 0.45, "furtherP75": 0.93, "driftBp": 4, "driftT": 0.5}, "light": {"n": 1385, "near": 0.34, "backInside": 0.29, "furtherMedian": 0.41, "furtherP75": 0.81, "driftBp": 6, "driftT": 0.7}, "normal": {"n": 1193, "near": 0.3, "backInside": 0.22, "furtherMedian": 0.47, "furtherP75": 0.99, "driftBp": 0, "driftT": -0.0}, "heavy": {"n": 337, "near": 0.28, "backInside": 0.26, "furtherMedian": 0.56, "furtherP75": 1.14, "driftBp": 12, "driftT": 0.6}}}

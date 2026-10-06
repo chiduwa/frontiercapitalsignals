@@ -504,6 +504,33 @@ def alpha_for(index):
     return ALPHA * 6 / (math.pi ** 2 * index ** 2)
 
 
+def call_metrics(pairs):
+    """Precision, NPV, sensitivity and specificity of a direction model's
+    forward calls ("up" when P(up) > 0.5), from (pUp, realized return) pairs,
+    with the up-rate they have to be read against. Asked 2026-10-06; studied in
+    docs/DAY_ZONE_METHODS_AND_CONFUSION.md. A READOUT, never a promotion
+    criterion, because on 1.58M walk-forward forecasts (80 assets, 21 models):
+      - sensitivity and specificity mostly measure how often a model says
+        "up" (stock models: 75% of the time, so 0.75 / 0.25 in both halves);
+        maximizing either picks a model that always says up, or never does;
+      - precision - up-rate and NPV - down-rate share one numerator
+        (TP.TN - FP.FN), so they always have the same sign: no model is good
+        at up calls and bad at down calls against the base rate;
+      - picking each asset's model by any of them gave worse probabilities
+        than picking by Brier, and no money after costs.
+    Informedness (sensitivity + specificity - 1) is 0 for any no-skill model
+    at any threshold, so it is the one honest single number here."""
+    n = len(pairs)
+    if not n: return None
+    tp = sum(1 for p, r in pairs if p > 0.5 and r > 0); fp = sum(1 for p, r in pairs if p > 0.5 and r <= 0)
+    tn = sum(1 for p, r in pairs if p <= 0.5 and r <= 0); fn = n - tp - fp - tn
+    div = lambda a, b: round(a / b, 4) if b else None
+    sens, spec = div(tp, tp + fn), div(tn, tn + fp)
+    return {'n': n, 'upRate': round((tp + fn) / n, 4), 'callsUp': round((tp + fp) / n, 4),
+            'precision': div(tp, tp + fp), 'npv': div(tn, tn + fn), 'sensitivity': sens, 'specificity': spec,
+            'informedness': round(sens + spec - 1, 4) if sens is not None and spec is not None else None}
+
+
 # --------------------------------------------------------------- ledger ops
 
 class Ledger:
@@ -518,16 +545,20 @@ class Ledger:
 
     def get(self, mid, sym, h, asof): return self.by.get((mid, sym, h, asof))
 
+    def forward_dates(self, mid, sym, h, start):
+        """A model's forecast dates >= start with no two outcomes overlapping:
+        one per 7 days at h = 7, every 5th session at h = 5."""
+        dates = sorted(d for d in self.dates.get((mid, sym, h), []) if d >= start)
+        if h == 5: dates = dates[::5]
+        if h == 7: dates = [d for d in dates if not ((day(d) - day(start)) // DAY) % 7]
+        return dates
+
     def paired(self, challenger, incumbent, sym, h, start):
         """Loss differences (incumbent - challenger, positive = challenger
         better) on dates >= start where both were scored; one per 7 days at
         h = 7 so no two outcomes overlap."""
-        dates = sorted(d for d in self.dates.get((challenger, sym, h), []) if d >= start)
-        # A 5-session horizon is counted in sessions: every 5th forecast date.
-        if h == 5: dates = dates[::5]
         out = []
-        for d in dates:
-            if h == 7 and ((day(d) - day(start)) // DAY) % 7: continue
+        for d in self.forward_dates(challenger, sym, h, start):
             c, i = self.get(challenger, sym, h, d), self.get(incumbent, sym, h, d)
             if c and i and c.get('loss') is not None and i.get('loss') is not None:
                 out.append((d, i['loss'] - c['loss']))
@@ -892,6 +923,18 @@ class Tournament:
                     'top': [{'feature': c, 'weight': round(latest[c], 4), 'signStability': round(stab(c), 2)} for c in top]}
 
     # -- 6. the compact summary build-signals reads
+    def calls(self, mid, sym, h, start):
+        """call_metrics over a direction model's forward forecasts in this
+        slot since `start` (non-overlapping, every asset of a pooled slot)."""
+        pairs = []
+        for s in self.slot_symbols(sym, 'direction'):
+            for d in self.ledger.forward_dates(mid, s, h, start):
+                r, outcome = self.ledger.get(mid, s, h, d), self.outcome.get((s, h, d))
+                if r is None or outcome is None: continue
+                fc = json.loads(r['forecast_json']) if isinstance(r['forecast_json'], str) else r['forecast_json']
+                if isinstance(fc.get('pUp'), (int, float)): pairs.append((fc['pUp'], outcome))
+        return call_metrics(pairs)
+
     def summary(self):
         assets = {}
         for sym, target, h in self.all_slots():
@@ -913,7 +956,13 @@ class Tournament:
                     'targetDate': latest['target_date'] if latest else None,
                     'challengers': [{'model': m['model_id'], 'label': describe(self.spec(m)), 'eValue': round(m['e_value'], 3) if m.get('e_value') else None,
                                      'threshold': round(1 / alpha_for(m['alpha_index'])), 'forwardN': m.get('forward_n') or 0,
-                                     'meanDiff': m.get('forward_mean_diff')} for m in ch]}
+                                     'meanDiff': m.get('forward_mean_diff'),
+                                     **({'calls': self.calls(m['model_id'], sym, h, m['epoch_start'])} if target == 'direction' else {})}
+                                    for m in ch]}
+                # The method in force, over the leading challenger's window, so
+                # the two readouts cover the same dates.
+                if target == 'direction' and ch:
+                    assets[sym][f'{target}:{h}']['incumbentCalls'] = self.calls(inc, sym, h, ch[0]['epoch_start'])
         classes = {sym: self.cls(sym) for sym in assets}
         return {'version': VERSION, 'asOf': self.asof, 'generatedAt': self.run_at, 'assets': assets, 'classes': classes,
                 'universe': {c: len(ss) for c, ss in self.by_class.items()},

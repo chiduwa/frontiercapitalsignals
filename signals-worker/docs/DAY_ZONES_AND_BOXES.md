@@ -224,6 +224,14 @@ quotes.
 
 ## 3. What now notifies you
 
+> **Superseded 2026-10-06 (day-zones-v3).** The levels now come from a median
+> regression that adds last week's moves, the 60-day mean/median gap and the
+> weekday to the inputs below, 2.4% more accurate on 2023-26 and better on
+> every coin; the mean itself, Monte Carlo days and random-walk formulas all
+> did worse. The alert rule is unchanged and its odds were recomputed (within
+> a point or two of the numbers here). See
+> [DAY_ZONE_METHODS_AND_CONFUSION](DAY_ZONE_METHODS_AND_CONFUSION.md).
+
 `scripts/day-zones.mjs` (hourly build) puts each tracked coin's forecast top
 and bottom for the UTC day in the payload as `dayZones`. That costs two
 public, keyless Binance requests per coin; HYPE uses Hyperliquid's public

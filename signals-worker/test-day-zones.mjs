@@ -9,7 +9,7 @@ import { dayZoneForecast, buildDayZones, DAY_ZONE } from './scripts/day-zones.mj
 const fixture = JSON.parse(readFileSync(new URL('./test-fixtures/day-zones-2026-09-30.json', import.meta.url), 'utf8'));
 const toBars = (rows) => rows.map(([t, o, h, l, c, qv]) => ({ t, o, h, l, c, qv }));
 
-test('the forecast reproduces the study (docs/research-2026-10-02-day-zones-boxes, daytop.py + activity.py) on real BTC and HBAR bars', () => {
+test('the forecast reproduces the study (docs/research-2026-10-06-mean-median-sim, ablate.py + evidence.py) on real BTC and HBAR bars', () => {
   for (const [sym, f] of Object.entries(fixture)) {
     const z = dayZoneForecast(toBars(f.bars), f.now);
     assert.ok(z, `${sym}: a zone`);
@@ -19,14 +19,34 @@ test('the forecast reproduces the study (docs/research-2026-10-02-day-zones-boxe
     assert.ok(Math.abs(z.downLog - f.downLog) < 1e-12, `${sym} down ${z.downLog} vs ${f.downLog}`);
     assert.ok(Math.abs(z.top - f.open * Math.exp(f.upLog)) < 1e-9 * f.open);
     assert.equal(z.windows, DAY_ZONE.windows);
-    // activity: yesterday's volume and move widen the band; today's volume so far
-    assert.ok(Math.abs(z.activity.multiplier - f.multiplier) < 1e-12, `${sym} multiplier ${z.activity.multiplier} vs ${f.multiplier}`);
+    // the regression's adjustment and inputs; yesterday's activity; today's volume so far
+    assert.ok(Math.abs(z.vsMedian.up - f.vsMedianUp) < 1e-12, `${sym} up vs median ${z.vsMedian.up} vs ${f.vsMedianUp}`);
+    assert.ok(Math.abs(z.vsMedian.down - f.vsMedianDown) < 1e-12, `${sym} down vs median ${z.vsMedian.down} vs ${f.vsMedianDown}`);
+    assert.ok(Math.abs(z.inputs.lastWeekUp - f.lastWeekUp) < 1e-12, `${sym} last week`);
+    assert.ok(Math.abs(z.inputs.tailGapDown - f.tailGapDown) < 1e-12, `${sym} mean/median gap`);
+    assert.ok(Math.abs(z.inputs.volRatio - f.volRatio) < 1e-9 * f.volRatio, `${sym} volatility ratio`);
+    assert.equal(z.inputs.weekday, 2, '2026-09-30 is a Wednesday (Monday = 0)');
     assert.ok(Math.abs(z.activity.volume24Ratio - f.volume24Ratio) < 1e-9 * f.volume24Ratio, `${sym} volume ratio`);
     assert.ok(Math.abs(z.activity.yesterdayMoveTypical - f.yesterdayMoveTypical) < 1e-12, `${sym} yesterday's move`);
     assert.equal(z.volumeSoFar.throughHourUtc, f.throughHourUtc);
     assert.ok(Math.abs(z.volumeSoFar.ratio - f.volumeSoFarRatio) < 1e-9 * f.volumeSoFarRatio, `${sym} volume so far ${z.volumeSoFar.ratio} vs ${f.volumeSoFarRatio}`);
   }
-  assert.ok(fixture.HBAR.multiplier > 1.3, 'HBAR on 2026-09-30 (10.8x volume after an 8.8-typical-move day) gets a wider band');
+  // HBAR on 2026-09-30 (10.8x volume after an 8.8-typical-move day, last week 3.1x its median):
+  // a much wider band, and the downside held at the 4x extrapolation guard.
+  const hb = dayZoneForecast(toBars(fixture.HBAR.bars), fixture.HBAR.now);
+  assert.ok(hb.vsMedian.up > 3, 'HBAR gets a much wider band');
+  assert.equal(hb.vsMedian.down, DAY_ZONE.maxVsMedian);
+});
+
+test('the weekday enters only through the day being forecast', () => {
+  // Zeroing the weekday terms moves each level by exactly the coefficient of
+  // the day being forecast (2026-09-30, a Wednesday) and by nothing else.
+  const f = fixture.BTC;
+  const bars = toBars(f.bars);
+  const flat = { up: { ...DAY_ZONE.model.up, weekday: [0, 0, 0, 0, 0, 0, 0] }, down: { ...DAY_ZONE.model.down, weekday: [0, 0, 0, 0, 0, 0, 0] } };
+  const z = dayZoneForecast(bars, f.now), z0 = dayZoneForecast(bars, f.now, { model: flat });
+  assert.ok(Math.abs(Math.log(z.upLog / z0.upLog) - DAY_ZONE.model.up.weekday[2]) < 1e-12);
+  assert.ok(Math.abs(Math.log(z.downLog / z0.downLog) - DAY_ZONE.model.down.weekday[2]) < 1e-12);
 });
 
 test('an unfinished hour never counts toward today\'s volume so far', () => {

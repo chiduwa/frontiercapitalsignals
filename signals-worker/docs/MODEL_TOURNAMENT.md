@@ -213,6 +213,30 @@ advantages are near zero (no family beat the base rate). Expect size and
 timing promotions long before any direction one, and possibly none for
 direction.
 
+## Forward-call readout: precision, NPV, sensitivity, specificity (2026-10-06)
+
+Asked whether the tournament could also check precision, recall/sensitivity,
+specificity and negative predictive value "to see if we can learn from those
+to improve the models per asset". It now checks them; it does not learn from
+them, on evidence ([DAY_ZONE_METHODS_AND_CONFUSION](DAY_ZONE_METHODS_AND_CONFUSION.md), section 3).
+
+- Every direction challenger in the run summary carries `calls`, computed from
+  its forward forecasts since its epoch ("up" when P(up) > 0.5): n, the
+  up-rate, how often it said up, precision, NPV, sensitivity, specificity and
+  informedness. The method in force gets the same over the leading
+  challenger's window (`incumbentCalls`). Multi-day horizons count one outcome
+  per horizon, exactly as the promotion test does (`Ledger.forward_dates`).
+- The panel prints the leader's line, with precision next to the share of up
+  days, because a 55% precision on a coin that rose 55% of days is no skill.
+- **Promotion is unchanged: Brier, through the e-process.** On 1.58M
+  walk-forward forecasts (80 assets, 21 families) sensitivity and specificity
+  mostly measured how often a model says "up"; precision and NPV gains over
+  the base rate always share a sign (one numerator), so no model is "good at
+  down calls only"; and picking each asset's model by any of them gave worse
+  probabilities than picking by Brier on every horizon, with no money after
+  costs. Informedness (0 for any model without skill) is the honest single
+  number in the readout.
+
 ## What reads it
 
 `build-signals.mjs` publishes the latest run as `payload.modelTournament` via

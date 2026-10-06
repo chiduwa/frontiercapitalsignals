@@ -2742,24 +2742,34 @@ console.log('\n== day zones: today\'s forecast top/bottom for the always-tracked
   const one = mod.dayZoneNotification([due.find(d => d.symbol === 'BTC')]);
   check('one coin: a plain title naming the coin and the side', one.title === "BTC at today's forecast top", one.title);
   check('every push says it is not a top signal and quotes what followed, by volume',
-    /Not a top signal/.test(one.message) && /near the day's high 35% on light, 28% on normal, 21% on heavy volume/.test(one.message)
+    /Not a top signal/.test(one.message) && /near the day's high 35% on light, 29% on normal, 23% on heavy volume/.test(one.message)
     && /kept rising into the close/.test(one.message) && /Open interest and taker buying made no reliable difference/.test(one.message), one.message);
   check('without a fresh volume reading it quotes the overall odds, in the coin\'s own terms',
-    /went a median \+0\.48% further, 1 in 4 beyond \+0\.99%, and closed the day back below the level 22% of the time/.test(one.message), one.message);
-  const withVol = (ratio, through, mult = 1) => ({ date: '2026-10-02', bySymbol: { BTC: { ...zone(85000, 1, 1), volumeSoFar: { ratio, throughHourUtc: through }, activity: { multiplier: mult } } } });
+    /went a median \+0\.48% further, 1 in 4 beyond \+0\.95%, and closed the day back below the level 23% of the time/.test(one.message), one.message);
+  const withVol = (ratio, through, vs = 1) => ({ date: '2026-10-02', bySymbol: { BTC: { ...zone(85000, 1, 1), volumeSoFar: { ratio, throughHourUtc: through }, vsMedian: { up: vs, down: vs } } } });
   const groupOf = (ratio, through, at = '2026-10-02T18:05:00Z') => mod.dueDayZoneAlerts(withVol(ratio, through), { BTC: { price: 86000 } }, at)[0].volumeGroup;
   check('volume so far picks the odds: under 1x light, 1-2x normal, 2x and up heavy',
     groupOf(0.7, 17) === 'light' && groupOf(1.4, 17) === 'normal' && groupOf(2.0, 17) === 'heavy', [groupOf(0.7, 17), groupOf(1.4, 17), groupOf(2.0, 17)].join());
   check('a volume reading more than two hours old is not used', groupOf(3, 15, '2026-10-02T18:05:00Z') === 'all');
   const heavy = mod.dayZoneNotification(mod.dueDayZoneAlerts(withVol(2.4, 17, 1.09), { BTC: { price: 86000 } }, '2026-10-02T18:05:00Z'));
   check('a heavy-volume push says so and quotes the heavy-volume odds',
-    /Volume so far 2\.4x normal for the time of day \(heavy\)/.test(heavy.message) && /back below the level 15% of the time/.test(heavy.message), heavy.message);
-  check('a band widened for yesterday\'s activity says by how much', /band widened 9% for yesterday's heavy volume and move/.test(heavy.message), heavy.message);
+    /Volume so far 2\.4x normal for the time of day \(heavy\)/.test(heavy.message) && /back below the level 16% of the time/.test(heavy.message), heavy.message);
+  check('a level set wider than the 60-day median move says by how much', /level 9% wider than its 60-day median move/.test(heavy.message), heavy.message);
+  const narrow = mod.dayZoneNotification(mod.dueDayZoneAlerts(withVol(0.8, 17, 0.88), { BTC: { price: 86000 } }, '2026-10-02T18:05:00Z'));
+  check('a narrower one says narrower', /level 12% narrower than its 60-day median move/.test(narrow.message), narrow.message);
+  const quiet = mod.dayZoneNotification(mod.dueDayZoneAlerts(withVol(0.8, 17, 1.03), { BTC: { price: 86000 } }, '2026-10-02T18:05:00Z'));
+  check('under 5% either way the adjustment goes unmentioned', !/than its 60-day median move/.test(quiet.message), quiet.message);
+  const sides = { date: '2026-10-02', bySymbol: { BTC: { ...zone(85000, 1, 1), vsMedian: { up: 1.2, down: 0.9 } } } };
+  const low = mod.dayZoneNotification(mod.dueDayZoneAlerts(sides, { BTC: { price: 84000 } }, '2026-10-02T18:05:00Z'));
+  check('a bottom quotes its own side\'s adjustment, not the top\'s', /level 10% narrower than its 60-day median move/.test(low.message) && !/20% wider/.test(low.message), low.message);
+  const v2 = { date: '2026-10-02', bySymbol: { BTC: { ...zone(85000, 1, 1), activity: { multiplier: 1.3 } } } };
+  check('an older (v2) payload without vsMedian still alerts and claims no adjustment',
+    !/than its 60-day median move/.test(mod.dayZoneNotification(mod.dueDayZoneAlerts(v2, { BTC: { price: 86000 } }, '2026-10-02T18:05:00Z')).message));
   const many = mod.dayZoneNotification(due);
   check('several coins on one tick share one push', many.title === 'Forecast top: BTC, ETH · forecast bottom: XLM', many.title);
-  check('a bottom quotes its own odds', /Not a bottom signal/.test(many.message) && /near the day's low 37% on light, 30% on normal, 28% on heavy volume/.test(many.message) && /no reliable bounce/.test(many.message));
+  check('a bottom quotes its own odds', /Not a bottom signal/.test(many.message) && /near the day's low 34% on light, 30% on normal, 28% on heavy volume/.test(many.message) && /no reliable bounce/.test(many.message));
   const all8 = {}; const big = {};
-  for (const s of ['BTC', 'ETH', 'SOL', 'XLM', 'XRP', 'HYPE', 'HBAR', 'ARB']) { all8[s] = { ...zone(100, 1, 1), volumeSoFar: { ratio: 2.5, throughHourUtc: 17 }, activity: { multiplier: 1.3 } }; big[s] = { price: 150 }; }
+  for (const s of ['BTC', 'ETH', 'SOL', 'XLM', 'XRP', 'HYPE', 'HBAR', 'ARB']) { all8[s] = { ...zone(100, 1, 1), volumeSoFar: { ratio: 2.5, throughHourUtc: 17 }, vsMedian: { up: 3.7, down: 4 } }; big[s] = { price: 150 }; }
   const worst = mod.dayZoneNotification(mod.dueDayZoneAlerts({ date: '2026-10-02', bySymbol: all8 }, big, '2026-10-02T18:05:00Z'));
   check('all eight coins at once still fit one ntfy message (4,096 bytes)', new TextEncoder().encode(worst.message).length < 4096, String(worst.message.length));
 
