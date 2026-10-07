@@ -28,7 +28,11 @@
 //     2.4% better on 2023-26 (t -5.2), HYPE included. The mean helps as an
 //     INPUT (the mean/median gap), not as a replacement for the median.
 //   - one model per coin was worse than this pooled one (picking each coin's
-//     best method on 2019-22 scored 0.971 on 2025-26 vs 0.965 for this).
+//     best method on 2019-22 scored 0.971 on 2025-26 vs 0.965 for this);
+//   - neural networks (2026-10-07: an MLP, an LSTM on 14 days of 4-hour bars)
+//     tied it and boosted trees did worse, refit on the same schedule; a
+//     50/50 blend gained 0.2-0.5% but not on BTC/ETH/SOL in 2025-26, so the
+//     model stays linear.
 // Calibrated: 49-50% of days stay inside each side. It replaces v2 (60-day
 // median x (24h vol / usual)^0.5 x the 2026-10-02 activity multiplier), whose
 // volume and yesterday's-move inputs it keeps, refitted.

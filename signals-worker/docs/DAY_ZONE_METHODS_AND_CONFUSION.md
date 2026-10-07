@@ -268,9 +268,64 @@ still uses only the Brier e-process**, and the code says why. Tests:
 always-up model reads as no skill, the shared-sign identity, the summary
 wiring and weekly counting) and `test-dashboard.mjs`.
 
+## 4. Neural networks (2026-10-07)
+
+Asked next: "how about neural network for predicting".
+
+**Already settled, not repeated.** Daily close-to-close direction and size
+were tested with an LSTM on 479 assets on 2026-09-23/24
+([SEQUENCE_MODELS](SEQUENCE_MODELS.md)):
+- **Direction:** it never beat the base rate.
+- **Size:** it beat GARCH + weekday only for LMT and CAT. Both are tournament
+  challengers.
+
+**New here:** networks on the day-zone target itself (the day's high and low
+from the 00:00 open, hourly data).
+
+**How it was tested.**
+- **The challengers:**
+  - a feed-forward network (MLP, 2 x 64) on the v3 inputs;
+  - an LSTM reading the last 14 days of 4-hour bars plus those inputs;
+  - gradient-boosted trees (LightGBM), as a nonlinear control that is not a
+    network.
+- **The method:** each challenger forecasts the 10/25/50/75/90th
+  percentiles, pooled over the eight coins. Every one is refit every 91 days
+  on all coin-days before the refit, with early stopping on the last 15% of
+  those days. Networks average 3 seeds.
+- **The benchmark:** v3's linear model, refit on the same schedule, so it
+  gets no in-sample advantage.
+- **The data:** 17,227 coin-days
+  (`research-2026-10-07-neural-zones/results/score_nn_out.txt`).
+
+| against the linear model (below 1 = better) | MAE 2019-22 | MAE 2023-26 | CRPS 2019-22 | CRPS 2023-26 |
+|---|---|---|---|---|
+| v2 (the old live levels) | 1.015 (t +4.2) | 1.029 (t +8.9) | 1.013 | 1.027 |
+| gradient-boosted trees | 1.003 (t +0.8) | 1.008 (t +3.6) | 1.009 | 1.002 |
+| MLP | 0.997 (t -1.5) | 1.001 (t +1.0) | 1.000 | 1.000 |
+| LSTM | 0.996 (t -2.2) | 1.001 (t +0.6) | 0.999 | 0.997 (t -1.7) |
+| linear + LSTM, 50/50 | 0.996 (t -3.8) | 0.998 (t -1.4) | 0.996 (t -3.3) | 0.995 (t -4.1) |
+
+- **Alone, the networks tie the linear model.** In 2025-26 they are slightly
+  worse on BTC, ETH and SOL (0.9-1.3%). The LSTM's 14 days of 4-hour bars add nothing
+  over the summary inputs.
+- **Trees are worse.**
+- **A 50/50 blend gains 0.2-0.5%.** That gain is significant on the whole
+  distribution in both periods, but on the level itself only in 2019-22, and
+  it is slightly worse on BTC, ETH and SOL in 2025-26. Not shipped: it would
+  put a PyTorch model into the hourly build for a gain that does not hold
+  where it matters most.
+- **Still no direction.** Every model's up/down tilt predicted the day's
+  actual tilt in 2019-22 (t 2.4-3.4) but not in 2023-26 (t 0.5-1.4), the same
+  "signs change between halves" seen on 2026-10-02.
+
+**The limit is the data, not the model.** About 18,000 coin-days, a target
+that is mostly noise around its median, and three very different learners
+landing on the linear model's accuracy.
+
 ## Reproduce
 
-[research-2026-10-06-mean-median-sim/](research-2026-10-06-mean-median-sim/README.md).
+[research-2026-10-06-mean-median-sim/](research-2026-10-06-mean-median-sim/README.md);
+neural networks: [research-2026-10-07-neural-zones/](research-2026-10-07-neural-zones/README.md).
 
 Related: [DAY_ZONES_AND_BOXES](DAY_ZONES_AND_BOXES.md),
 [MODEL_TOURNAMENT](MODEL_TOURNAMENT.md).
