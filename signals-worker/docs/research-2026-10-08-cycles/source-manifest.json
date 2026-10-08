@@ -1,0 +1,194 @@
+[
+  {
+    "url": "https://raw.githubusercontent.com/coinmetrics/data/master/csv/btc.csv",
+    "file": "coinmetrics-btc.csv",
+    "bytes": 2482497,
+    "sha256": "06495ff8e643432e6948b7b4686ce44fc106217287dabdc1b38351d9ddec46c3"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/coinmetrics/data/master/csv/eth.csv",
+    "file": "coinmetrics-eth.csv",
+    "bytes": 2121732,
+    "sha256": "46b18f3df967405374b1f6ee8a3d11ee1b7a5b176ac9fb4342caf6bf8648f2cc"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/coinmetrics/data/master/csv/ltc.csv",
+    "file": "coinmetrics-ltc.csv",
+    "bytes": 1598248,
+    "sha256": "a47defa0eae5c5e39b7f4b4392a309d32daffb271f4cfd8e5d2c915dcc009a6e"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/coinmetrics/data/master/csv/xrp.csv",
+    "file": "coinmetrics-xrp.csv",
+    "bytes": 1279291,
+    "sha256": "251ed578003a742e42e3fb239af5c765903384b4cc42fee6b3872be8a5b0b568"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/coinmetrics/data/master/csv/doge.csv",
+    "file": "coinmetrics-doge.csv",
+    "bytes": 1576582,
+    "sha256": "ab756a42b9c1560dfdba6b1da20eb9a11e6e7263e3df53a7f85ddc45b5b3e0a1"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/SPY?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-SPY.json",
+    "bytes": 734266,
+    "sha256": "c0f44b1e01bf6feb591e80d31c493d69a7d4f982baa0e3814c141f1f976bfae9"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/QQQ?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-QQQ.json",
+    "bytes": 729586,
+    "sha256": "9ab114f9c12d232c5a7eee0afee37ca975d82787c2534cb6a094cc4f91e9a435"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/TLT?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-TLT.json",
+    "bytes": 673455,
+    "sha256": "5621a81c99a0e4304ac31bfa32e5a2390f3c597634ad6612282094d9b4993a70"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/GLD?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-GLD.json",
+    "bytes": 601507,
+    "sha256": "f0d88afe4c94727241fbf080ffcfde84d7d94bef80204e7d1fb80f9c77c8f2a3"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/UUP?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-UUP.json",
+    "bytes": 541111,
+    "sha256": "2e37b041229f01385de0aaed3c922921b7a15b9e5e056ff1cea2ea72a6e4ebfd"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-AAPL.json",
+    "bytes": 756756,
+    "sha256": "59d3e57e645c1243db9ec27bfb09b7e2ff9b385a9d44ff14e39f69280098067a"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/MSFT?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-MSFT.json",
+    "bytes": 726582,
+    "sha256": "bb86bf4261f80d14f9f24f34093783fa58dd8ebaeb10e7501a05095e75c6d725"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/NVDA?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-NVDA.json",
+    "bytes": 780169,
+    "sha256": "3a7d7cf86605bc6cd36b47996be7ed5377f0416da23599a5f700e1b9becd0457"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/TSLA?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-TSLA.json",
+    "bytes": 455765,
+    "sha256": "d8ca6589beb162bfc266d1800bf3601c436fed83f268e1c7a8abb3fdcb346c28"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/AMZN?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-AMZN.json",
+    "bytes": 743333,
+    "sha256": "38b07646d253bd471211f0a76ba1a265e614bc62bfb1d06d5c0ed099901adc53"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/META?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-META.json",
+    "bytes": 390186,
+    "sha256": "97d0f5940fe6d370f1bbccf09850197b8300f1cf0cc6d835f22282ba6242d7ec"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/AMD?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-AMD.json",
+    "bytes": 710358,
+    "sha256": "5a19dd24d5227f14d42c5a9dfaa5cecabcb840d057abef97db8cc692a26d8076"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/HOOD?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-HOOD.json",
+    "bytes": 142092,
+    "sha256": "50c65b3ec385c7f476983fba65d6cebc6c515ccd5d181753b6c59dd3a5c26905"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/TQQQ?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-TQQQ.json",
+    "bytes": 473018,
+    "sha256": "1f5293e8968483f72768f6f9d9814eefd15f1d75849e5dedc93336976ff38f96"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/SQQQ?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-SQQQ.json",
+    "bytes": 290377,
+    "sha256": "e021e973addc236fe4be5e18895d3d92deaf58508c66d579ecbac6528f598201"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/SOXL?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-SOXL.json",
+    "bytes": 468015,
+    "sha256": "1995354e1dfb150b086ee577403fed3b3aabad571deb72bf589935cfbabd1c3e"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/NVDL?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-NVDL.json",
+    "bytes": 107815,
+    "sha256": "c381db87654d65755f3b65a4fbc1818ddb6108122b6a122902c3416640dda237"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/TSLL?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-TSLL.json",
+    "bytes": 117271,
+    "sha256": "0eb6468b3890525d9ad1cd62f221fcac6e3a5ea24166595c5ff9a2b05c32bb5f"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/BITX?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-BITX.json",
+    "bytes": 92335,
+    "sha256": "a0a96a83159dcd0442aa80b221472657b5393129796d85e4f6c142bca6db28f8"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/CONL?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-CONL.json",
+    "bytes": 112532,
+    "sha256": "e548f68723bff1b68ea9f11b9656a53dbd4d56c1f5b046c37196b44b42bd3be8"
+  },
+  {
+    "url": "https://query1.finance.yahoo.com/v8/finance/chart/MSTU?interval=1d&period1=946684800&period2=1791417600&includePrePost=false&events=div%2Csplits",
+    "file": "yahoo-MSTU.json",
+    "bytes": 43330,
+    "sha256": "a18e572e1dee5cd0625f0ed484dc02ff0863882f5fda0455c6f46407c1cad283"
+  },
+  {
+    "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=86400&limit=1000&start=1313625600&end=1399939200",
+    "file": "bitstamp-BTC-2011-08-18.json",
+    "bytes": 123775,
+    "sha256": "62660a2d7626de070886ec7f3129e490271d9ae5e43df898a8091cad533a8050"
+  },
+  {
+    "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=86400&limit=1000&start=1400025600&end=1486339200",
+    "file": "bitstamp-BTC-2014-05-14.json",
+    "bytes": 128413,
+    "sha256": "b28fa86483d3a2565dce8b92c9f5148e86599661665b7e552be3779de80381ba"
+  },
+  {
+    "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=86400&limit=1000&start=1486425600&end=1572739200",
+    "file": "bitstamp-BTC-2017-02-07.json",
+    "bytes": 133067,
+    "sha256": "89f169f8f1c706fd446647f45e691001b18db83ee16db4c0729d496e5c6ba4ab"
+  },
+  {
+    "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=86400&limit=1000&start=1572825600&end=1659139200",
+    "file": "bitstamp-BTC-2019-11-04.json",
+    "bytes": 135099,
+    "sha256": "fc1b44b3ad4508d07ec20e7d2d8d466e0a47e19c1b57602922f139646146b76f"
+  },
+  {
+    "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=86400&limit=1000&start=1659225600&end=1745539200",
+    "file": "bitstamp-BTC-2022-07-31.json",
+    "bytes": 135953,
+    "sha256": "b497ada3c58115014cb023715ead7ad6892918de3b8bb0b8af5d5067f0df7f39"
+  },
+  {
+    "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=86400&limit=1000&start=1745625600&end=1791331200",
+    "file": "bitstamp-BTC-2025-04-26.json",
+    "bytes": 136655,
+    "sha256": "7a07e607f6a0bf77dc00d1bf5d114b49a1e501fa0acbcd5763931c025bd655d7"
+  }
+]

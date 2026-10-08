@@ -10,9 +10,15 @@ import { authorizeRow, authorizeResearch, authorizeTournament, TOURNAMENT_SOURCE
 import { activePolicyCandidate, isActivePolicyCandidate } from './active-limit.mjs';
 
 async function getJson(path) {
-  const res = await fetch(`${config.signalsBase}${path}`);
-  if (!res.ok) throw new Error(`${path} fetch failed: HTTP ${res.status}`);
-  return res.json();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const res = await fetch(`${config.signalsBase}${path}`, { signal: controller.signal });
+    if (!res.ok) throw new Error(`${path} fetch failed: HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export const fetchSignals = () => getJson('/api/signals');

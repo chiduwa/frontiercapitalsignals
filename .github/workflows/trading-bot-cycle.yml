@@ -43,7 +43,9 @@ jobs:
       # rather than in a live cycle.
       - name: Verify contract and risk guardrails
         working-directory: trading-bot
-        run: node test.mjs
+        run: |
+          node test.mjs
+          node --test test-network-deadlines.mjs
 
       # The shadow ledger's table and the open-order exit-geometry columns are
       # additive schema this bot owns. Re-running is safe: Wrangler records

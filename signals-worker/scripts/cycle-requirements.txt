@@ -1,0 +1,3 @@
+-r scenario-requirements.txt
+scikit-learn==1.9.1
+matplotlib==3.10.8

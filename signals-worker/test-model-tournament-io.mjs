@@ -49,6 +49,8 @@ test('a score fills an empty loss and never overwrites a scored one', async () =
   await importResults({}, results({ runAt: 'r2', forecasts: [], scores: [score(0.15)] }), { batch, query });
   await importResults({}, results({ runAt: 'r3', forecasts: [], scores: [score(0.99)] }), { batch, query });
   assert.equal(db.prepare('SELECT loss FROM model_forecasts').get().loss, 0.15);
+  const state = await exportState({}, { query, nowMs: Date.parse('2026-09-25T00:00:00Z') });
+  assert.equal(state.ledger[0].outcome_json, '{"value":1.2}', 'readouts receive the immutable scored outcome');
 });
 
 test('the registry keeps what a model is, updates where it stands, and history never duplicates', async () => {

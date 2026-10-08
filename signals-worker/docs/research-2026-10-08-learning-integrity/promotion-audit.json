@@ -1,0 +1,18 @@
+{
+  "seed": 71008,
+  "runs": 200,
+  "outcomesPerRun": 540,
+  "trueMeanLossAdvantage": -0.00040000000000000105,
+  "promotionThreshold": 32.89868133696452,
+  "falsePromotions": {
+    "old": 175,
+    "new": 0
+  },
+  "rule": "bounded-loss-v2",
+  "liveRegistryAtAudit": {
+    "champions": 0,
+    "directionChallengers": 647,
+    "magnitudeChallengers": 867,
+    "timingChallengers": 217
+  }
+}

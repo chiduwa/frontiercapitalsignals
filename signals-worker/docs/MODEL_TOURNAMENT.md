@@ -1,5 +1,18 @@
 # Per-asset model tournament (`model-tournament-v1`)
 
+**2026-10-08 correction:** promotion now uses `bounded-loss-v2`. The prior
+variance-scaled, symmetrically clipped difference does **not** preserve the
+mean-loss null under skewed errors. A worse challenger crossed its threshold
+in 175/200 controlled simulations. Direction now uses raw Brier differences
+(bound 1); timing uses raw log-loss differences divided by `-log(1e-9)`,
+the bound implied by the existing probability floor. Neither is clipped or
+rescaled from past realized differences. QLIKE has no finite such bound:
+magnitude forecasts, raw losses and screening continue, but automatic
+promotion/retirement is withheld pending a valid test for that objective.
+No live champions existed in the registry at this audit. Existing baselines,
+forecasts, model IDs, alpha allocations and trading risk controls are retained.
+See [the evidence and validation report](research-2026-10-08-learning-integrity/README.md).
+
 Asked 2026-09-23: use the history and everything we log so the learning model
 gets better at predicting and timing, "even if that means creating/generating
 its own models per asset", and "learn how to weigh each data/information per
@@ -172,8 +185,11 @@ For each challenger against the method in force, from its epoch start:
 
 - Pair the two models' losses on each date both were scored. At 7 days, use
   one date per week so no two outcomes overlap.
-- Scale each difference by the spread of the *previous* differences, and clip
-  to ±1. The first 10 only set the scale.
+- For direction, use the raw Brier loss difference in [-1, 1]. For timing,
+  divide the raw log-loss difference by its fixed `-log(1e-9)` bound. No
+  clipping, learned scale or burn-in enters promotion. Invalid bounds abstain
+  for the entire comparison. Magnitude's unbounded QLIKE remains untested by
+  this e-process; its raw outcomes continue accumulating.
 - Track a mixture betting e-process: E = mean over λ ∈ {0.05, 0.1, 0.2, 0.35,
   0.5} of ∏(1 + λx). While the challenger is no better, E is a nonnegative
   supermartingale, so the chance it *ever* reaches 1/α is at most α (Ville's
@@ -190,12 +206,18 @@ For each challenger against the method in force, from its epoch start:
 - **Demote** a champion when the reverse e-process against its fallback (the
   pooled champion, or else the benchmark) reaches 20.
 - **Retire** a challenger when it is clearly worse (reverse E ≥ 20) or has
-  logged 540 forward outcomes (80 at 7 days) without a verdict.
+  logged 540 forward outcomes (80 at 7 days) without a verdict. This timeout
+  is suspended for magnitude while its promotion test is unavailable.
 
 A per-asset champion beats a pooled one; a pooled champion applies to every
 asset without its own.
 
 ### How long promotion takes
+
+**The simulation table below describes the retired clipped test, not the
+current bounded test. Do not use it to estimate current promotion time.**
+The corrected test will generally require more evidence, especially for
+small probability improvements. The old apparent speed was partly the bug.
 
 Honestly, months for most real effects. Simulated for the first challenger
 of a slot (bar E ≥ 33; 200 runs each), where d is the true advantage in

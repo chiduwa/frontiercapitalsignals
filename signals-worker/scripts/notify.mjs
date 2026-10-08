@@ -12,6 +12,7 @@
 import { d1, chunk } from './d1-client.mjs';
 import { summarise, formatSummary, formatPct, formatPrice } from './price-change.mjs';
 import { combinePushes } from './push-batch.mjs';
+import { OUTCOME_MODEL_VERSION, OUTCOME_LABEL_VERSION, WEIGHT_INDEPENDENT_MODEL_VERSIONS, loadDirectionBaselines } from './reliability.mjs';
 import { MIN_RELIABILITY_SAMPLES, currentSignalConfidence, noSkillBaseline, skillOverBaseline } from '../worker.js';
 
 const NTFY_TIMEOUT_MS = 10000;
@@ -130,13 +131,17 @@ export function selectReliableReversalEvidence(rows, baselines, assetClass, symb
   return qualified[0] || null;
 }
 
-export async function checkAndNotifyReversals(env, nowIso, lookbackHours = 6) {
+export async function checkAndNotifyReversals(env, nowIso, lookbackHours = 6,
+  { loadBaselines = () => loadDirectionBaselines(env) } = {}) {
   if (!env.NTFY_TOPIC) return 0;
   const cutoff = new Date(new Date(nowIso).getTime() - lookbackHours * 3600 * 1000).toISOString();
   const rows = await d1(env, `
     SELECT symbol, asset_class, run_at, dir FROM technique_votes
-    WHERE technique_id = 'reversal' AND run_at >= ? ORDER BY symbol, run_at
-  `, [cutoff]);
+    WHERE technique_id = 'reversal' AND run_at >= ? AND run_at <= ?
+      AND EXISTS (SELECT 1 FROM forecast_run_versions v
+                  WHERE v.run_at = technique_votes.run_at AND v.model_version = ?)
+    ORDER BY symbol, run_at
+  `, [cutoff, nowIso, OUTCOME_MODEL_VERSION]);
 
   const bySymbol = {};
   for (const r of rows) (bySymbol[`${r.asset_class}|${r.symbol}`] ??= { symbol: r.symbol, assetClass: r.asset_class, rows: [] }).rows.push(r);
@@ -159,7 +164,8 @@ export async function checkAndNotifyReversals(env, nowIso, lookbackHours = 6) {
   const symbols = fresh.map((f) => f.symbol);
   const placeholders = symbols.map(() => '?').join(',');
   const priceNow = {};
-  const priceRows = await d1(env, `SELECT symbol, asset_class, price FROM asset_price_log WHERE symbol IN (${placeholders}) ORDER BY run_at DESC`, symbols);
+  const priceRows = await d1(env, `SELECT symbol, asset_class, price FROM asset_price_log
+    WHERE symbol IN (${placeholders}) AND run_at >= ? AND run_at <= ? ORDER BY run_at DESC`, [...symbols, cutoff, nowIso]);
   for (const r of priceRows) {
     const key = `${r.asset_class}|${r.symbol}`;
     if (!(key in priceNow)) priceNow[key] = r.price;
@@ -171,10 +177,10 @@ export async function checkAndNotifyReversals(env, nowIso, lookbackHours = 6) {
     FROM forecast_outcomes
     WHERE series_kind = 'technique' AND series_key = 'reversal'
       AND aggregated = 1 AND symbol IN (${placeholders})
+      AND model_version IN (${WEIGHT_INDEPENDENT_MODEL_VERSIONS.map(() => '?').join(',')}) AND label_version = ?
     GROUP BY symbol, asset_class, dir, horizon_minutes
-  `, symbols);
-  const baselineRows = await d1(env, 'SELECT asset_class, horizon_hours, n_up, n_flat, n_down FROM direction_baseline');
-  const baselines = Object.fromEntries(baselineRows.map((row) => [`${row.asset_class}|${row.horizon_hours}`, row]));
+  `, [...symbols, ...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION]);
+  const baselines = await loadBaselines();
   const stateRows = await d1(env, `SELECT symbol, last_sent_at FROM notification_state WHERE kind = 'reversal' AND symbol IN (${placeholders})`, symbols);
   const lastSent = Object.fromEntries(stateRows.map((row) => [row.symbol, Date.parse(row.last_sent_at)]));
 

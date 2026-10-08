@@ -29,7 +29,7 @@ const D1_TIMEOUT_MS = 30000;
 export async function d1(env, sql, params = []) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), D1_TIMEOUT_MS);
-  let res;
+  let res, body;
   try {
     res = await fetch(d1Url(env), {
       method: 'POST',
@@ -37,10 +37,10 @@ export async function d1(env, sql, params = []) {
       body: JSON.stringify({ sql, params }),
       signal: ctrl.signal
     });
+    body = await res.json().catch(() => null);
   } finally {
     clearTimeout(t);
   }
-  const body = await res.json().catch(() => null);
   if (!res.ok || !body || body.success !== true) {
     throw new Error(`D1 query failed: HTTP ${res.status} ${JSON.stringify(body && body.errors)}`);
   }
@@ -57,7 +57,7 @@ export async function d1Batch(env, statements) {
   if (!Array.isArray(statements) || !statements.length) return [];
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), D1_TIMEOUT_MS);
-  let res;
+  let res, body;
   try {
     res = await fetch(d1Url(env), {
       method: 'POST',
@@ -70,10 +70,10 @@ export async function d1Batch(env, statements) {
       }),
       signal: ctrl.signal
     });
+    body = await res.json().catch(() => null);
   } finally {
     clearTimeout(t);
   }
-  const body = await res.json().catch(() => null);
   const results = body && Array.isArray(body.result) ? body.result : [];
   const failed = results.find((result) => result && result.success === false);
   if (!res.ok || !body || body.success !== true || failed) {

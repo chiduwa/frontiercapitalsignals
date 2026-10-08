@@ -42,8 +42,8 @@ class EProcess(unittest.TestCase):
         runs = 400
         for _ in range(runs):
             # Heavy-tailed, zero-mean advantage, checked after EVERY outcome.
-            d = rng.standard_t(3, size=600) * 0.05
-            xs = mt.scaled(list(d))
+            d = np.clip(rng.standard_t(3, size=600) * 0.05, -1, 1)
+            xs = mt.bounded_differences(list(d), 'direction')
             logs = np.zeros(len(mt.LAMBDAS)); crossed = False
             for x in xs:
                 if x is None: continue
@@ -58,8 +58,8 @@ class EProcess(unittest.TestCase):
         rng = np.random.default_rng(3)
         found = 0
         for _ in range(50):
-            d = rng.normal(0.4, 1.0, size=400)
-            e, n = mt.e_value(mt.scaled(list(d)))
+            d = np.clip(rng.normal(0.4, 1.0, size=400), -1, 1)
+            e, n = mt.e_value(mt.bounded_differences(list(d), 'direction'))
             found += e >= 1 / mt.alpha_for(1)
         self.assertGreaterEqual(found, 45)
 
@@ -162,7 +162,9 @@ class Lifecycle(unittest.TestCase):
         for k in range(200):
             d = mt.add_days(start, k)
             ledger.append(ledger_row(bench, 'A', 1, d, 0.25 + rng.normal(0, 0.02)))
-            ledger.append(ledger_row(good['id'], 'A', 1, d, 0.20 + rng.normal(0, 0.02)))
+            # The bounded mean test needs a stronger finite-sample effect
+            # than the old, invalid variance-scaled clipping shortcut.
+            ledger.append(ledger_row(good['id'], 'A', 1, d, 0.17 + rng.normal(0, 0.02)))
             ledger.append(ledger_row(other['id'], 'A', 1, d, 0.25 + rng.normal(0, 0.02)))
         t2 = self.tournament(list(t.registry.values()), ledger)
         t2.lifecycle()
@@ -282,7 +284,10 @@ class CallMetrics(unittest.TestCase):
             d = mt.add_days(start, k)
             for h in (1, 7):
                 for mid, p in ((good['id'], 0.6 if k % 2 else 0.4), (bench, 0.55)):
-                    row = ledger_row(mid, 'A', h, d, 0.25); row['forecast_json'] = json.dumps({'pUp': p}); ledger.append(row)
+                    row = ledger_row(mid, 'A', h, d, 0.25)
+                    row['forecast_json'] = json.dumps({'pUp': p})
+                    row['outcome_json'] = json.dumps({'value': t.outcome.get(('A', h, d))})
+                    ledger.append(row)
         t2 = mt.Tournament(data, list(t.registry.values()), ledger, asof, '2026-01-01T00:00:00Z')
         s = t2.summary()['assets']['A']
         c1 = s['direction:1']['challengers'][0]['calls']

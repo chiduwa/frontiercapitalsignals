@@ -1,0 +1,5 @@
+# Offline research only; never installed in the Worker or bots.
+numpy==2.4.6
+pandas==3.0.6
+scipy==1.18.1
+exchange-calendars==4.13.2

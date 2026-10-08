@@ -21,8 +21,11 @@ outcomes existed (model_forecasts), through a test that stays valid however
 often it is checked: a betting e-process on the paired loss difference,
 promotion when it reaches 1/alpha_j (Ville's inequality), with alpha spent
 across challengers in admission order. A champion that stops beating what it
-replaced is demoted the same way. Search width therefore costs time, never
-false promotions.
+replaced is demoted the same way. The error bound is per slot and assumes
+nonpositive conditional mean loss differences. Direction and timing use
+fixed mathematical bounds; unbounded QLIKE remains measurement-only until
+a valid test is supplied (bounded-loss-v2, 2026-10-08). Historical clipping
+is used only to rank candidates, never as promotion evidence.
 
 Research only in the sense that matters: this writes forecasts and a
 registry, and places nothing. Downstream use of a champion is gated by the
@@ -56,6 +59,10 @@ LAMBDAS = np.array([0.05, 0.1, 0.2, 0.35, 0.5])
 BURN_IN = 10                 # paired outcomes that only set the scale
 SCREEN_DAYS = 360            # history the generator ranks candidates on
 FIRINGS = 6                  # 4-hour slots per UTC day: 00, 04, ... 20
+PROMOTION_RULE = 'bounded-loss-v2'
+# Fixed bounds on each loss difference, known BEFORE any outcome. QLIKE has
+# no finite bound: it keeps learning, but cannot use this mean test to promote.
+LOSS_DIFFERENCE_BOUNDS = {'direction': 1.0, 'timing': -math.log(1e-9)}
 
 LAGS = [f'returnLag{k}' for k in range(10)]
 GROUPS = {
@@ -476,9 +483,9 @@ def timing_known(days, asof):
 # --------------------------------------------------------------- e-process
 
 def scaled(diffs):
-    """Predictably scaled, clipped paired differences: None during burn-in.
-    The scale at t uses only differences before t, so the bet stays
-    predictable and the e-process valid."""
+    """Robust historical SCREEN ranking only, never promotion evidence.
+    Clipping a skewed zero-mean difference can make its mean positive.
+    Predictable scaling does not repair that change of hypothesis."""
     out, hist = [], []
     for d in diffs:
         if len(hist) >= BURN_IN:
@@ -488,6 +495,16 @@ def scaled(diffs):
             out.append(None)
         hist.append(d)
     return out
+
+
+def bounded_differences(diffs, target):
+    bound = LOSS_DIFFERENCE_BOUNDS.get(target)
+    if bound is None: return [None] * len(diffs)
+    # A violated mathematical bound is corrupt evidence, not a value to clip.
+    # Abort the comparison rather than selecting which outcomes to count.
+    if any(not math.isfinite(d) or abs(d) > bound for d in diffs):
+        return [None] * len(diffs)
+    return [d / bound for d in diffs]
 
 
 def e_value(xs):
@@ -566,16 +583,22 @@ class Ledger:
 
 
 def slot_series(ledger, cid, iid, symbols, h, start, pooled):
+    target = cid.split(':', 1)[0]
     if not pooled:
         pairs = ledger.paired(cid, iid, symbols[0], h, start)
-        return [d for _, d in pairs], scaled([d for _, d in pairs])
-    per_date = {}
+        diffs = [d for _, d in pairs]
+        return diffs, bounded_differences(diffs, target)
+    per_date, raw_date, invalid = {}, {}, False
     for s in symbols:
         pairs = ledger.paired(cid, iid, s, h, start)
-        for (d, _), x in zip(pairs, scaled([v for _, v in pairs])):
+        normalized = bounded_differences([v for _, v in pairs], target)
+        invalid = invalid or any(x is None for x in normalized)
+        for (d, raw), x in zip(pairs, normalized):
+            raw_date.setdefault(d, []).append(raw)
             if x is not None: per_date.setdefault(d, []).append(x)
-    xs = [float(np.mean(per_date[d])) for d in sorted(per_date)]
-    return xs, xs
+    dates = sorted(raw_date)
+    xs = [None] * len(dates) if invalid else [float(np.mean(per_date[d])) for d in dates]
+    return [float(np.mean(raw_date[d])) for d in dates], xs
 
 
 # ----------------------------------------------------------------- run
@@ -703,6 +726,7 @@ class Tournament:
             l = loss(target, fc, outcome)
             if l is None: continue
             r['loss'], r['outcome'] = l, outcome
+            r['outcome_json'] = json.dumps({'value': outcome})
             self.scores.append({'model_id': mid, 'symbol': sym, 'horizon': h, 'as_of': asof,
                                 'outcome_json': json.dumps({'value': outcome}), 'loss': l, 'scored_at': self.run_at})
 
@@ -737,7 +761,7 @@ class Tournament:
                         if best is None or e > best['e_value']: best = m
                     elif ew >= RETIRE_E:
                         self.move(m, 'retired', f'worse than incumbent {inc} (e={ew:.1f}, n={len(diffs)})')
-                    elif len(diffs) >= MAX_FORWARD[h]:
+                    elif target in LOSS_DIFFERENCE_BOUNDS and len(diffs) >= MAX_FORWARD[h]:
                         self.move(m, 'retired', f'no verdict after {len(diffs)} forward outcomes')
                 if best:
                     old = self.champion(sym, target, h)
@@ -857,6 +881,7 @@ class Tournament:
                     tdate = add_days(self.asof, h)
                     test = [{'date': tdate, 'weekday': int((day(tdate).astype('int64') + 4) % 7)}]
                     for spec in self.active(sym, target, h):
+                        if self.ledger.get(spec['id'], sym, h, self.asof): continue
                         fc = fit_predict(spec, known, test, h)[0][0]
                         self.emit(spec, sym, target, h, tdate, fc, as_of=self.asof)
                     continue
@@ -872,6 +897,9 @@ class Tournament:
                 train = matured(rows, latest)
                 if len(train) < 150: continue
                 for spec in self.active(sym, target, h):
+                    # Reruns/weekends keep the first forecast. Check before
+                    # fitting (especially the LSTM), not only in emit().
+                    if self.ledger.get(spec['id'], sym, h, latest): continue
                     fc, w = fit_predict(spec, train, open_rows, h, pool=self.pool_for(spec, sym, h, latest))
                     # A size forecast of nothing can never be scored; log none.
                     if target == 'magnitude' and not fc[0].get('sigma'): continue
@@ -929,10 +957,22 @@ class Tournament:
         pairs = []
         for s in self.slot_symbols(sym, 'direction'):
             for d in self.ledger.forward_dates(mid, s, h, start):
-                r, outcome = self.ledger.get(mid, s, h, d), self.outcome.get((s, h, d))
-                if r is None or outcome is None: continue
-                fc = json.loads(r['forecast_json']) if isinstance(r['forecast_json'], str) else r['forecast_json']
-                if isinstance(fc.get('pUp'), (int, float)): pairs.append((fc['pUp'], outcome))
+                r = self.ledger.get(mid, s, h, d)
+                if r is None or r.get('loss') is None: continue
+                # The accuracy readout must use the same frozen outcome as
+                # the loss. Re-reading today's archive can silently rewrite
+                # yesterday's precision, or erase it after archive pruning.
+                try:
+                    raw = r.get('outcome_json')
+                    outcome = (json.loads(raw) if isinstance(raw, str) else raw)['value']
+                    fc = json.loads(r['forecast_json']) if isinstance(r['forecast_json'], str) else r['forecast_json']
+                    if not isinstance(fc, dict): continue
+                    p = fc.get('pUp')
+                    if (type(p) in (int, float) and math.isfinite(p) and 0 <= p <= 1
+                            and type(outcome) in (int, float) and math.isfinite(outcome)):
+                        pairs.append((p, outcome))
+                except (ValueError, TypeError, KeyError):
+                    continue  # Missing/malformed evidence is never reconstructed.
         return call_metrics(pairs)
 
     def summary(self):
@@ -946,6 +986,8 @@ class Tournament:
                     dates = [d for d in self.ledger.dates.get((inc, sym, h), [])]
                     latest = self.ledger.get(inc, sym, h, max(dates)) if dates else None
                 assets.setdefault(sym, {})[f'{target}:{h}'] = {
+                    'promotionRule': PROMOTION_RULE,
+                    'promotionStatus': 'forward-testing' if target in LOSS_DIFFERENCE_BOUNDS else 'awaiting-valid-unbounded-loss-test',
                     'incumbent': inc, 'incumbentLabel': describe(self.spec_for(inc, target)),
                     'promoted': bool(champ) or (not self.is_pooled(sym) and bool(self.champion(self.pooled_key(sym), target, h))),
                     'championSince': champ['status_changed_at'] if champ else None,
@@ -971,7 +1013,9 @@ class Tournament:
                            'champions': sum(1 for m in self.registry.values() if m['status'] == 'champion'),
                            'challengers': sum(1 for m in self.registry.values() if m['status'] == 'challenger')},
                 'rules': {'alpha': ALPHA, 'demoteE': DEMOTE_E, 'retireE': RETIRE_E, 'minForward': MIN_FORWARD,
-                          'liveChallengers': LIVE_CHALLENGERS}}
+                          'liveChallengers': LIVE_CHALLENGERS, 'promotionRule': PROMOTION_RULE,
+                          'lossDifferenceBounds': LOSS_DIFFERENCE_BOUNDS,
+                          'magnitudePromotion': 'withheld: QLIKE is unbounded; forecasts and raw losses still accumulate'}}
 
 
 def run(data, registry, ledger_rows, generate=False, run_at=None, weights=True):

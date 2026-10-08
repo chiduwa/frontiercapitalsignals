@@ -131,7 +131,7 @@ export async function exportState(env, { query = d1, sinceDays = 900, nowMs = Da
   const ledger = [];
   for (const ids of chunk(active, 50)) {
     ledger.push(...await pagedQuery(query, env,
-      `SELECT model_id, symbol, target, horizon, as_of, target_date, forecast_json, loss FROM model_forecasts
+      `SELECT model_id, symbol, target, horizon, as_of, target_date, forecast_json, loss, outcome_json FROM model_forecasts
        WHERE as_of >= ? AND model_id IN (${ids.map(() => '?').join(',')})
        ORDER BY model_id, symbol, horizon, as_of`, [since, ...ids]));
   }

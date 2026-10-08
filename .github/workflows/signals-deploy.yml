@@ -66,6 +66,8 @@ jobs:
           node --test test-big-move-watch-io.mjs
           node --test test-day-zones.mjs
           node --test test-push-batch.mjs
+          node --test test-notify-evidence.mjs test-d1-client.mjs
+          node --test ../trading-bot/test-network-deadlines.mjs
           node --test test-model-zoo.mjs
           node --test test-time-series.mjs
           node --test test-upsert-changed.mjs

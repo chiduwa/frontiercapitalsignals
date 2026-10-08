@@ -28,15 +28,18 @@ async function signedRequest(method, path, params = {}) {
   const url = `${config.binanceBase}${path}?${query.toString()}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), BINANCE_REQUEST_TIMEOUT_MS);
-  let res;
+  let res, body;
   try {
     res = await fetch(url, {
       method, headers: { 'X-MBX-APIKEY': config.binanceApiKey }, signal: controller.signal
     });
+    body = await res.text().then(parseBinanceJson).catch(error => {
+      if (controller.signal.aborted) throw error;
+      return null;
+    });
   } finally {
     clearTimeout(timeout);
   }
-  const body = await res.text().then(parseBinanceJson).catch(() => null);
   if (!res.ok) {
     const error = new Error(`Binance ${method} ${path} failed: HTTP ${res.status} ${JSON.stringify(body)}`);
     error.httpStatus = res.status;
@@ -65,15 +68,18 @@ async function publicRequest(path, params = {}) {
   const query = new URLSearchParams(params);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), BINANCE_REQUEST_TIMEOUT_MS);
-  let res;
+  let res, body;
   try {
     res = await fetch(`${config.binanceBase}${path}?${query.toString()}`, {
       signal: controller.signal
     });
+    body = await res.text().then(parseBinanceJson).catch(error => {
+      if (controller.signal.aborted) throw error;
+      return null;
+    });
   } finally {
     clearTimeout(timeout);
   }
-  const body = await res.text().then(parseBinanceJson).catch(() => null);
   if (!res.ok) throw new Error(`Binance GET ${path} failed: HTTP ${res.status} ${JSON.stringify(body)}`);
   return body;
 }

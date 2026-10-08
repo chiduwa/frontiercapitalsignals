@@ -1,0 +1,441 @@
+{
+  "inputSHA256": "72e89d424b37fe4812134360e1ab2b274d02e2aba836dd18626f89e246eb27d1",
+  "inputForecasts": 1576533,
+  "commonAssetDates": 75073,
+  "modelCount": 20,
+  "selectionBefore": "2025-04-01",
+  "evaluationEnd": "2026-10-04",
+  "actionable": false,
+  "limitations": [
+    "Previously explored historical panel; not fresh forward evidence.",
+    "Surviving fixed asset universe; delisted assets not added.",
+    "Block t values are diagnostics, not multiplicity-adjusted promotion tests.",
+    "Brier improvement does not establish net trading profit or executable timing."
+  ],
+  "results": [
+    {
+      "class": "crypto",
+      "horizon": 1,
+      "candidate": "ensemble_weight_0.25",
+      "n": 21157,
+      "assets": 39,
+      "brier": 0.24965025459572607,
+      "baselineBrier": 0.2495542858109841,
+      "brierSkill": -0.0003845607557093622,
+      "pairedGain": -9.596878474190962e-05,
+      "blockMeanGain": -0.00010835628822599767,
+      "blockSE": 0.00023830859505346593,
+      "blockT": -0.4546889641210268,
+      "laterHalfGains": [
+        -2.445831877258639e-05,
+        -0.00016626607287446773
+      ],
+      "assetsImproved": 15,
+      "selectedWeights": null
+    },
+    {
+      "class": "crypto",
+      "horizon": 1,
+      "candidate": "ensemble_weight_0.5",
+      "n": 21157,
+      "assets": 39,
+      "brier": 0.2500613149442262,
+      "baselineBrier": 0.2495542858109841,
+      "brierSkill": -0.002031738832271923,
+      "pairedGain": -0.0005070291332420804,
+      "blockMeanGain": -0.0005326239964751049,
+      "blockSE": 0.0004815370486436743,
+      "blockT": -1.106091417005867,
+      "laterHalfGains": [
+        -0.00034487935652263165,
+        -0.0006664280326922238
+      ],
+      "assetsImproved": 8,
+      "selectedWeights": null
+    },
+    {
+      "class": "crypto",
+      "horizon": 1,
+      "candidate": "ensemble_weight_0.75",
+      "n": 21157,
+      "assets": 39,
+      "brier": 0.2507874668564846,
+      "baselineBrier": 0.2495542858109841,
+      "brierSkill": -0.004941534229688793,
+      "pairedGain": -0.0012331810455005097,
+      "blockMeanGain": -0.0012728031247473191,
+      "blockSE": 0.0007302019468884031,
+      "blockT": -1.7430837183755714,
+      "laterHalfGains": [
+        -0.0009612631132501337,
+        -0.0015004858794532647
+      ],
+      "assetsImproved": 7,
+      "selectedWeights": null
+    },
+    {
+      "class": "crypto",
+      "horizon": 1,
+      "candidate": "ensemble_weight_1.0",
+      "n": 21157,
+      "assets": 39,
+      "brier": 0.2518287103325013,
+      "baselineBrier": 0.2495542858109841,
+      "brierSkill": -0.009113946947959528,
+      "pairedGain": -0.0022744245215172,
+      "blockMeanGain": -0.002328893673042643,
+      "blockSE": 0.0009847977848110715,
+      "blockT": -2.3648445487612766,
+      "laterHalfGains": [
+        -0.001873609588955093,
+        -0.002668439613157595
+      ],
+      "assetsImproved": 5,
+      "selectedWeights": null
+    },
+    {
+      "class": "crypto",
+      "horizon": 1,
+      "candidate": "per_asset_frozen_weight",
+      "n": 21157,
+      "assets": 39,
+      "brier": 0.24984955651248467,
+      "baselineBrier": 0.2495542858109841,
+      "brierSkill": -0.0011831922683316343,
+      "pairedGain": -0.0002952707015005207,
+      "blockMeanGain": -0.00032889239041772333,
+      "blockSE": 0.00034289322148229055,
+      "blockT": -0.9591685393953163,
+      "laterHalfGains": [
+        -9.038748232570534e-05,
+        -0.0004966780688925408
+      ],
+      "assetsImproved": 8,
+      "selectedWeights": {
+        "0.0": 16,
+        "0.25": 8,
+        "0.5": 6,
+        "0.75": 8,
+        "1.0": 0
+      }
+    },
+    {
+      "class": "crypto",
+      "horizon": 7,
+      "candidate": "ensemble_weight_0.25",
+      "n": 2989,
+      "assets": 39,
+      "brier": 0.24903618223976826,
+      "baselineBrier": 0.24892326462915917,
+      "brierSkill": -0.0004536241752144399,
+      "pairedGain": -0.00011291761060906818,
+      "blockMeanGain": -0.00011559721192442806,
+      "blockSE": 0.0008180972728591751,
+      "blockT": -0.14130008222668483,
+      "laterHalfGains": [
+        0.0008867587506380054,
+        -0.0010960100906144848
+      ],
+      "assetsImproved": 20,
+      "selectedWeights": null
+    },
+    {
+      "class": "crypto",
+      "horizon": 7,
+      "candidate": "ensemble_weight_0.5",
+      "n": 2989,
+      "assets": 39,
+      "brier": 0.25002487795020795,
+      "baselineBrier": 0.24892326462915917,
+      "brierSkill": -0.004425513712789986,
+      "pairedGain": -0.0011016133210487618,
+      "blockMeanGain": -0.0011053079775092609,
+      "blockSE": 0.0016583051965487804,
+      "blockT": -0.666528682301423,
+      "laterHalfGains": [
+        0.0010465461715827116,
+        -0.0032141364584607353
+      ],
+      "assetsImproved": 15,
+      "selectedWeights": null
+    },
+    {
+      "class": "crypto",
+      "horizon": 7,
+      "candidate": "ensemble_weight_0.75",
+      "n": 2989,
+      "assets": 39,
+      "brier": 0.2518893517604782,
+      "baselineBrier": 0.24892326462915917,
+      "brierSkill": -0.011915668612726416,
+      "pairedGain": -0.002966087131319083,
+      "blockMeanGain": -0.0029691322967544996,
+      "blockSE": 0.0025244817511352745,
+      "blockT": -1.1761353772588228,
+      "laterHalfGains": [
+        0.0004793622628341195,
+        -0.006354379103538753
+      ],
+      "assetsImproved": 10,
+      "selectedWeights": null
+    },
+    {
+      "class": "crypto",
+      "horizon": 7,
+      "candidate": "ensemble_weight_1.0",
+      "n": 2989,
+      "assets": 39,
+      "brier": 0.2546296036705792,
+      "baselineBrier": 0.24892326462915917,
+      "brierSkill": -0.022924088875024173,
+      "pairedGain": -0.00570633904142003,
+      "blockMeanGain": -0.005707070169660144,
+      "blockSE": 0.003420262192185334,
+      "blockT": -1.668606045086176,
+      "laterHalfGains": [
+        -0.000814792975607768,
+        -0.010516738025848545
+      ],
+      "assetsImproved": 5,
+      "selectedWeights": null
+    },
+    {
+      "class": "crypto",
+      "horizon": 7,
+      "candidate": "per_asset_frozen_weight",
+      "n": 2989,
+      "assets": 39,
+      "brier": 0.2497888228318818,
+      "baselineBrier": 0.24892326462915917,
+      "brierSkill": -0.003477208946347954,
+      "pairedGain": -0.0008655582027226556,
+      "blockMeanGain": -0.0008746267600744261,
+      "blockSE": 0.0010012683839792137,
+      "blockT": -0.8735188028193881,
+      "laterHalfGains": [
+        -0.0005929145851205363,
+        -0.0011336788671462397
+      ],
+      "assetsImproved": 3,
+      "selectedWeights": {
+        "0.0": 24,
+        "0.25": 4,
+        "0.5": 4,
+        "0.75": 3,
+        "1.0": 3
+      }
+    },
+    {
+      "class": "stock",
+      "horizon": 1,
+      "candidate": "ensemble_weight_0.25",
+      "n": 15539,
+      "assets": 41,
+      "brier": 0.24958584018320412,
+      "baselineBrier": 0.24953725611533986,
+      "brierSkill": -0.00019469665019400395,
+      "pairedGain": -4.858406786426442e-05,
+      "blockMeanGain": -6.802525078322967e-05,
+      "blockSE": 0.00010427040936648815,
+      "blockT": -0.6523926701403414,
+      "laterHalfGains": [
+        0.00012179230084608894,
+        -0.00021806371884456328
+      ],
+      "assetsImproved": 19,
+      "selectedWeights": null
+    },
+    {
+      "class": "stock",
+      "horizon": 1,
+      "candidate": "ensemble_weight_0.5",
+      "n": 15539,
+      "assets": 41,
+      "brier": 0.24988498364405062,
+      "baselineBrier": 0.24953725611533986,
+      "brierSkill": -0.001393489429690753,
+      "pairedGain": -0.0003477275287107494,
+      "blockMeanGain": -0.0003849033833151647,
+      "blockSE": 0.00021188860890475016,
+      "blockT": -1.8165364589664632,
+      "laterHalfGains": [
+        -3.303261567547662e-05,
+        -0.0006607661527300471
+      ],
+      "assetsImproved": 14,
+      "selectedWeights": null
+    },
+    {
+      "class": "stock",
+      "horizon": 1,
+      "candidate": "ensemble_weight_0.75",
+      "n": 15539,
+      "assets": 41,
+      "brier": 0.2504346864978793,
+      "baselineBrier": 0.24953725611533986,
+      "brierSkill": -0.003596378338490025,
+      "pairedGain": -0.0008974303825394576,
+      "blockMeanGain": -0.0009506343975958078,
+      "blockSE": 0.00032426920296281455,
+      "blockT": -2.9316209769844273,
+      "laterHalfGains": [
+        -0.0004644747495647007,
+        -0.0013281073016564527
+      ],
+      "assetsImproved": 11,
+      "selectedWeights": null
+    },
+    {
+      "class": "stock",
+      "horizon": 1,
+      "candidate": "ensemble_weight_1.0",
+      "n": 15539,
+      "assets": 41,
+      "brier": 0.25123494874469027,
+      "baselineBrier": 0.24953725611533986,
+      "brierSkill": -0.006803363376592264,
+      "pairedGain": -0.0016976926293503889,
+      "blockMeanGain": -0.0017652182936251592,
+      "blockSE": 0.00044271712555039736,
+      "blockT": -3.9872374293869797,
+      "laterHalfGains": [
+        -0.0011725341008215838,
+        -0.0022200871656237794
+      ],
+      "assetsImproved": 9,
+      "selectedWeights": null
+    },
+    {
+      "class": "stock",
+      "horizon": 1,
+      "candidate": "per_asset_frozen_weight",
+      "n": 15539,
+      "assets": 41,
+      "brier": 0.2495801914235239,
+      "baselineBrier": 0.24953725611533986,
+      "brierSkill": -0.00017205971105238582,
+      "pairedGain": -4.293530818403576e-05,
+      "blockMeanGain": -6.549255027425105e-05,
+      "blockSE": 0.00015986213773293135,
+      "blockT": -0.40968143678689023,
+      "laterHalfGains": [
+        0.0004158135397663383,
+        -0.0004992696885136184
+      ],
+      "assetsImproved": 5,
+      "selectedWeights": {
+        "0.0": 28,
+        "0.25": 6,
+        "0.5": 2,
+        "0.75": 4,
+        "1.0": 1
+      }
+    },
+    {
+      "class": "stock",
+      "horizon": 5,
+      "candidate": "ensemble_weight_0.25",
+      "n": 3075,
+      "assets": 41,
+      "brier": 0.24658640815597646,
+      "baselineBrier": 0.24602007129302436,
+      "brierSkill": -0.0023019945485567295,
+      "pairedGain": -0.0005663368629521026,
+      "blockMeanGain": -0.0005375777636987224,
+      "blockSE": 0.0003090431215444867,
+      "blockT": -1.7394911137711189,
+      "laterHalfGains": [
+        -0.0001546891650658894,
+        -0.0009671517266834155
+      ],
+      "assetsImproved": 12,
+      "selectedWeights": null
+    },
+    {
+      "class": "stock",
+      "horizon": 5,
+      "candidate": "ensemble_weight_0.5",
+      "n": 3075,
+      "assets": 41,
+      "brier": 0.24775778328272718,
+      "baselineBrier": 0.24602007129302436,
+      "brierSkill": -0.007063293578323915,
+      "pairedGain": -0.0017377119897028094,
+      "blockMeanGain": -0.0016829948965668535,
+      "blockSE": 0.0006180440886555132,
+      "blockT": -2.723098444688669,
+      "laterHalfGains": [
+        -0.0009540852459549196,
+        -0.002500716977036281
+      ],
+      "assetsImproved": 9,
+      "selectedWeights": null
+    },
+    {
+      "class": "stock",
+      "horizon": 5,
+      "candidate": "ensemble_weight_0.75",
+      "n": 3075,
+      "assets": 41,
+      "brier": 0.2495341966732765,
+      "baselineBrier": 0.24602007129302436,
+      "brierSkill": -0.014283897089301334,
+      "pairedGain": -0.0035141253802521196,
+      "blockMeanGain": -0.0034362513986043917,
+      "blockSE": 0.0009299219673777217,
+      "blockT": -3.695204026951041,
+      "laterHalfGains": [
+        -0.0023981882426670933,
+        -0.004600695751058593
+      ],
+      "assetsImproved": 9,
+      "selectedWeights": null
+    },
+    {
+      "class": "stock",
+      "horizon": 5,
+      "candidate": "ensemble_weight_1.0",
+      "n": 3075,
+      "assets": 41,
+      "brier": 0.2519156483276244,
+      "baselineBrier": 0.24602007129302436,
+      "brierSkill": -0.023963805081488987,
+      "pairedGain": -0.005895577034600033,
+      "blockMeanGain": -0.005797347269811336,
+      "blockSE": 0.0012475601861959306,
+      "blockT": -4.646947966084626,
+      "laterHalfGains": [
+        -0.00448699815520241,
+        -0.0072670880487503515
+      ],
+      "assetsImproved": 8,
+      "selectedWeights": null
+    },
+    {
+      "class": "stock",
+      "horizon": 5,
+      "candidate": "per_asset_frozen_weight",
+      "n": 3075,
+      "assets": 41,
+      "brier": 0.24602007129302436,
+      "baselineBrier": 0.24602007129302436,
+      "brierSkill": 0.0,
+      "pairedGain": 0.0,
+      "blockMeanGain": 0.0,
+      "blockSE": 0.0,
+      "blockT": null,
+      "laterHalfGains": [
+        0.0,
+        0.0
+      ],
+      "assetsImproved": 0,
+      "selectedWeights": {
+        "0.0": 41,
+        "0.25": 0,
+        "0.5": 0,
+        "0.75": 0,
+        "1.0": 0
+      }
+    }
+  ]
+}
