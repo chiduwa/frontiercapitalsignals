@@ -15,6 +15,11 @@ Frontier Capital Signals publishes daily market intelligence briefs covering gov
 - [Free AI Visibility Scan](https://frontiercapitalsignals.com/scan): Free automated scan of a website's analytics, structured data, and AI-crawler readiness
 - [Contact](https://frontiercapitalsignals.com/contact)
 
+## Research
+
+- [Quant Research](https://frontiercapitalsignals.com/research): Reproducible trading research behind the signals, tested on real market data with fees
+- [Binance Grid Bots Tested: Best Spot and Futures Settings](https://frontiercapitalsignals.com/research/binance-grid-bots): 72,280 Binance grid bots replayed on 2021–2026 prices. Spot grids did not beat holding after fees; a wide BTC grid (geometric, ±44%, 49 grids) halved drawdowns; the Arbitrage Bot on BTC earned about 4% a year at September 2026 funding; leverage turns futures grids into liquidation risk.
+
 ## Recent intelligence (latest 15)
 
 - [West Africa Food Inflation: Fragile Calm, External Shocks Persist](https://frontiercapitalsignals.com/intelligence/2026-10-05-west-africa-food-inflation-fragile-calm-external-shocks-persist-e36d7888): The current lull in West African food price inflation is precarious, signaling ongoing vulnerability to external shocks and future market instability for regional investments.

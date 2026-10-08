@@ -58,6 +58,11 @@ function main() {
   lines.push(`- [Free AI Visibility Scan](${SITE}/scan): Free automated scan of a website's analytics, structured data, and AI-crawler readiness`);
   lines.push(`- [Contact](${SITE}/contact)`);
   lines.push("");
+  lines.push("## Research");
+  lines.push("");
+  lines.push(`- [Quant Research](${SITE}/research): Reproducible trading research behind the signals, tested on real market data with fees`);
+  lines.push(`- [Binance Grid Bots Tested: Best Spot and Futures Settings](${SITE}/research/binance-grid-bots): 72,280 Binance grid bots replayed on 2021–2026 prices. Spot grids did not beat holding after fees; a wide BTC grid (geometric, ±44%, 49 grids) halved drawdowns; the Arbitrage Bot on BTC earned about 4% a year at September 2026 funding; leverage turns futures grids into liquidation risk.`);
+  lines.push("");
   lines.push(`## Recent intelligence (latest ${posts.length})`);
   lines.push("");
   for (const p of posts) {

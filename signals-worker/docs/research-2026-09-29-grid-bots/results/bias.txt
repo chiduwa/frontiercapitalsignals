@@ -1,0 +1,21 @@
+1. Martingale prices, daily vol 3%, 30-day grids at +-1.5 sd, 400 paths, fee-free
+  15-minute path  step 0.6%: excess -0.83% (se 0.16), 221 round trips
+  15-minute path  step 1.5%: excess -0.36% (se 0.16), 46 round trips
+  15-minute path  step 3.0%: excess -0.14% (se 0.16), 13 round trips
+  daily bars      step 0.6%: excess -1.55% (se 0.15), 124 round trips
+  daily bars      step 1.5%: excess -0.73% (se 0.16), 38 round trips
+  daily bars      step 3.0%: excess -0.20% (se 0.16), 13 round trips
+
+2. BTC, 2026-05-08 to 2026-09-11, 30-day grids started every 3 days, 0.1% fee
+  +-1.5 sd, step 0.4%: round trips hourly 231 / daily 106 (2.17x); excess after fees hourly -2.69% / daily -2.99%
+  +-1.5 sd, step 0.6%: round trips hourly 115 / daily 63 (1.81x); excess after fees hourly -2.42% / daily -2.79%
+  +-1.5 sd, step 1.0%: round trips hourly 44 / daily 31 (1.42x); excess after fees hourly -2.20% / daily -2.51%
+  +-1.5 sd, step 1.5%: round trips hourly 19 / daily 17 (1.17x); excess after fees hourly -2.12% / daily -2.28%
+  +-1.5 sd, step 2.0%: round trips hourly 12 / daily 10 (1.16x); excess after fees hourly -2.03% / daily -2.19%
+  +-1.5 sd, step 3.0%: round trips hourly 5 / daily 5 (1.05x); excess after fees hourly -1.94% / daily -2.00%
+  +-2.0 sd, step 0.4%: round trips hourly 297 / daily 129 (2.30x); excess after fees hourly -2.04% / daily -2.35%
+  +-2.0 sd, step 0.6%: round trips hourly 148 / daily 77 (1.92x); excess after fees hourly -1.78% / daily -2.16%
+  +-2.0 sd, step 1.0%: round trips hourly 56 / daily 38 (1.49x); excess after fees hourly -1.58% / daily -1.91%
+  +-2.0 sd, step 1.5%: round trips hourly 25 / daily 20 (1.26x); excess after fees hourly -1.45% / daily -1.68%
+  +-2.0 sd, step 2.0%: round trips hourly 14 / daily 13 (1.14x); excess after fees hourly -1.42% / daily -1.57%
+  +-2.0 sd, step 3.0%: round trips hourly 7 / daily 6 (1.05x); excess after fees hourly -1.31% / daily -1.38%
