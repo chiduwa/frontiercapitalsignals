@@ -56,6 +56,7 @@ export function articleSchema({
   country,
   category,
   image,
+  sourceUrl,
 }: {
   title: string;
   summary: string;
@@ -64,6 +65,7 @@ export function articleSchema({
   country: string;
   category: string;
   image?: string;
+  sourceUrl?: string;
 }) {
   return {
     "@context": "https://schema.org",
@@ -73,6 +75,8 @@ export function articleSchema({
     datePublished: date,
     dateModified: date,
     url: `https://frontiercapitalsignals.com/intelligence/${slug}`,
+    // The reporting the brief is drafted from, so search and AI systems can trace it.
+    ...(sourceUrl ? { isBasedOn: sourceUrl } : {}),
     // Article rich results require an image. Posts without one fall back to
     // this route's generated social card, which renders the headline.
     image: [image ?? `https://frontiercapitalsignals.com/intelligence/${slug}/opengraph-image`],

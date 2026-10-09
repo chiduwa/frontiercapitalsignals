@@ -15,6 +15,10 @@ export interface Post {
   category: string;
   imageQuery: string;
   image?: string;   // real stored image; placeholder URLs are stripped by realImage()
+  // The reporting the brief was drafted from (posts generated before 2026-10-09 have none).
+  source?: string;
+  sourceUrl?: string;
+  sourcePublished?: string;
   content?: string;
 }
 
@@ -77,6 +81,9 @@ export async function getPostBySlug(slug: string): Promise<Post | null> {
     category: data.category || "General",
     imageQuery: data.imageQuery || "Africa business",
     image: realImage(data.image),
+    source: typeof data.source === "string" && data.source.trim() ? data.source.trim() : undefined,
+    sourceUrl: typeof data.sourceUrl === "string" && /^https?:\/\//.test(data.sourceUrl) ? data.sourceUrl : undefined,
+    sourcePublished: typeof data.sourcePublished === "string" && data.sourcePublished ? data.sourcePublished : undefined,
     content: processed.toString(),
   };
 }

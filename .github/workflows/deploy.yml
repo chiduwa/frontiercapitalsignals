@@ -28,3 +28,9 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           GOOGLE_AI_API_KEY: ${{ secrets.GOOGLE_AI_API_KEY }}
+
+      - name: Submit new URLs to IndexNow
+        # Only after a successful deploy, so engines are never sent a 404. A
+        # failure here is reported on the run but does not undo the deploy.
+        continue-on-error: true
+        run: node scripts/indexnow-after-deploy.mjs

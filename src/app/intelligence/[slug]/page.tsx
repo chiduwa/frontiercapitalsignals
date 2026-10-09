@@ -83,7 +83,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
 
   return (
     <article className="bg-white min-h-screen">
-      <JsonLd data={articleSchema({ title: post.title, summary: post.summary, date: post.date, slug, country: post.country, category: post.category, image: post.image })} />
+      <JsonLd data={articleSchema({ title: post.title, summary: post.summary, date: post.date, slug, country: post.country, category: post.category, image: post.image, sourceUrl: post.sourceUrl })} />
       {/* Hero image */}
       <div className="relative h-64 sm:h-80 w-full overflow-hidden bg-gray-100">
         <Image src={imageUrl} alt={post.title} fill className="object-cover" unoptimized priority />
@@ -113,16 +113,27 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
         {/* Body */}
         <div className="prose-investment" dangerouslySetInnerHTML={{ __html: post.content ?? "" }} />
 
+        {/* Source */}
+        {post.sourceUrl && (
+          <p className="mt-10 text-sm text-slate-600">
+            Based on reporting by{" "}
+            <a href={post.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-gold-dim font-semibold underline hover:text-gold transition-colors">
+              {post.source ?? new URL(post.sourceUrl).hostname}
+            </a>
+            {post.sourcePublished ? <>, published {post.sourcePublished}</> : null}.
+          </p>
+        )}
+
         {/* Disclaimer */}
         <div className="mt-12 pt-8 border-t border-gray-100">
           <p className="text-slate-600 text-xs leading-relaxed">
-            This intelligence report is provided for informational purposes only and does not constitute investment advice. Frontier Capital Signals makes no representations as to the accuracy, completeness, or timeliness of this information. Always conduct independent due diligence before making investment decisions.
+            This brief was drafted with AI assistance from public news reporting. It is provided for informational purposes only and does not constitute investment advice. Frontier Capital Signals makes no representations as to the accuracy, completeness, or timeliness of this information. Always conduct independent due diligence before making investment decisions.
           </p>
         </div>
 
         {/* Back */}
         <div className="mt-8">
-          <Link href="/intelligence" className="inline-flex items-center gap-2 text-gold text-sm font-semibold hover:text-gold-light transition-colors">
+          <Link href="/intelligence" className="inline-flex items-center gap-2 text-gold-dim text-sm font-semibold hover:text-gold transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
