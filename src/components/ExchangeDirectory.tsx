@@ -214,7 +214,7 @@ export default function ExchangeDirectory() {
                 {sectors.map((s) => (
                   <div key={s.name}>
                     <p className="text-gold-dim text-[11px] font-semibold tracking-widest uppercase mb-2.5">
-                      {s.name} <span className="text-gray-400">({s.listings.length})</span>
+                      {s.name} <span className="text-gray-500">({s.listings.length})</span>
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                       {s.listings.map((l) => {

@@ -9,6 +9,11 @@
   --color-gold: #b8860b;
   --color-gold-light: #d4a017;
   --color-gold-dim: #92690b;
+  /* Small gold text on the pale gold-tint badges (gold-dim measured 4.23:1 there). */
+  --color-gold-ink: #7a5a0c;
+  /* Tailwind's slate-500 (#62748e) measured 4.49:1 on the sand page background,
+     just under WCAG's 4.5:1, on every light page. One shade darker passes (4.61:1). */
+  --color-slate-500: #61728c;
   --color-sand: #faf8f5;
   --color-stone: #f1ede8;
   --font-sans: var(--font-geist-sans);

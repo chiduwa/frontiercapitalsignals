@@ -23,7 +23,7 @@ export default function IntelligencePage() {
             <div>
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gold/10 border border-gold/30 mb-4">
                 <span className="w-1.5 h-1.5 rounded-full bg-gold animate-pulse" />
-                <span className="text-gold-dim text-xs font-semibold tracking-widest uppercase">Updated Daily</span>
+                <span className="text-gold-ink text-xs font-semibold tracking-widest uppercase">Updated Daily</span>
               </div>
               <h1 className="text-4xl font-black text-ink tracking-tight">Market Intelligence</h1>
               <p className="text-slate-500 mt-2 max-w-xl text-sm leading-relaxed">

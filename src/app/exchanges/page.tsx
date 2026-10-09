@@ -121,7 +121,7 @@ export default function ExchangesPage() {
                     </td>
                     <td className="py-3.5 px-3 border-b border-gray-100 text-slate-600 whitespace-nowrap text-xs">
                       {e.tradingWindow}{" "}
-                      <span className="text-gray-400">{e.timezone}</span>
+                      <span className="text-gray-500">{e.timezone}</span>
                     </td>
                   </tr>
                 ))}
