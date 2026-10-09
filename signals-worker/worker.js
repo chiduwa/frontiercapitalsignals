@@ -10062,11 +10062,13 @@ function isRateLimited(ip) {
 
 const PAGE_CSP = [
   "default-src 'none'",
-  "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com",
+  // static.cloudflareinsights.com / cloudflareinsights.com: Cloudflare injects its
+  // Web Analytics beacon into this page; without them every visit logged a CSP error.
+  "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://static.cloudflareinsights.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src https://fonts.gstatic.com",
   "img-src 'self' data: https://www.google-analytics.com",
-  "connect-src 'self' https://www.googletagmanager.com https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com",
+  "connect-src 'self' https://www.googletagmanager.com https://www.google-analytics.com https://analytics.google.com https://region1.google-analytics.com https://cloudflareinsights.com",
   "frame-ancestors 'none'",
   "base-uri 'none'"
 ].join('; ');
@@ -10517,6 +10519,15 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     let path = url.pathname;
+
+    // The zone has no "Always Use HTTPS" rule, so plain-HTTP requests reached
+    // this route and were served in the clear (HSTS only helps after a first
+    // secure visit; the domain is not preloaded). Production host only, so
+    // local wrangler dev on http://localhost keeps working.
+    if (url.protocol === 'http:' && url.hostname.endsWith('frontiercapitalsignals.com')) {
+      url.protocol = 'https:';
+      return Response.redirect(url.toString(), 301);
+    }
 
     // Normalize the mount so it works whether bound at /signals* or served
     // at the zone root during local testing.

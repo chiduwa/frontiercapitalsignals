@@ -636,6 +636,14 @@ const redir = await worker.fetch(new Request('https://x.com/signals'), emptyEnv,
 check('/signals -> 301', redir.status === 301, `got ${redir.status}`);
 check('301 targets /signals/', (redir.headers.get('location') || '').endsWith('/signals/'));
 
+// Plain HTTP on the production host is sent to HTTPS (the zone has no
+// Always-Use-HTTPS rule); local http://localhost development is left alone.
+const plain = await worker.fetch(new Request('http://frontiercapitalsignals.com/signals/?view=crypto'), emptyEnv, ctx);
+check('http:// on the production host -> 301 to the same https:// URL', plain.status === 301 &&
+  plain.headers.get('location') === 'https://frontiercapitalsignals.com/signals/?view=crypto', `${plain.status} ${plain.headers.get('location')}`);
+const localDev = await worker.fetch(new Request('http://localhost:8787/signals/'), emptyEnv, ctx);
+check('http://localhost is not redirected', localDev.status === 200, `got ${localDev.status}`);
+
 const page = await worker.fetch(new Request('https://x.com/signals/'), emptyEnv, ctx);
 const pageText = await page.text();
 check('dashboard served', page.headers.get('content-type').includes('text/html') && pageText.includes('Frontier Capital'));
