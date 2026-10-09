@@ -105,7 +105,7 @@ export default function HomePage() {
               <div key={title} data-fx-tilt className="bg-white border border-gray-200 rounded-xl p-6 hover:border-gold/50 hover:shadow-md transition-all group">
                 <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl border border-gold/20 bg-gold/5 text-gold-dim"><ServiceIcon name={icon} /></div>
                 <h3 className="text-ink font-bold mb-2 group-hover:text-gold-dim transition-colors">{title}</h3>
-                <p className="text-slate-500 text-sm leading-relaxed">{desc}</p>
+                <p className="text-slate-600 text-sm leading-relaxed">{desc}</p>
               </div>
             ))}
             {/* Featured, full-width: the analytics offering is a different buyer
@@ -122,7 +122,7 @@ export default function HomePage() {
                   <h3 className="text-ink font-bold group-hover:text-gold-dim transition-colors">Data &amp; Business Analytics</h3>
                   <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full gradient-gold text-white">Also Available</span>
                 </div>
-                <p className="text-slate-500 text-sm leading-relaxed">
+                <p className="text-slate-600 text-sm leading-relaxed">
                   Dashboards, data pipelines, forecasting models, and marketing analytics. The market data, research pipeline and signal engine on this site were built in-house, and we build the same kind of thing for clients.
                 </p>
               </div>
@@ -157,9 +157,9 @@ export default function HomePage() {
               </div>
               <h2 className="text-4xl font-black text-white mb-5 tracking-tight">Frontier Capital Signals</h2>
               <p className="text-white/70 text-lg leading-relaxed mb-4 max-w-xl">
-                Hourly confluence screens across 290 US equities and 150+ cryptocurrencies. Up to 16 independent technical and valuation techniques, from RSI and MACD to Wall Street price targets, reversal detection and multi-year seasonal analogs, must agree before a setup ranks. A setup that cannot clear its own historical no-skill baseline is withheld rather than published.
+                Hourly confluence screens across 290 US equities and 150+ cryptocurrencies. Each asset is scored by up to 32 candidate techniques, from RSI and MACD to Wall Street price targets, reversal detection and multi-year seasonal analogs, and only techniques whose own record beats a no-skill baseline carry live weight. A setup that cannot clear its own historical no-skill baseline is withheld rather than published.
               </p>
-              <p className="text-white/40 text-sm mb-8 max-w-xl">
+              <p className="text-white/70 text-sm mb-8 max-w-xl">
                 Mechanical technical analysis, not investment advice. Markets carry real risk of loss.
               </p>
               <a

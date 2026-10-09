@@ -172,8 +172,11 @@ export default function MarketGlobe() {
             style={{ left: `${market.labelX / 6}%`, top: `${market.labelY / 5.6}%` }}
             onPointerEnter={() => highlight(market.name)} onPointerLeave={() => highlight("")}
             onFocus={() => highlight(market.name)} onBlur={() => highlight("")}
-            aria-label={`Explore ${market.name} investor resources`}>
-            <span>{market.name}</span><small>{market.currency}</small>
+>
+            {/* The accessible name is the visible text plus a hidden suffix; an aria-label that
+                did not contain the visible "Ghana GHS" failed label-in-name for voice users. */}
+            <span>{market.name}</span> <small>{market.currency}</small>
+            <span className="sr-only"> investor resources</span>
           </a>
         ))}
         <button className={styles.motion} type="button" onClick={() => setPaused(value => !value)} aria-pressed={paused}>

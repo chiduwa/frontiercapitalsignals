@@ -22,7 +22,7 @@ const countries = [
       { label: "Ghana Investment Promotion Centre (GIPC)", url: "https://gipc.gov.gh", desc: "Primary investment promotion authority. Register investments, find incentives." },
       { label: "Registrar General's Department", url: "https://rgd.gov.gh", desc: "Company registration, business name registration, intellectual property." },
       { label: "Ghana Revenue Authority (GRA)", url: "https://gra.gov.gh", desc: "Tax registration, tax incentives, TINs, customs." },
-      { label: "Bank of Ghana", url: "https://bog.gov.gh", desc: "Central bank, forex regulations, licensing for financial institutions." },
+      { label: "Bank of Ghana", url: "https://www.bog.gov.gh", desc: "Central bank, forex regulations, licensing for financial institutions." },
       { label: "Ministry of Trade and Industry", url: "https://moti.gov.gh", desc: "Trade policy, industrial licensing, sector-specific investment info." },
       { label: "Public Procurement Authority", url: "https://ppa.gov.gh", desc: "Government tender notices and procurement opportunities." },
       { label: "Ghana Free Zones Authority", url: "https://gfza.gov.gh", desc: "Free zone designation and incentives for export-oriented investments." },
@@ -34,7 +34,7 @@ const countries = [
     resources: [
       { label: "Nigerian Investment Promotion Commission (NIPC)", url: "https://nipc.gov.ng", desc: "Investment registration, incentives, one-stop investment shop." },
       { label: "Corporate Affairs Commission (CAC)", url: "https://www.cac.gov.ng", desc: "Business registration — companies, partnerships, NGOs." },
-      { label: "Federal Inland Revenue Service (FIRS)", url: "https://firs.gov.ng", desc: "Federal tax administration, TINs, tax clearance certificates." },
+      { label: "Nigeria Revenue Service (NRS, formerly FIRS)", url: "https://www.nrs.gov.ng", desc: "Federal tax administration, TINs, tax clearance certificates. Replaced FIRS on 1 January 2026." },
       { label: "Central Bank of Nigeria (CBN)", url: "https://cbn.gov.ng", desc: "Monetary policy, forex regulations, financial sector licensing." },
       { label: "Nigeria Export-Import Bank (NEXIM)", url: "https://www.neximbank.com.ng", desc: "Trade finance and export development support." },
       { label: "Infrastructure Concession Regulatory Commission", url: "https://www.icrc.gov.ng", desc: "PPP project registry, concession opportunities." },
@@ -59,23 +59,23 @@ const countries = [
     highlight: "Emerging frontier market with major opportunities in agriculture, mining, and energy. Low competition from international investors — high upside potential.",
     resources: [
       { label: "Malawi Investment and Trade Centre (MITC)", url: "https://mitc.mw", desc: "Primary investment promotion body. Facilitation, incentives, sector guides." },
-      { label: "Registrar of Companies (Malawi)", url: "https://obrm.gov.mw", desc: "Company registration, business licensing." },
-      { label: "Malawi Revenue Authority (MRA)", url: "https://mra.mw", desc: "Tax registration, tax incentives for qualifying investments." },
+      { label: "Business and Companies Registry (Malawi)", url: "https://registrargeneral.gov.mw", desc: "Online company registration and business licensing." },
+      { label: "Malawi Revenue Authority (MRA)", url: "https://www.mra.mw", desc: "Tax registration, tax incentives for qualifying investments." },
       { label: "Reserve Bank of Malawi", url: "https://www.rbm.mw", desc: "Monetary policy, forex, financial sector regulation." },
-      { label: "Ministry of Natural Resources, Energy and Mining", url: "https://www.mines.gov.mw", desc: "Mining concessions, energy projects, natural resource licensing." },
-      { label: "Malawi Energy Regulatory Authority (MERA)", url: "https://www.meramalawi.mw", desc: "Energy sector regulation, licenses for energy projects." },
+      { label: "Ministry of Mining (Malawi)", url: "https://www.mining.gov.mw", desc: "Mining policy. Mineral rights are licensed by the Mining and Minerals Regulatory Authority under the Mines and Minerals Act 2023." },
+      { label: "Malawi Energy Regulatory Authority (MERA)", url: "https://mera.mw", desc: "Energy sector regulation, licenses for energy projects." },
     ],
   },
   {
     id: "uganda", name: "Uganda", flag: "🇺🇬", tagline: "Pearl of Africa, Rising Economy",
     highlight: "Rapidly expanding oil sector (first production 2025), strong agriculture base, young population, major infrastructure development underway.",
     resources: [
-      { label: "Uganda Investment Authority (UIA)", url: "https://www.ugandainvest.go.ug", desc: "Investment registration, facilitation, incentives, sector briefs." },
+      { label: "Uganda Investment Authority (UIA)", url: "https://ugandainvest.go.ug", desc: "Investment registration, facilitation, incentives, sector briefs." },
       { label: "Uganda Registration Services Bureau (URSB)", url: "https://www.ursb.go.ug", desc: "Business registration, intellectual property, civil registration." },
       { label: "Uganda Revenue Authority (URA)", url: "https://www.ura.go.ug", desc: "Tax registration, tax clearance, customs and excise." },
       { label: "Bank of Uganda", url: "https://www.bou.or.ug", desc: "Monetary policy, foreign exchange, commercial banking licenses." },
-      { label: "Petroleum Authority of Uganda (PAU)", url: "https://pau.go.ug", desc: "Oil and gas sector regulation, upstream licensing." },
-      { label: "Uganda National Roads Authority (UNRA)", url: "https://www.unra.go.ug", desc: "Road infrastructure projects, PPP opportunities." },
+      { label: "Petroleum Authority of Uganda (PAU)", url: "https://www.pau.go.ug", desc: "Oil and gas sector regulation, upstream licensing." },
+      { label: "Ministry of Works and Transport (Uganda)", url: "https://www.works.go.ug", desc: "National road projects and PPP opportunities; took over the roads mandate of the dissolved Uganda National Roads Authority (UNRA)." },
       { label: "Public Procurement and Disposal of Public Assets (PPDA)", url: "https://www.ppda.go.ug", desc: "Government tenders, procurement notices." },
     ],
   },
@@ -118,7 +118,7 @@ function CapitalMarkets({
 
   return (
     <>
-      <p className="text-slate-500 text-[11px] font-semibold tracking-widest uppercase mt-8 mb-3">
+      <p className="text-slate-600 text-[11px] font-semibold tracking-widest uppercase mt-8 mb-3">
         Capital Markets &amp; Stock Exchange
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -233,9 +233,9 @@ export default function ResourcesPage() {
                     <p className="text-gold-dim text-sm font-semibold">{tagline}</p>
                   </div>
                 </div>
-                <p className="text-slate-500 text-sm mb-6 max-w-3xl leading-relaxed">{highlight}</p>
+                <p className="text-slate-600 text-sm mb-6 max-w-3xl leading-relaxed">{highlight}</p>
 
-                <p className="text-slate-500 text-[11px] font-semibold tracking-widest uppercase mb-3">
+                <p className="text-slate-600 text-[11px] font-semibold tracking-widest uppercase mb-3">
                   Government &amp; Regulatory
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

@@ -1,5 +1,6 @@
 name = "frontiercapitalsignals"
-main = ".open-next/worker.js"
+# custom-worker.js wraps .open-next/worker.js (HTTP -> HTTPS redirect).
+main = "custom-worker.js"
 compatibility_date = "2026-09-01"
 compatibility_flags = ["nodejs_compat"]
 
