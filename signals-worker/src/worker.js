@@ -7990,6 +7990,19 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     .zone-head{margin-top:4px}.panel>summary{padding:15px}.ps-meta{max-width:100px;white-space:normal}.ps-title{font-size:15px}.asset-details{max-width:none}.sigcell{width:100%}.evidence-details{align-self:flex-start}.abstain-note{text-align:left}.asset .flip-note{white-space:normal}.tbl-wrap tbody tr{border-radius:8px}.panel-controls button{padding:8px 12px}footer .cols{display:grid;gap:6px}
   }
   @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+  /* Reserve the space the first payload fills. Before this, the empty tiles
+     and the short loading note left the footer on screen and the freshness
+     subtitles grew a line when real times arrived, so the arriving data
+     pushed the page down: CLS 0.30 on mobile (measured 2026-10-08). */
+  /* The tile row keeps the tallest height measured at each width (124-140px
+     wide, 234px phones, 248px at 320px) even once filled: a reservation that
+     is removed when the tiles land moves everything below by a few pixels,
+     and that small move, multiplied by the large panel it shifts, scored 0.12. */
+  .overview{min-height:140px}
+  .dashboard-loading{min-height:640px}
+  @media(min-width:761px) and (max-width:1040px){.freshness{min-height:66px}}
+  @media(max-width:760px){.overview{min-height:234px}.fr-sub{flex-basis:100%}}
+  @media(max-width:359px){.overview{min-height:248px}}
 </style>
 </head>
 <body>
