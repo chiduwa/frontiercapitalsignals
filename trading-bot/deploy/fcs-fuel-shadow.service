@@ -1,0 +1,37 @@
+[Unit]
+Description=FrontierCapitalSignals — shadow log of squeeze-warning states after exhaustion alerts (research data only)
+Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/signals-worker/scripts/fuel-shadow.mjs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Reads recent pushed exhaustion alerts from D1 (one small read) and public Binance
+# futures data, and appends the warning-sign state to /var/lib/fcs-fuel-shadow.
+# No pushes, no orders, no D1 writes. Not under any trading lock: read-only.
+Type=oneshot
+User=fcsbot
+Group=fcsbot
+WorkingDirectory=/opt/fcs/signals-worker
+EnvironmentFile=/etc/fcs-trading-bot.env
+StateDirectory=fcs-fuel-shadow
+Environment=FUEL_DATA_DIR=/var/lib/fcs-fuel-shadow
+ExecStart=/usr/bin/node scripts/fuel-shadow.mjs
+TimeoutStartSec=300
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fcs-fuel-shadow

@@ -194,3 +194,25 @@ The Binance secret lives only in `/etc/fcs-trading-bot.env` (mode 640,
 root:fcsbot) — not in GitHub, not in this repo. To rotate: create the new key
 with the same IP restriction, edit the file, restart the timer, then delete
 the old key on Binance.
+
+## Research recorders (added 2026-10-13, data only)
+
+Two read-only recorders came out of the NEAR/RED liquidation review
+(`signals-worker/reports/scenarios/2026-10-12-near-red/`, gitignored). Neither sends
+alerts, places orders or writes to D1.
+
+| Unit | What it records | Where |
+|---|---|---|
+| `fcs-liquidation-collector.service` (always on, restarts daily) | Binance `!forceOrder@arr` liquidation snapshots, from the `/market/ws` route (the old `/ws` route delivers nothing) | `/var/lib/fcs-liquidations/forceorder-YYYY-MM-DD.ndjson[.gz]` |
+| `fcs-fuel-shadow.timer` (every 15 min, :04 UTC) | Squeeze-warning signs for 12h after each pushed exhaustion alert: contracts OI change, premium index, account ratio, thrust | `/var/lib/fcs-fuel-shadow/fuel-shadow-YYYY-MM.ndjson` |
+
+The hourly updater installs the unit files but never enables a new unit, so turn
+them on once (needs SSH):
+
+```sh
+sudo systemctl enable --now fcs-liquidation-collector.service fcs-fuel-shadow.timer
+journalctl -u fcs-liquidation-collector -n 20 --no-pager
+```
+
+Disable with `sudo systemctl disable --now` on the same names; the updater will not
+re-enable them.

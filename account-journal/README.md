@@ -14,6 +14,12 @@ Provenance is deliberately conservative:
 - `unknown`: the exchange does not provide enough evidence. An unmatched
   historical fill is never relabelled “manual” just to make the report neat.
 
+Binance's own forced closes keep `origin = unknown` (they show how a position
+ended, not who opened it) but are labelled by `classification_method`:
+`exchange_liquidation` for client order IDs starting `autoclose-`, and
+`exchange_adl` for `adl_autoclose`. Exact overrides and bot-ledger order IDs
+still take precedence.
+
 Legacy emergency protection from older FCS versions used the separate `fcsa-`
 namespace and remains `unknown` rather than contaminating the bot-strategy P&L
 cohort. Current code never creates protection for an externally opened trade

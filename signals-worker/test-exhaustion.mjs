@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import {
   tierOf, recentPrints, latestReading, marketGauge, describeGauge, exhaustionAlertBody,
   MAJOR_LIQUIDITY_30D, MAJOR_MARKET_CAP, EXHAUSTION_EVIDENCE, BREADTH_REFERENCE,
-  binanceDenomination, matchMarketCaps, runPosition, tokenizedStockSymbols, KNOWN_TOKENIZED_STOCKS
+  binanceDenomination, matchMarketCaps, runPosition, tokenizedStockSymbols, KNOWN_TOKENIZED_STOCKS,
+  EXHAUSTION_PATH_RISK, pathRiskSentence
 } from './scripts/exhaustion-gauge.mjs';
 
 let seed = 11;
@@ -115,11 +116,28 @@ assert.doesNotMatch(body, /—/, 'no em dashes in user-facing copy');
 assert.match(body, /On mid-size coins a print like this has been followed by trailing the market by 1\.9% over the next day/,
   'a per-coin print quotes the per-coin record for its own size');
 const strong = exhaustionAlertBody(hit, hot, 'proven', { nowTs, rulesFired: ['exhaustion20', 'exhaustion_calibrated'] });
-assert.match(strong, /Strong: both exhaustion rules fired/);
+assert.match(strong, /Both exhaustion rules fired/);
+assert.doesNotMatch(strong, /Strong:/, 'two overlapping rules are not independent confirmation (Codex audit 2026-10-12)');
 assert.ok(strong.includes(`${Math.round(EXHAUSTION_EVIDENCE.byCase['both|mid'].fellShare24 * 100)}% of 2,857 past cases`), strong);
 const twenty = exhaustionAlertBody(hit, hot, 'proven', { nowTs, rulesFired: ['exhaustion20'] });
 assert.match(twenty, /trailing the market by 2\.7%/, 'a 20x-only print quotes the 20x record');
+// The path before the fade (2026-10-13, NEAR/RED liquidation review): every alert
+// says it is not a short entry and quotes how often the price ran 8.5%/15% higher
+// first, for its own case. The old "first traded higher ... chance to sell into
+// strength" line read as an entry instruction and is gone.
+for (const t of [body, strong, twenty]) {
+  assert.match(t, /This is a 24-hour weakness warning, not a short entry: further upside often comes first\./, t);
+  assert.doesNotMatch(t, /sell into strength|first traded higher/i, t);
+}
+assert.ok(body.includes(pathRiskSentence(EXHAUSTION_PATH_RISK.byCase['perCoinOnly|mid'])), body);
+assert.match(strong, /In about 5 in 10 past alerts like this the futures price went 8\.5% or more above the alert price at some point within 24 hours, and 15% or more in about 3 in 10\./, strong);
+assert.match(twenty, /In about 4 in 10 past alerts like this/, twenty);
+assert.equal(pathRiskSentence({ ran85: 0.04, ran15: 0.001 }).match(/about (\d+) in 10/g).join('|'), 'about 1 in 10|about 1 in 10', 'never "0 in 10"');
+for (const [k, v] of Object.entries(EXHAUSTION_PATH_RISK.byCase)) {
+  assert.ok(v.ran15 < v.ran85 && v.ran85 < 1 && v.n > 100, k);
+}
 const deepHit = { symbol: 'DEEP', features: { ...hit.features, liquidity30d: 5e6 } };
+assert.ok(exhaustionAlertBody(deepHit, hot, 'proven', { nowTs, rulesFired: ['exhaustion20'] }).includes(pathRiskSentence(EXHAUSTION_PATH_RISK.byCase.major)));
 assert.match(exhaustionAlertBody(deepHit, hot, 'proven', { nowTs, rulesFired: ['exhaustion20'] }), /caution, not a sell signal/,
   'on the most liquid coins the alert says the evidence is not there');
 
@@ -138,6 +156,7 @@ const bigBody = exhaustionAlertBody(bigHit, hot, 'proven', { nowTs, rulesFired: 
 assert.match(bigBody, /large coin \(about \$1\.1B market cap\) even though it trades thinly on Binance/, bigBody);
 assert.match(bigBody, /fell in 61% of 719 past cases\)\. Treat it as a caution, not a sell signal\./);
 assert.doesNotMatch(bigBody, /exhaustion print/, 'a caution does not count the run as a sell sequence');
+assert.ok(bigBody.includes(pathRiskSentence(EXHAUSTION_PATH_RISK.all)), bigBody);
 for (const t of [second, bigBody]) assert.doesNotMatch(t, /—/, 'no em dashes in user-facing copy');
 
 console.log('EXHAUSTION GAUGE OK');

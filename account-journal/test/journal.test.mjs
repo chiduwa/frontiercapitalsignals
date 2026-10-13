@@ -157,6 +157,23 @@ test('classification requires affirmative provenance evidence', () => {
   assert.equal(assisted.method, 'bot_assisted_external_protection');
 });
 
+test('Binance liquidation and auto-deleverage closes are labelled, owner left unknown', () => {
+  const evidence = { overrides: new Map(), botOrderIds: new Set() };
+  const config = { botPrefixes: ['fcsf-', 'fcss-'], assistedPrefixes: ['fcsa-'], manualPrefixes: ['mine-'] };
+  // The real ID shapes of the 2026-10-11/12 NEAR and RED liquidations.
+  const liq = classifyOrder({ orderId: '36498569467', clientOrderId: 'autoclose-5179173432020602949' }, evidence, config);
+  assert.equal(liq.method, 'exchange_liquidation');
+  assert.equal(liq.origin, 'unknown');
+  const adl = classifyOrder({ orderId: '7', clientOrderId: 'adl_autoclose-123' }, evidence, config);
+  assert.equal(adl.method, 'exchange_adl');
+  assert.equal(adl.origin, 'unknown');
+  // An operator override or the bot ledger still wins: provenance evidence outranks the exit label.
+  const owned = { overrides: new Map(), botOrderIds: new Set(['8']) };
+  assert.equal(classifyOrder({ orderId: '8', clientOrderId: 'autoclose-1' }, owned, config).method, 'bot_ledger_order_id');
+  // Only the exact exchange prefixes count.
+  assert.equal(classifyOrder({ orderId: '9', clientOrderId: 'my-autoclose-1' }, evidence, config).method, 'no_provenance_match');
+});
+
 test('exact overrides and exact bot-ledger order IDs outrank prefixes', () => {
   const evidence = {
     overrides: new Map([['10', { origin: 'manual', note: 'reviewed' }]]),

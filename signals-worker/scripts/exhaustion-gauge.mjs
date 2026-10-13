@@ -331,16 +331,49 @@ export function exhaustionAlertBody(h, bars, gateWhy, { rulesFired = [], nowTs =
   if (tier === 'major' && !(f.liquidity30d >= MAJOR_LIQUIDITY_30D)) {
     const ev = EXHAUSTION_EVIDENCE.largeCap;
     lines.push(`This is a large coin (about ${formatCap(f.marketCap)} market cap) even though it trades thinly on Binance. On coins this size a print like this has only weakly been followed by weakness (${formatPct(ev.excess24)} against the market over a day; the coin fell in ${Math.round(ev.fellShare24 * 100)}% of ${ev.n.toLocaleString('en-US')} past cases). Treat it as a caution, not a sell signal.`);
+    lines.push(pathRiskSentence(EXHAUSTION_PATH_RISK.all));
   } else if (tier === 'major') {
     lines.push(`This is one of the most liquid coins, and on those a print like this has not reliably been followed by weakness (${formatPct(EXHAUSTION_EVIDENCE.byTier.major.excess24)} against the market over a day). Treat it as a caution, not a sell signal.`);
+    lines.push(pathRiskSentence(EXHAUSTION_PATH_RISK.byCase.major));
   } else {
     const ev = EXHAUSTION_EVIDENCE.byCase[`${kind}|${tier}`];
     const size = tier === 'thin' ? 'thin-volume' : 'mid-size';
-    const lead = both ? `Strong: both exhaustion rules fired. On ${size} coins that combination` : `On ${size} coins a print like this`;
-    lines.push(`${lead} has been followed by trailing the market by ${Math.abs(ev.excess24).toFixed(1)}% over the next day, and the coin fell outright in ${Math.round(ev.fellShare24 * 100)}% of ${ev.n.toLocaleString('en-US')} past cases. In ${Math.round(ev.pokedHigherShare24 * 100)}% of them it first traded higher (median ${formatPct(ev.medianPokeHigher24)}), so there is usually a chance to sell into strength.`);
+    const lead = both ? `Both exhaustion rules fired. On ${size} coins that combination` : `On ${size} coins a print like this`;
+    lines.push(`${lead} has been followed by trailing the market by ${Math.abs(ev.excess24).toFixed(1)}% over the next day, and the coin fell outright in ${Math.round(ev.fellShare24 * 100)}% of ${ev.n.toLocaleString('en-US')} past cases.`);
+    lines.push(pathRiskSentence(EXHAUSTION_PATH_RISK.byCase[`${kind}|${tier}`] || EXHAUSTION_PATH_RISK.all));
     const run = runPosition(h.symbol, bars, f);
     if (run) lines.push(run);
   }
   lines.push(`Basis: ${gateWhy}. Not financial advice.`);
   return lines.join('\n');
+}
+
+// The path before the fade, measured 2026-10-12/13 (NEAR/RED liquidation review,
+// reports/scenarios/2026-10-12-near-red): every alert the CURRENT rules would have
+// pushed, Jan 2023 - Oct 2026 (9,902 of them on coins with a USDT perpetual), entry
+// at the perp price 5 minutes after the alert hour closed, highest MARK price over
+// the next 24 hours. "ran85" is the share that went at least 8.5% above that price at
+// some point (what liquidates a 10x short); "ran15" the share that went 15%+. It is
+// any-time, not "before the fall": against a 5% profit target the 8.5% move came
+// first in about 3 alerts in 10. Similar in 2023-24 and 2025-26 (39% / 44%).
+export const EXHAUSTION_PATH_RISK = Object.freeze({
+  period: 'Jan 2023 to Oct 2026, futures mark price, 24h after the alert',
+  all: { n: 9902, ran85: 0.42, ran15: 0.26 },
+  byCase: {
+    'both|thin': { n: 2535, ran85: 0.47, ran15: 0.32 },
+    'both|mid': { n: 2851, ran85: 0.45, ran15: 0.28 },
+    'perCoinOnly|thin': { n: 673, ran85: 0.39, ran15: 0.24 },
+    'perCoinOnly|mid': { n: 1241, ran85: 0.38, ran15: 0.22 },
+    'rule20Only|thin': { n: 758, ran85: 0.40, ran15: 0.24 },
+    'rule20Only|mid': { n: 1395, ran85: 0.38, ran15: 0.21 },
+    major: { n: 449, ran85: 0.34, ran15: 0.18 }
+  }
+});
+
+// Ten-based wording a phone notification can be read at a glance by.
+export function pathRiskSentence(p) {
+  const tenths = (x) => Math.max(1, Math.round(x * 10));
+  return `This is a 24-hour weakness warning, not a short entry: further upside often comes first. `
+    + `In about ${tenths(p.ran85)} in 10 past alerts like this the futures price went 8.5% or more above the alert price at some point within 24 hours, `
+    + `and 15% or more in about ${tenths(p.ran15)} in 10.`;
 }

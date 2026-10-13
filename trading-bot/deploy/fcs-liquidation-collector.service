@@ -1,0 +1,42 @@
+[Unit]
+Description=FrontierCapitalSignals — record Binance liquidation snapshots (research data only)
+Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/signals-worker/scripts/liquidation-collector.mjs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Long-running WebSocket reader of wss://fstream.binance.com/market/ws/!forceOrder@arr.
+# Public market data only: no keys, no orders, no pushes, no D1 writes. Files go to
+# /var/lib/fcs-liquidations (one NDJSON per UTC day, gzipped once the day ends).
+# Restarted daily (RuntimeMaxSec) so code shipped by the hourly updater takes effect.
+Type=simple
+User=fcsbot
+Group=fcsbot
+WorkingDirectory=/opt/fcs/signals-worker
+StateDirectory=fcs-liquidations
+Environment=LIQ_DATA_DIR=/var/lib/fcs-liquidations
+ExecStart=/usr/bin/node scripts/liquidation-collector.mjs
+Restart=always
+RestartSec=15
+RuntimeMaxSec=1d
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fcs-liquidation-collector
+
+[Install]
+WantedBy=multi-user.target

@@ -2378,7 +2378,7 @@ export const SURGE_CONFIGS = [
     maxMarketCap: 500_000_000,
     dir: -1, horizonHours: 24,
     proven: true,
-    note: 'volume this far above the coin\'s own 30-day norm, on an hour this large for it, after a run, has been followed by about -3% against the market over the next day on smaller coins. It usually pokes higher first, so there is often a chance to sell into strength'
+    note: 'volume this far above the coin\'s own 30-day norm, on an hour this large for it, after a run, has been followed by about -3% against the market over the next day on smaller coins. It often runs higher first (about 4 in 10 such alerts saw the futures price 8.5% or more above the alert price within 24 hours), so it is a weakness warning, not a short entry'
   },
   {
     id: 'accum_quiet',
@@ -8768,8 +8768,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     var pct=function(v,dp){return num(v)?(v>0?'+':'')+v.toFixed(dp==null?1:dp)+'%':'n/a';};
     var share=function(v){return num(v)?Math.round(v*100)+'%':'n/a';};
     var share1=function(v){return num(v)?(v*100).toFixed(1)+'%':'n/a';};
-    var out='<div class="xp-banner" role="note"><b>What this watches.</b> Volume exhaustion is an hour where a coin trades far more than its own normal, jumps in price, and has already run up. On smaller coins that has usually meant the buying is used up: across 478 coins since January 2024, those hours were followed by '
-      +pct(tiers.mid&&tiers.mid.excess24)+' on mid-size coins and '+pct(tiers.thin&&tiers.thin.excess24)+' on the thinnest, against the market over the next day. The coin often pokes higher first, so there is usually time to sell into strength. On the biggest coins (BTC, ETH, SOL, XRP and similar) it has not worked, and surges there have tended to keep going, so they get no sell warnings. Not financial advice.</div>';
+    var out='<div class="xp-banner" role="note"><b>What this watches.</b> Volume exhaustion is an hour where a coin trades far more than its own normal, jumps in price, and has already run up. On smaller coins that has usually been followed by weakness: across 478 coins since January 2024, those hours were followed by '
+      +pct(tiers.mid&&tiers.mid.excess24)+' on mid-size coins and '+pct(tiers.thin&&tiers.thin.excess24)+' on the thinnest, against the market over the next day. Further upside often comes first: in about 4 in 10 past alerts the futures price went 8.5% or more above the alert price within 24 hours, so this is a weakness warning, not a short entry. On the biggest coins (BTC, ETH, SOL, XRP and similar) it has not worked, and surges there have tended to keep going, so they get no sell warnings. Not financial advice.</div>';
     if(x.status==='awaiting-first-run') return out+'<div class="dashboard-empty">The first scan has not landed yet. It runs a few minutes after every hour.</div>';
     var g=x.gauge||{};
     out+=panelStart({id:'exhMarket',tone:'watch',open:true,eyebrow:'CRYPTO &middot; <b>WHOLE MARKET</b>',title:g.headline||'The whole market',

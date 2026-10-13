@@ -1,0 +1,14 @@
+[Unit]
+Description=Record squeeze-warning states for recent exhaustion alerts every 15 minutes
+Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/signals-worker/scripts/fuel-shadow.mjs
+
+[Timer]
+# Same 30-minute decision grid the research used is covered twice over; offset
+# from the bots' five-minute cycle and the :37 updater. UTC (test.mjs pins it).
+OnCalendar=*:4/15 UTC
+AccuracySec=30s
+Persistent=false
+Unit=fcs-fuel-shadow.service
+
+[Install]
+WantedBy=timers.target
