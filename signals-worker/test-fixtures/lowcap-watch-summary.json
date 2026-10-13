@@ -1,0 +1,580 @@
+{
+ "version": "lowcap-watch-v1",
+ "asOf": "2026-10-12",
+ "runAt": "2026-10-13T21:53:42Z",
+ "universe": {
+  "binancePairs": 393,
+  "ranked": 388,
+  "lowcaps": 155,
+  "eligible": 98,
+  "mcapCeiling": 34278376.62663047
+ },
+ "inflowWatch": {
+  "status": "live",
+  "list": [
+   {
+    "rank": 1,
+    "symbol": "TKO",
+    "pair": "TKOUSDT",
+    "name": "Toko Token",
+    "mcap": 9752377.35354431,
+    "mom30": 0.03891050583657596,
+    "volRatio": 1.163490638064079,
+    "qv30": 268071.45466833335,
+    "lift20Usd": 119785.71487000001,
+    "spreadBp": 37.24394785847277,
+    "korea": null,
+    "perp": false
+   },
+   {
+    "rank": 2,
+    "symbol": "MAV",
+    "pair": "MAVUSDT",
+    "name": "Maverick Protocol",
+    "mcap": 12513990.576282652,
+    "mom30": 0.019980970504281714,
+    "volRatio": 2.071542759522782,
+    "qv30": 452888.243718,
+    "lift20Usd": 42812.35739,
+    "spreadBp": 18.761726078800113,
+    "korea": null,
+    "perp": true
+   },
+   {
+    "rank": 3,
+    "symbol": "CTK",
+    "pair": "CTKUSDT",
+    "name": "Shentu",
+    "mcap": 20473443.934800487,
+    "mom30": 0.07534246575342451,
+    "volRatio": 10.786947417465148,
+    "qv30": 1363204.7968123355,
+    "lift20Usd": 70993.55756,
+    "spreadBp": 16.038492381715464,
+    "korea": null,
+    "perp": true
+   },
+   {
+    "rank": 4,
+    "symbol": "WOO",
+    "pair": "WOOUSDT",
+    "name": "WOO",
+    "mcap": 23849228.343709603,
+    "mom30": 0.09833187006145727,
+    "volRatio": 1.2255666789950093,
+    "qv30": 228209.91026823333,
+    "lift20Usd": 16968.694894,
+    "spreadBp": 15.847860538827987,
+    "korea": null,
+    "perp": true
+   },
+   {
+    "rank": 5,
+    "symbol": "IQ",
+    "pair": "IQUSDT",
+    "name": "IQ",
+    "mcap": 23381580.912058238,
+    "mom30": -0.028169014084507116,
+    "volRatio": 0.9346437004031147,
+    "qv30": 226487.77401096665,
+    "lift20Usd": 32111.909767,
+    "spreadBp": 23.809523809523096,
+    "korea": "krw",
+    "perp": false
+   },
+   {
+    "rank": 6,
+    "symbol": "FOGO",
+    "pair": "FOGOUSDT",
+    "name": "Fogo",
+    "mcap": 24369575.425254844,
+    "mom30": -0.3047473200612558,
+    "volRatio": 1.2717339517517219,
+    "qv30": 626690.6691646667,
+    "lift20Usd": 26710.16709,
+    "spreadBp": 21.436227224007702,
+    "korea": null,
+    "perp": true
+   },
+   {
+    "rank": 7,
+    "symbol": "SXT",
+    "pair": "SXTUSDT",
+    "name": "Space and Time",
+    "mcap": 12734351.403763764,
+    "mom30": 0.07446808510638303,
+    "volRatio": 1.7003294200132975,
+    "qv30": 751709.7812504,
+    "lift20Usd": 70603.045174,
+    "spreadBp": 10.958904109588596,
+    "korea": null,
+    "perp": true
+   },
+   {
+    "rank": 8,
+    "symbol": "FRAX",
+    "pair": "FRAXUSDT",
+    "name": "Frax (prev. FXS)",
+    "mcap": 30212612.701913647,
+    "mom30": 0.2088150289017341,
+    "volRatio": 3.9424188115623884,
+    "qv30": 375532.2838023333,
+    "lift20Usd": 27994.98961,
+    "spreadBp": 15.48227279764671,
+    "korea": null,
+    "perp": true
+   },
+   {
+    "rank": 9,
+    "symbol": "MBL",
+    "pair": "MBLUSDT",
+    "name": "MovieBloc",
+    "mcap": 15040375.407561984,
+    "mom30": 0.13959731543624176,
+    "volRatio": 2.6092589844198213,
+    "qv30": 691916.2479891373,
+    "lift20Usd": 69612.752942,
+    "spreadBp": 26.246719160105624,
+    "korea": "krw",
+    "perp": true
+   },
+   {
+    "rank": 10,
+    "symbol": "AEVO",
+    "pair": "AEVOUSDT",
+    "name": "Aevo",
+    "mcap": 23098104.55068479,
+    "mom30": 0.11827956989247301,
+    "volRatio": 2.3964496037930187,
+    "qv30": 470674.96872404334,
+    "lift20Usd": 37841.3704036,
+    "spreadBp": 8.074283407347268,
+    "korea": null,
+    "perp": true
+   }
+  ]
+ },
+ "avoid": [
+  {
+   "symbol": "ACT",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 9487624.80890131,
+   "lowcap": true
+  },
+  {
+   "symbol": "AVA",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 16465333.252990307,
+   "lowcap": true
+  },
+  {
+   "symbol": "BICO",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 17388520.37247868,
+   "lowcap": true
+  },
+  {
+   "symbol": "COOKIE",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 8982134.813509207,
+   "lowcap": true
+  },
+  {
+   "symbol": "CVC",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 24526428.247900035,
+   "lowcap": true
+  },
+  {
+   "symbol": "DODO",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 20414180.41355267,
+   "lowcap": true
+  },
+  {
+   "symbol": "EPIC",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 14761021.073623022,
+   "lowcap": true
+  },
+  {
+   "symbol": "GLMR",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 11514297.283899125,
+   "lowcap": true
+  },
+  {
+   "symbol": "GNS",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 17806183.096668687,
+   "lowcap": true
+  },
+  {
+   "symbol": "GTC",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 19578429.977689076,
+   "lowcap": true
+  },
+  {
+   "symbol": "HEI",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 9829917.3422641,
+   "lowcap": true
+  },
+  {
+   "symbol": "MANTRA",
+   "reasons": [
+    "Upbit warning"
+   ],
+   "mcap": 27933546.007528376,
+   "lowcap": true
+  },
+  {
+   "symbol": "MOVR",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 18320980.424494177,
+   "lowcap": true
+  },
+  {
+   "symbol": "NOM",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 5645357.831111285,
+   "lowcap": true
+  },
+  {
+   "symbol": "PORTAL",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 13328784.616006287,
+   "lowcap": true
+  },
+  {
+   "symbol": "QI",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 18924268.488888856,
+   "lowcap": true
+  },
+  {
+   "symbol": "QKC",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 18975213.03457255,
+   "lowcap": true
+  },
+  {
+   "symbol": "QUICK",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 6550406.532944428,
+   "lowcap": true
+  },
+  {
+   "symbol": "RARE",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 12557526.744154599,
+   "lowcap": true
+  },
+  {
+   "symbol": "RESOLV",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 8816342.277546892,
+   "lowcap": true
+  },
+  {
+   "symbol": "SCR",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 4578362.188769705,
+   "lowcap": true
+  },
+  {
+   "symbol": "SOPH",
+   "reasons": [
+    "Binance monitoring tag",
+    "Upbit warning"
+   ],
+   "mcap": 6536662.490604174,
+   "lowcap": true
+  },
+  {
+   "symbol": "TLM",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 9528550.597998152,
+   "lowcap": true
+  },
+  {
+   "symbol": "TOWNS",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 7055949.140893382,
+   "lowcap": true
+  },
+  {
+   "symbol": "ARK",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 38450120.081379645,
+   "lowcap": false
+  },
+  {
+   "symbol": "AWE",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 124755265.14093201,
+   "lowcap": false
+  },
+  {
+   "symbol": "BLUR",
+   "reasons": [
+    "Binance monitoring tag",
+    "Upbit warning"
+   ],
+   "mcap": 35771768.1238058,
+   "lowcap": false
+  },
+  {
+   "symbol": "EGLD",
+   "reasons": [
+    "Upbit warning"
+   ],
+   "mcap": 116388173.25200932,
+   "lowcap": false
+  },
+  {
+   "symbol": "FTT",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 84762425.90159044,
+   "lowcap": false
+  },
+  {
+   "symbol": "JASMY",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 243395395.26348874,
+   "lowcap": false
+  },
+  {
+   "symbol": "LSK",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 45392512.11851646,
+   "lowcap": false
+  },
+  {
+   "symbol": "MOVE",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 40060954.54022514,
+   "lowcap": false
+  },
+  {
+   "symbol": "STX",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 770148055.3413883,
+   "lowcap": false
+  },
+  {
+   "symbol": "SYN",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 46155159.059416205,
+   "lowcap": false
+  },
+  {
+   "symbol": "VELODROME",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 35925356.75919736,
+   "lowcap": false
+  },
+  {
+   "symbol": "WIF",
+   "reasons": [
+    "Binance monitoring tag"
+   ],
+   "mcap": 208491106.0474219,
+   "lowcap": false
+  },
+  {
+   "symbol": "ZIL",
+   "reasons": [
+    "Upbit warning"
+   ],
+   "mcap": 71147062.40404724,
+   "lowcap": false
+  }
+ ],
+ "spike": {
+  "status": "shadow",
+  "gate": {
+   "minCohorts": 180,
+   "minT": 2.0
+  }
+ },
+ "live": {
+  "inflow": {
+   "cohorts": 0
+  },
+  "spike": {
+   "cohorts": 0
+  }
+ },
+ "evidence": {
+  "version": "lowcap-watch-v1",
+  "source": "docs/LOWCAP_SPIKES.md; docs/research-2026-10-13-lowcap/results/prod_validation.json, event_study.csv, episodes.csv",
+  "walkForward": {
+   "from": "2021-11-02",
+   "to": "2026-07-07",
+   "anchors": 123,
+   "universe": "bottom 40% of Binance USDT market caps, delisted pairs included"
+  },
+  "inflow": {
+   "top10Rate": 0.1731,
+   "baseRate": 0.0824,
+   "auc": 0.673,
+   "t": 5.27,
+   "byYear": {
+    "2021": {
+     "top10": 0.18,
+     "base": 0.0778
+    },
+    "2022": {
+     "top10": 0.1363,
+     "base": 0.0585
+    },
+    "2023": {
+     "top10": 0.2144,
+     "base": 0.1227
+    },
+    "2024": {
+     "top10": 0.2813,
+     "base": 0.1044
+    },
+    "2025": {
+     "top10": 0.1132,
+     "base": 0.051
+    },
+    "2026": {
+     "top10": 0.072,
+     "base": 0.0711
+    }
+   }
+  },
+  "spike": {
+   "top10Rate": 0.1333,
+   "baseRate": 0.1096,
+   "auc": 0.55,
+   "t": 2.34
+  },
+  "episodes": {
+   "count": 361,
+   "coins": 218,
+   "medianMultiple": 4.42,
+   "medianDays": 50,
+   "medianAfter90": -0.574,
+   "heldShare": 0.085,
+   "since": "2019"
+  },
+  "events": {
+   "monitoring": {
+    "post90": {
+     "median": -0.299,
+     "n": 69
+    },
+    "day0": {
+     "median": -0.1121,
+     "n": 83
+    }
+   },
+   "upbitCaution": {
+    "post90": {
+     "median": -0.2239,
+     "n": 23
+    },
+    "post30": {
+     "median": -0.0793,
+     "n": 32
+    }
+   },
+   "delistNotice": {
+    "day0": {
+     "median": -0.0386,
+     "n": 280
+    },
+    "post30": {
+     "median": -0.0751,
+     "n": 280
+    }
+   },
+   "upbitKrwLowcap": {
+    "day0": {
+     "median": 0.516,
+     "n": 12
+    },
+    "post30": {
+     "median": -0.2988,
+     "n": 11
+    }
+   }
+  }
+ },
+ "sources": {
+  "binanceTags": true,
+  "binanceDelistings": true,
+  "cmc": true,
+  "upbit": true,
+  "binanceSpot": 1.0,
+  "perpArchive": 1.0
+ },
+ "notes": []
+}

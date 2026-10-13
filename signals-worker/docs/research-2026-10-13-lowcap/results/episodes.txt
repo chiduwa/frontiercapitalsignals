@@ -1,0 +1,160 @@
+episodes 361 coins 218
+by year: {2019: 5, 2020: 30, 2021: 123, 2022: 34, 2023: 40, 2024: 53, 2025: 30, 2026: 46}
+median multiple 4.42 ; median days trough->peak 50.0 ; median return 90d after peak -0.574 ; share recovering >=0 after peak 0.08
+category share of episodes vs share of low-cap coin-days:
+           episodes  lowcap_days
+cat                             
+defi          0.299        0.344
+ai            0.147        0.115
+gaming        0.105        0.104
+privacy       0.094        0.073
+l1_l2         0.083        0.069
+other         0.066        0.101
+fan_token     0.053        0.078
+depin         0.039        0.029
+infra         0.033        0.023
+rwa           0.033        0.023
+meme          0.028        0.017
+nft           0.017        0.025
+payments      0.003        0.001
+episodes with upbit_krw between trough-14d and peak: 0.014
+episodes with bn_perp between trough-14d and peak: 0.133
+episodes with bn_perp_ann between trough-14d and peak: 0.105
+episodes with bn_monitoring between trough-14d and peak: 0.008
+episodes with bn_delist between trough-14d and peak: 0.036
+episodes with bn_support between trough-14d and peak: 0.202
+episodes with upbit_caution between trough-14d and peak: 0.000
+episodes with no catalogued event: 0.673
+breadth at trough: episodes median 0.185 vs all days median 0.333
+
+Recent episodes (2024+):
+            sym     trough       peak  days  mult  mcap_trough       cat  after90                       events                                                                                                         event_titles
+       PERPUSDT 2023-11-21 2024-01-02    42   3.2         37.4      defi    -0.23                                                                                                                                                  
+       NTRNUSDT 2023-11-06 2024-01-05    60   5.1         63.1      defi    -0.24          bn_perp;bn_perp_ann               Binance Futures Will Launch USDⓈ-M NTRN Perpetual Contract With Up to 50x Leverage | archive first day
+     PEOPLEUSDT 2023-11-21 2024-01-07    47   3.8         56.4      meme    -0.16                                                                                                                                                  
+         OMUSDT 2023-12-15 2024-02-09    56  13.2         18.8       rwa     1.28                                                                                                                                                  
+       COTIUSDT 2024-01-23 2024-02-26    34   5.1         67.9   privacy    -0.51                                                                                                                                                  
+      SPELLUSDT 2024-02-04 2024-03-02    27   3.3         51.5      defi    -0.39                                                                                                                                                  
+        SYNUSDT 2024-01-07 2024-03-06    59   5.0         53.3      defi    -0.62                                                                                                                                                  
+       ARKMUSDT 2024-01-23 2024-03-09    46   8.0         74.3        ai    -0.40                                                                                                                                                  
+        RLCUSDT 2024-01-09 2024-03-09    60   3.5         96.4        ai    -0.34                                                                                                                                                  
+        PHBUSDT 2024-01-25 2024-03-10    45   4.6         39.0        ai    -0.40                                                                                                                                                  
+       REEFUSDT 2024-02-04 2024-03-12    37   3.2         31.5    gaming    -0.59                                                                                                                                                  
+      VANRYUSDT 2024-02-03 2024-03-13    39   6.1         69.7     l1_l2    -0.53          bn_perp;bn_perp_ann              Binance Futures Will Launch USDⓈ-M VANRY Perpetual Contract With Up to 50x Leverage | archive first day
+         IQUSDT 2024-02-04 2024-03-14    39   3.3         86.5        ai    -0.47                   bn_support                                                                                                                     
+        ORNUSDT 2024-02-06 2024-03-17    40   3.6         26.5      defi    -0.40                                                                                                                                                  
+      FRONTUSDT 2024-02-04 2024-03-17    42   6.6         37.9      defi    -0.60                                                                                                                                                  
+        PHAUSDT 2024-02-04 2024-03-20    45   3.5         65.9        ai    -0.61                                                                                                                                                  
+     BADGERUSDT 2024-01-25 2024-03-24    59   3.0         57.2      defi    -0.66                                                                                                                                                  
+       NULSUSDT 2024-02-04 2024-03-25    50   4.2         22.7     l1_l2    -0.59                                                                                                                                                  
+        CLVUSDT 2024-01-31 2024-03-27    56   3.2         36.2     l1_l2    -0.64                                                                                                                                                  
+        TRUUSDT 2024-01-31 2024-03-27    56   3.8         50.4       rwa    -0.19                                                                                                                                                  
+        REIUSDT 2024-02-04 2024-03-28    53  12.0         25.7     l1_l2    -0.84                                                                                                                                                  
+        MOBUSDT 2024-03-28 2024-03-29     1   3.2         12.0   privacy      NaN                    bn_delist                                                                     Binance Will Delist DREP, MOB, PNT on 2024-04-03
+        XVGUSDT 2024-02-04 2024-04-02    58   4.1         50.6   privacy    -0.67                                                                                                                                                  
+       GHSTUSDT 2024-02-03 2024-04-03    60   3.7         46.9    gaming    -0.63                                                                                                                                                  
+        ATAUSDT 2024-02-06 2024-04-04    58   3.1         37.0      defi    -0.59                                                                                                                                                  
+       DEXEUSDT 2024-02-11 2024-04-09    58   5.2        109.7        ai    -0.40                                                                                                                                                  
+        BELUSDT 2024-02-09 2024-04-09    60   3.4         39.8      defi    -0.77                                                                                                                                                  
+        COSUSDT 2024-02-26 2024-04-26    60   4.5         35.9     other    -0.76                                                                                                                                                  
+      CREAMUSDT 2024-03-21 2024-05-19    59   4.1         40.3      defi    -0.81                                                                                                                                                  
+       HIGHUSDT 2024-04-13 2024-06-07    55   4.0        107.6    gaming    -0.85                                                                                                                                                  
+     PEOPLEUSDT 2024-04-13 2024-06-08    56   6.2        110.9      meme    -0.62                                                                                                                                                  
+        MDXUSDT 2024-07-08 2024-07-12     4   3.5         21.9      defi      NaN                    bn_delist                                                              Binance Will Delist BOND, DOCK, MDX, POLS on 2024-07-22
+       RAREUSDT 2024-08-05 2024-08-22    17   4.2         44.5       nft    -0.58          bn_perp;bn_perp_ann Binance Futures Will Launch USDⓈ-Margined G and RARE Perpetual Contracts With Up to 50x Leverage | archive first day
+     ALPACAUSDT 2024-08-16 2024-08-24     8   3.4         12.7      defi    -0.39          bn_perp;bn_perp_ann      Binance Futures Will Launch USDⓈ-Margined ALPACA Perpetual Contract With up to 75x Leverage | archive first day
+       VIDTUSDT 2024-08-05 2024-09-09    35   3.5         12.6        ai     0.02          bn_perp;bn_perp_ann        Binance Futures Will Launch USDⓈ-Margined VIDT Perpetual Contract With up to 75x Leverage | archive first day
+         OGUSDT 2024-08-15 2024-10-07    53   4.7         11.9 fan_token    -0.57                                                                                                                                                  
+        DIAUSDT 2024-09-16 2024-10-23    37   3.7         34.9        ai    -0.47                      bn_perp                                                                                                    archive first day
+       PROSUSDT 2024-10-07 2024-11-14    38   3.4          8.8     other    -0.59                                                                                                                                                  
+        CLVUSDT 2024-11-04 2024-11-20    16   4.4         25.3     l1_l2    -0.67                                                                                                                                                  
+       TROYUSDT 2024-10-25 2024-11-21    27   5.3         10.3     other    -0.75                      bn_perp                                                                                                    archive first day
+       SCRTUSDT 2024-11-04 2024-12-01    27   4.5         48.6   privacy    -0.71                      bn_perp                                                                                                    archive first day
+        XVGUSDT 2024-11-04 2024-12-04    30   6.3         53.0   privacy    -0.74                                                                                                                                                  
+       LQTYUSDT 2024-10-17 2024-12-07    51   3.5         73.8      defi    -0.72                                                                                                                                                  
+       CELRUSDT 2024-11-04 2024-12-08    34   3.0         79.1   privacy    -0.64                                                                                                                                                  
+       IDEXUSDT 2024-11-04 2024-12-08    34   3.1         25.6      defi    -0.70                                                                                                                                                  
+        AVAUSDT 2024-11-04 2024-12-12    38   6.4         22.6       nft    -0.73                                                                                                                                                  
+       CTXCUSDT 2024-11-03 2024-12-14    41   5.3         40.8        ai    -0.85                                                                                                                                                  
+        UTKUSDT 2024-11-04 2024-12-15    41   4.5         21.0      defi    -0.71                                                                                                                                                  
+      USUALUSDT 2024-11-22 2024-12-19    27   6.6        108.5      defi    -0.89           bn_perp;bn_support                                                                                                    archive first day
+        COWUSDT 2024-11-20 2024-12-25    35   3.5         90.5      defi    -0.72           bn_perp;bn_support                                                                                                    archive first day
+       PONDUSDT 2024-11-04 2024-12-27    53   3.3         78.8        ai    -0.66                                                                                                                                                  
+        PHAUSDT 2024-11-04 2024-12-27    53   5.2         73.0        ai    -0.75                                                                                                                                                  
+         DFUSDT 2024-11-04 2024-12-30    56   3.3         28.5      defi    -0.17                      bn_perp                                                                                                    archive first day
+        ATAUSDT 2024-11-04 2025-01-02    59   3.2         39.1      defi    -0.77                                                                                                                                                  
+       HIVEUSDT 2024-11-07 2025-01-06    60   3.5         93.9     l1_l2    -0.71                      bn_perp                                                                                                    archive first day
+    AUCTIONUSDT 2025-02-06 2025-03-21    43   6.1         55.6      defi    -0.82                                                                                                                                                  
+        FUNUSDT 2025-03-09 2025-04-15    37   4.6         20.3    gaming     1.67                      bn_perp                                                                                                    archive first day
+      MAGICUSDT 2025-04-08 2025-04-21    13   3.4         20.8        ai    -0.24                                                                                                                                                  
+       ARDRUSDT 2025-04-07 2025-04-25    18   3.4         40.9     l1_l2    -0.23                                                                                                                                                  
+     ALPACAUSDT 2025-04-17 2025-04-30    13  19.3          4.4      defi      NaN                    bn_delist                                                             Binance Will Delist ALPACA, PDA, VIB, WING on 2025-05-02
+      VOXELUSDT 2025-04-17 2025-04-30    13   5.7          5.2    gaming    -0.55                                                                                                                                                  
+        FLMUSDT 2025-04-14 2025-04-30    16   3.6          7.7      defi    -0.41                                                                                                                                                  
+        BSWUSDT 2025-04-15 2025-04-30    15   5.1          6.0    gaming    -0.80                                                                                                                                                  
+     PEOPLEUSDT 2025-04-15 2025-05-14    29   3.4         52.3      meme    -0.40                                                                                                                                                  
+     COOKIEUSDT 2025-04-08 2025-05-24    46   4.0         33.4        ai    -0.51                                                                                                                                                  
+        WCTUSDT 2025-04-15 2025-05-29    44   4.0         53.2     infra    -0.73 bn_perp;bn_support;upbit_krw                                                        월렛커넥트(WCT) 신규 거래지원 안내 (KRW, BTC, USDT 마켓) | archive first day
+  BANANAS31USDT 2025-05-12 2025-07-10    59   7.3         50.9      meme    -0.85                   bn_support                                                                                                                     
+      HYPERUSDT 2025-06-22 2025-07-10    18   6.3         16.2      defi    -0.53                    upbit_krw                                                                                        하이퍼레인(HYPER) KRW 마켓 디지털 자산 추가
+        FUNUSDT 2025-05-30 2025-07-14    45   7.4         33.6    gaming    -0.77                                                                                                                                                  
+        DIAUSDT 2025-06-22 2025-07-22    30   3.3         39.2        ai    -0.60                                                                                                                                                  
+        SPKUSDT 2025-07-08 2025-07-23    15   5.9         29.1      defi    -0.78                                                                                                                                                  
+        TUTUSDT 2025-05-30 2025-07-27    58   3.4         19.2      meme    -0.70                                                                                                                                                  
+       OMNIUSDT 2025-07-07 2025-07-29    22   3.6         49.1     l1_l2    -0.24                    upbit_krw                                                                                        옴니네트워크(OMNI) KRW 마켓 디지털 자산 추가
+        ASRUSDT 2025-06-15 2025-08-09    55   4.1         14.2 fan_token    -0.80                                                                                                                                                  
+       EPICUSDT 2025-07-07 2025-08-18    42   3.9         17.5       rwa    -0.81                                                                                                                                                  
+         OGUSDT 2025-07-12 2025-09-10    60   5.3         19.1 fan_token    -0.45                                                                                                                                                  
+        SLFUSDT 2025-09-09 2025-09-12     3   3.4          4.1     l1_l2      NaN                    bn_delist                                                                    Binance Will Delist BAKE, HIFI, SLF on 2025-09-17
+       BAKEUSDT 2025-09-08 2025-09-12     4   3.8          9.9    gaming      NaN                    bn_delist                                                                    Binance Will Delist BAKE, HIFI, SLF on 2025-09-17
+       HIFIUSDT 2025-09-08 2025-09-13     5   9.3          7.9       rwa      NaN                    bn_delist                                                                    Binance Will Delist BAKE, HIFI, SLF on 2025-09-17
+     ALPINEUSDT 2025-08-02 2025-09-29    58   8.0         15.7 fan_token    -0.91                                                                                                                                                  
+       DEGOUSDT 2025-10-10 2025-10-26    16   3.3         13.8      defi    -0.80                                                                                                                                                  
+     RESOLVUSDT 2025-11-03 2025-11-16    13   4.3         14.0      defi    -0.67                                                                                                                                                  
+       TNSRUSDT 2025-11-18 2025-11-20     2   7.4         15.5       nft    -0.79                                                                                                                                                  
+BROCCOLI714USDT 2025-12-18 2026-01-06    19   3.6         10.9      meme    -0.70                                                                                                                                                  
+       DUSKUSDT 2025-12-18 2026-01-21    34   5.9         18.5   privacy    -0.38                                                                                                                                                  
+        GUNUSDT 2025-12-29 2026-01-22    24   3.2         14.9    gaming    -0.51                                                                                                                                                  
+        GPSUSDT 2025-12-18 2026-02-09    53   3.2         17.4     other    -0.48                                                                                                                                                  
+       ENSOUSDT 2026-01-20 2026-02-24    35   4.9         11.2     infra    -0.71                                                                                                                                                  
+      PIXELUSDT 2026-03-01 2026-03-11    10   3.0         15.3    gaming    -0.64                                                                                                                                                  
+       DEGOUSDT 2026-03-06 2026-03-16    10   4.4          5.6      defi    -0.98                                                                                                                                                  
+        STOUSDT 2026-02-11 2026-04-01    49   8.5         11.8      defi    -0.90                                                                                                                                                  
+        NOMUSDT 2026-03-27 2026-04-02     6   4.4          5.4      defi    -0.76                                                                                                                                                  
+          DUSDT 2026-03-28 2026-04-04     7   4.0          3.9    gaming    -0.78                                                                                                                                                  
+        KATUSDT 2026-04-12 2026-04-24    12   3.1         18.5      defi    -0.81                                                                                                                                                  
+        ZBTUSDT 2026-03-22 2026-04-26    35   3.2         18.8   privacy    -0.50                                                                                                                                                  
+      LUMIAUSDT 2026-03-01 2026-04-28    58   3.3          8.1   privacy    -0.63                                                                                                                                                  
+        TSTUSDT 2026-03-29 2026-05-04    36   3.3          7.4      meme    -0.57                                                                                                                                                  
+       DOGSUSDT 2026-03-29 2026-05-07    39   3.5         12.9      meme    -0.60                                                                                                                                                  
+       EDENUSDT 2026-03-29 2026-05-21    53   4.7          4.8       rwa    -0.54                                                                                                                                                  
+       FIDAUSDT 2026-03-29 2026-05-21    53   3.3         12.3      defi    -0.56                                                                                                                                                  
+     PORTALUSDT 2026-05-28 2026-05-31     3   4.3          6.5    gaming    -0.53                                                                                                                                                  
+        SYNUSDT 2026-06-10 2026-06-30    20  19.9          6.3      defi    -0.69                                                                                                                                                  
+        NFPUSDT 2026-06-30 2026-07-01     1   5.7          2.8        ai      NaN                    bn_delist                                                              Binance Will Delist ALCX, ARDR, NFP, POND on 2026-07-10
+        TLMUSDT 2026-06-30 2026-07-05     5   3.9          5.7    gaming    -0.53                                                                                                                                                  
+        ATMUSDT 2026-06-05 2026-07-14    39   3.3          7.2 fan_token    -0.64                                                                                                                                                  
+       ALLOUSDT 2026-05-26 2026-07-24    59   6.2         16.8        ai    -0.55                                                                                                                                                  
+        HEIUSDT 2026-06-16 2026-08-05    50   3.8          7.0      defi    -0.55                                                                                                                                                  
+        HFTUSDT 2026-06-30 2026-08-06    37   3.9          6.6    gaming      NaN                    bn_delist                                                    Binance Will Delist ACX, HFT, PIVX, PYR, VANRY, VIC on 2026-08-17
+       EPICUSDT 2026-07-08 2026-08-07    30   3.8         10.6       rwa    -0.63                                                                                                                                                  
+       BICOUSDT 2026-07-29 2026-08-08    10   5.5         11.4      defi    -0.73                                                                                                                                                  
+        TUTUSDT 2026-07-08 2026-08-09    32  20.9          8.0      meme    -0.90                                                                                                                                                  
+        ACEUSDT 2026-07-18 2026-08-14    27   4.0          6.6    gaming    -0.22                                                                                                                                                  
+        ONGUSDT 2026-08-12 2026-08-26    14   5.9         19.3     l1_l2    -0.64                                                                                                                                                  
+       PROMUSDT 2026-06-30 2026-08-29    60   6.3         20.1     other    -0.25                    upbit_krw                                                                                      프롬(PROM) KRW, USDT 마켓 디지털 자산 추가
+       HEMIUSDT 2026-07-13 2026-09-03    52   3.9          4.1     l1_l2    -0.66                                                                                                                                                  
+       IOSTUSDT 2026-08-18 2026-09-09    22   3.5         18.5     depin    -0.56                                                                                                                                                  
+        LSKUSDT 2026-08-01 2026-09-13    43  11.1         16.0       rwa    -0.74                bn_monitoring                                       Binance Will Extend the Monitoring Tag to Include ACX, LSK & STX on 2026-07-24
+       COTIUSDT 2026-07-24 2026-09-17    55   3.5         21.3   privacy      NaN                                                                                                                                                  
+        ONEUSDT 2026-09-10 2026-09-21    11   6.7          9.5     l1_l2      NaN                                                                                                                                                  
+    MUBARAKUSDT 2026-07-24 2026-09-22    60   7.7         10.2      meme      NaN                                                                                                                                                  
+        NILUSDT 2026-08-01 2026-09-23    53   4.5         13.1        ai      NaN                                                                                                                                                  
+       SAGAUSDT 2026-07-30 2026-09-24    56   6.1          5.0        ai      NaN                                                                                                                                                  
+        PHAUSDT 2026-08-01 2026-09-25    55   4.4         16.4        ai      NaN                                                                                                                                                  
+         QIUSDT 2026-08-05 2026-09-25    51   3.1          8.6      defi      NaN                                                                                                                                                  
+        ARKUSDT 2026-08-18 2026-09-26    39   3.0         17.0       nft      NaN                                                                                                                                                  
+       MOVRUSDT 2026-08-24 2026-10-01    38   4.2          8.7     l1_l2      NaN                bn_monitoring                         Binance Will Extend the Monitoring Tag to Include GLMR, ICX, MOVR, RARE & SOPH on 2026-08-11
+        RLCUSDT 2026-08-12 2026-10-09    58   3.9         23.0        ai      NaN                                                                                                                                                  
+      MAGICUSDT 2026-08-12 2026-10-11    60   3.5         13.2        ai      NaN                                                                                                                                                  
+        GTCUSDT 2026-09-15 2026-10-12    27   3.8          6.6     infra      NaN                    upbit_krw                                                                                      깃코인(GTC) KRW, USDT 마켓 디지털 자산 추가

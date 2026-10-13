@@ -7774,6 +7774,9 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   @media(min-width:721px){#panel-exhWatch .bh-head,#panel-exhWatch .bh-row{grid-template-columns:minmax(64px,.5fr) minmax(80px,.6fr) minmax(64px,.5fr) minmax(90px,.6fr) minmax(70px,.5fr) minmax(230px,2fr)}}
   @media(min-width:721px){#panel-exhPrints .bh-head,#panel-exhPrints .bh-row{grid-template-columns:minmax(70px,.6fr) repeat(6,minmax(76px,.7fr))}}
   @media(min-width:721px){#panel-profitSmall .bh-head,#panel-profitSmall .bh-row,#panel-profitMid .bh-head,#panel-profitMid .bh-row{grid-template-columns:minmax(190px,1.7fr) minmax(90px,.8fr) repeat(6,minmax(70px,.6fr))}}
+  @media(min-width:721px){#panel-lowcapWatch .bh-head,#panel-lowcapWatch .bh-row{grid-template-columns:minmax(170px,1.4fr) repeat(5,minmax(84px,.75fr))}}
+  .lc-avoid{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px}
+  .lc-avoid .subtle-chip{white-space:normal}
   .ex-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);margin:12px 0}
   .ex-tile{background:var(--ink-1);padding:10px 12px;font-family:var(--mono)}
   .ex-tile b{display:block;font-size:18px;color:var(--paper);font-variant-numeric:tabular-nums}
@@ -7789,8 +7792,8 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   /* On a phone the new lists pair their fields two to a line, with the coin or
      company and the reading across the full width, instead of one per line. */
   @media(max-width:720px){
-    #panel-exhWatch .bh-row,#panel-exhPrints .bh-row,#panel-profitSmall .bh-row,#panel-profitMid .bh-row,#panel-decouplingWatch .bh-row,#panel-coinRotation .bh-row{grid-template-columns:1fr 1fr;column-gap:14px;row-gap:8px}
-    #panel-exhWatch .bh-row>.bh-sym,#panel-exhPrints .bh-row>.bh-sym,#panel-profitSmall .bh-row>.bh-sym,#panel-profitMid .bh-row>.bh-sym,#panel-exhWatch .bh-row>[data-l="Reading"]{grid-column:1/-1}
+    #panel-exhWatch .bh-row,#panel-exhPrints .bh-row,#panel-profitSmall .bh-row,#panel-profitMid .bh-row,#panel-decouplingWatch .bh-row,#panel-coinRotation .bh-row,#panel-lowcapWatch .bh-row{grid-template-columns:1fr 1fr;column-gap:14px;row-gap:8px}
+    #panel-exhWatch .bh-row>.bh-sym,#panel-exhPrints .bh-row>.bh-sym,#panel-profitSmall .bh-row>.bh-sym,#panel-profitMid .bh-row>.bh-sym,#panel-lowcapWatch .bh-row>.bh-sym,#panel-exhWatch .bh-row>[data-l="Reading"]{grid-column:1/-1}
   }
   .ex-list{margin:8px 0 4px;padding-left:18px;font-family:var(--mono);font-size:11.5px;line-height:1.75;color:var(--muted)}
   .ex-list b{color:var(--paper)}
@@ -9206,6 +9209,57 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
           :'<div class="dr-note">No large coin has pulled away from the market in the last 72 hours.</div>')
         +'<div class="dr-note">'+dcLive+'<br>'+dcPush+'</div>'
         +PANEL_END;
+    }
+    // Low-cap watch (scripts/lowcap-watch.py, docs/LOWCAP_SPIKES.md): Binance's
+    // smallest coins whose trading is likely to surge, and the coins to stay
+    // away from. Volume, not direction, and the panel says so. Every rate quoted
+    // comes from the payload's evidence block. The spike ranking renders only
+    // when its gate is live AND its list arrived (lowcap-watch.py SPIKE_GATE);
+    // until then the panel states that it is being logged and nothing more.
+    var lcw=d.lowcapWatch;
+    if(lcw&&(lcw.status==='live'||lcw.status==='stale')&&lcw.inflowWatch){
+      var lcPct=function(x,signed){return typeof x==='number'&&isFinite(x)?(signed&&x>=0?'+':'')+Math.round(x*100)+'%':'n/a';};
+      var lcUsd=function(x){return typeof x!=='number'||!isFinite(x)?'n/a':x>=1e6?'$'+(x/1e6).toFixed(1)+'M':'$'+Math.max(1,Math.round(x/1e3))+'k';};
+      var lcKorea=function(k){return k==='krw'?'on Upbit KRW':k==='btc-usdt-only'?'Upbit BTC/USDT only':'not on Upbit';};
+      var lcRow=function(r,attr){
+        return '<div class="bh-row" data-'+attr+'="'+esc(r.symbol)+'"><span class="bh-sym">'+r.rank+'. '+esc(r.symbol)+(r.name?'<span class="pg-name">'+esc(r.name)+'</span>':'')+'</span>'
+          +'<span class="bh-cell" data-l="Market cap">'+lcUsd(r.mcap)+'</span>'
+          +'<span class="bh-cell" data-l="30 days">'+lcPct(r.mom30,true)+'</span>'
+          +'<span class="bh-cell" data-l="Volume vs usual">'+(typeof r.volRatio==='number'&&isFinite(r.volRatio)?r.volRatio.toFixed(1)+'&times;':'n/a')+'</span>'
+          +'<span class="bh-cell" data-l="Buying that lifts it 20%">'+lcUsd(r.lift20Usd)+'</span>'
+          +'<span class="bh-cell" data-l="Korea">'+lcKorea(r.korea)+'</span></div>';
+      };
+      var lcHead='<div class="bh-head"><span>Coin</span><span>Market cap</span><span>30 days</span><span>Volume vs usual</span><span>Buying that lifts it 20%</span><span>Korea</span></div>';
+      var lcEv=lcw.evidence||{},lcIn=lcEv.inflow||{},lcSp=lcEv.spike||{},lcEp=lcEv.episodes||{},lcE=lcEv.events||{},lcWf=lcEv.walkForward||{};
+      var lcU=lcw.universe||{},lcLive=lcw.live||{},lcLI=lcLive.inflow||{},lcLS=lcLive.spike||{};
+      var lcInflow=lcw.inflowWatch.status==='live'?(lcw.inflowWatch.list||[]):[];
+      var lcRows=lcInflow.map(function(r){return lcRow(r,'lcw');}).join('');
+      var lcSpikeLive=!!(lcw.spike&&lcw.spike.status==='live'&&lcw.spike.list&&lcw.spike.list.length);
+      var lcMon=(lcE.monitoring||{}).post90||{},lcUpw=(lcE.upbitCaution||{}).post90||{};
+      var lcAvoid=(lcw.avoid||[]).map(function(a){
+        return '<span class="subtle-chip" data-lca="'+esc(a.symbol)+'" title="'+esc((a.reasons||[]).join('; '))+'">'+esc(a.symbol)+' &middot; '+esc((a.reasons||[]).join(', '))+'</span>';
+      }).join('');
+      var lcRecord=lcLI.cohorts?'<b>Live record</b>: the top 10 saw their volume triple '+Math.round((lcLI.top10||0)*100)+'% of the time, against '+Math.round((lcLI.base||0)*100)+'% of all the low caps on the same days ('+lcLI.cohorts+' day'+(lcLI.cohorts===1?'':'s')+(typeof lcLI.t==='number'?', t='+lcLI.t.toFixed(2):'')+').'
+        :'<b>Live record</b>: starts with this list; each day is scored 30 days later against every low cap of that day.';
+      var lcSpikeNote=lcSpikeLive?'':'<div class="dr-note"><b>Not shown: which low caps will double.</b> A second ranking, of the low caps most likely to close at twice today&#39;s price within 90 days, is logged every day but kept off this page. In the study its top 10 did so '+Math.round((lcSp.top10Rate||0)*100)+'% of the time against '+Math.round((lcSp.baseRate||0)*100)+'%, an edge too small to publish on a backtest. It appears here only if its own live record beats the low-cap average after costs (t of '+((lcw.spike&&lcw.spike.gate&&lcw.spike.gate.minT)||2)+' or more over '+((lcw.spike&&lcw.spike.gate&&lcw.spike.gate.minCohorts)||180)+' days). '+(lcLS.cohorts?'Scored so far: '+lcLS.cohorts+' day'+(lcLS.cohorts===1?'':'s')+'.':'Nothing scored yet; the first outcomes come 90 days after the first list.')+'</div>';
+      watch+=panelStart({id:'lowcapWatch',tone:'watch',open:!!lcRows,
+          eyebrow:'CRYPTO &middot; <b>LOW CAPS</b>',
+          title:'Binance low caps where trading is likely to surge',
+          meta:'from the '+esc(lcw.asOf||'')+' close &middot; '+(lcU.lowcaps||0)+' coins under '+lcUsd(lcU.mcapCeiling)+' &middot; direction unknown'+(lcw.status==='stale'?' &middot; <span class="amber-t">stale</span>':'')})
+        +'<div class="xp-banner" role="note"><b>Volume, not direction.</b> Of the '+(lcU.lowcaps||0)+' smallest coins on Binance (the bottom 40% by market cap), these are the likeliest to see their trading volume triple over the next 30 days. '
+          +'Walked forward over '+(lcWf.anchors||0)+' dates ('+esc(lcWf.from||'')+' to '+esc(lcWf.to||'')+'), the daily top 10 did so '+Math.round((lcIn.top10Rate||0)*100)+'% of the time against '+Math.round((lcIn.baseRate||0)*100)+'% of all low caps. Whether the price follows is not forecast. '
+          +'Low caps that explode usually give it back: of '+(lcEp.count||0)+' runs of 3&times; or more since '+esc(lcEp.since||'2019')+', the typical coin was '+Math.round(Math.abs(lcEp.medianAfter90||0)*100)+'% below its peak 90 days later. Not a buy signal, not financial advice.</div>'
+        +(lcRows?'<div class="bh-list">'+lcHead+lcRows+'</div>'
+          :'<div class="dr-note">'+(lcw.inflowWatch.status==='demoted'?'The list is paused: its live record trails the low-cap average.':'No low cap qualifies today.')+'</div>')
+        +(lcSpikeLive?'<div class="dr-note"><b>Most likely to double within 90 days</b> (cleared its live-record gate).</div><div class="bh-list">'+lcHead+lcw.spike.list.map(function(r){return lcRow(r,'lcs');}).join('')+'</div>':'')
+        +'<div class="dr-note">'+lcRecord+' &ldquo;Buying that lifts it 20%&rdquo; is the dollars on Binance&#39;s order book between today&#39;s price and 20% above it; the same coins trade far more than that every day, so a lift rarely holds on its own.</div>'
+        +(lcAvoid?'<div class="dr-note"><b>Stay away from</b>: coins under Binance&#39;s monitoring tag (the typical one ran '+Math.round(Math.abs(lcMon.median||0)*100)+'% behind the market over the next 90 days, '+(lcMon.n||0)+' cases), Upbit&#39;s warning designation ('+Math.round(Math.abs(lcUpw.median||0)*100)+'% behind, '+(lcUpw.n||0)+' cases) or an announced Binance delisting. Fan tokens are left out of the list above.</div><div class="lc-avoid">'+lcAvoid+'</div>':'')
+        +lcSpikeNote
+        +((lcw.notes&&lcw.notes.length)?'<div class="dr-note">'+lcw.notes.map(esc).join(' &middot; ')+'</div>':'')
+        +PANEL_END;
+    } else if(lcw&&lcw.status==='awaiting-first-run'){
+      watch+=panelStart({id:'lowcapWatch',tone:'watch',open:false,eyebrow:'CRYPTO &middot; LOW CAPS',title:'Binance low caps where trading is likely to surge',meta:'awaiting first run'})
+        +'<div class="dr-note">The low-cap watch has not published a list yet.</div>'+PANEL_END;
     }
     if(d.crypto.favorites && d.crypto.favorites.length){
       watch+=boardHtml({side:'favorites', assetClass:'crypto', boardId:'crypto-favorites', eyebrow:'CRYPTO &middot; <b>FAVORITES</b>', title:'Always tracked', callsWithheld:cryptoCallsWithheld, withheldReason:cryptoWithheldReason}, d.crypto.favorites, d.crypto.favorites.length);

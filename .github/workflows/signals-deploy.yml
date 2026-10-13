@@ -64,6 +64,7 @@ jobs:
           node --test test-lead-lag.mjs
           node --test test-model-tournament-io.mjs
           node --test test-big-move-watch-io.mjs
+          node --test test-lowcap-watch-io.mjs
           node --test test-day-zones.mjs
           node --test test-push-batch.mjs
           node --test test-recorders.mjs

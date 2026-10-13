@@ -228,6 +228,20 @@ export function checkPayload(payload, now = Date.now()) {
     push('decoupling-watch-fresh', 'warn', dw.status === 'live',
       `the pulling-away-from-the-market watch is ${dw.status}${Number.isFinite(age) ? ` (last run ${age.toFixed(1)}h ago)` : ''}; check signals-live-scan.yml`);
   }
+  // The low-cap watch (2026-10-13) runs once a day in its own workflow and reads
+  // Binance's www API for the monitoring tags and delisting notices behind its
+  // avoid list; a runner that cannot reach it still publishes, so say so here.
+  const lw = payload.lowcapWatch;
+  if (lw && lw.status && lw.status !== 'awaiting-first-run') {
+    const age = lw.lastRunAt ? hours(now - Date.parse(lw.lastRunAt)) : NaN;
+    push('lowcap-watch-fresh', 'warn', lw.status === 'live',
+      `the low-cap watch is ${lw.status}${Number.isFinite(age) ? ` (last run ${age.toFixed(1)}h ago)` : ''}; check signals-lowcap-watch.yml`);
+    if (lw.sources) {
+      const missing = ['binanceTags', 'binanceDelistings', 'upbit'].filter((k) => lw.sources[k] === false);
+      push('lowcap-avoid-sources', 'warn', missing.length === 0,
+        `the low-cap avoid list is incomplete: ${missing.join(', ')} unavailable on the last run`);
+    }
+  }
 
   const boards = ['crypto', 'stocks'].flatMap((cls) => ['breakout', 'breakdown'].map((side) => (payload[cls]?.[side] || []).length));
   push('boards-populated', 'fail', boards.some((n) => n > 0),

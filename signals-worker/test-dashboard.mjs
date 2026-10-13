@@ -823,6 +823,72 @@ console.log('\n== profit growers: small and mid caps, from SEC filings ==');
 
 [withheld, proven, ui, clocks, stale].forEach((r) => r.dom.window.close());
 
+// ============ low-cap watch: volume, never direction; the spike list is gated ==
+// The summary is the real output of scripts/lowcap-watch.py (2026-10-12 close),
+// as lowcap-watch-io.mjs's loader returns it.
+console.log('\n== the low-cap watch lists likely volume surges, the coins to avoid, and keeps the spike list gated ==');
+{
+  const summary = JSON.parse(readFileSync(new URL('./test-fixtures/lowcap-watch-summary.json', import.meta.url), 'utf8'));
+  const live = { ...summary, status: 'live', ageHours: 4, lastRunAt: summary.runAt };
+  const view = await render({ ...payload(), lowcapWatch: live }, { settleMs: 1200 });
+  const el = view.doc.getElementById('panel-lowcapWatch');
+  const text = el?.textContent || '';
+  check('the low-cap watch renders without disrupting the page', view.pageErrors.length === 0 && Boolean(el), JSON.stringify(view.pageErrors));
+  check('it sits with the watchlists, open', Boolean(el?.closest('[data-dashboard-view="watchlists"]')) && el.open === true);
+  check('every listed coin gets a row, in rank order',
+    summary.inflowWatch.list.every((w) => el.querySelector(`[data-lcw="${w.symbol}"]`))
+    && [...el.querySelectorAll('[data-lcw]')].map((r) => r.getAttribute('data-lcw')).join() === summary.inflowWatch.list.map((w) => w.symbol).join());
+  check('it states volume, not direction, and that it is not advice',
+    text.includes('Volume, not direction') && text.includes('Whether the price follows is not forecast') && text.includes('not financial advice'));
+  check('the quoted rates come from the evidence block',
+    text.includes(`${Math.round(summary.evidence.inflow.top10Rate * 100)}% of the time against ${Math.round(summary.evidence.inflow.baseRate * 100)}% of all low caps`));
+  check('no direction arrow or trade verb inside the panel',
+    el.querySelectorAll('.dir-arrow, .dir-up, .dir-down').length === 0 && !/\bBUY\b|\bSELL\b|\bLONG\b|\bSHORT\b/.test(text));
+  check('a missing value renders as n/a, not NaN', !/NaN|undefined|null/.test(text));
+  check('every coin to avoid is listed with its reason',
+    summary.avoid.every((a) => el.querySelector(`[data-lca="${a.symbol}"]`)) && text.includes('monitoring tag'));
+  check('while the spike ranking is logged only, no spike row renders and the panel says why',
+    !el.querySelector('[data-lcs]') && text.includes('Not shown: which low caps will double'));
+  check('before any day is scored, the live record says it starts with this list', text.includes('starts with this list'));
+  view.dom.window.close();
+
+  const spikeList = summary.inflowWatch.list.slice(0, 3).map((r, i) => ({ ...r, rank: i + 1 }));
+  const gated = await render({ ...payload(), lowcapWatch: { ...live, spike: { status: 'live', gate: summary.spike.gate, list: spikeList } } }, { settleMs: 1200 });
+  const gEl = gated.doc.getElementById('panel-lowcapWatch');
+  check('once its gate is live, the spike list IS published', gated.pageErrors.length === 0 && gEl.querySelectorAll('[data-lcs]').length === 3
+    && !(gEl.textContent || '').includes('Not shown: which low caps will double'));
+  gated.dom.window.close();
+
+  const smuggled = await render({ ...payload(), lowcapWatch: { ...live, spike: { status: 'shadow', gate: summary.spike.gate, list: spikeList } } }, { settleMs: 1200 });
+  check('a shadow spike list that arrives anyway is still refused',
+    smuggled.pageErrors.length === 0 && !smuggled.doc.getElementById('panel-lowcapWatch').querySelector('[data-lcs]'));
+  smuggled.dom.window.close();
+
+  const scored = await render({ ...payload(), lowcapWatch: { ...live, live: { inflow: { cohorts: 45, top10: 0.21, base: 0.09, t: 3.1 }, spike: { cohorts: 12 } } } }, { settleMs: 1200 });
+  const sText = scored.doc.getElementById('panel-lowcapWatch')?.textContent || '';
+  check('once scored, it reports the live record against the same days',
+    /the top 10 saw their volume triple 21% of the time, against 9% of all the low caps on the same days \(45 days, t=3\.10\)/.test(sText)
+    && sText.includes('Scored so far: 12 days'));
+  scored.dom.window.close();
+
+  const demoted = await render({ ...payload(), lowcapWatch: { ...live, inflowWatch: { status: 'demoted', list: summary.inflowWatch.list } } }, { settleMs: 1200 });
+  const dEl = demoted.doc.getElementById('panel-lowcapWatch');
+  check('a demoted watch shows no list, even one that arrives anyway, and says it is paused', !dEl.querySelector('[data-lcw]') && (dEl.textContent || '').includes('paused'));
+  demoted.dom.window.close();
+
+  const stale = await render({ ...payload(), lowcapWatch: { ...live, status: 'stale' } }, { settleMs: 1200 });
+  check('a stale watch is marked stale', /stale/.test(stale.doc.getElementById('panel-lowcapWatch')?.textContent || ''));
+  stale.dom.window.close();
+
+  const first = await render({ ...payload(), lowcapWatch: { status: 'awaiting-first-run' } }, { settleMs: 1200 });
+  check('before the first run it says so', (first.doc.getElementById('panel-lowcapWatch')?.textContent || '').includes('has not published a list yet'));
+  first.dom.window.close();
+
+  const none = await render({ ...payload(), lowcapWatch: { status: 'unavailable' } }, { settleMs: 1200 });
+  check('an unavailable watch adds nothing and breaks nothing', none.pageErrors.length === 0 && !none.doc.getElementById('panel-lowcapWatch'));
+  none.dom.window.close();
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
 console.log('DASHBOARD OK');

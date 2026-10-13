@@ -1,0 +1,68 @@
+logit_all_y2c done
+gbm_all_y2c done
+ridge_all_tp2 done
+logit_all_inflow done
+logit_noregime_y2c done
+             model  anchors  auc_y2c  auc_y2c_t  auc_y2c_h1  auc_y2c_h2  top_y2c  base_y2c  hit_y2c_t  auc_inflow3x  auc_inflow3x_t  x_tp2  x_tp2_t  x_tp2_h1  x_tp2_h2  top_tp2_net  all_tp2_net  x_ret90  x_ret90_t  top_ret90_net
+     logit_all_y2c      123    0.530      1.494       0.557       0.507    0.140     0.110      1.721         0.509           0.592  0.034    1.382     0.075    -0.002       -0.023       -0.056    0.062      1.718         -0.006
+       gbm_all_y2c      123    0.545      2.408       0.563       0.529    0.158     0.110      3.160         0.524           1.942  0.045    2.171     0.048     0.042       -0.012       -0.056    0.053      1.637         -0.015
+     ridge_all_tp2      123    0.496     -0.180       0.539       0.459    0.133     0.110      1.435         0.535           2.256  0.045    1.915     0.068     0.025       -0.012       -0.056    0.079      2.277          0.011
+  logit_all_inflow      123    0.509      0.483       0.525       0.496    0.124     0.110      1.029         0.674          15.089  0.038    1.677     0.054     0.025       -0.018       -0.056    0.065      1.686         -0.003
+logit_noregime_y2c      123    0.527      1.303       0.556       0.503    0.137     0.110      1.498         0.509           0.690  0.027    1.073     0.071    -0.010       -0.029       -0.056    0.054      1.425         -0.014
+          vol_only      144    0.538      2.616       0.523       0.555    0.146     0.152     -0.492         0.456          -3.643 -0.059   -3.413    -0.056    -0.062       -0.066       -0.007   -0.111     -4.027         -0.036
+        illiq_only      144    0.506      0.334       0.518       0.493    0.153     0.152      0.094         0.639          10.770  0.037    1.942     0.069     0.000        0.030       -0.007    0.077      2.029          0.153
+        small_only      144    0.511      0.486       0.498       0.526    0.151     0.152     -0.090         0.539           2.360 -0.006   -0.210     0.009    -0.022       -0.013       -0.007    0.017      0.362          0.093
+     volsurge_only      144    0.515      1.164       0.522       0.507    0.140     0.152     -1.088         0.610          11.202 -0.042   -3.279    -0.037    -0.048       -0.049       -0.007   -0.043     -1.899          0.033
+
+full-sample logit coefficients (y2c), rank-percentile scale:
+cat_fan_token      -0.611
+upbit_krw          -0.523
+has_perp           -0.309
+alt_med_mom_90     -0.308
+mom_180            -0.283
+log_lambda         -0.257
+max_ret_30         -0.224
+supply_growth_90   -0.216
+dd_ath             -0.196
+avg_trade_usd      -0.193
+cat_defi           -0.188
+vol_surge_30_90    -0.177
+trades_surge       -0.157
+cat_gaming         -0.151
+max_ret_90         -0.148
+log_mcap           -0.131
+taker_buy_7        -0.129
+launchpool         -0.117
+log_qv30           -0.110
+days_since_low     -0.104
+monitoring         -0.044
+age                -0.034
+log_price          -0.028
+cat_mom_30         -0.009
+mom_7               0.004
+amihud_30           0.009
+mom_90              0.014
+net_flow_30         0.030
+net_flow_7          0.035
+mom_30              0.043
+dd_365              0.051
+turnover_30         0.054
+cat_l1_l2           0.060
+cat_depin           0.072
+vol_surge_7_90      0.084
+cat_ai              0.091
+prior_spikes        0.119
+top_vc              0.128
+cat_privacy         0.138
+binance_labs        0.153
+taker_buy_chg       0.186
+cat_rwa             0.207
+vol_ratio           0.216
+range_30            0.216
+up_from_low_365     0.285
+dwf                 0.297
+cat_meme            0.355
+vol_30              0.375
+breadth_30          0.492
+made_in_america     0.532
+btc_mom_90          1.179

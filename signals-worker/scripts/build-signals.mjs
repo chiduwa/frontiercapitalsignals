@@ -29,6 +29,7 @@ import { loadBigMoveWatch } from './big-move-watch-io.mjs';
 import { buildDayZones } from './day-zones.mjs';
 import { loadDecouplingWatch } from './decoupling-watch-io.mjs';
 import { loadCoinRotation } from './coin-rotation-io.mjs';
+import { loadLowcapWatch } from './lowcap-watch-io.mjs';
 import { loadExhaustion } from './exhaustion-io.mjs';
 import { loadProfitGrowth, loadCompanyProfitMetrics } from './profit-growth.mjs';
 
@@ -309,6 +310,15 @@ if (FCS_D1_DATABASE_ID) {
   } catch (error) {
     payload.coinRotation = { status: 'unavailable' };
     console.error('coin rotation unavailable:', error.message);
+  }
+  // Binance low caps whose trading is likely to surge, the coins to avoid, and
+  // the private spike ranking's live record (scripts/lowcap-watch.py, daily).
+  // The spike list itself travels only once its gate is live.
+  try {
+    payload.lowcapWatch = await loadLowcapWatch(env);
+  } catch (error) {
+    payload.lowcapWatch = { status: 'unavailable' };
+    console.error('low-cap watch unavailable:', error.message);
   }
   try {
     payload.sessionResearch = await loadSessionHealth(env);

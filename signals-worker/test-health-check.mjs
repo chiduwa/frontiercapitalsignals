@@ -255,6 +255,10 @@ assert.ok(!notOk(healthy({ decouplingWatch: { status: 'live', lastRunAt: new Dat
 assert.ok(!notOk(healthy({ decouplingWatch: { status: 'awaiting-first-run' } })).includes('decoupling-watch-fresh'), 'a watch that has not run yet is not flagged');
 assert.ok(notOk(healthy({ coinRotation: { status: 'stale', lastRunAt: new Date(Date.now() - 6 * 3600000).toISOString() } })).includes('coin-rotation-fresh'), 'a stale paper rotation warns');
 assert.ok(!notOk(healthy({ coinRotation: { status: 'live', lastRunAt: new Date().toISOString() } })).includes('coin-rotation-fresh'), 'a live paper rotation passes');
+assert.ok(notOk(healthy({ lowcapWatch: { status: 'stale', lastRunAt: new Date(Date.now() - 40 * 3600000).toISOString() } })).includes('lowcap-watch-fresh'), 'a stale low-cap watch warns');
+assert.ok(!notOk(healthy({ lowcapWatch: { status: 'live', lastRunAt: new Date().toISOString(), sources: { binanceTags: true, binanceDelistings: true, upbit: true } } })).some((id) => id.startsWith('lowcap')), 'a live, fully sourced low-cap watch passes');
+assert.ok(notOk(healthy({ lowcapWatch: { status: 'live', lastRunAt: new Date().toISOString(), sources: { binanceTags: false, binanceDelistings: true, upbit: true } } })).includes('lowcap-avoid-sources'), 'an avoid list missing the Binance tags warns');
+assert.ok(!notOk(healthy({ lowcapWatch: { status: 'awaiting-first-run' } })).some((id) => id.startsWith('lowcap')), 'a low-cap watch that has not run yet is not flagged');
 assert.ok(notOk(healthy({ profitGrowth: { status: 'unavailable' } })).includes('profit-growers-fresh'), 'an unavailable profit view warns');
 assert.deepEqual(failing(healthy({ exhaustion: { status: 'stale' }, profitGrowth: { status: 'stale' } })), [], 'these warn, they never fail the page');
 

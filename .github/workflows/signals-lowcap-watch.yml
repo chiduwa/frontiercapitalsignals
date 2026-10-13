@@ -1,0 +1,83 @@
+name: Signals Low-Cap Watch
+
+# Daily: rank Binance's low caps (bottom 40% of Binance market caps) by how
+# likely their trading volume is to triple over the next 30 days, list the coins
+# to stay away from (Binance monitoring tag, Upbit warning, Binance delisting),
+# and log a private spike ranking that stays off the page until its own live
+# record beats the low-cap average (scripts/lowcap-watch.py SPIKE_GATE). Every
+# low cap is written to D1 before its outcome exists and scored in place 30 and
+# 90 days later. See signals-worker/docs/LOWCAP_SPIKES.md. Places nothing.
+#
+# It fetches its own data (Binance spot, CMC, Upbit, the Binance archive), so it
+# does not wait for Signals Daily. GitHub starts daily crons late; the summary
+# stays live for 36 hours (lowcap-watch-io.mjs STALE_HOURS).
+on:
+  schedule:
+    - cron: '23 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signals-lowcap-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install pinned model libraries
+        run: python -m pip install -r signals-worker/scripts/lowcap-requirements.txt
+      - name: Test the watch before it touches D1
+        working-directory: signals-worker
+        env:
+          OPENBLAS_NUM_THREADS: '1'
+        run: |
+          python test-lowcap-watch.py
+          node --test test-lowcap-watch-io.mjs
+      - name: Apply D1 migrations
+        working-directory: signals-worker
+        run: npx --yes wrangler@4 d1 migrations apply frontier-capital-signals-reliability --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Read the ledger's open rows
+        working-directory: signals-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+        run: |
+          mkdir -p reports/lowcap/run
+          node scripts/lowcap-watch-io.mjs export reports/lowcap/run/state.json
+      - name: Fetch, rank and score
+        working-directory: signals-worker
+        env:
+          OPENBLAS_NUM_THREADS: '1'
+        run: python scripts/lowcap-watch.py --state reports/lowcap/run/state.json --output reports/lowcap/run/results.json
+      - name: Write to D1
+        working-directory: signals-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FCS_D1_DATABASE_ID: ${{ vars.FCS_D1_DATABASE_ID }}
+        run: node scripts/lowcap-watch-io.mjs import reports/lowcap/run/results.json
+      - name: Preserve results, including failed runs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: lowcap-watch-${{ github.run_id }}
+          path: signals-worker/reports/lowcap/run/results.json
+          retention-days: 90
+          if-no-files-found: warn

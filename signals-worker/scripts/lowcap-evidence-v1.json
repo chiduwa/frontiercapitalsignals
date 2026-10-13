@@ -1,0 +1,99 @@
+{
+ "version": "lowcap-watch-v1",
+ "source": "docs/LOWCAP_SPIKES.md; docs/research-2026-10-13-lowcap/results/prod_validation.json, event_study.csv, episodes.csv",
+ "walkForward": {
+  "from": "2021-11-02",
+  "to": "2026-07-07",
+  "anchors": 123,
+  "universe": "bottom 40% of Binance USDT market caps, delisted pairs included"
+ },
+ "inflow": {
+  "top10Rate": 0.1731,
+  "baseRate": 0.0824,
+  "auc": 0.673,
+  "t": 5.27,
+  "byYear": {
+   "2021": {
+    "top10": 0.18,
+    "base": 0.0778
+   },
+   "2022": {
+    "top10": 0.1363,
+    "base": 0.0585
+   },
+   "2023": {
+    "top10": 0.2144,
+    "base": 0.1227
+   },
+   "2024": {
+    "top10": 0.2813,
+    "base": 0.1044
+   },
+   "2025": {
+    "top10": 0.1132,
+    "base": 0.051
+   },
+   "2026": {
+    "top10": 0.072,
+    "base": 0.0711
+   }
+  }
+ },
+ "spike": {
+  "top10Rate": 0.1333,
+  "baseRate": 0.1096,
+  "auc": 0.55,
+  "t": 2.34
+ },
+ "episodes": {
+  "count": 361,
+  "coins": 218,
+  "medianMultiple": 4.42,
+  "medianDays": 50,
+  "medianAfter90": -0.574,
+  "heldShare": 0.085,
+  "since": "2019"
+ },
+ "events": {
+  "monitoring": {
+   "post90": {
+    "median": -0.299,
+    "n": 69
+   },
+   "day0": {
+    "median": -0.1121,
+    "n": 83
+   }
+  },
+  "upbitCaution": {
+   "post90": {
+    "median": -0.2239,
+    "n": 23
+   },
+   "post30": {
+    "median": -0.0793,
+    "n": 32
+   }
+  },
+  "delistNotice": {
+   "day0": {
+    "median": -0.0386,
+    "n": 280
+   },
+   "post30": {
+    "median": -0.0751,
+    "n": 280
+   }
+  },
+  "upbitKrwLowcap": {
+   "day0": {
+    "median": 0.516,
+    "n": 12
+   },
+   "post30": {
+    "median": -0.2988,
+    "n": 11
+   }
+  }
+ }
+}

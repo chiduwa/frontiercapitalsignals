@@ -1,0 +1,17 @@
+1) Same-window link: 30d log return on 30d net taker flow (% of mcap), per-date slope, by size
+   low40: +1% of mcap net buying -> +0.26% price (log), t=2.9, dates=179; median |net flow| 2.91% of mcap
+   mid30: +1% of mcap net buying -> +0.83% price (log), t=4.7, dates=175; median |net flow| 1.03% of mcap
+   top30: +1% of mcap net buying -> +1.98% price (log), t=3.4, dates=175; median |net flow| 0.42% of mcap
+
+2) Low caps: does today predict the SIGN of next-30d net buying? (top-minus-bottom quintile of P(flow>0), NW t)
+   net_flow_7       top 0.341 bottom 0.122 base 0.228 spread +0.219 t=+13.16
+   net_flow_30      top 0.369 bottom 0.109 base 0.228 spread +0.261 t=+15.07
+   taker_buy_7      top 0.353 bottom 0.162 base 0.228 spread +0.191 t=+11.77
+   taker_buy_chg    top 0.279 bottom 0.218 base 0.228 spread +0.061 t=+5.93
+   mom_7            top 0.222 bottom 0.212 base 0.228 spread +0.009 t=+0.89
+   mom_30           top 0.223 bottom 0.214 base 0.228 spread +0.008 t=+0.69
+   vol_surge_7_90   top 0.217 bottom 0.250 base 0.228 spread -0.034 t=-2.86
+   amihud_30        top 0.262 bottom 0.197 base 0.228 spread +0.065 t=+3.57
+   log_mcap         top 0.233 bottom 0.213 base 0.228 spread +0.020 t=+1.36
+   dd_365           top 0.255 bottom 0.192 base 0.228 spread +0.063 t=+4.91
+   vol_30           top 0.216 bottom 0.250 base 0.228 spread -0.034 t=-2.80
