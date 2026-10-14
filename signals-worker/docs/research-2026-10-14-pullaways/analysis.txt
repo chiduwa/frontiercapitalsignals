@@ -1,0 +1,79 @@
+== A. After a pull-away: does it keep going? (continuation = further relative move in the same direction)
+
+-- PULLING AHEAD
+  2019-22 bull n   820 | 1d median -2.4% mean -1.0% (t -2.2) kept going 34% | 7d median -1.6% mean +1.2% (t +1.3) kept going 46% | 30d median -2.8% mean +4.6% (t +2.5) kept going 45% | 90d median -4.1% mean +4.6% (t +2.1) kept going 46%
+        peak of the lead (from the start of the move): day0 15% 1-3d 9% 4-14d 16% 15-30d 14% 31-60d 22% 61-90d 24%;  median peak day 27; half the onset lead given back by day 7 41%, by 30 63%, never in 90d 25%; all of it back within 90d 50%
+  2019-22 bear n   931 | 1d median -2.4% mean -1.5% (t -3.5) kept going 34% | 7d median -4.8% mean -2.9% (t -4.6) kept going 34% | 30d median -5.7% mean -3.8% (t -3.2) kept going 39% | 90d median -6.4% mean -4.1% (t -2.8) kept going 39%
+        peak of the lead (from the start of the move): day0 18% 1-3d 10% 4-14d 15% 15-30d 12% 31-60d 20% 61-90d 26%;  median peak day 25; half the onset lead given back by day 7 47%, by 30 68%, never in 90d 19%; all of it back within 90d 51%
+  2019-22 any  n  1751 | 1d median -2.4% mean -1.3% (t -4.0) kept going 34% | 7d median -3.7% mean -1.0% (t -1.8) kept going 40% | 30d median -4.8% mean +0.2% (t +0.1) kept going 42% | 90d median -5.8% mean -0.0% (t -0.0) kept going 42%
+        peak of the lead (from the start of the move): day0 16% 1-3d 9% 4-14d 15% 15-30d 13% 31-60d 21% 61-90d 25%;  median peak day 26; half the onset lead given back by day 7 44%, by 30 66%, never in 90d 22%; all of it back within 90d 51%
+  2023-26 bull n  2342 | 1d median -1.4% mean -0.7% (t -3.1) kept going 38% | 7d median -2.4% mean -0.5% (t -1.2) kept going 41% | 30d median -2.1% mean +0.3% (t +0.4) kept going 45% | 90d median -2.6% mean -0.2% (t -0.2) kept going 47%
+        peak of the lead (from the start of the move): day0 14% 1-3d 10% 4-14d 16% 15-30d 14% 31-60d 18% 61-90d 27%;  median peak day 24; half the onset lead given back by day 7 43%, by 30 65%, never in 90d 25%; all of it back within 90d 50%
+  2023-26 bear n   786 | 1d median -1.0% mean -0.6% (t -1.3) kept going 40% | 7d median -2.4% mean -2.7% (t -4.1) kept going 40% | 30d median -4.2% mean -4.3% (t -3.8) kept going 39% | 90d median -4.8% mean -4.6% (t -3.0) kept going 44%
+        peak of the lead (from the start of the move): day0 14% 1-3d 13% 4-14d 14% 15-30d 12% 31-60d 18% 61-90d 29%;  median peak day 27; half the onset lead given back by day 7 43%, by 30 67%, never in 90d 22%; all of it back within 90d 56%
+  2023-26 any  n  3128 | 1d median -1.3% mean -0.6% (t -3.3) kept going 39% | 7d median -2.4% mean -1.1% (t -2.9) kept going 40% | 30d median -2.7% mean -0.9% (t -1.5) kept going 43% | 90d median -3.0% mean -1.3% (t -1.5) kept going 46%
+        peak of the lead (from the start of the move): day0 14% 1-3d 11% 4-14d 15% 15-30d 14% 31-60d 18% 61-90d 28%;  median peak day 25; half the onset lead given back by day 7 43%, by 30 65%, never in 90d 24%; all of it back within 90d 51%
+  all bull n  3162 | 1d median -1.7% mean -0.8% (t -3.8) kept going 37% | 7d median -2.3% mean -0.1% (t -0.2) kept going 42% | 30d median -2.2% mean +1.4% (t +2.1) kept going 45% | 90d median -2.7% mean +1.1% (t +1.2) kept going 46%
+        peak of the lead (from the start of the move): day0 15% 1-3d 10% 4-14d 16% 15-30d 14% 31-60d 19% 61-90d 27%;  median peak day 25; half the onset lead given back by day 7 43%, by 30 64%, never in 90d 25%; all of it back within 90d 50%
+  all bear n  1717 | 1d median -1.7% mean -1.1% (t -3.5) kept going 37% | 7d median -3.7% mean -2.8% (t -6.2) kept going 37% | 30d median -5.0% mean -4.0% (t -4.9) kept going 39% | 90d median -5.9% mean -4.3% (t -4.1) kept going 41%
+        peak of the lead (from the start of the move): day0 16% 1-3d 11% 4-14d 14% 15-30d 12% 31-60d 19% 61-90d 27%;  median peak day 26; half the onset lead given back by day 7 45%, by 30 68%, never in 90d 20%; all of it back within 90d 53%
+  all any  n  4879 | 1d median -1.7% mean -0.9% (t -5.2) kept going 37% | 7d median -2.7% mean -1.0% (t -3.4) kept going 40% | 30d median -3.3% mean -0.5% (t -1.0) kept going 43% | 90d median -3.9% mean -0.8% (t -1.1) kept going 45%
+        peak of the lead (from the start of the move): day0 15% 1-3d 10% 4-14d 15% 15-30d 13% 31-60d 19% 61-90d 27%;  median peak day 25; half the onset lead given back by day 7 43%, by 30 65%, never in 90d 23%; all of it back within 90d 51%
+
+-- FALLING BEHIND
+  2019-22 bull n   111 | 1d median +0.4% mean +0.0% (t +0.1) kept going 53% | 7d median +3.2% mean +2.6% (t +2.1) kept going 67% | 30d median +5.6% mean +3.7% (t +1.3) kept going 62% | 90d median +6.5% mean -3.5% (t -0.6) kept going 58%
+        peak of the lead (from the start of the move): day0 5% 1-3d 6% 4-14d 7% 15-30d 12% 31-60d 21% 61-90d 50%;  median peak day 60; half the onset lead given back by day 7 21%, by 30 50%, never in 90d 30%; all of it back within 90d 49%
+  2019-22 bear n   294 | 1d median +0.8% mean +0.9% (t +1.1) kept going 58% | 7d median +0.7% mean +1.2% (t +0.6) kept going 54% | 30d median -0.7% mean -1.8% (t -0.6) kept going 48% | 90d median -3.6% mean -3.2% (t -0.7) kept going 45%
+        peak of the lead (from the start of the move): day0 5% 1-3d 14% 4-14d 16% 15-30d 11% 31-60d 22% 61-90d 32%;  median peak day 38; half the onset lead given back by day 7 26%, by 30 56%, never in 90d 27%; all of it back within 90d 57%
+  2019-22 any  n   405 | 1d median +0.7% mean +0.6% (t +1.1) kept going 57% | 7d median +1.6% mean +1.6% (t +1.0) kept going 57% | 30d median +0.9% mean -0.3% (t -0.1) kept going 52% | 90d median -1.0% mean -3.3% (t -0.8) kept going 49%
+        peak of the lead (from the start of the move): day0 5% 1-3d 12% 4-14d 14% 15-30d 11% 31-60d 21% 61-90d 37%;  median peak day 43; half the onset lead given back by day 7 25%, by 30 55%, never in 90d 27%; all of it back within 90d 55%
+  2023-26 bull n   749 | 1d median +0.1% mean +0.5% (t +1.4) kept going 51% | 7d median +0.1% mean +2.1% (t +2.5) kept going 51% | 30d median +0.6% mean +4.2% (t +3.0) kept going 53% | 90d median +0.8% mean +2.7% (t +1.5) kept going 51%
+        peak of the lead (from the start of the move): day0 6% 1-3d 8% 4-14d 14% 15-30d 14% 31-60d 20% 61-90d 37%;  median peak day 40; half the onset lead given back by day 7 26%, by 30 54%, never in 90d 29%; all of it back within 90d 55%
+  2023-26 bear n   373 | 1d median +0.3% mean +1.2% (t +2.3) kept going 53% | 7d median +1.1% mean +5.0% (t +3.4) kept going 56% | 30d median +1.5% mean +8.6% (t +3.7) kept going 53% | 90d median +3.3% mean +10.6% (t +3.6) kept going 55%
+        peak of the lead (from the start of the move): day0 8% 1-3d 6% 4-14d 13% 15-30d 9% 31-60d 21% 61-90d 43%;  median peak day 52; half the onset lead given back by day 7 20%, by 30 48%, never in 90d 34%; all of it back within 90d 50%
+  2023-26 any  n  1122 | 1d median +0.1% mean +0.7% (t +2.5) kept going 52% | 7d median +0.5% mean +3.1% (t +4.0) kept going 52% | 30d median +1.0% mean +5.7% (t +4.6) kept going 53% | 90d median +1.5% mean +5.3% (t +3.4) kept going 52%
+        peak of the lead (from the start of the move): day0 7% 1-3d 7% 4-14d 14% 15-30d 13% 31-60d 20% 61-90d 39%;  median peak day 44; half the onset lead given back by day 7 24%, by 30 52%, never in 90d 31%; all of it back within 90d 53%
+  all bull n   860 | 1d median +0.1% mean +0.4% (t +1.4) kept going 52% | 7d median +0.7% mean +2.2% (t +2.8) kept going 53% | 30d median +1.3% mean +4.1% (t +3.3) kept going 54% | 90d median +1.4% mean +1.9% (t +1.0) kept going 52%
+        peak of the lead (from the start of the move): day0 6% 1-3d 8% 4-14d 13% 15-30d 14% 31-60d 20% 61-90d 39%;  median peak day 43; half the onset lead given back by day 7 25%, by 30 54%, never in 90d 29%; all of it back within 90d 54%
+  all bear n   667 | 1d median +0.5% mean +1.1% (t +2.4) kept going 55% | 7d median +0.9% mean +3.3% (t +2.6) kept going 55% | 30d median +0.5% mean +4.0% (t +1.9) kept going 51% | 90d median +0.4% mean +4.4% (t +1.5) kept going 51%
+        peak of the lead (from the start of the move): day0 6% 1-3d 10% 4-14d 14% 15-30d 10% 31-60d 21% 61-90d 38%;  median peak day 45; half the onset lead given back by day 7 23%, by 30 52%, never in 90d 31%; all of it back within 90d 53%
+  all any  n  1527 | 1d median +0.3% mean +0.7% (t +2.7) kept going 53% | 7d median +0.8% mean +2.7% (t +3.8) kept going 54% | 30d median +1.0% mean +4.1% (t +3.4) kept going 52% | 90d median +1.0% mean +3.0% (t +1.8) kept going 51%
+        peak of the lead (from the start of the move): day0 6% 1-3d 9% 4-14d 14% 15-30d 12% 31-60d 20% 61-90d 39%;  median peak day 44; half the onset lead given back by day 7 24%, by 30 53%, never in 90d 30%; all of it back within 90d 54%
+
+-- CONTROL (random liquid coin-days, relative return either way, so continuation = |R| is not comparable; mean R shows drift)
+  2019-22 bull: n 2727  mean R7 +2.8% R30 +6.2% R90 +6.2%; median R30 +0.5%
+  2019-22 bear: n 4124  mean R7 +0.9% R30 +1.4% R90 +1.1%; median R30 +0.0%
+  2023-26 bull: n 10640  mean R7 +0.4% R30 -0.5% R90 -3.7%; median R30 -1.2%
+  2023-26 bear: n 5575  mean R7 -0.6% R30 -2.3% R90 -6.7%; median R30 -2.1%
+
+== B. What at the onset predicts the pull-away lasting (top fifth minus bottom fifth, cut on 2019-22, same cuts on 2023-26)
+  ahead  rel3          7d: -0.051 (t -2.8) / -0.090 (t -5.0)   30d: -0.093 (t -2.7) / -0.193 (t -6.1)   30d median top/bottom -17.2% / +0.0% (2023-26) <== both halves
+  ahead  z3            7d: -0.057 (t -3.2) / -0.029 (t -2.6)   30d: -0.110 (t -4.1) / -0.053 (t -3.1)   30d median top/bottom -6.9% / -0.6% (2023-26) <== both halves
+  ahead  spike_share   7d: -0.053 (t -3.6) / -0.019 (t -1.8)   30d: -0.070 (t -2.9) / -0.021 (t -1.1)   30d median top/bottom -4.9% / -0.5% (2023-26)
+  ahead  vol3          7d: -0.055 (t -3.3) / -0.049 (t -3.8)   30d: -0.054 (t -1.7) / -0.105 (t -5.3)   30d median top/bottom -8.6% / +1.3% (2023-26) <== both halves
+  ahead  vol_rel       7d: -0.059 (t -3.5) / -0.061 (t -4.9)   30d: -0.080 (t -3.1) / -0.130 (t -6.1)   30d median top/bottom -9.7% / +0.3% (2023-26) <== both halves
+  ahead  liq           7d: +0.059 (t +4.0) / +0.033 (t +3.4)   30d: +0.037 (t +1.2) / +0.066 (t +4.0)   30d median top/bottom +2.0% / -3.8% (2023-26) <== both halves
+  ahead  beta          7d: -0.034 (t -2.0) / +0.015 (t +1.5)   30d: -0.071 (t -2.3) / +0.027 (t +1.4)   30d median top/bottom -3.9% / +0.1% (2023-26)
+  ahead  mkt3          7d: +0.014 (t +0.9) / +0.006 (t +0.6)   30d: +0.000 (t +0.0) / -0.005 (t -0.3)   30d median top/bottom -2.6% / +0.1% (2023-26)
+  ahead  pre30         7d: +0.025 (t +1.5) / +0.005 (t +0.3)   30d: -0.004 (t -0.1) / -0.006 (t -0.2)   30d median top/bottom -5.1% / -4.2% (2023-26)
+  ahead  pre90         7d: +0.037 (t +2.0) / +0.001 (t +0.1)   30d: -0.005 (t -0.2) / +0.017 (t +0.6)   30d median top/bottom -5.3% / -5.7% (2023-26)
+  ahead  dist_hi365    7d: +0.065 (t +3.2) / +0.009 (t +0.5)   30d: +0.098 (t +2.7) / -0.032 (t -1.0)   30d median top/bottom -5.0% / -3.9% (2023-26)
+  ahead  age           7d: +0.036 (t +2.4) / +0.009 (t +0.7)   30d: +0.060 (t +2.4) / +0.021 (t +0.9)   30d median top/bottom -1.7% / -6.8% (2023-26)
+  ahead  breadth       7d: -0.014 (t -0.9) / +0.003 (t +0.3)   30d: +0.006 (t +0.2) / +0.032 (t +1.9)   30d median top/bottom -2.2% / -3.8% (2023-26)
+  ahead  btc_ret90     7d: +0.074 (t +4.3) / +0.026 (t +0.5)   30d: +0.143 (t +4.0) / -0.040 (t -0.5)   30d median top/bottom -3.4% / +3.0% (2023-26)
+  ahead  dom_chg30     7d: -0.012 (t -0.7) / +0.012 (t +0.6)   30d: -0.005 (t -0.1) / +0.021 (t +0.7)   30d median top/bottom -2.9% / -2.4% (2023-26)
+  behind rel3          7d: -0.006 (t -0.1) / -0.193 (t -5.8)   30d: -0.107 (t -1.4) / -0.340 (t -7.1)   30d median top/bottom -3.0% / +20.3% (2023-26)
+  behind z3            7d: +0.020 (t +0.4) / -0.112 (t -4.2)   30d: +0.008 (t +0.1) / -0.183 (t -4.5)   30d median top/bottom -1.3% / +4.1% (2023-26)
+  behind spike_share   7d: +0.035 (t +0.8) / +0.064 (t +2.8)   30d: +0.083 (t +1.1) / +0.107 (t +2.9)   30d median top/bottom +2.7% / +0.2% (2023-26)
+  behind vol3          7d: +0.138 (t +3.8) / +0.045 (t +2.1)   30d: +0.185 (t +3.6) / +0.102 (t +3.0)   30d median top/bottom +6.6% / -3.5% (2023-26) <== both halves
+  behind vol_rel       7d: +0.168 (t +4.3) / +0.048 (t +1.8)   30d: +0.201 (t +3.2) / +0.083 (t +1.9)   30d median top/bottom +7.2% / +0.6% (2023-26)
+  behind liq           7d: +0.036 (t +1.6) / -0.025 (t -1.2)   30d: +0.136 (t +2.6) / -0.028 (t -0.9)   30d median top/bottom -0.8% / +0.6% (2023-26)
+  behind beta          7d: -0.105 (t -2.5) / -0.055 (t -2.6)   30d: -0.076 (t -1.4) / -0.110 (t -3.1)   30d median top/bottom +0.1% / +3.2% (2023-26) <== both halves
+  behind mkt3          7d: +0.125 (t +3.0) / +0.006 (t +0.5)   30d: +0.098 (t +1.1) / +0.016 (t +0.5)   30d median top/bottom -0.5% / -1.0% (2023-26)
+  behind pre30         7d: +0.107 (t +3.8) / +0.001 (t +0.0)   30d: +0.161 (t +4.1) / +0.073 (t +1.6)   30d median top/bottom +11.4% / -1.5% (2023-26)
+  behind pre90         7d: +0.122 (t +4.1) / +0.006 (t +0.2)   30d: +0.231 (t +3.6) / +0.043 (t +1.0)   30d median top/bottom +9.4% / -0.1% (2023-26)
+  behind dist_hi365    7d: +0.079 (t +2.7) / -0.105 (t -2.4)   30d: +0.194 (t +3.3) / -0.140 (t -2.4)   30d median top/bottom +1.2% / +4.1% (2023-26)
+  behind age           7d: +0.028 (t +0.6) / -0.027 (t -1.2)   30d: -0.048 (t -0.9) / -0.077 (t -2.1)   30d median top/bottom -0.8% / +7.1% (2023-26)
+  behind breadth       7d: -0.114 (t -3.1) / -0.052 (t -2.8)   30d: -0.183 (t -3.8) / -0.027 (t -0.5)   30d median top/bottom +0.0% / +2.4% (2023-26) <== both halves
+  behind btc_ret90     7d: +0.044 (t +1.5) / +0.030 (t +2.3)   30d: +0.116 (t +1.8) / +0.010 (t +0.5)   30d median top/bottom +1.5% / +2.1% (2023-26)
+  behind dom_chg30     7d: -0.034 (t -0.9) / +0.039 (t +1.0)   30d: -0.065 (t -0.9) / +0.031 (t +0.6)   30d median top/bottom +0.2% / +2.5% (2023-26)

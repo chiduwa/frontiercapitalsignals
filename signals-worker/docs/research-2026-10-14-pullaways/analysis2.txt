@@ -1,0 +1,58 @@
+== A2. Events vs random days in the same half and regime (continuation in the event direction)
+
+-- PULLING AHEAD
+  2019-22 bull                                 n   820 | 7d med -1.6% vs -0.2%, kept going 46% vs 49% | 30d med -2.8% vs +0.5%, kept going 45% vs 51% | 90d med -4.1% vs -1.4%, kept going 46% vs 48%
+  2019-22 bear                                 n   931 | 7d med -4.8% vs -0.1%, kept going 34% vs 49% | 30d med -5.7% vs +0.0%, kept going 39% vs 50% | 90d med -6.4% vs -0.1%, kept going 39% vs 50%
+  2023-26 bull                                 n  2342 | 7d med -2.4% vs -0.3%, kept going 41% vs 48% | 30d med -2.1% vs -1.2%, kept going 45% vs 46% | 90d med -2.6% vs -3.0%, kept going 47% vs 45%
+  2023-26 bear                                 n   786 | 7d med -2.4% vs -0.9%, kept going 40% vs 45% | 30d med -4.2% vs -2.1%, kept going 39% vs 44% | 90d med -4.8% vs -5.2%, kept going 44% vs 42%
+
+-- FALLING BEHIND
+  2019-22 bull                                 n   111 | 7d med +3.2% vs +0.2%, kept going 67% vs 51% | 30d med +5.6% vs -0.5%, kept going 62% vs 49% | 90d med +6.5% vs +1.4%, kept going 58% vs 52%
+  2019-22 bear                                 n   294 | 7d med +0.7% vs +0.1%, kept going 54% vs 51% | 30d med -0.7% vs -0.0%, kept going 48% vs 50% | 90d med -3.6% vs +0.1%, kept going 45% vs 50%
+  2023-26 bull                                 n   749 | 7d med +0.1% vs +0.3%, kept going 51% vs 52% | 30d med +0.6% vs +1.2%, kept going 53% vs 54% | 90d med +0.8% vs +3.0%, kept going 51% vs 55%
+  2023-26 bear                                 n   373 | 7d med +1.1% vs +0.9%, kept going 56% vs 55% | 30d med +1.5% vs +2.1%, kept going 53% vs 56% | 90d med +3.3% vs +5.2%, kept going 55% vs 58%
+
+== B2. Profiles (pulling ahead). Large = 30-day median volume >= $20M/day. Low volume = own-vs-market surge below the 2019-22 median (2.55); steady = biggest day under 70% of the move; moderate = 3-day lead under 19%
+  large coin | 2019-22 bull                    n   223 | 7d med +0.2% vs -0.2%, kept going 52% vs 49% | 30d med -0.4% vs +0.5%, kept going 48% vs 51% | 90d med +1.7% vs -1.4%, kept going 51% vs 48%
+  large coin | 2019-22 bear                    n   144 | 7d med -2.0% vs -0.1%, kept going 42% vs 49% | 30d med +0.0% vs +0.0%, kept going 50% vs 50% | 90d med -2.2% vs -0.1%, kept going 46% vs 50%
+  large coin | 2023-26 bull                    n   289 | 7d med -0.3% vs -0.3%, kept going 49% vs 48% | 30d med +1.5% vs -1.2%, kept going 53% vs 46% | 90d med +7.2% vs -3.0%, kept going 61% vs 45%
+  large coin | 2023-26 bear                    n    67 | 7d med +0.7% vs -0.9%, kept going 55% vs 45% | 30d med +3.0% vs -2.1%, kept going 60% vs 44% | 90d med +5.5% vs -5.2%, kept going 64% vs 42%
+  small coin | 2019-22 bull                    n   597 | 7d med -3.1% vs -0.2%, kept going 44% vs 49% | 30d med -4.5% vs +0.5%, kept going 44% vs 51% | 90d med -6.5% vs -1.4%, kept going 44% vs 48%
+  small coin | 2019-22 bear                    n   787 | 7d med -5.4% vs -0.1%, kept going 33% vs 49% | 30d med -6.7% vs +0.0%, kept going 37% vs 50% | 90d med -7.7% vs -0.1%, kept going 37% vs 50%
+  small coin | 2023-26 bull                    n  2053 | 7d med -2.8% vs -0.3%, kept going 39% vs 48% | 30d med -2.5% vs -1.2%, kept going 43% vs 46% | 90d med -3.6% vs -3.0%, kept going 45% vs 45%
+  small coin | 2023-26 bear                    n   719 | 7d med -2.9% vs -0.9%, kept going 38% vs 45% | 30d med -4.8% vs -2.1%, kept going 37% vs 44% | 90d med -5.9% vs -5.2%, kept going 42% vs 42%
+  large + low volume surge | 2019-22 bull      n   143 | 7d med +2.8% vs -0.2%, kept going 56% vs 49% | 30d med +0.3% vs +0.5%, kept going 50% vs 51% | 90d med +4.7% vs -1.4%, kept going 55% vs 48%
+  large + low volume surge | 2019-22 bear      n   111 | 7d med -1.0% vs -0.1%, kept going 44% vs 49% | 30d med +1.4% vs +0.0%, kept going 55% vs 50% | 90d med -1.2% vs -0.1%, kept going 48% vs 50%
+  large + low volume surge | 2023-26 bull      n   243 | 7d med -0.3% vs -0.3%, kept going 49% vs 48% | 30d med +3.0% vs -1.2%, kept going 54% vs 46% | 90d med +9.1% vs -3.0%, kept going 62% vs 45%
+  large + low volume surge | 2023-26 bear      n    55 | 7d med +0.8% vs -0.9%, kept going 58% vs 45% | 30d med +3.0% vs -2.1%, kept going 62% vs 44% | 90d med +7.5% vs -5.2%, kept going 69% vs 42%
+  large + steady + moderate (TRX-like) | 2019-22 bull n    58 | 7d med +1.1% vs -0.2%, kept going 53% vs 49% | 30d med +2.6% vs +0.5%, kept going 55% vs 51% | 90d med +6.3% vs -1.4%, kept going 55% vs 48%
+  large + steady + moderate (TRX-like) | 2019-22 bear n    45 | 7d med -0.2% vs -0.1%, kept going 47% vs 49% | 30d med +3.7% vs +0.0%, kept going 60% vs 50% | 90d med +3.9% vs -0.1%, kept going 56% vs 50%
+  large + steady + moderate (TRX-like) | 2023-26 bull n    98 | 7d med +1.0% vs -0.3%, kept going 57% vs 48% | 30d med +6.6% vs -1.2%, kept going 62% vs 46% | 90d med +11.0% vs -3.0%, kept going 73% vs 45%
+  large + steady + moderate (TRX-like) | 2023-26 bear n    29 | 7d med +2.0% vs -0.9%, kept going 66% vs 45% | 30d med +5.8% vs -2.1%, kept going 76% vs 44% | 90d med +13.1% vs -5.2%, kept going 79% vs 42%
+  small + heavy volume + big move | 2019-22 bull n   318 | 7d med -7.2% vs -0.2%, kept going 41% vs 49% | 30d med -5.6% vs +0.5%, kept going 42% vs 51% | 90d med -10.9% vs -1.4%, kept going 40% vs 48%
+  small + heavy volume + big move | 2019-22 bear n   356 | 7d med -10.1% vs -0.1%, kept going 28% vs 49% | 30d med -12.3% vs +0.0%, kept going 30% vs 50% | 90d med -14.5% vs -0.1%, kept going 31% vs 50%
+  small + heavy volume + big move | 2023-26 bull n   611 | 7d med -7.8% vs -0.3%, kept going 34% vs 48% | 30d med -8.9% vs -1.2%, kept going 36% vs 46% | 90d med -10.7% vs -3.0%, kept going 36% vs 45%
+  small + heavy volume + big move | 2023-26 bear n   226 | 7d med -7.1% vs -0.9%, kept going 32% vs 45% | 30d med -13.7% vs -2.1%, kept going 28% vs 44% | 90d med -17.2% vs -5.2%, kept going 31% vs 42%
+  pulled ahead while the market fell 5%+ | 2019-22 bull n   184 | 7d med -1.2% vs -0.2%, kept going 47% vs 49% | 30d med -4.8% vs +0.5%, kept going 43% vs 51% | 90d med -1.0% vs -1.4%, kept going 48% vs 48%
+  pulled ahead while the market fell 5%+ | 2019-22 bear n   317 | 7d med -4.4% vs -0.1%, kept going 33% vs 49% | 30d med -6.7% vs +0.0%, kept going 37% vs 50% | 90d med -9.1% vs -0.1%, kept going 34% vs 50%
+  pulled ahead while the market fell 5%+ | 2023-26 bull n   546 | 7d med -1.8% vs -0.3%, kept going 40% vs 48% | 30d med -0.4% vs -1.2%, kept going 48% vs 46% | 90d med +2.4% vs -3.0%, kept going 53% vs 45%
+  pulled ahead while the market fell 5%+ | 2023-26 bear n   216 | 7d med -3.0% vs -0.9%, kept going 39% vs 45% | 30d med -3.0% vs -2.1%, kept going 41% vs 44% | 90d med -4.9% vs -5.2%, kept going 43% vs 42%
+  pulled ahead while the market rose 5%+ | 2019-22 bull n   204 | 7d med -2.6% vs -0.2%, kept going 42% vs 49% | 30d med -1.8% vs +0.5%, kept going 46% vs 51% | 90d med -15.1% vs -1.4%, kept going 40% vs 48%
+  pulled ahead while the market rose 5%+ | 2019-22 bear n   160 | 7d med -5.1% vs -0.1%, kept going 39% vs 49% | 30d med -6.1% vs +0.0%, kept going 39% vs 50% | 90d med -11.4% vs -0.1%, kept going 32% vs 50%
+  pulled ahead while the market rose 5%+ | 2023-26 bull n   617 | 7d med -3.1% vs -0.3%, kept going 39% vs 48% | 30d med -2.1% vs -1.2%, kept going 44% vs 46% | 90d med -3.7% vs -3.0%, kept going 44% vs 45%
+  pulled ahead while the market rose 5%+ | 2023-26 bear n   148 | 7d med -1.4% vs -0.9%, kept going 44% vs 45% | 30d med -2.9% vs -2.1%, kept going 45% vs 44% | 90d med -0.5% vs -5.2%, kept going 49% vs 42%
+
+== C. How long the lead lasts (pulling ahead): share that has given back half / all of the onset lead by day d
+  all                                      bull n  3049  half back by 3/7/14/30/60/90d: 26% 43% 54% 64% 72% 75%  | all back: 2% 7% 17% 29% 43% 50%  | median peak day 25
+  all                                      bear n  1690  half back by 3/7/14/30/60/90d: 27% 45% 57% 68% 75% 80%  | all back: 2% 7% 17% 31% 44% 53%  | median peak day 26
+  large + steady + moderate (TRX-like)     bull n   148  half back by 3/7/14/30/60/90d: 18% 32% 41% 48% 54% 56%  | all back: 1% 6% 15% 24% 33% 39%  | median peak day 51
+  large + steady + moderate (TRX-like)     bear n    74  half back by 3/7/14/30/60/90d: 15% 30% 43% 51% 55% 62%  | all back: 1% 4% 14% 23% 34% 43%  | median peak day 48
+  small + heavy volume + big move          bull n   904  half back by 3/7/14/30/60/90d: 26% 43% 54% 64% 71% 74%  | all back: 1% 5% 11% 20% 33% 41%  | median peak day 16
+  small + heavy volume + big move          bear n   571  half back by 3/7/14/30/60/90d: 30% 51% 61% 71% 79% 84%  | all back: 2% 7% 12% 26% 40% 50%  | median peak day 11
+
+== D. TRX: its pull-aheads vs its own random days
+  7d: TRX after pull-aheads median -0.6% ahead in 44% (n 27) | TRX on random days median +0.4% ahead in 55% (n 40)
+  30d: TRX after pull-aheads median +8.6% ahead in 70% (n 27) | TRX on random days median +1.4% ahead in 57% (n 40)
+  90d: TRX after pull-aheads median +26.0% ahead in 81% (n 26) | TRX on random days median +14.9% ahead in 74% (n 38)
+  2019-22: 30d after pull-aheads median +2.4% (n 14) vs random days -1.3% (n 20); share of TRX pull-aheads with the market down 5%+ over the 3 days: 21%; TRX beta median 0.90
+  2023-26: 30d after pull-aheads median +11.1% (n 13) vs random days +11.4% (n 20); share of TRX pull-aheads with the market down 5%+ over the 3 days: 92%; TRX beta median 0.21
