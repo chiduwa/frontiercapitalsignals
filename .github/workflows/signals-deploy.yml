@@ -68,7 +68,7 @@ jobs:
           node --test test-day-zones.mjs
           node --test test-push-batch.mjs
           node --test test-recorders.mjs
-          node --test test-live-scan-delivery.mjs test-fuel-shadow.mjs test-liquidation-collector.mjs
+          node --test test-live-scan-delivery.mjs test-exhaustion-followup.mjs test-fuel-shadow.mjs test-liquidation-collector.mjs
           node --test test-notify-evidence.mjs test-d1-client.mjs
           node --test ../trading-bot/test-network-deadlines.mjs
           node --test test-model-zoo.mjs

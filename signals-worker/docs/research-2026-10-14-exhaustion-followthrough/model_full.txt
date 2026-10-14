@@ -1,0 +1,24 @@
+######## checkpoint +1h  features 52
+  fit disc -> score val: AUC 0.556  base up-first 39%  (n train 4850, test 5169)
+    deciles (low->high) up-first: 32% 31% 33% 39% 42% 37% 41% 48% 41% 45%
+    deciles 3d return median:     -3.9% -3.6% -4.3% -3.6% -3.7% -2.9% -3.8% -3.7% -4.3% -3.9%
+    held-out importance (AUC drop): run24Z 0.020, pre30d 0.012, dist_hi90 0.011, breadth24 0.009, btc_pre7d 0.008, short_basis 0.007, ratio 0.007, tradeRatio 0.005, sfuel15_20 0.004, hi_k 0.004
+  fit val -> score disc: AUC 0.547  base up-first 33%  (n train 5169, test 4850)
+    deciles (low->high) up-first: 26% 29% 31% 32% 33% 36% 31% 40% 38% 38%
+    deciles 3d return median:     -4.3% -4.7% -4.4% -4.3% -4.9% -4.5% -5.1% -5.6% -7.1% -7.9%
+######## checkpoint +4h  features 52
+  fit disc -> score val: AUC 0.533  base up-first 39%  (n train 4848, test 5169)
+    deciles (low->high) up-first: 34% 39% 33% 38% 39% 36% 39% 42% 43% 43%
+    deciles 3d return median:     -2.7% -3.1% -2.6% -2.2% -3.0% -3.2% -3.8% -3.3% -3.9% -4.2%
+    held-out importance (AUC drop): run24Z 0.009, btc_pre7d 0.009, ratio 0.004, dist_hi90 0.004, tradeRatio 0.004, pre30d 0.004, upper_wick 0.003, barPct 0.003, btc_pre24 0.003, short_basis 0.003
+  fit val -> score disc: AUC 0.536  base up-first 33%  (n train 5169, test 4848)
+    deciles (low->high) up-first: 30% 29% 30% 34% 35% 29% 35% 37% 34% 40%
+    deciles 3d return median:     -4.2% -3.5% -4.9% -3.7% -4.8% -4.6% -3.4% -4.4% -4.4% -3.7%
+######## checkpoint +12h  features 52
+  fit disc -> score val: AUC 0.536  base up-first 38%  (n train 4841, test 5166)
+    deciles (low->high) up-first: 33% 37% 39% 34% 35% 39% 37% 38% 42% 47%
+    deciles 3d return median:     -1.7% -1.6% -1.8% -1.7% -2.8% -2.6% -2.6% -2.6% -2.5% -1.9%
+    held-out importance (AUC drop): run24Z 0.009, dist_hi90 0.009, breadth24 0.008, btc_pre7d 0.006, v_last_k 0.005, tier_n 0.005, tradeRatio 0.005, p_k 0.004, ratio 0.004, taker_k 0.003
+  fit val -> score disc: AUC 0.544  base up-first 33%  (n train 5166, test 4841)
+    deciles (low->high) up-first: 25% 26% 33% 35% 36% 30% 36% 35% 37% 38%
+    deciles 3d return median:     -3.3% -3.4% -3.3% -3.2% -3.0% -3.4% -3.2% -4.0% -2.4% -2.6%

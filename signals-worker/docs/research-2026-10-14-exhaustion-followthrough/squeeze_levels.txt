@@ -1,0 +1,64 @@
+
+-- all
+  disc all                      n  4971  24h high above alert close: median  6.3%  p75  14.4%  p90  30.9%  reach +8.7% (10x liq)  40%  | 72h: median  8.2% p75  18.5% p90  40.2% reach +8.7%  48%
+  val all                      n  5169  24h high above alert close: median  5.6%  p75  13.0%  p90  26.4%  reach +8.7% (10x liq)  37%  | 72h: median  7.5% p75  17.0% p90  34.8% reach +8.7%  45%
+
+-- alert bar size
+  disc +5-7%                    n  2066  24h high above alert close: median  4.9%  p75  11.6%  p90  24.2%  reach +8.7% (10x liq)  34%  | 72h: median  7.0% p75  15.5% p90  32.2% reach +8.7%  43%
+  disc +7-14%                   n  1908  24h high above alert close: median  6.3%  p75  14.6%  p90  30.7%  reach +8.7% (10x liq)  40%  | 72h: median  8.3% p75  19.2% p90  40.0% reach +8.7%  48%
+  disc >=+14%                   n   997  24h high above alert close: median  9.3%  p75  20.9%  p90  45.4%  reach +8.7% (10x liq)  52%  | 72h: median 10.7% p75  25.8% p90  56.3% reach +8.7%  56%
+  val +5-7%                    n  2329  24h high above alert close: median  4.6%  p75  10.3%  p90  21.3%  reach +8.7% (10x liq)  30%  | 72h: median  6.4% p75  14.3% p90  29.9% reach +8.7%  40%
+  val +7-14%                   n  1989  24h high above alert close: median  6.4%  p75  14.1%  p90  26.6%  reach +8.7% (10x liq)  40%  | 72h: median  8.1% p75  17.9% p90  34.7% reach +8.7%  48%
+  val >=+14%                   n   851  24h high above alert close: median  8.1%  p75  19.3%  p90  41.6%  reach +8.7% (10x liq)  48%  | 72h: median  9.3% p75  23.0% p90  50.7% reach +8.7%  53%
+
+-- accounts long at alert
+  disc <50% (shorts majority)   n   696  24h high above alert close: median  6.6%  p75  15.3%  p90  31.1%  reach +8.7% (10x liq)  40%  | 72h: median  8.8% p75  20.2% p90  44.6% reach +8.7%  51%
+  disc 50-65%                   n  1994  24h high above alert close: median  6.5%  p75  14.2%  p90  29.2%  reach +8.7% (10x liq)  40%  | 72h: median  8.3% p75  18.9% p90  39.1% reach +8.7%  48%
+  disc >65%                     n  1189  24h high above alert close: median  6.3%  p75  16.3%  p90  36.7%  reach +8.7% (10x liq)  42%  | 72h: median  8.6% p75  20.3% p90  42.6% reach +8.7%  50%
+  val <50% (shorts majority)   n   267  24h high above alert close: median  8.1%  p75  19.0%  p90  39.7%  reach +8.7% (10x liq)  48%  | 72h: median 11.0% p75  25.4% p90  54.7% reach +8.7%  57%
+  val 50-65%                   n  1030  24h high above alert close: median  5.2%  p75  11.0%  p90  25.2%  reach +8.7% (10x liq)  33%  | 72h: median  7.3% p75  16.2% p90  33.4% reach +8.7%  43%
+  val >65%                     n   698  24h high above alert close: median  4.8%  p75  10.2%  p90  19.5%  reach +8.7% (10x liq)  31%  | 72h: median  6.8% p75  14.5% p90  24.6% reach +8.7%  42%
+
+-- market 24h before
+  disc falling                  n  1742  24h high above alert close: median  6.4%  p75  14.6%  p90  31.2%  reach +8.7% (10x liq)  41%  | 72h: median  8.4% p75  18.5% p90  39.6% reach +8.7%  48%
+  disc flat                     n  1423  24h high above alert close: median  6.3%  p75  13.6%  p90  30.7%  reach +8.7% (10x liq)  39%  | 72h: median  8.0% p75  17.9% p90  42.1% reach +8.7%  47%
+  disc rising                   n  1806  24h high above alert close: median  6.2%  p75  15.0%  p90  30.8%  reach +8.7% (10x liq)  39%  | 72h: median  8.2% p75  19.4% p90  39.6% reach +8.7%  48%
+  val falling                  n  1595  24h high above alert close: median  5.6%  p75  12.6%  p90  25.1%  reach +8.7% (10x liq)  36%  | 72h: median  6.8% p75  15.9% p90  32.9% reach +8.7%  43%
+  val flat                     n  1542  24h high above alert close: median  5.4%  p75  12.1%  p90  24.9%  reach +8.7% (10x liq)  36%  | 72h: median  7.0% p75  15.1% p90  31.7% reach +8.7%  43%
+  val rising                   n  2032  24h high above alert close: median  5.8%  p75  13.9%  p90  28.7%  reach +8.7% (10x liq)  38%  | 72h: median  8.3% p75  18.9% p90  38.0% reach +8.7%  49%
+
+-- volume in hour 1 after (x baseline)
+  disc <5x                      n   150  24h high above alert close: median  4.5%  p75   9.0%  p90  17.0%  reach +8.7% (10x liq)  27%  | 72h: median  6.6% p75  12.4% p90  27.7% reach +8.7%  37%
+  disc 5-20x                    n  1693  24h high above alert close: median  4.2%  p75   9.4%  p90  18.9%  reach +8.7% (10x liq)  28%  | 72h: median  6.1% p75  13.6% p90  28.6% reach +8.7%  39%
+  disc >=20x                    n  3128  24h high above alert close: median  7.9%  p75  18.1%  p90  37.6%  reach +8.7% (10x liq)  47%  | 72h: median  9.7% p75  21.5% p90  45.5% reach +8.7%  53%
+  val <5x                      n   143  24h high above alert close: median  3.5%  p75   8.2%  p90  14.5%  reach +8.7% (10x liq)  24%  | 72h: median  6.5% p75  13.4% p90  24.8% reach +8.7%  36%
+  val 5-20x                    n  1897  24h high above alert close: median  3.9%  p75   9.2%  p90  19.9%  reach +8.7% (10x liq)  26%  | 72h: median  5.8% p75  14.3% p90  30.1% reach +8.7%  38%
+  val >=20x                    n  3129  24h high above alert close: median  7.2%  p75  15.7%  p90  30.5%  reach +8.7% (10x liq)  44%  | 72h: median  8.6% p75  19.0% p90  39.1% reach +8.7%  50%
+
+-- size tier
+  disc major                    n   175  24h high above alert close: median  5.6%  p75  10.2%  p90  17.8%  reach +8.7% (10x liq)  31%  | 72h: median  6.7% p75  12.8% p90  27.2% reach +8.7%  39%
+  disc mid                      n  2109  24h high above alert close: median  6.3%  p75  13.8%  p90  27.7%  reach +8.7% (10x liq)  39%  | 72h: median  8.3% p75  18.3% p90  37.3% reach +8.7%  48%
+  disc thin                     n  2687  24h high above alert close: median  6.3%  p75  15.6%  p90  35.2%  reach +8.7% (10x liq)  41%  | 72h: median  8.2% p75  19.3% p90  43.5% reach +8.7%  48%
+  val major                    n   233  24h high above alert close: median  5.4%  p75  12.0%  p90  20.6%  reach +8.7% (10x liq)  33%  | 72h: median  8.1% p75  16.9% p90  30.7% reach +8.7%  46%
+  val mid                      n  3001  24h high above alert close: median  5.7%  p75  12.7%  p90  26.1%  reach +8.7% (10x liq)  37%  | 72h: median  7.7% p75  17.1% p90  35.1% reach +8.7%  46%
+  val thin                     n  1935  24h high above alert close: median  5.5%  p75  13.5%  p90  27.7%  reach +8.7% (10x liq)  37%  | 72h: median  7.1% p75  16.9% p90  34.8% reach +8.7%  44%
+
+-- from the +1h price: hour-1 volume (x pre-alert baseline) and price vs the alert close
+  disc ('<5x',)                                   n   150  24h high above the +1h price: median  4.9% p75   9.2% p90  22.8%  reach +8.7%  26%  3d median -2.1%  share 3%
+  disc ('5-20x',)                                 n  1693  24h high above the +1h price: median  5.2% p75  10.6% p90  21.0%  reach +8.7%  32%  3d median -3.6%  share 34%
+  disc ('>=20x',)                                 n  3128  24h high above the +1h price: median  6.0% p75  14.2% p90  31.4%  reach +8.7%  39%  3d median -6.4%  share 63%
+  disc ('<5x', 'below alert close')               n    96  24h high above the +1h price: median  4.3% p75   9.1% p90  19.9%  reach +8.7%  26%  3d median -1.7%  share 2%
+  disc ('<5x', 'at/above alert close')            n    54  24h high above the +1h price: median  5.2% p75   9.1% p90  26.2%  reach +8.7%  26%  3d median -3.5%  share 1%
+  disc ('5-20x', 'below alert close')             n  1225  24h high above the +1h price: median  4.9% p75  10.5% p90  20.5%  reach +8.7%  32%  3d median -3.1%  share 25%
+  disc ('5-20x', 'at/above alert close')          n   468  24h high above the +1h price: median  5.6% p75  10.6% p90  24.3%  reach +8.7%  32%  3d median -5.2%  share 9%
+  disc ('>=20x', 'below alert close')             n  1863  24h high above the +1h price: median  4.8% p75  11.6% p90  24.5%  reach +8.7%  33%  3d median -4.8%  share 37%
+  disc ('>=20x', 'at/above alert close')          n  1265  24h high above the +1h price: median  8.4% p75  19.0% p90  36.8%  reach +8.7%  49%  3d median -9.1%  share 25%
+  val ('<5x',)                                   n   143  24h high above the +1h price: median  4.5% p75   8.9% p90  15.8%  reach +8.7%  27%  3d median -1.5%  share 3%
+  val ('5-20x',)                                 n  1897  24h high above the +1h price: median  4.9% p75  10.5% p90  21.9%  reach +8.7%  30%  3d median -2.5%  share 37%
+  val ('>=20x',)                                 n  3129  24h high above the +1h price: median  5.9% p75  13.1% p90  26.6%  reach +8.7%  38%  3d median -4.7%  share 61%
+  val ('<5x', 'below alert close')               n   103  24h high above the +1h price: median  3.8% p75   8.8% p90  14.9%  reach +8.7%  26%  3d median -1.9%  share 2%
+  val ('<5x', 'at/above alert close')            n    40  24h high above the +1h price: median  5.8% p75   9.3% p90  18.2%  reach +8.7%  30%  3d median +0.2%  share 1%
+  val ('5-20x', 'below alert close')             n  1459  24h high above the +1h price: median  4.8% p75   9.9% p90  21.3%  reach +8.7%  28%  3d median -2.5%  share 28%
+  val ('5-20x', 'at/above alert close')          n   438  24h high above the +1h price: median  5.8% p75  12.5% p90  25.0%  reach +8.7%  37%  3d median -2.6%  share 8%
+  val ('>=20x', 'below alert close')             n  1971  24h high above the +1h price: median  5.4% p75  11.7% p90  23.4%  reach +8.7%  34%  3d median -3.8%  share 38%
+  val ('>=20x', 'at/above alert close')          n  1158  24h high above the +1h price: median  7.3% p75  16.9% p90  31.1%  reach +8.7%  45%  3d median -7.0%  share 22%

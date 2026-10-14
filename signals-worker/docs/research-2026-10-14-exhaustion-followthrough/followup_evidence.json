@@ -1,0 +1,62 @@
+{
+ "cooled": {
+  "disc": {
+   "n": 2861,
+   "share": 0.323,
+   "high24Median": 5.7,
+   "high24P90": 26.8,
+   "reach87": 0.367,
+   "ret72Median": -4.6,
+   "below72": 0.681
+  },
+  "val": {
+   "n": 3171,
+   "share": 0.353,
+   "high24Median": 5.9,
+   "high24P90": 27.8,
+   "reach87": 0.369,
+   "ret72Median": -3.1,
+   "below72": 0.639
+  }
+ },
+ "hotFaded": {
+  "disc": {
+   "n": 3552,
+   "share": 0.401,
+   "high24Median": 6.5,
+   "high24P90": 36.8,
+   "reach87": 0.42,
+   "ret72Median": -7.0,
+   "below72": 0.743
+  },
+  "val": {
+   "n": 3578,
+   "share": 0.398,
+   "high24Median": 6.5,
+   "high24P90": 29.5,
+   "reach87": 0.406,
+   "ret72Median": -5.6,
+   "below72": 0.726
+  }
+ },
+ "hotHeld": {
+  "disc": {
+   "n": 2434,
+   "share": 0.275,
+   "high24Median": 9.3,
+   "high24P90": 45.1,
+   "reach87": 0.52,
+   "ret72Median": -11.0,
+   "below72": 0.777
+  },
+  "val": {
+   "n": 2238,
+   "share": 0.249,
+   "high24Median": 8.2,
+   "high24P90": 37.2,
+   "reach87": 0.483,
+   "ret72Median": -8.9,
+   "below72": 0.759
+  }
+ }
+}

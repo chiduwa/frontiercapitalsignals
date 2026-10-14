@@ -1,0 +1,26 @@
+
+=== disc: 4701 episode-first alerts
+  runner50   18% (n 838): peak median +83.3% (p75 +126.8%), days to peak median 10.5 (p25 2.4, p75 21.2)
+            after the peak: gives back median -51.6% from the high; back below the alert close within 30d of the peak 60%, median 6.1 days after the peak; 7d after the peak +20.0% vs alert close
+            volume around the peak (max hour, x pre-alert baseline): median 170.4x; later pushed prints: 4.6 per alert; a later print within 6h of the peak 52%
+  run20-50   26% (n 1222): peak median +30.7% (p75 +38.1%), days to peak median 6.9 (p25 0.9, p75 18.8)
+            after the peak: gives back median -40.3% from the high; back below the alert close within 30d of the peak 92%, median 1.7 days after the peak; 7d after the peak -1.5% vs alert close
+            volume around the peak (max hour, x pre-alert baseline): median 69.0x; later pushed prints: 2.2 per alert; a later print within 6h of the peak 52%
+  fade       56% (n 2641): peak median +7.9% (p75 +13.0%), days to peak median 0.3 (p25 0.0, p75 6.0)
+            after the peak: gives back median -38.3% from the high; back below the alert close within 30d of the peak 100%, median 0.0 days after the peak; 7d after the peak -13.9% vs alert close
+            volume around the peak (max hour, x pre-alert baseline): median 33.1x; later pushed prints: 1.0 per alert; a later print within 6h of the peak 23%
+  every later print in the 30d window (n 9158): within 6h of the eventual peak 30%, before the peak by >6h 40%, after the peak by >6h 30%
+  ... on runners only (n 3870): within 6h of the peak 24%, before >6h 57%, after >6h 18%
+
+=== val: 5169 episode-first alerts
+  runner50   24% (n 1254): peak median +83.3% (p75 +124.1%), days to peak median 17.3 (p25 7.5, p75 25.0)
+            after the peak: gives back median -46.4% from the high; back below the alert close within 30d of the peak 44%, median 11.2 days after the peak; 7d after the peak +32.8% vs alert close
+            volume around the peak (max hour, x pre-alert baseline): median 138.5x; later pushed prints: 4.0 per alert; a later print within 6h of the peak 44%
+  run20-50   27% (n 1419): peak median +31.6% (p75 +39.5%), days to peak median 12.9 (p25 3.0, p75 23.1)
+            after the peak: gives back median -37.7% from the high; back below the alert close within 30d of the peak 84%, median 3.2 days after the peak; 7d after the peak +2.9% vs alert close
+            volume around the peak (max hour, x pre-alert baseline): median 69.8x; later pushed prints: 2.2 per alert; a later print within 6h of the peak 48%
+  fade       48% (n 2496): peak median +8.2% (p75 +13.6%), days to peak median 0.7 (p25 0.0, p75 9.5)
+            after the peak: gives back median -34.0% from the high; back below the alert close within 30d of the peak 99%, median 0.1 days after the peak; 7d after the peak -11.1% vs alert close
+            volume around the peak (max hour, x pre-alert baseline): median 34.8x; later pushed prints: 0.9 per alert; a later print within 6h of the peak 24%
+  every later print in the 30d window (n 10438): within 6h of the eventual peak 27%, before the peak by >6h 49%, after the peak by >6h 24%
+  ... on runners only (n 5037): within 6h of the peak 21%, before >6h 64%, after >6h 15%

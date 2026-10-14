@@ -45,6 +45,7 @@ import { combinePushes } from './push-batch.mjs';
 import { deliverSurgeBatch, loadPushedBars, sendPush, surgeBarKey } from './live-scan-delivery.mjs';
 import { runDecouplingWatch } from './decoupling-watch-io.mjs';
 import { runCoinRotation } from './coin-rotation-io.mjs';
+import { runExhaustionFollowups } from './exhaustion-followup.mjs';
 
 const { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, NTFY_TOPIC } = process.env;
 for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID })) {
@@ -416,6 +417,21 @@ async function main() {
     sent = await deliverSurgeBatch(pending, push, { notify, env, query: d1 });
   }
 
+  // One hour after each pushed exhaustion alert: what the first hour did and what
+  // followed past alerts in that state (scripts/exhaustion-followup.mjs). Alerts
+  // pushed in this run wait for the next one. A failure never touches the scan.
+  let followed = 0;
+  try {
+    const fu = await runExhaustionFollowups({
+      env, query: d1, barsBySymbol, nowMs: Date.now(), notify, dryRun: DRY_RUN,
+      skip: new Set(pending.map((p) => JSON.stringify([p.h.symbol, p.h.features.at])))
+    });
+    followed = fu.sent;
+    console.log(`exhaustion follow-ups: ${fu.due} due, ${fu.sent} sent, ${fu.late} too late or unreadable`);
+  } catch (e) {
+    console.error('exhaustion follow-up failed (scan unaffected):', e.message || e);
+  }
+
   // Roll up each configuration's standing so the dashboard and any human
   // reading D1 can see what is proving out and what is not.
   for (const cfg of DRY_RUN ? [] : SURGE_CONFIGS) {
@@ -462,7 +478,7 @@ async function main() {
     console.error('coin rotation failed (scan unaffected):', e.message || e);
   }
 
-  console.log(`\nlive-scan: ${fired.length} cast(s) ${DRY_RUN ? "found (dry run: nothing written)" : "logged"}, ${sent + decoupled + rotated} notification(s) sent`);
+  console.log(`\nlive-scan: ${fired.length} cast(s) ${DRY_RUN ? "found (dry run: nothing written)" : "logged"}, ${sent + followed + decoupled + rotated} notification(s) sent`);
 }
 
 main().catch((e) => { console.error('live-scan failed:', e); process.exit(1); });

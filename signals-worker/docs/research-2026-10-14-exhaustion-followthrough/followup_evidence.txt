@@ -1,0 +1,6 @@
+disc cooled    n  2861 share 32%  24h high median +5.7% p90 +26.8%  reach +8.7% 37%  3d median -4.6%  below at 3d 68%
+disc hotFaded  n  3552 share 40%  24h high median +6.5% p90 +36.8%  reach +8.7% 42%  3d median -7.0%  below at 3d 74%
+disc hotHeld   n  2434 share 28%  24h high median +9.3% p90 +45.1%  reach +8.7% 52%  3d median -11.0%  below at 3d 78%
+val cooled    n  3171 share 35%  24h high median +5.9% p90 +27.8%  reach +8.7% 37%  3d median -3.1%  below at 3d 64%
+val hotFaded  n  3578 share 40%  24h high median +6.5% p90 +29.5%  reach +8.7% 41%  3d median -5.6%  below at 3d 73%
+val hotHeld   n  2238 share 25%  24h high median +8.2% p90 +37.2%  reach +8.7% 48%  3d median -8.9%  below at 3d 76%

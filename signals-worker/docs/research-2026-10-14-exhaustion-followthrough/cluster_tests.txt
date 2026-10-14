@@ -1,0 +1,54 @@
+
+######## shorts (above)
+  10x + 1h disc: magnet reach -0.002 (t -0.4, n 96425);  cascade +3% +0.011 (t +1.2, n 31539);  top stops in band -0.013 (t -1.9)   base reach 34%, heavy share 15%
+  10x + 1h val: magnet reach +0.007 (t +1.0, n 49650);  cascade +3% +0.017 (t +1.3, n 14516);  top stops in band -0.012 (t -1.1)   base reach 31%, heavy share 13%
+  10x + 4h disc: magnet reach +0.001 (t +0.2, n 96375);  cascade +3% -0.002 (t -0.1, n 28916);  top stops in band +0.002 (t +0.2)   base reach 32%, heavy share 17%
+  10x + 4h val: magnet reach +0.008 (t +1.0, n 49550);  cascade +3% +0.011 (t +0.8, n 13293);  top stops in band -0.003 (t -0.2)   base reach 29%, heavy share 16%
+  10x +12h disc: magnet reach +0.012 (t +2.3, n 96375);  cascade +3% +0.029 (t +2.9, n 25726);  top stops in band -0.022 (t -2.7)   base reach 28%, heavy share 18%
+  10x +12h val: magnet reach +0.011 (t +1.7, n 49425);  cascade +3% +0.043 (t +2.8, n 11661);  top stops in band -0.032 (t -2.5)   base reach 25%, heavy share 18%
+  20x + 1h disc: magnet reach -0.010 (t -1.3, n 96425);  cascade +3% +0.016 (t +1.9, n 31539);  top stops in band -0.016 (t -2.1)   base reach 34%, heavy share 11%
+  20x + 1h val: magnet reach +0.004 (t +0.3, n 49650);  cascade +3% +0.011 (t +0.8, n 14516);  top stops in band -0.013 (t -1.2)   base reach 31%, heavy share 9%
+  20x + 4h disc: magnet reach +0.005 (t +0.8, n 96375);  cascade +3% +0.005 (t +0.5, n 28916);  top stops in band -0.009 (t -1.1)   base reach 32%, heavy share 14%
+  20x + 4h val: magnet reach +0.008 (t +0.8, n 49550);  cascade +3% +0.029 (t +2.1, n 13293);  top stops in band -0.025 (t -2.3)   base reach 29%, heavy share 12%
+  20x +12h disc: magnet reach -0.002 (t -0.3, n 96375);  cascade +3% +0.006 (t +0.7, n 25726);  top stops in band -0.011 (t -1.4)   base reach 28%, heavy share 17%
+  20x +12h val: magnet reach -0.003 (t -0.3, n 49425);  cascade +3% +0.011 (t +0.8, n 11661);  top stops in band -0.013 (t -1.0)   base reach 25%, heavy share 14%
+
+######## longs (below)
+  10x + 1h disc: magnet reach +0.009 (t +1.9, n 96425);  cascade +3% -0.004 (t -0.5, n 30585);  top stops in band -0.001 (t -0.1)   base reach 34%, heavy share 19%
+  10x + 1h val: magnet reach -0.008 (t -1.6, n 49650);  cascade +3% +0.004 (t +0.3, n 12405);  top stops in band -0.001 (t -0.1)   base reach 27%, heavy share 18%
+  10x + 4h disc: magnet reach +0.013 (t +3.6, n 96375);  cascade +3% +0.007 (t +0.7, n 27318);  top stops in band -0.006 (t -0.7)   base reach 30%, heavy share 20%
+  10x + 4h val: magnet reach -0.016 (t -3.2, n 49550);  cascade +3% +0.008 (t +0.5, n 11448);  top stops in band -0.003 (t -0.2)   base reach 25%, heavy share 19%
+  10x +12h disc: magnet reach +0.023 (t +4.3, n 96375);  cascade +3% -0.035 (t -3.1, n 23724);  top stops in band +0.028 (t +3.0)   base reach 27%, heavy share 20%
+  10x +12h val: magnet reach -0.014 (t -2.8, n 49425);  cascade +3% +0.012 (t +0.7, n 10423);  top stops in band -0.006 (t -0.4)   base reach 23%, heavy share 20%
+  20x + 1h disc: magnet reach +0.015 (t +2.3, n 96425);  cascade +3% +0.001 (t +0.1, n 30585);  top stops in band -0.003 (t -0.4)   base reach 34%, heavy share 20%
+  20x + 1h val: magnet reach +0.001 (t +0.2, n 49650);  cascade +3% -0.022 (t -1.7, n 12405);  top stops in band +0.019 (t +1.6)   base reach 27%, heavy share 20%
+  20x + 4h disc: magnet reach +0.020 (t +3.3, n 96375);  cascade +3% -0.012 (t -1.1, n 27318);  top stops in band +0.007 (t +0.8)   base reach 30%, heavy share 20%
+  20x + 4h val: magnet reach -0.010 (t -2.2, n 49550);  cascade +3% -0.029 (t -1.9, n 11448);  top stops in band +0.027 (t +2.0)   base reach 25%, heavy share 20%
+  20x +12h disc: magnet reach +0.030 (t +5.1, n 96375);  cascade +3% -0.015 (t -1.2, n 23724);  top stops in band +0.010 (t +1.0)   base reach 27%, heavy share 20%
+  20x +12h val: magnet reach -0.008 (t -1.6, n 49425);  cascade +3% -0.036 (t -2.3, n 10423);  top stops in band +0.032 (t +2.2)   base reach 23%, heavy share 20%
+
+######## T4 placebo: |24h extreme - densest band| (%), real vs shuffled densest band
+  speak_10 + 1h disc: n 3871  median gap real 7.35% vs shuffled 7.13% (p 0.992);  within 1.5% real 10.6% vs shuffled 11.0% (p 0.814);  densest band median 10%
+  speak_10 + 1h val: n 1990  median gap real 6.36% vs shuffled 6.22% (p 0.924);  within 1.5% real 12.1% vs shuffled 12.2% (p 0.574);  densest band median 10%
+  speak_10 + 4h disc: n 3872  median gap real 8.39% vs shuffled 8.29% (p 0.846);  within 1.5% real 8.6% vs shuffled 8.5% (p 0.426);  densest band median 12%
+  speak_10 + 4h val: n 1986  median gap real 6.97% vs shuffled 7.01% (p 0.380);  within 1.5% real 10.7% vs shuffled 10.1% (p 0.162);  densest band median 11%
+  speak_10 +12h disc: n 3874  median gap real 9.44% vs shuffled 9.18% (p 1.000);  within 1.5% real 6.3% vs shuffled 6.9% (p 0.940);  densest band median 13%
+  speak_10 +12h val: n 1981  median gap real 8.08% vs shuffled 7.80% (p 0.990);  within 1.5% real 7.7% vs shuffled 8.2% (p 0.782);  densest band median 12%
+  speak_20 + 1h disc: n 3865  median gap real 5.30% vs shuffled 5.18% (p 0.948);  within 1.5% real 14.8% vs shuffled 16.4% (p 0.998);  densest band median 6%
+  speak_20 + 1h val: n 1987  median gap real 4.14% vs shuffled 4.06% (p 0.834);  within 1.5% real 20.1% vs shuffled 20.3% (p 0.626);  densest band median 5%
+  speak_20 + 4h disc: n 3870  median gap real 6.01% vs shuffled 6.05% (p 0.384);  within 1.5% real 13.8% vs shuffled 14.2% (p 0.798);  densest band median 8%
+  speak_20 + 4h val: n 1985  median gap real 4.52% vs shuffled 4.51% (p 0.578);  within 1.5% real 17.0% vs shuffled 17.7% (p 0.814);  densest band median 6%
+  speak_20 +12h disc: n 3872  median gap real 6.85% vs shuffled 6.63% (p 0.956);  within 1.5% real 12.0% vs shuffled 13.0% (p 0.980);  densest band median 9%
+  speak_20 +12h val: n 1981  median gap real 5.14% vs shuffled 4.95% (p 0.960);  within 1.5% real 14.9% vs shuffled 16.0% (p 0.946);  densest band median 7%
+  lpeak_10 + 1h disc: n 3876  median gap real 5.80% vs shuffled 5.88% (p 0.198);  within 1.5% real 14.2% vs shuffled 13.7% (p 0.178);  densest band median 10%
+  lpeak_10 + 1h val: n 1991  median gap real 6.41% vs shuffled 6.37% (p 0.658);  within 1.5% real 11.9% vs shuffled 12.3% (p 0.714);  densest band median 12%
+  lpeak_10 + 4h disc: n 3874  median gap real 5.15% vs shuffled 5.35% (p 0.008);  within 1.5% real 16.1% vs shuffled 15.2% (p 0.056);  densest band median 9%
+  lpeak_10 + 4h val: n 1987  median gap real 5.28% vs shuffled 5.52% (p 0.008);  within 1.5% real 14.5% vs shuffled 14.2% (p 0.302);  densest band median 10%
+  lpeak_10 +12h disc: n 3874  median gap real 4.50% vs shuffled 4.75% (p 0.002);  within 1.5% real 18.4% vs shuffled 17.0% (p 0.004);  densest band median 9%
+  lpeak_10 +12h val: n 1982  median gap real 4.50% vs shuffled 4.83% (p 0.000);  within 1.5% real 15.5% vs shuffled 16.0% (p 0.770);  densest band median 9%
+  lpeak_20 + 1h disc: n 3875  median gap real 4.98% vs shuffled 5.05% (p 0.210);  within 1.5% real 15.4% vs shuffled 16.7% (p 0.992);  densest band median 7%
+  lpeak_20 + 1h val: n 1991  median gap real 4.62% vs shuffled 4.59% (p 0.588);  within 1.5% real 17.7% vs shuffled 18.3% (p 0.774);  densest band median 8%
+  lpeak_20 + 4h disc: n 3874  median gap real 4.24% vs shuffled 4.56% (p 0.000);  within 1.5% real 20.0% vs shuffled 18.6% (p 0.012);  densest band median 6%
+  lpeak_20 + 4h val: n 1987  median gap real 3.80% vs shuffled 4.12% (p 0.000);  within 1.5% real 22.2% vs shuffled 20.7% (p 0.038);  densest band median 6%
+  lpeak_20 +12h disc: n 3873  median gap real 3.32% vs shuffled 3.72% (p 0.000);  within 1.5% real 25.0% vs shuffled 22.4% (p 0.000);  densest band median 5%
+  lpeak_20 +12h val: n 1982  median gap real 3.01% vs shuffled 3.35% (p 0.000);  within 1.5% real 27.0% vs shuffled 24.8% (p 0.004);  densest band median 5%

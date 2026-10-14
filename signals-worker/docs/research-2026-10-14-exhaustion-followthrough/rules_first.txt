@@ -1,0 +1,497 @@
+
+######## checkpoint +1h  (disc n 4971, val n 5169)
+  base disc: up-first 33%, median further peak +13.1% at 34h, median 3d -5.1%, mean 3d log vs mkt -0.036 (t -13.2)
+  base val: up-first 39%, median further peak +15.1% at 69h, median 3d -3.8%, mean 3d log vs mkt -0.026 (t -12.5)
+  -- p_k  cuts -0.0487, -0.0246, -0.00358, 0.0214
+     disc: Q1: n995 up 34% pk +13.9%@52h 3d -4.0% xm -0.035 | Q2: n994 up 31% pk +12.2%@47h 3d -3.6% xm -0.023 | Q3: n994 up 33% pk +13.3%@45h 3d -4.6% xm -0.028 | Q4: n994 up 31% pk +11.5%@27h 3d -5.1% xm -0.024 | Q5: n994 up 39% pk +14.7%@12h 3d -9.5% xm -0.072
+        top-bottom: 3d vs mkt -0.038 (t -4.1); up-first +0.04 (t +1.8); log further peak +0.028 (t +2.1)
+     val: Q1: n871 up 43% pk +16.6%@83h 3d -3.1% xm -0.021 | Q2: n1135 up 39% pk +15.0%@89h 3d -2.6% xm -0.013 | Q3: n1319 up 35% pk +13.4%@71h 3d -3.7% xm -0.017 | Q4: n976 up 39% pk +15.2%@68h 3d -3.9% xm -0.022 | Q5: n868 up 41% pk +16.4%@23h 3d -7.7% xm -0.063
+        top-bottom: 3d vs mkt -0.042 (t -5.6); up-first -0.02 (t -0.9); log further peak +0.006 (t +0.5)
+  -- hi_k  cuts 0.00666, 0.0189, 0.0379, 0.0769
+     disc: Q1: n995 up 32% pk +13.1%@71h 3d -2.8% xm -0.016 | Q2: n994 up 31% pk +11.8%@52h 3d -3.4% xm -0.016 | Q3: n994 up 32% pk +12.0%@46h 3d -4.5% xm -0.023 | Q4: n994 up 35% pk +13.2%@20h 3d -6.9% xm -0.043 | Q5: n994 up 37% pk +15.1%@11h 3d -10.0% xm -0.084
+        top-bottom: 3d vs mkt -0.067 (t -7.8); up-first +0.06 (t +2.6); log further peak +0.066 (t +5.0)
+     val: Q1: n1194 up 37% pk +14.0%@97h 3d -2.3% xm -0.007 | Q2: n1063 up 37% pk +14.1%@83h 3d -3.0% xm -0.016 | Q3: n1105 up 39% pk +15.3%@66h 3d -3.7% xm -0.017 | Q4: n1019 up 42% pk +16.1%@61h 3d -4.5% xm -0.030 | Q5: n788 up 40% pk +16.9%@22h 3d -8.6% xm -0.072
+        top-bottom: 3d vs mkt -0.065 (t -8.2); up-first +0.03 (t +1.4); log further peak +0.044 (t +3.8)
+  -- dd_k  cuts -0.121, -0.0789, -0.0531, -0.0293
+     disc: Q1: n995 up 37% pk +15.0%@27h 3d -5.5% xm -0.055 | Q2: n994 up 32% pk +11.7%@25h 3d -5.3% xm -0.037 | Q3: n994 up 31% pk +13.1%@41h 3d -5.0% xm -0.036 | Q4: n994 up 33% pk +12.8%@35h 3d -4.8% xm -0.031 | Q5: n994 up 33% pk +12.3%@37h 3d -4.8% xm -0.022
+        top-bottom: 3d vs mkt +0.033 (t +3.5); up-first -0.04 (t -1.3); log further peak -0.025 (t -1.5)
+     val: Q1: n660 up 43% pk +16.6%@42h 3d -4.8% xm -0.041 | Q2: n1137 up 40% pk +16.2%@88h 3d -3.5% xm -0.024 | Q3: n1169 up 40% pk +15.7%@83h 3d -3.2% xm -0.024 | Q4: n1299 up 37% pk +14.2%@61h 3d -3.8% xm -0.022 | Q5: n904 up 35% pk +13.5%@69h 3d -3.9% xm -0.025
+        top-bottom: 3d vs mkt +0.016 (t +2.0); up-first -0.07 (t -2.7); log further peak -0.031 (t -2.6)
+  -- v_k  cuts 12.2, 21.7, 37, 73.8
+     disc: Q1: n995 up 31% pk +12.4%@54h 3d -3.3% xm -0.016 | Q2: n994 up 35% pk +14.0%@49h 3d -3.8% xm -0.025 | Q3: n994 up 32% pk +12.6%@47h 3d -4.6% xm -0.029 | Q4: n994 up 37% pk +13.9%@23h 3d -6.0% xm -0.040 | Q5: n994 up 32% pk +12.5%@11h 3d -9.1% xm -0.072
+        top-bottom: 3d vs mkt -0.056 (t -7.6); up-first +0.01 (t +0.5); log further peak +0.032 (t +2.4)
+     val: Q1: n1096 up 41% pk +16.6%@112h 3d -2.2% xm -0.010 | Q2: n1109 up 42% pk +15.7%@80h 3d -2.8% xm -0.015 | Q3: n1024 up 38% pk +15.1%@72h 3d -3.5% xm -0.018 | Q4: n959 up 38% pk +14.5%@54h 3d -4.2% xm -0.027 | Q5: n981 up 34% pk +13.1%@20h 3d -7.5% xm -0.060
+        top-bottom: 3d vs mkt -0.050 (t -8.4); up-first -0.07 (t -3.1); log further peak -0.028 (t -2.4)
+  -- v_last_k  cuts 12.2, 21.7, 37, 73.8
+     disc: Q1: n995 up 31% pk +12.4%@54h 3d -3.3% xm -0.016 | Q2: n994 up 35% pk +14.0%@49h 3d -3.8% xm -0.025 | Q3: n994 up 32% pk +12.6%@47h 3d -4.6% xm -0.029 | Q4: n994 up 37% pk +13.9%@23h 3d -6.0% xm -0.040 | Q5: n994 up 32% pk +12.5%@11h 3d -9.1% xm -0.072
+        top-bottom: 3d vs mkt -0.056 (t -7.6); up-first +0.01 (t +0.5); log further peak +0.032 (t +2.4)
+     val: Q1: n1096 up 41% pk +16.6%@112h 3d -2.2% xm -0.010 | Q2: n1109 up 42% pk +15.7%@80h 3d -2.8% xm -0.015 | Q3: n1024 up 38% pk +15.1%@72h 3d -3.5% xm -0.018 | Q4: n959 up 38% pk +14.5%@54h 3d -4.2% xm -0.027 | Q5: n981 up 34% pk +13.1%@20h 3d -7.5% xm -0.060
+        top-bottom: 3d vs mkt -0.050 (t -8.4); up-first -0.07 (t -3.1); log further peak -0.028 (t -2.4)
+  -- v_last3_k  cuts 12.2, 21.7, 37, 73.8
+     disc: Q1: n995 up 31% pk +12.4%@54h 3d -3.3% xm -0.016 | Q2: n994 up 35% pk +14.0%@49h 3d -3.8% xm -0.025 | Q3: n994 up 32% pk +12.6%@47h 3d -4.6% xm -0.029 | Q4: n994 up 37% pk +13.9%@23h 3d -6.0% xm -0.040 | Q5: n994 up 32% pk +12.5%@11h 3d -9.1% xm -0.072
+        top-bottom: 3d vs mkt -0.056 (t -7.6); up-first +0.01 (t +0.5); log further peak +0.032 (t +2.4)
+     val: Q1: n1096 up 41% pk +16.6%@112h 3d -2.2% xm -0.010 | Q2: n1109 up 42% pk +15.7%@80h 3d -2.8% xm -0.015 | Q3: n1024 up 38% pk +15.1%@72h 3d -3.5% xm -0.018 | Q4: n959 up 38% pk +14.5%@54h 3d -4.2% xm -0.027 | Q5: n981 up 34% pk +13.1%@20h 3d -7.5% xm -0.060
+        top-bottom: 3d vs mkt -0.050 (t -8.4); up-first -0.07 (t -3.1); log further peak -0.028 (t -2.4)
+  -- v_decay_k  cuts 0.296, 0.447, 0.665, 1.16
+     disc: Q1: n995 up 30% pk +11.2%@52h 3d -3.6% xm -0.029 | Q2: n994 up 33% pk +13.3%@38h 3d -4.5% xm -0.022 | Q3: n994 up 32% pk +13.1%@38h 3d -5.7% xm -0.045 | Q4: n994 up 34% pk +12.8%@30h 3d -5.4% xm -0.032 | Q5: n994 up 38% pk +15.0%@18h 3d -7.5% xm -0.054
+        top-bottom: 3d vs mkt -0.025 (t -3.3); up-first +0.07 (t +3.0); log further peak +0.057 (t +5.0)
+     val: Q1: n977 up 36% pk +14.3%@84h 3d -3.2% xm -0.017 | Q2: n1017 up 42% pk +16.3%@92h 3d -2.8% xm -0.015 | Q3: n1084 up 38% pk +14.6%@64h 3d -3.8% xm -0.030 | Q4: n1071 up 40% pk +15.2%@70h 3d -4.0% xm -0.023 | Q5: n1020 up 38% pk +14.7%@36h 3d -5.4% xm -0.043
+        top-bottom: 3d vs mkt -0.027 (t -4.7); up-first +0.01 (t +0.5); log further peak +0.017 (t +1.7)
+  -- tb_k  cuts 0.448, 0.48, 0.501, 0.527
+     disc: Q1: n995 up 34% pk +13.0%@69h 3d -2.4% xm -0.017 | Q2: n994 up 36% pk +14.3%@38h 3d -4.8% xm -0.035 | Q3: n994 up 31% pk +12.4%@21h 3d -6.7% xm -0.050 | Q4: n994 up 33% pk +12.7%@16h 3d -6.8% xm -0.045 | Q5: n994 up 34% pk +12.5%@36h 3d -5.6% xm -0.035
+        top-bottom: 3d vs mkt -0.018 (t -2.5); up-first +0.00 (t +0.0); log further peak +0.024 (t +2.0)
+     val: Q1: n1386 up 40% pk +15.7%@104h 3d -2.3% xm -0.007 | Q2: n1193 up 39% pk +14.4%@69h 3d -3.8% xm -0.023 | Q3: n939 up 38% pk +14.8%@46h 3d -4.7% xm -0.033 | Q4: n968 up 39% pk +15.6%@42h 3d -4.9% xm -0.042 | Q5: n683 up 37% pk +14.5%@61h 3d -4.7% xm -0.035
+        top-bottom: 3d vs mkt -0.028 (t -4.2); up-first -0.03 (t -1.3); log further peak +0.007 (t +0.7)
+  -- mkt_k  cuts -0.00437, -0.00111, 0.00134, 0.00476
+     disc: Q1: n995 up 32% pk +12.1%@33h 3d -4.9% xm -0.037 | Q2: n995 up 35% pk +13.3%@44h 3d -5.1% xm -0.044 | Q3: n993 up 35% pk +14.3%@26h 3d -5.3% xm -0.037 | Q4: n994 up 35% pk +14.6%@35h 3d -4.7% xm -0.032 | Q5: n994 up 30% pk +11.8%@32h 3d -5.5% xm -0.032
+        top-bottom: 3d vs mkt +0.005 (t +0.7); up-first -0.02 (t -0.6); log further peak -0.017 (t -1.1)
+     val: Q1: n1109 up 40% pk +15.8%@74h 3d -3.8% xm -0.030 | Q2: n949 up 34% pk +13.4%@70h 3d -4.1% xm -0.028 | Q3: n1000 up 35% pk +13.9%@54h 3d -4.0% xm -0.027 | Q4: n1161 up 41% pk +15.6%@72h 3d -3.5% xm -0.019 | Q5: n950 up 43% pk +17.1%@69h 3d -3.2% xm -0.024
+        top-bottom: 3d vs mkt +0.006 (t +1.1); up-first +0.03 (t +1.2); log further peak +0.022 (t +1.9)
+
+######## checkpoint +2h  (disc n 4970, val n 5169)
+  base disc: up-first 34%, median further peak +13.1% at 40h, median 3d -4.5%, mean 3d log vs mkt -0.031 (t -11.6)
+  base val: up-first 39%, median further peak +15.2% at 73h, median 3d -3.5%, mean 3d log vs mkt -0.023 (t -11.3)
+  -- p_k  cuts -0.0602, -0.0322, -0.00859, 0.0237
+     disc: Q1: n994 up 33% pk +14.1%@60h 3d -3.6% xm -0.038 | Q2: n994 up 32% pk +12.0%@50h 3d -3.1% xm -0.018 | Q3: n994 up 34% pk +13.4%@59h 3d -3.1% xm -0.010 | Q4: n994 up 32% pk +12.0%@36h 3d -5.1% xm -0.027 | Q5: n994 up 37% pk +14.4%@15h 3d -8.3% xm -0.061
+        top-bottom: 3d vs mkt -0.023 (t -2.4); up-first +0.04 (t +1.4); log further peak +0.030 (t +1.9)
+     val: Q1: n827 up 44% pk +17.7%@95h 3d -2.5% xm -0.017 | Q2: n1044 up 38% pk +14.7%@99h 3d -2.2% xm -0.016 | Q3: n1298 up 38% pk +14.4%@73h 3d -2.8% xm -0.011 | Q4: n1153 up 36% pk +14.4%@72h 3d -3.7% xm -0.023 | Q5: n847 up 40% pk +15.8%@22h 3d -7.7% xm -0.054
+        top-bottom: 3d vs mkt -0.037 (t -4.6); up-first -0.04 (t -1.7); log further peak +0.007 (t +0.6)
+  -- hi_k  cuts 0.00829, 0.0234, 0.0465, 0.0931
+     disc: Q1: n994 up 30% pk +12.4%@74h 3d -2.6% xm -0.013 | Q2: n994 up 32% pk +11.9%@62h 3d -3.1% xm -0.016 | Q3: n995 up 34% pk +11.8%@48h 3d -4.0% xm -0.019 | Q4: n993 up 35% pk +13.5%@24h 3d -5.7% xm -0.036 | Q5: n994 up 38% pk +16.1%@13h 3d -8.9% xm -0.071
+        top-bottom: 3d vs mkt -0.058 (t -6.9); up-first +0.08 (t +3.4); log further peak +0.072 (t +5.9)
+     val: Q1: n1141 up 38% pk +14.4%@103h 3d -1.6% xm -0.003 | Q2: n1133 up 38% pk +14.8%@101h 3d -2.6% xm -0.014 | Q3: n1114 up 37% pk +14.5%@71h 3d -3.7% xm -0.018 | Q4: n982 up 41% pk +16.2%@56h 3d -4.3% xm -0.032 | Q5: n799 up 43% pk +17.6%@23h 3d -7.8% xm -0.060
+        top-bottom: 3d vs mkt -0.057 (t -7.5); up-first +0.05 (t +2.1); log further peak +0.050 (t +4.5)
+  -- dd_k  cuts -0.137, -0.0935, -0.0636, -0.036
+     disc: Q1: n994 up 36% pk +15.4%@32h 3d -5.6% xm -0.054 | Q2: n994 up 34% pk +12.6%@44h 3d -4.2% xm -0.031 | Q3: n994 up 32% pk +13.1%@38h 3d -4.1% xm -0.025 | Q4: n994 up 35% pk +13.0%@45h 3d -3.7% xm -0.013 | Q5: n994 up 31% pk +11.5%@42h 3d -5.0% xm -0.030
+        top-bottom: 3d vs mkt +0.024 (t +2.7); up-first -0.05 (t -1.7); log further peak -0.036 (t -2.3)
+     val: Q1: n624 up 44% pk +17.6%@48h 3d -4.7% xm -0.046 | Q2: n998 up 41% pk +16.9%@90h 3d -3.5% xm -0.023 | Q3: n1256 up 41% pk +15.2%@85h 3d -3.3% xm -0.017 | Q4: n1326 up 38% pk +14.9%@76h 3d -3.0% xm -0.017 | Q5: n965 up 33% pk +12.7%@64h 3d -4.1% xm -0.023
+        top-bottom: 3d vs mkt +0.024 (t +3.0); up-first -0.11 (t -3.3); log further peak -0.041 (t -3.1)
+  -- v_k  cuts 9.73, 17.3, 28.9, 58.4
+     disc: Q1: n994 up 31% pk +11.7%@56h 3d -3.0% xm -0.014 | Q2: n994 up 34% pk +12.8%@65h 3d -3.1% xm -0.019 | Q3: n994 up 34% pk +13.6%@48h 3d -3.8% xm -0.022 | Q4: n994 up 36% pk +13.9%@25h 3d -5.1% xm -0.039 | Q5: n994 up 34% pk +13.7%@13h 3d -8.5% xm -0.060
+        top-bottom: 3d vs mkt -0.046 (t -6.4); up-first +0.03 (t +1.2); log further peak +0.052 (t +4.0)
+     val: Q1: n1091 up 43% pk +17.0%@116h 3d -1.4% xm -0.004 | Q2: n1166 up 39% pk +15.5%@88h 3d -2.6% xm -0.015 | Q3: n964 up 39% pk +14.8%@71h 3d -3.4% xm -0.018 | Q4: n995 up 38% pk +14.7%@65h 3d -4.1% xm -0.023 | Q5: n953 up 36% pk +13.9%@21h 3d -6.8% xm -0.059
+        top-bottom: 3d vs mkt -0.055 (t -9.2); up-first -0.08 (t -3.1); log further peak -0.026 (t -2.3)
+  -- v_last_k  cuts 5.92, 10.6, 18.2, 39.8
+     disc: Q1: n994 up 31% pk +11.9%@65h 3d -2.4% xm -0.008 | Q2: n994 up 33% pk +12.9%@65h 3d -3.0% xm -0.012 | Q3: n994 up 34% pk +13.7%@48h 3d -4.0% xm -0.027 | Q4: n994 up 35% pk +13.6%@26h 3d -5.8% xm -0.034 | Q5: n994 up 34% pk +13.8%@11h 3d -9.3% xm -0.072
+        top-bottom: 3d vs mkt -0.064 (t -8.0); up-first +0.04 (t +1.6); log further peak +0.042 (t +3.4)
+     val: Q1: n1085 up 43% pk +16.8%@124h 3d -1.2% xm -0.002 | Q2: n1155 up 40% pk +16.0%@96h 3d -2.4% xm -0.012 | Q3: n1010 up 37% pk +14.8%@78h 3d -3.7% xm -0.024 | Q4: n983 up 38% pk +14.3%@59h 3d -3.7% xm -0.017 | Q5: n936 up 36% pk +14.0%@18h 3d -8.0% xm -0.065
+        top-bottom: 3d vs mkt -0.064 (t -10.3); up-first -0.07 (t -3.1); log further peak -0.014 (t -1.2)
+  -- v_last3_k  cuts 9.73, 17.3, 28.9, 58.4
+     disc: Q1: n994 up 31% pk +11.7%@56h 3d -3.0% xm -0.014 | Q2: n994 up 34% pk +12.8%@65h 3d -3.1% xm -0.019 | Q3: n994 up 34% pk +13.6%@48h 3d -3.8% xm -0.022 | Q4: n994 up 36% pk +13.9%@25h 3d -5.1% xm -0.039 | Q5: n994 up 34% pk +13.7%@13h 3d -8.5% xm -0.060
+        top-bottom: 3d vs mkt -0.046 (t -6.4); up-first +0.03 (t +1.2); log further peak +0.052 (t +4.0)
+     val: Q1: n1091 up 43% pk +17.0%@116h 3d -1.4% xm -0.004 | Q2: n1166 up 39% pk +15.5%@88h 3d -2.6% xm -0.015 | Q3: n964 up 39% pk +14.8%@71h 3d -3.4% xm -0.018 | Q4: n995 up 38% pk +14.7%@65h 3d -4.1% xm -0.023 | Q5: n953 up 36% pk +13.9%@21h 3d -6.8% xm -0.059
+        top-bottom: 3d vs mkt -0.055 (t -9.2); up-first -0.08 (t -3.1); log further peak -0.026 (t -2.3)
+  -- v_decay_k  cuts 0.236, 0.35, 0.525, 0.921
+     disc: Q1: n994 up 31% pk +11.6%@63h 3d -2.9% xm -0.017 | Q2: n994 up 32% pk +12.0%@42h 3d -4.2% xm -0.023 | Q3: n994 up 31% pk +12.3%@48h 3d -5.1% xm -0.037 | Q4: n994 up 35% pk +13.7%@38h 3d -4.4% xm -0.030 | Q5: n994 up 39% pk +16.2%@19h 3d -6.6% xm -0.047
+        top-bottom: 3d vs mkt -0.030 (t -3.9); up-first +0.08 (t +3.4); log further peak +0.063 (t +5.3)
+     val: Q1: n965 up 37% pk +14.1%@102h 3d -2.7% xm -0.012 | Q2: n1032 up 41% pk +16.1%@88h 3d -2.4% xm -0.015 | Q3: n1094 up 37% pk +14.5%@72h 3d -3.6% xm -0.023 | Q4: n1071 up 40% pk +15.9%@80h 3d -3.6% xm -0.023 | Q5: n1007 up 40% pk +15.4%@35h 3d -5.3% xm -0.041
+        top-bottom: 3d vs mkt -0.028 (t -4.9); up-first +0.03 (t +1.5); log further peak +0.026 (t +2.8)
+  -- v_trend_k  cuts 0.301, 0.428, 0.577, 0.839
+     disc: Q1: n994 up 35% pk +13.8%@68h 3d -2.4% xm -0.008 | Q2: n994 up 33% pk +13.2%@42h 3d -4.4% xm -0.019 | Q3: n994 up 32% pk +13.2%@32h 3d -5.5% xm -0.036 | Q4: n994 up 33% pk +12.5%@34h 3d -5.7% xm -0.049 | Q5: n994 up 36% pk +13.5%@24h 3d -5.8% xm -0.042
+        top-bottom: 3d vs mkt -0.034 (t -4.6); up-first +0.01 (t +0.5); log further peak +0.021 (t +1.4)
+     val: Q1: n1060 up 39% pk +15.1%@90h 3d -1.8% xm -0.009 | Q2: n1114 up 38% pk +14.9%@95h 3d -3.7% xm -0.026 | Q3: n1056 up 39% pk +15.6%@79h 3d -3.6% xm -0.019 | Q4: n946 up 41% pk +15.5%@70h 3d -3.9% xm -0.017 | Q5: n993 up 39% pk +14.8%@33h 3d -5.4% xm -0.042
+        top-bottom: 3d vs mkt -0.033 (t -5.8); up-first -0.00 (t -0.1); log further peak +0.012 (t +1.2)
+  -- tb_k  cuts 0.456, 0.481, 0.5, 0.521
+     disc: Q1: n994 up 35% pk +13.5%@82h 3d -1.9% xm -0.016 | Q2: n994 up 33% pk +12.6%@36h 3d -4.4% xm -0.029 | Q3: n994 up 33% pk +14.2%@35h 3d -5.8% xm -0.035 | Q4: n994 up 34% pk +12.4%@20h 3d -6.2% xm -0.042 | Q5: n994 up 33% pk +12.8%@32h 3d -4.9% xm -0.031
+        top-bottom: 3d vs mkt -0.015 (t -2.2); up-first -0.02 (t -0.7); log further peak +0.018 (t +1.5)
+     val: Q1: n1495 up 40% pk +15.4%@105h 3d -1.9% xm -0.006 | Q2: n1147 up 41% pk +16.0%@86h 3d -3.2% xm -0.018 | Q3: n1037 up 38% pk +14.8%@47h 3d -4.5% xm -0.032 | Q4: n908 up 38% pk +15.9%@34h 3d -5.0% xm -0.035 | Q5: n582 up 37% pk +13.3%@62h 3d -5.2% xm -0.039
+        top-bottom: 3d vs mkt -0.033 (t -4.2); up-first -0.03 (t -1.2); log further peak +0.011 (t +0.9)
+  -- realert_k  cuts 0.5, 1.5
+     disc: 0: n4150 up 33% pk +12.6%@51h 3d -3.7% xm -0.024 | 1: n720 up 39% pk +16.1%@12h 3d -8.8% xm -0.059 | 2+: n100 up 37% pk +17.9%@7h 3d -15.9% xm -0.113
+        top-bottom: 3d vs mkt -0.089 (t -3.3); up-first +0.05 (t +1.0); log further peak +0.107 (t +3.0)
+     val: 0: n4408 up 39% pk +15.1%@87h 3d -2.9% xm -0.017 | 1: n681 up 41% pk +15.7%@19h 3d -7.7% xm -0.050 | 2+: n80 up 46% pk +20.7%@17h 3d -12.1% xm -0.125
+        top-bottom: 3d vs mkt -0.109 (t -4.5); up-first +0.08 (t +1.3); log further peak +0.045 (t +1.8)
+  -- green_k  cuts 0.5
+     disc: Q1: n4274 up 34% pk +13.2%@45h 3d -4.1% xm -0.027 | Q2: n696 up 33% pk +12.8%@17h 3d -7.2% xm -0.052
+        top-bottom: 3d vs mkt -0.025 (t -3.0); up-first -0.01 (t -0.3); log further peak +0.017 (t +1.1)
+     val: Q1: n4565 up 39% pk +15.2%@80h 3d -3.2% xm -0.019 | Q2: n604 up 39% pk +15.2%@28h 3d -6.6% xm -0.054
+        top-bottom: 3d vs mkt -0.035 (t -4.8); up-first +0.00 (t +0.0); log further peak +0.004 (t +0.4)
+  -- mkt_k  cuts -0.00601, -0.00147, 0.0018, 0.00597
+     disc: Q1: n994 up 33% pk +12.3%@35h 3d -4.5% xm -0.039 | Q2: n997 up 35% pk +13.8%@56h 3d -4.2% xm -0.037 | Q3: n991 up 36% pk +14.9%@45h 3d -3.9% xm -0.023 | Q4: n994 up 32% pk +11.9%@26h 3d -5.2% xm -0.027 | Q5: n994 up 32% pk +12.2%@37h 3d -4.8% xm -0.028
+        top-bottom: 3d vs mkt +0.011 (t +1.6); up-first -0.02 (t -0.6); log further peak -0.011 (t -0.8)
+     val: Q1: n1091 up 39% pk +15.9%@80h 3d -3.1% xm -0.027 | Q2: n922 up 39% pk +15.2%@82h 3d -3.5% xm -0.023 | Q3: n1040 up 35% pk +13.5%@65h 3d -4.2% xm -0.029 | Q4: n1065 up 39% pk +15.1%@71h 3d -3.8% xm -0.019 | Q5: n1051 up 43% pk +17.1%@75h 3d -2.9% xm -0.016
+        top-bottom: 3d vs mkt +0.010 (t +1.7); up-first +0.04 (t +1.8); log further peak +0.019 (t +1.8)
+
+######## checkpoint +4h  (disc n 4969, val n 5169)
+  base disc: up-first 33%, median further peak +13.1% at 46h, median 3d -4.1%, mean 3d log vs mkt -0.026 (t -10.6)
+  base val: up-first 39%, median further peak +15.3% at 84h, median 3d -3.1%, mean 3d log vs mkt -0.020 (t -10.1)
+  -- p_k  cuts -0.073, -0.0399, -0.013, 0.0268
+     disc: Q1: n994 up 33% pk +13.9%@55h 3d -3.9% xm -0.035 | Q2: n994 up 30% pk +12.0%@64h 3d -3.1% xm -0.014 | Q3: n993 up 34% pk +13.1%@65h 3d -3.1% xm -0.014 | Q4: n994 up 34% pk +12.9%@57h 3d -4.0% xm -0.013 | Q5: n994 up 36% pk +13.6%@14h 3d -8.6% xm -0.054
+        top-bottom: 3d vs mkt -0.019 (t -2.0); up-first +0.03 (t +0.9); log further peak +0.033 (t +2.0)
+     val: Q1: n713 up 46% pk +18.7%@104h 3d -1.8% xm -0.012 | Q2: n1097 up 40% pk +16.0%@109h 3d -1.9% xm -0.009 | Q3: n1261 up 35% pk +13.9%@93h 3d -2.4% xm -0.018 | Q4: n1219 up 35% pk +13.8%@65h 3d -3.5% xm -0.014 | Q5: n879 up 41% pk +17.1%@29h 3d -7.9% xm -0.053
+        top-bottom: 3d vs mkt -0.041 (t -5.0); up-first -0.05 (t -1.8); log further peak +0.002 (t +0.1)
+  -- hi_k  cuts 0.0105, 0.0281, 0.055, 0.111
+     disc: Q1: n994 up 30% pk +12.4%@84h 3d -2.3% xm -0.011 | Q2: n994 up 34% pk +12.1%@65h 3d -2.7% xm -0.007 | Q3: n993 up 32% pk +12.6%@49h 3d -4.1% xm -0.019 | Q4: n997 up 33% pk +13.2%@33h 3d -5.1% xm -0.030 | Q5: n991 up 39% pk +16.0%@15h 3d -8.7% xm -0.065
+        top-bottom: 3d vs mkt -0.053 (t -6.5); up-first +0.09 (t +4.1); log further peak +0.082 (t +6.0)
+     val: Q1: n1154 up 37% pk +14.8%@113h 3d -1.3% xm -0.003 | Q2: n1112 up 38% pk +14.8%@102h 3d -2.0% xm -0.006 | Q3: n1073 up 36% pk +14.2%@82h 3d -3.3% xm -0.016 | Q4: n1002 up 41% pk +15.7%@67h 3d -3.9% xm -0.028 | Q5: n828 up 42% pk +18.3%@28h 3d -7.8% xm -0.060
+        top-bottom: 3d vs mkt -0.057 (t -7.7); up-first +0.05 (t +1.9); log further peak +0.054 (t +4.9)
+  -- dd_k  cuts -0.154, -0.108, -0.0756, -0.0432
+     disc: Q1: n994 up 37% pk +15.8%@37h 3d -5.1% xm -0.049 | Q2: n994 up 30% pk +12.6%@42h 3d -4.5% xm -0.026 | Q3: n993 up 33% pk +13.6%@53h 3d -3.9% xm -0.026 | Q4: n994 up 34% pk +12.6%@51h 3d -3.5% xm -0.013 | Q5: n994 up 33% pk +11.6%@50h 3d -3.9% xm -0.018
+        top-bottom: 3d vs mkt +0.031 (t +3.7); up-first -0.04 (t -1.2); log further peak -0.041 (t -2.3)
+     val: Q1: n571 up 46% pk +19.3%@55h 3d -3.8% xm -0.033 | Q2: n937 up 42% pk +16.6%@100h 3d -3.0% xm -0.028 | Q3: n1199 up 40% pk +15.8%@94h 3d -2.9% xm -0.017 | Q4: n1385 up 37% pk +14.8%@85h 3d -2.7% xm -0.016 | Q5: n1077 up 32% pk +13.1%@66h 3d -3.5% xm -0.015
+        top-bottom: 3d vs mkt +0.018 (t +2.1); up-first -0.13 (t -3.9); log further peak -0.051 (t -3.7)
+  -- v_k  cuts 7.38, 12.8, 21.5, 43.9
+     disc: Q1: n994 up 30% pk +11.6%@63h 3d -2.7% xm -0.008 | Q2: n994 up 35% pk +13.4%@67h 3d -2.5% xm -0.013 | Q3: n993 up 33% pk +13.1%@59h 3d -3.8% xm -0.020 | Q4: n994 up 34% pk +13.4%@34h 3d -4.6% xm -0.036 | Q5: n994 up 35% pk +13.7%@15h 3d -8.0% xm -0.054
+        top-bottom: 3d vs mkt -0.046 (t -6.1); up-first +0.04 (t +1.7); log further peak +0.058 (t +4.1)
+     val: Q1: n1058 up 43% pk +17.0%@120h 3d -1.1% xm -0.002 | Q2: n1143 up 39% pk +16.0%@102h 3d -2.2% xm -0.011 | Q3: n1005 up 38% pk +14.9%@87h 3d -2.6% xm -0.017 | Q4: n1014 up 36% pk +14.2%@68h 3d -3.6% xm -0.020 | Q5: n949 up 36% pk +13.6%@20h 3d -6.9% xm -0.056
+        top-bottom: 3d vs mkt -0.054 (t -8.4); up-first -0.07 (t -2.8); log further peak -0.016 (t -1.3)
+  -- v_last_k  cuts 3.24, 6.12, 11.1, 24.8
+     disc: Q1: n994 up 30% pk +11.2%@68h 3d -2.3% xm -0.009 | Q2: n994 up 33% pk +13.3%@64h 3d -2.5% xm -0.009 | Q3: n993 up 35% pk +13.3%@58h 3d -3.3% xm -0.014 | Q4: n994 up 34% pk +13.4%@32h 3d -5.4% xm -0.032 | Q5: n994 up 35% pk +14.0%@14h 3d -9.1% xm -0.067
+        top-bottom: 3d vs mkt -0.057 (t -7.7); up-first +0.05 (t +2.0); log further peak +0.051 (t +4.1)
+     val: Q1: n1074 up 42% pk +16.5%@123h 3d -1.1% xm -0.001 | Q2: n1133 up 39% pk +15.8%@111h 3d -1.8% xm -0.008 | Q3: n1023 up 39% pk +15.6%@79h 3d -2.8% xm -0.013 | Q4: n983 up 37% pk +14.7%@69h 3d -3.7% xm -0.021 | Q5: n956 up 35% pk +13.8%@18h 3d -7.9% xm -0.064
+        top-bottom: 3d vs mkt -0.063 (t -10.1); up-first -0.07 (t -2.7); log further peak -0.006 (t -0.5)
+  -- v_last3_k  cuts 4.88, 8.65, 15.2, 33
+     disc: Q1: n994 up 31% pk +11.7%@69h 3d -2.3% xm -0.003 | Q2: n994 up 33% pk +13.3%@64h 3d -2.4% xm -0.012 | Q3: n993 up 34% pk +12.9%@57h 3d -3.8% xm -0.023 | Q4: n994 up 35% pk +13.4%@39h 3d -5.0% xm -0.025 | Q5: n994 up 34% pk +13.7%@14h 3d -8.7% xm -0.068
+        top-bottom: 3d vs mkt -0.064 (t -8.9); up-first +0.03 (t +1.3); log further peak +0.043 (t +3.3)
+     val: Q1: n1046 up 42% pk +16.8%@123h 3d -0.8% xm +0.001 | Q2: n1139 up 41% pk +16.4%@107h 3d -2.3% xm -0.009 | Q3: n1071 up 38% pk +14.8%@87h 3d -2.8% xm -0.017 | Q4: n1007 up 37% pk +14.8%@69h 3d -3.6% xm -0.022 | Q5: n906 up 35% pk +13.5%@18h 3d -7.7% xm -0.061
+        top-bottom: 3d vs mkt -0.063 (t -9.6); up-first -0.06 (t -2.5); log further peak -0.007 (t -0.6)
+  -- v_decay_k  cuts 0.175, 0.267, 0.403, 0.707
+     disc: Q1: n994 up 30% pk +11.4%@67h 3d -2.5% xm -0.015 | Q2: n994 up 32% pk +12.6%@54h 3d -3.9% xm -0.019 | Q3: n993 up 33% pk +13.1%@50h 3d -3.7% xm -0.018 | Q4: n994 up 34% pk +13.5%@42h 3d -5.4% xm -0.031 | Q5: n994 up 38% pk +15.8%@19h 3d -6.1% xm -0.050
+        top-bottom: 3d vs mkt -0.035 (t -4.8); up-first +0.08 (t +3.6); log further peak +0.072 (t +5.9)
+     val: Q1: n951 up 38% pk +14.6%@117h 3d -1.8% xm -0.009 | Q2: n1025 up 40% pk +15.7%@93h 3d -2.2% xm -0.014 | Q3: n1157 up 36% pk +14.8%@69h 3d -3.1% xm -0.019 | Q4: n1035 up 39% pk +15.2%@85h 3d -3.4% xm -0.019 | Q5: n1001 up 40% pk +16.3%@46h 3d -5.6% xm -0.041
+        top-bottom: 3d vs mkt -0.032 (t -5.2); up-first +0.02 (t +0.9); log further peak +0.039 (t +4.0)
+  -- v_trend_k  cuts 0.249, 0.363, 0.492, 0.753
+     disc: Q1: n994 up 35% pk +14.4%@77h 3d -2.1% xm -0.006 | Q2: n994 up 31% pk +12.3%@53h 3d -4.1% xm -0.019 | Q3: n993 up 32% pk +12.6%@42h 3d -4.5% xm -0.029 | Q4: n994 up 34% pk +13.4%@38h 3d -5.1% xm -0.027 | Q5: n994 up 34% pk +13.1%@28h 3d -6.4% xm -0.050
+        top-bottom: 3d vs mkt -0.043 (t -6.3); up-first -0.01 (t -0.6); log further peak +0.023 (t +1.8)
+     val: Q1: n1034 up 38% pk +14.8%@106h 3d -1.7% xm -0.010 | Q2: n1011 up 37% pk +15.0%@86h 3d -2.2% xm -0.010 | Q3: n1031 up 40% pk +16.1%@91h 3d -3.5% xm -0.018 | Q4: n1047 up 38% pk +14.8%@71h 3d -3.3% xm -0.023 | Q5: n1046 up 39% pk +16.1%@56h 3d -5.3% xm -0.041
+        top-bottom: 3d vs mkt -0.031 (t -5.0); up-first +0.00 (t +0.2); log further peak +0.028 (t +2.7)
+  -- tb_k  cuts 0.461, 0.483, 0.498, 0.515
+     disc: Q1: n994 up 35% pk +13.1%@86h 3d -1.9% xm -0.010 | Q2: n994 up 33% pk +12.9%@48h 3d -4.0% xm -0.023 | Q3: n993 up 34% pk +13.6%@33h 3d -5.2% xm -0.034 | Q4: n994 up 33% pk +13.0%@24h 3d -5.6% xm -0.035 | Q5: n994 up 32% pk +12.8%@42h 3d -4.7% xm -0.029
+        top-bottom: 3d vs mkt -0.019 (t -2.6); up-first -0.03 (t -1.1); log further peak +0.001 (t +0.1)
+     val: Q1: n1555 up 41% pk +15.9%@118h 3d -1.5% xm -0.003 | Q2: n1128 up 38% pk +14.9%@76h 3d -2.9% xm -0.018 | Q3: n1021 up 38% pk +15.1%@77h 3d -4.0% xm -0.031 | Q4: n895 up 39% pk +15.6%@46h 3d -5.0% xm -0.031 | Q5: n570 up 35% pk +14.4%@56h 3d -4.9% xm -0.033
+        top-bottom: 3d vs mkt -0.030 (t -4.1); up-first -0.06 (t -2.4); log further peak +0.000 (t +0.0)
+  -- realert_k  cuts 0.5, 1.5
+     disc: 0: n3918 up 32% pk +12.6%@60h 3d -3.4% xm -0.019 | 1: n795 up 38% pk +14.9%@17h 3d -7.1% xm -0.039 | 2+: n256 up 40% pk +18.2%@10h 3d -12.1% xm -0.101
+        top-bottom: 3d vs mkt -0.082 (t -5.4); up-first +0.08 (t +2.4); log further peak +0.094 (t +4.7)
+     val: 0: n4163 up 38% pk +15.1%@95h 3d -2.4% xm -0.012 | 1: n766 up 40% pk +15.6%@31h 3d -6.8% xm -0.041 | 2+: n240 up 39% pk +17.6%@20h 3d -11.0% xm -0.094
+        top-bottom: 3d vs mkt -0.081 (t -6.0); up-first +0.01 (t +0.2); log further peak +0.030 (t +1.7)
+  -- green_k  cuts 0.25, 0.5
+     disc: Q1: n2305 up 33% pk +13.2%@63h 3d -3.4% xm -0.022 | Q2: n1785 up 33% pk +12.9%@43h 3d -4.5% xm -0.025 | Q3: n879 up 35% pk +12.7%@18h 3d -6.9% xm -0.041
+        top-bottom: 3d vs mkt -0.019 (t -2.6); up-first +0.02 (t +0.7); log further peak +0.020 (t +1.3)
+     val: Q1: n2453 up 40% pk +15.4%@106h 3d -2.2% xm -0.010 | Q2: n1927 up 37% pk +14.8%@68h 3d -3.6% xm -0.023 | Q3: n789 up 38% pk +16.2%@52h 3d -5.8% xm -0.045
+        top-bottom: 3d vs mkt -0.035 (t -5.6); up-first -0.02 (t -0.7); log further peak +0.008 (t +0.9)
+  -- mkt_k  cuts -0.00894, -0.00178, 0.00246, 0.00938
+     disc: Q1: n994 up 32% pk +12.7%@39h 3d -4.3% xm -0.032 | Q2: n996 up 35% pk +13.0%@56h 3d -4.0% xm -0.023 | Q3: n992 up 37% pk +14.7%@57h 3d -4.1% xm -0.029 | Q4: n995 up 33% pk +13.1%@47h 3d -3.6% xm -0.022 | Q5: n992 up 30% pk +12.3%@41h 3d -4.8% xm -0.025
+        top-bottom: 3d vs mkt +0.007 (t +0.9); up-first -0.03 (t -0.9); log further peak -0.018 (t -1.2)
+     val: Q1: n1060 up 41% pk +16.6%@97h 3d -2.4% xm -0.027 | Q2: n1074 up 37% pk +14.4%@68h 3d -3.5% xm -0.025 | Q3: n947 up 35% pk +13.7%@69h 3d -3.8% xm -0.025 | Q4: n1198 up 37% pk +15.1%@81h 3d -3.1% xm -0.016 | Q5: n890 up 44% pk +17.1%@100h 3d -2.0% xm -0.007
+        top-bottom: 3d vs mkt +0.019 (t +3.0); up-first +0.03 (t +1.1); log further peak +0.012 (t +0.9)
+
+######## checkpoint +8h  (disc n 4969, val n 5169)
+  base disc: up-first 33%, median further peak +13.3% at 55h, median 3d -3.4%, mean 3d log vs mkt -0.022 (t -9.1)
+  base val: up-first 39%, median further peak +15.4% at 90h, median 3d -2.6%, mean 3d log vs mkt -0.016 (t -8.2)
+  -- p_k  cuts -0.0855, -0.0488, -0.0176, 0.0273
+     disc: Q1: n994 up 35% pk +15.2%@63h 3d -2.5% xm -0.023 | Q2: n994 up 29% pk +12.2%@73h 3d -3.2% xm -0.010 | Q3: n993 up 35% pk +12.7%@72h 3d -2.4% xm -0.011 | Q4: n994 up 32% pk +12.7%@58h 3d -3.2% xm -0.017 | Q5: n994 up 36% pk +14.2%@20h 3d -8.6% xm -0.047
+        top-bottom: 3d vs mkt -0.024 (t -2.5); up-first +0.00 (t +0.1); log further peak +0.040 (t +2.3)
+     val: Q1: n730 up 46% pk +18.8%@112h 3d -1.1% xm -0.002 | Q2: n1056 up 39% pk +15.2%@111h 3d -1.3% xm -0.005 | Q3: n1250 up 34% pk +14.0%@104h 3d -2.0% xm -0.011 | Q4: n1223 up 37% pk +14.2%@84h 3d -2.9% xm -0.010 | Q5: n910 up 41% pk +16.9%@44h 3d -7.4% xm -0.052
+        top-bottom: 3d vs mkt -0.050 (t -6.4); up-first -0.05 (t -1.9); log further peak +0.016 (t +1.3)
+  -- hi_k  cuts 0.0122, 0.033, 0.0668, 0.133
+     disc: Q1: n994 up 30% pk +12.6%@94h 3d -1.9% xm -0.006 | Q2: n994 up 31% pk +12.4%@72h 3d -2.3% xm -0.007 | Q3: n993 up 33% pk +13.0%@61h 3d -3.1% xm -0.014 | Q4: n994 up 33% pk +13.0%@38h 3d -4.7% xm -0.027 | Q5: n994 up 40% pk +16.6%@17h 3d -8.1% xm -0.055
+        top-bottom: 3d vs mkt -0.049 (t -5.9); up-first +0.09 (t +4.3); log further peak +0.082 (t +6.6)
+     val: Q1: n1116 up 38% pk +15.0%@126h 3d -0.9% xm +0.000 | Q2: n1116 up 37% pk +14.6%@112h 3d -1.6% xm -0.002 | Q3: n1121 up 36% pk +14.4%@86h 3d -2.7% xm -0.012 | Q4: n975 up 43% pk +16.6%@69h 3d -3.4% xm -0.024 | Q5: n841 up 42% pk +18.1%@42h 3d -7.2% xm -0.049
+        top-bottom: 3d vs mkt -0.049 (t -6.9); up-first +0.04 (t +1.8); log further peak +0.061 (t +5.4)
+  -- dd_k  cuts -0.173, -0.123, -0.0873, -0.0521
+     disc: Q1: n994 up 39% pk +16.9%@43h 3d -4.4% xm -0.039 | Q2: n994 up 32% pk +13.4%@56h 3d -3.7% xm -0.022 | Q3: n993 up 32% pk +12.4%@62h 3d -3.5% xm -0.018 | Q4: n994 up 32% pk +12.4%@58h 3d -2.6% xm -0.015 | Q5: n994 up 31% pk +12.1%@55h 3d -3.6% xm -0.014
+        top-bottom: 3d vs mkt +0.025 (t +3.0); up-first -0.08 (t -2.4); log further peak -0.046 (t -2.6)
+     val: Q1: n584 up 44% pk +19.1%@64h 3d -3.4% xm -0.031 | Q2: n934 up 44% pk +17.0%@108h 3d -2.4% xm -0.012 | Q3: n1121 up 40% pk +16.4%@111h 3d -2.1% xm -0.014 | Q4: n1402 up 36% pk +14.4%@90h 3d -2.4% xm -0.016 | Q5: n1128 up 34% pk +13.2%@80h 3d -2.8% xm -0.012
+        top-bottom: 3d vs mkt +0.019 (t +2.3); up-first -0.11 (t -3.4); log further peak -0.032 (t -2.3)
+  -- v_k  cuts 5.58, 9.31, 15.9, 32.3
+     disc: Q1: n994 up 30% pk +12.2%@67h 3d -2.1% xm -0.006 | Q2: n994 up 32% pk +13.3%@67h 3d -2.2% xm -0.009 | Q3: n993 up 33% pk +12.9%@62h 3d -3.3% xm -0.016 | Q4: n994 up 36% pk +14.3%@51h 3d -3.3% xm -0.022 | Q5: n994 up 35% pk +14.4%@16h 3d -7.5% xm -0.057
+        top-bottom: 3d vs mkt -0.051 (t -6.6); up-first +0.05 (t +2.1); log further peak +0.054 (t +3.8)
+     val: Q1: n1061 up 42% pk +16.8%@137h 3d -0.6% xm -0.000 | Q2: n1099 up 40% pk +16.1%@108h 3d -1.7% xm -0.002 | Q3: n1041 up 37% pk +14.4%@97h 3d -2.2% xm -0.013 | Q4: n996 up 38% pk +14.7%@76h 3d -3.0% xm -0.017 | Q5: n972 up 37% pk +15.0%@35h 3d -6.4% xm -0.049
+        top-bottom: 3d vs mkt -0.049 (t -8.6); up-first -0.05 (t -1.9); log further peak +0.004 (t +0.3)
+  -- v_last_k  cuts 2.03, 3.71, 6.89, 15.7
+     disc: Q1: n994 up 30% pk +12.5%@81h 3d -1.9% xm -0.004 | Q2: n994 up 34% pk +14.2%@67h 3d -2.2% xm -0.008 | Q3: n993 up 32% pk +12.6%@61h 3d -2.8% xm -0.011 | Q4: n994 up 37% pk +14.0%@45h 3d -4.3% xm -0.026 | Q5: n994 up 35% pk +14.4%@16h 3d -8.3% xm -0.060
+        top-bottom: 3d vs mkt -0.057 (t -7.6); up-first +0.05 (t +2.3); log further peak +0.055 (t +4.6)
+     val: Q1: n1048 up 40% pk +16.1%@143h 3d -0.4% xm +0.006 | Q2: n1020 up 39% pk +15.8%@110h 3d -1.5% xm -0.001 | Q3: n1098 up 40% pk +15.5%@96h 3d -2.1% xm -0.011 | Q4: n1035 up 39% pk +15.3%@81h 3d -3.2% xm -0.019 | Q5: n968 up 36% pk +14.3%@26h 3d -7.0% xm -0.055
+        top-bottom: 3d vs mkt -0.062 (t -9.4); up-first -0.04 (t -1.4); log further peak +0.014 (t +1.2)
+  -- v_last3_k  cuts 2.54, 4.45, 7.91, 17.8
+     disc: Q1: n994 up 31% pk +12.6%@77h 3d -1.9% xm -0.005 | Q2: n994 up 32% pk +13.1%@63h 3d -2.0% xm -0.004 | Q3: n993 up 33% pk +13.0%@66h 3d -3.1% xm -0.016 | Q4: n994 up 36% pk +13.7%@42h 3d -4.0% xm -0.023 | Q5: n994 up 35% pk +14.7%@15h 3d -8.5% xm -0.060
+        top-bottom: 3d vs mkt -0.055 (t -6.9); up-first +0.04 (t +1.7); log further peak +0.049 (t +4.0)
+     val: Q1: n1071 up 40% pk +16.6%@137h 3d -0.5% xm +0.003 | Q2: n1072 up 40% pk +15.6%@117h 3d -1.3% xm -0.001 | Q3: n1021 up 40% pk +16.1%@93h 3d -2.3% xm -0.007 | Q4: n1017 up 39% pk +15.1%@78h 3d -3.0% xm -0.020 | Q5: n988 up 35% pk +14.1%@25h 3d -7.1% xm -0.056
+        top-bottom: 3d vs mkt -0.060 (t -9.3); up-first -0.05 (t -1.8); log further peak +0.006 (t +0.5)
+  -- v_decay_k  cuts 0.127, 0.195, 0.301, 0.533
+     disc: Q1: n994 up 29% pk +11.7%@77h 3d -1.9% xm -0.008 | Q2: n994 up 32% pk +12.8%@63h 3d -2.9% xm -0.012 | Q3: n993 up 33% pk +13.5%@56h 3d -3.7% xm -0.020 | Q4: n994 up 34% pk +12.9%@48h 3d -4.5% xm -0.024 | Q5: n994 up 38% pk +16.3%@23h 3d -5.8% xm -0.045
+        top-bottom: 3d vs mkt -0.038 (t -4.8); up-first +0.09 (t +4.5); log further peak +0.075 (t +6.2)
+     val: Q1: n931 up 38% pk +15.1%@142h 3d -1.2% xm -0.002 | Q2: n992 up 38% pk +14.8%@90h 3d -1.8% xm -0.010 | Q3: n1168 up 39% pk +15.6%@90h 3d -2.2% xm -0.010 | Q4: n1085 up 39% pk +14.9%@80h 3d -3.3% xm -0.017 | Q5: n993 up 41% pk +16.7%@54h 3d -5.1% xm -0.039
+        top-bottom: 3d vs mkt -0.037 (t -5.9); up-first +0.03 (t +1.2); log further peak +0.039 (t +3.9)
+  -- v_trend_k  cuts 0.227, 0.327, 0.456, 0.686
+     disc: Q1: n994 up 34% pk +14.7%@82h 3d -1.9% xm +0.001 | Q2: n994 up 32% pk +13.0%@62h 3d -2.5% xm -0.015 | Q3: n993 up 30% pk +12.2%@52h 3d -4.2% xm -0.026 | Q4: n994 up 34% pk +13.2%@45h 3d -4.5% xm -0.031 | Q5: n994 up 36% pk +14.0%@36h 3d -5.0% xm -0.037
+        top-bottom: 3d vs mkt -0.038 (t -4.7); up-first +0.02 (t +0.8); log further peak +0.024 (t +1.8)
+     val: Q1: n1072 up 39% pk +16.6%@112h 3d -0.9% xm -0.002 | Q2: n1011 up 36% pk +14.6%@93h 3d -2.7% xm -0.012 | Q3: n1030 up 41% pk +15.8%@96h 3d -2.3% xm -0.013 | Q4: n1019 up 38% pk +13.9%@81h 3d -3.2% xm -0.023 | Q5: n1037 up 40% pk +16.3%@65h 3d -4.0% xm -0.029
+        top-bottom: 3d vs mkt -0.027 (t -4.4); up-first +0.01 (t +0.4); log further peak +0.035 (t +3.2)
+  -- tb_k  cuts 0.464, 0.484, 0.498, 0.512
+     disc: Q1: n994 up 34% pk +13.2%@85h 3d -1.3% xm -0.005 | Q2: n994 up 34% pk +13.4%@62h 3d -3.2% xm -0.016 | Q3: n993 up 34% pk +13.9%@45h 3d -4.2% xm -0.033 | Q4: n994 up 32% pk +12.9%@28h 3d -5.0% xm -0.031 | Q5: n994 up 32% pk +13.1%@47h 3d -4.0% xm -0.023
+        top-bottom: 3d vs mkt -0.018 (t -2.5); up-first -0.02 (t -0.9); log further peak +0.011 (t +0.9)
+     val: Q1: n1568 up 39% pk +15.7%@134h 3d -1.1% xm +0.001 | Q2: n1167 up 39% pk +15.3%@86h 3d -2.2% xm -0.011 | Q3: n1031 up 39% pk +15.9%@78h 3d -3.5% xm -0.024 | Q4: n854 up 36% pk +15.0%@59h 3d -5.2% xm -0.038 | Q5: n549 up 39% pk +15.0%@64h 3d -3.3% xm -0.022
+        top-bottom: 3d vs mkt -0.023 (t -3.1); up-first -0.01 (t -0.2); log further peak +0.024 (t +2.0)
+  -- realert_k  cuts 0.5, 1.5
+     disc: 0: n3708 up 32% pk +12.8%@64h 3d -2.7% xm -0.013 | 1: n817 up 37% pk +14.9%@28h 3d -5.6% xm -0.029 | 2+: n444 up 39% pk +17.2%@13h 3d -10.7% xm -0.077
+        top-bottom: 3d vs mkt -0.064 (t -5.5); up-first +0.08 (t +3.1); log further peak +0.089 (t +5.9)
+     val: 0: n3952 up 39% pk +15.2%@108h 3d -1.7% xm -0.006 | 1: n814 up 37% pk +14.9%@44h 3d -5.3% xm -0.040 | 2+: n403 up 43% pk +18.3%@26h 3d -8.4% xm -0.061
+        top-bottom: 3d vs mkt -0.055 (t -4.5); up-first +0.04 (t +1.5); log further peak +0.058 (t +3.8)
+  -- green_k  cuts 0.25, 0.375, 0.5
+     disc: Q1: n1361 up 32% pk +13.2%@72h 3d -2.3% xm -0.016 | Q2: n1389 up 32% pk +12.7%@62h 3d -3.3% xm -0.016 | Q3: n1251 up 35% pk +14.2%@47h 3d -3.9% xm -0.025 | Q4: n968 up 34% pk +12.9%@30h 3d -5.3% xm -0.033
+        top-bottom: 3d vs mkt -0.016 (t -2.2); up-first +0.01 (t +0.5); log further peak +0.018 (t +1.2)
+     val: Q1: n1307 up 38% pk +15.3%@118h 3d -1.4% xm -0.002 | Q2: n1593 up 38% pk +14.9%@94h 3d -2.1% xm -0.013 | Q3: n1373 up 38% pk +15.3%@76h 3d -3.1% xm -0.016 | Q4: n896 up 42% pk +16.6%@66h 3d -4.9% xm -0.038
+        top-bottom: 3d vs mkt -0.036 (t -5.7); up-first +0.03 (t +1.5); log further peak +0.032 (t +3.1)
+  -- mkt_k  cuts -0.0153, -0.00367, 0.00396, 0.0134
+     disc: Q1: n994 up 34% pk +13.3%@44h 3d -3.2% xm -0.024 | Q2: n994 up 35% pk +13.9%@70h 3d -3.7% xm -0.022 | Q3: n993 up 33% pk +12.8%@61h 3d -3.6% xm -0.034 | Q4: n994 up 32% pk +12.6%@46h 3d -3.3% xm -0.009 | Q5: n994 up 33% pk +13.9%@53h 3d -3.6% xm -0.020
+        top-bottom: 3d vs mkt +0.005 (t +0.7); up-first -0.00 (t -0.0); log further peak -0.012 (t -0.8)
+     val: Q1: n946 up 43% pk +17.3%@105h 3d -1.7% xm -0.021 | Q2: n1123 up 37% pk +14.6%@79h 3d -3.2% xm -0.019 | Q3: n1095 up 33% pk +13.3%@90h 3d -2.6% xm -0.017 | Q4: n1120 up 40% pk +16.0%@82h 3d -2.9% xm -0.009 | Q5: n885 up 42% pk +16.3%@111h 3d -1.8% xm -0.012
+        top-bottom: 3d vs mkt +0.008 (t +1.3); up-first -0.01 (t -0.2); log further peak -0.008 (t -0.6)
+
+######## checkpoint +12h  (disc n 4965, val n 5166)
+  base disc: up-first 33%, median further peak +13.2% at 59h, median 3d -3.2%, mean 3d log vs mkt -0.019 (t -7.7)
+  base val: up-first 38%, median further peak +15.3% at 98h, median 3d -2.2%, mean 3d log vs mkt -0.013 (t -7.1)
+  -- p_k  cuts -0.0952, -0.0555, -0.0214, 0.0271
+     disc: Q1: n993 up 36% pk +14.9%@64h 3d -2.2% xm -0.016 | Q2: n993 up 29% pk +12.5%@82h 3d -2.4% xm -0.004 | Q3: n993 up 32% pk +12.2%@73h 3d -2.9% xm -0.016 | Q4: n993 up 31% pk +11.6%@63h 3d -3.5% xm -0.010 | Q5: n993 up 37% pk +14.9%@26h 3d -6.7% xm -0.047
+        top-bottom: 3d vs mkt -0.031 (t -3.2); up-first +0.02 (t +0.6); log further peak +0.031 (t +2.0)
+     val: Q1: n654 up 44% pk +18.2%@113h 3d -0.9% xm -0.001 | Q2: n1092 up 38% pk +15.1%@122h 3d -1.1% xm -0.005 | Q3: n1265 up 37% pk +14.3%@122h 3d -1.4% xm -0.005 | Q4: n1198 up 36% pk +14.4%@82h 3d -2.5% xm -0.011 | Q5: n957 up 39% pk +16.8%@45h 3d -6.3% xm -0.045
+        top-bottom: 3d vs mkt -0.045 (t -5.8); up-first -0.05 (t -1.6); log further peak +0.013 (t +1.0)
+  -- hi_k  cuts 0.0134, 0.0371, 0.0732, 0.148
+     disc: Q1: n993 up 30% pk +12.7%@98h 3d -1.6% xm -0.002 | Q2: n993 up 32% pk +12.2%@71h 3d -1.8% xm -0.003 | Q3: n993 up 32% pk +12.9%@60h 3d -3.2% xm -0.011 | Q4: n993 up 33% pk +12.6%@57h 3d -3.9% xm -0.022 | Q5: n993 up 39% pk +16.2%@23h 3d -7.1% xm -0.055
+        top-bottom: 3d vs mkt -0.053 (t -6.5); up-first +0.09 (t +3.9); log further peak +0.086 (t +6.8)
+     val: Q1: n1088 up 38% pk +14.5%@134h 3d -0.7% xm +0.003 | Q2: n1163 up 37% pk +14.6%@124h 3d -1.3% xm -0.002 | Q3: n1078 up 35% pk +14.1%@103h 3d -2.2% xm -0.010 | Q4: n990 up 41% pk +16.7%@72h 3d -3.1% xm -0.020 | Q5: n847 up 42% pk +18.1%@47h 3d -6.0% xm -0.046
+        top-bottom: 3d vs mkt -0.049 (t -6.8); up-first +0.04 (t +1.6); log further peak +0.063 (t +5.3)
+  -- dd_k  cuts -0.186, -0.135, -0.0955, -0.0578
+     disc: Q1: n994 up 37% pk +16.1%@48h 3d -4.2% xm -0.043 | Q2: n992 up 31% pk +13.4%@56h 3d -3.2% xm -0.014 | Q3: n993 up 31% pk +12.0%@64h 3d -3.1% xm -0.015 | Q4: n993 up 34% pk +13.3%@73h 3d -2.8% xm -0.013 | Q5: n993 up 32% pk +11.2%@59h 3d -3.0% xm -0.008
+        top-bottom: 3d vs mkt +0.035 (t +4.6); up-first -0.06 (t -1.8); log further peak -0.039 (t -2.5)
+     val: Q1: n581 up 46% pk +20.1%@76h 3d -3.0% xm -0.027 | Q2: n851 up 40% pk +15.6%@110h 3d -1.9% xm -0.010 | Q3: n1167 up 38% pk +15.2%@109h 3d -1.9% xm -0.010 | Q4: n1408 up 37% pk +14.8%@108h 3d -1.7% xm -0.011 | Q5: n1159 up 34% pk +14.0%@75h 3d -2.6% xm -0.015
+        top-bottom: 3d vs mkt +0.012 (t +1.5); up-first -0.12 (t -3.9); log further peak -0.052 (t -3.8)
+  -- v_k  cuts 4.77, 7.82, 13.3, 27.3
+     disc: Q1: n993 up 30% pk +11.4%@68h 3d -2.0% xm -0.003 | Q2: n993 up 33% pk +13.9%@80h 3d -2.1% xm -0.004 | Q3: n993 up 33% pk +13.1%@68h 3d -3.0% xm -0.011 | Q4: n993 up 35% pk +13.1%@58h 3d -3.4% xm -0.024 | Q5: n993 up 35% pk +14.6%@22h 3d -6.3% xm -0.051
+        top-bottom: 3d vs mkt -0.048 (t -6.1); up-first +0.06 (t +2.0); log further peak +0.050 (t +3.6)
+     val: Q1: n1091 up 43% pk +17.0%@137h 3d -0.4% xm +0.005 | Q2: n1064 up 38% pk +14.9%@124h 3d -1.7% xm -0.004 | Q3: n1034 up 38% pk +15.1%@102h 3d -1.9% xm -0.011 | Q4: n1021 up 36% pk +14.8%@87h 3d -2.6% xm -0.013 | Q5: n956 up 36% pk +15.0%@40h 3d -5.5% xm -0.047
+        top-bottom: 3d vs mkt -0.052 (t -9.2); up-first -0.07 (t -2.5); log further peak -0.001 (t -0.1)
+  -- v_last_k  cuts 1.61, 3.05, 5.64, 13.6
+     disc: Q1: n993 up 30% pk +12.7%@79h 3d -1.5% xm -0.001 | Q2: n993 up 34% pk +13.1%@75h 3d -1.8% xm -0.006 | Q3: n993 up 34% pk +13.1%@65h 3d -3.0% xm -0.009 | Q4: n993 up 35% pk +13.6%@55h 3d -3.5% xm -0.016 | Q5: n993 up 33% pk +13.4%@19h 3d -7.5% xm -0.061
+        top-bottom: 3d vs mkt -0.060 (t -8.0); up-first +0.03 (t +1.4); log further peak +0.057 (t +4.3)
+     val: Q1: n994 up 42% pk +16.8%@146h 3d -0.2% xm +0.011 | Q2: n1076 up 39% pk +15.5%@119h 3d -0.8% xm -0.001 | Q3: n1052 up 37% pk +14.7%@110h 3d -1.9% xm -0.008 | Q4: n1043 up 38% pk +15.0%@91h 3d -2.7% xm -0.014 | Q5: n1001 up 34% pk +15.0%@30h 3d -6.5% xm -0.055
+        top-bottom: 3d vs mkt -0.066 (t -10.4); up-first -0.08 (t -3.2); log further peak -0.002 (t -0.2)
+  -- v_last3_k  cuts 1.97, 3.43, 6.23, 14.7
+     disc: Q1: n993 up 30% pk +12.7%@79h 3d -1.6% xm -0.003 | Q2: n993 up 33% pk +12.9%@76h 3d -1.9% xm -0.003 | Q3: n993 up 35% pk +13.4%@59h 3d -3.0% xm -0.009 | Q4: n993 up 35% pk +13.4%@59h 3d -3.7% xm -0.015 | Q5: n993 up 34% pk +13.9%@18h 3d -7.4% xm -0.062
+        top-bottom: 3d vs mkt -0.059 (t -8.0); up-first +0.04 (t +1.7); log further peak +0.058 (t +4.5)
+     val: Q1: n1017 up 43% pk +17.2%@151h 3d -0.2% xm +0.011 | Q2: n1072 up 39% pk +15.2%@126h 3d -1.1% xm -0.000 | Q3: n1043 up 35% pk +14.6%@101h 3d -1.7% xm -0.008 | Q4: n1063 up 38% pk +15.1%@85h 3d -3.0% xm -0.017 | Q5: n971 up 34% pk +14.9%@32h 3d -7.0% xm -0.054
+        top-bottom: 3d vs mkt -0.065 (t -10.0); up-first -0.09 (t -3.4); log further peak -0.010 (t -0.9)
+  -- v_decay_k  cuts 0.105, 0.163, 0.251, 0.458
+     disc: Q1: n993 up 29% pk +12.1%@83h 3d -1.6% xm -0.003 | Q2: n993 up 31% pk +12.0%@71h 3d -2.5% xm -0.012 | Q3: n993 up 35% pk +13.9%@59h 3d -3.0% xm -0.011 | Q4: n993 up 33% pk +13.0%@52h 3d -4.0% xm -0.021 | Q5: n993 up 38% pk +15.5%@30h 3d -5.8% xm -0.046
+        top-bottom: 3d vs mkt -0.043 (t -5.4); up-first +0.09 (t +4.1); log further peak +0.074 (t +6.2)
+     val: Q1: n891 up 37% pk +15.2%@147h 3d -0.7% xm +0.003 | Q2: n1029 up 38% pk +14.7%@104h 3d -1.3% xm -0.006 | Q3: n1115 up 37% pk +14.9%@108h 3d -2.4% xm -0.012 | Q4: n1141 up 38% pk +15.2%@80h 3d -2.4% xm -0.012 | Q5: n990 up 40% pk +16.6%@55h 3d -4.9% xm -0.038
+        top-bottom: 3d vs mkt -0.042 (t -6.9); up-first +0.02 (t +0.9); log further peak +0.040 (t +3.9)
+  -- v_trend_k  cuts 0.223, 0.325, 0.459, 0.706
+     disc: Q1: n993 up 34% pk +13.7%@97h 3d -1.8% xm -0.005 | Q2: n993 up 31% pk +12.4%@60h 3d -2.8% xm -0.009 | Q3: n993 up 32% pk +13.4%@59h 3d -2.8% xm -0.014 | Q4: n993 up 33% pk +12.6%@47h 3d -3.9% xm -0.021 | Q5: n993 up 35% pk +13.6%@41h 3d -5.3% xm -0.043
+        top-bottom: 3d vs mkt -0.038 (t -4.9); up-first +0.01 (t +0.4); log further peak +0.029 (t +2.2)
+     val: Q1: n1048 up 40% pk +16.1%@127h 3d -0.8% xm +0.003 | Q2: n981 up 36% pk +14.7%@101h 3d -1.9% xm -0.010 | Q3: n1023 up 38% pk +15.0%@97h 3d -2.2% xm -0.009 | Q4: n1043 up 39% pk +14.9%@105h 3d -2.3% xm -0.014 | Q5: n1071 up 38% pk +15.8%@64h 3d -4.2% xm -0.035
+        top-bottom: 3d vs mkt -0.038 (t -7.0); up-first -0.02 (t -0.8); log further peak +0.021 (t +1.9)
+  -- tb_k  cuts 0.466, 0.485, 0.497, 0.51
+     disc: Q1: n993 up 34% pk +13.6%@91h 3d -1.2% xm -0.002 | Q2: n993 up 34% pk +13.4%@61h 3d -2.6% xm -0.013 | Q3: n993 up 34% pk +13.3%@48h 3d -3.8% xm -0.023 | Q4: n993 up 33% pk +13.4%@42h 3d -4.3% xm -0.031 | Q5: n993 up 31% pk +12.5%@54h 3d -3.5% xm -0.023
+        top-bottom: 3d vs mkt -0.021 (t -2.9); up-first -0.03 (t -1.1); log further peak +0.007 (t +0.6)
+     val: Q1: n1592 up 40% pk +15.7%@140h 3d -0.7% xm +0.004 | Q2: n1230 up 39% pk +14.8%@100h 3d -1.7% xm -0.009 | Q3: n931 up 37% pk +15.0%@76h 3d -3.2% xm -0.021 | Q4: n876 up 37% pk +15.4%@68h 3d -4.6% xm -0.036 | Q5: n537 up 37% pk +16.3%@65h 3d -3.6% xm -0.022
+        top-bottom: 3d vs mkt -0.026 (t -3.5); up-first -0.02 (t -0.8); log further peak +0.021 (t +1.8)
+  -- realert_k  cuts 0.5, 1.5
+     disc: 0: n3565 up 32% pk +12.7%@72h 3d -2.4% xm -0.009 | 1: n820 up 36% pk +13.8%@42h 3d -4.7% xm -0.024 | 2+: n580 up 38% pk +16.5%@12h 3d -8.4% xm -0.068
+        top-bottom: 3d vs mkt -0.059 (t -5.8); up-first +0.07 (t +2.8); log further peak +0.082 (t +5.7)
+     val: 0: n3794 up 38% pk +15.0%@115h 3d -1.5% xm -0.003 | 1: n860 up 37% pk +14.9%@60h 3d -4.2% xm -0.030 | 2+: n512 up 40% pk +18.3%@33h 3d -7.4% xm -0.058
+        top-bottom: 3d vs mkt -0.055 (t -5.7); up-first +0.02 (t +1.0); log further peak +0.047 (t +3.8)
+  -- green_k  cuts 0.333, 0.417, 0.5
+     disc: Q1: n1802 up 32% pk +13.0%@72h 3d -2.2% xm -0.011 | Q2: n1156 up 33% pk +13.4%@65h 3d -3.0% xm -0.014 | Q3: n1025 up 32% pk +12.5%@54h 3d -4.4% xm -0.028 | Q4: n982 up 36% pk +14.4%@42h 3d -4.0% xm -0.028
+        top-bottom: 3d vs mkt -0.018 (t -2.4); up-first +0.04 (t +1.7); log further peak +0.028 (t +2.1)
+     val: Q1: n1764 up 37% pk +14.8%@120h 3d -1.4% xm -0.002 | Q2: n1353 up 39% pk +15.1%@108h 3d -1.8% xm -0.013 | Q3: n1132 up 36% pk +14.8%@77h 3d -3.0% xm -0.016 | Q4: n917 up 42% pk +17.4%@72h 3d -4.1% xm -0.032
+        top-bottom: 3d vs mkt -0.030 (t -5.2); up-first +0.05 (t +2.1); log further peak +0.037 (t +3.6)
+  -- mkt_k  cuts -0.019, -0.00548, 0.00424, 0.016
+     disc: Q1: n994 up 31% pk +13.0%@53h 3d -3.0% xm -0.018 | Q2: n992 up 35% pk +13.9%@56h 3d -3.8% xm -0.023 | Q3: n993 up 33% pk +12.7%@77h 3d -3.8% xm -0.026 | Q4: n993 up 33% pk +12.6%@58h 3d -3.0% xm -0.015 | Q5: n993 up 33% pk +13.8%@59h 3d -2.2% xm -0.011
+        top-bottom: 3d vs mkt +0.007 (t +1.0); up-first +0.02 (t +0.6); log further peak -0.003 (t -0.2)
+     val: Q1: n872 up 41% pk +17.7%@111h 3d -1.6% xm -0.019 | Q2: n1068 up 36% pk +14.4%@86h 3d -2.4% xm -0.020 | Q3: n1227 up 35% pk +13.2%@89h 3d -2.8% xm -0.012 | Q4: n1034 up 38% pk +15.6%@98h 3d -2.2% xm -0.011 | Q5: n965 up 42% pk +16.7%@112h 3d -1.5% xm -0.004
+        top-bottom: 3d vs mkt +0.015 (t +2.3); up-first +0.01 (t +0.2); log further peak -0.004 (t -0.3)
+
+######## checkpoint +24h  (disc n 4962, val n 5165)
+  base disc: up-first 33%, median further peak +12.9% at 72h, median 3d -2.2%, mean 3d log vs mkt -0.010 (t -4.1)
+  base val: up-first 39%, median further peak +15.4% at 118h, median 3d -1.4%, mean 3d log vs mkt -0.004 (t -2.5)
+  -- p_k  cuts -0.114, -0.0698, -0.0326, 0.0208
+     disc: Q1: n993 up 37% pk +15.2%@83h 3d -1.9% xm -0.013 | Q2: n992 up 29% pk +12.4%@91h 3d -1.6% xm -0.003 | Q3: n992 up 31% pk +11.2%@91h 3d -1.4% xm +0.002 | Q4: n992 up 33% pk +12.9%@75h 3d -1.7% xm -0.002 | Q5: n993 up 35% pk +13.8%@37h 3d -4.9% xm -0.035
+        top-bottom: 3d vs mkt -0.022 (t -2.4); up-first -0.02 (t -0.7); log further peak +0.024 (t +1.8)
+     val: Q1: n647 up 42% pk +17.1%@125h 3d -1.5% xm -0.008 | Q2: n1044 up 39% pk +15.8%@134h 3d -0.5% xm +0.008 | Q3: n1292 up 35% pk +14.0%@129h 3d -0.8% xm +0.002 | Q4: n1216 up 39% pk +14.6%@117h 3d -0.7% xm +0.002 | Q5: n966 up 41% pk +16.9%@76h 3d -4.5% xm -0.032
+        top-bottom: 3d vs mkt -0.023 (t -3.2); up-first -0.00 (t -0.1); log further peak +0.025 (t +2.1)
+  -- hi_k  cuts 0.0165, 0.044, 0.0865, 0.179
+     disc: Q1: n993 up 30% pk +12.7%@106h 3d -0.9% xm +0.002 | Q2: n992 up 31% pk +11.7%@78h 3d -1.1% xm +0.001 | Q3: n992 up 32% pk +12.8%@84h 3d -1.8% xm -0.003 | Q4: n992 up 32% pk +12.8%@70h 3d -2.8% xm -0.008 | Q5: n993 up 39% pk +15.2%@36h 3d -5.3% xm -0.042
+        top-bottom: 3d vs mkt -0.043 (t -5.3); up-first +0.09 (t +4.0); log further peak +0.076 (t +6.5)
+     val: Q1: n1068 up 38% pk +15.2%@146h 3d -0.2% xm +0.010 | Q2: n1141 up 36% pk +14.0%@128h 3d -0.5% xm +0.002 | Q3: n1053 up 39% pk +14.6%@127h 3d -1.4% xm -0.003 | Q4: n1000 up 40% pk +15.5%@104h 3d -1.6% xm -0.003 | Q5: n903 up 42% pk +18.3%@74h 3d -4.2% xm -0.032
+        top-bottom: 3d vs mkt -0.043 (t -6.0); up-first +0.04 (t +1.6); log further peak +0.058 (t +5.0)
+  -- dd_k  cuts -0.214, -0.157, -0.115, -0.0736
+     disc: Q1: n993 up 39% pk +15.8%@67h 3d -2.9% xm -0.028 | Q2: n992 up 30% pk +12.1%@67h 3d -2.7% xm -0.013 | Q3: n992 up 32% pk +12.8%@89h 3d -2.0% xm -0.004 | Q4: n992 up 33% pk +12.1%@71h 3d -1.6% xm -0.001 | Q5: n993 up 30% pk +12.1%@74h 3d -1.6% xm -0.005
+        top-bottom: 3d vs mkt +0.023 (t +3.2); up-first -0.09 (t -3.0); log further peak -0.056 (t -3.9)
+     val: Q1: n611 up 46% pk +20.2%@98h 3d -2.9% xm -0.016 | Q2: n894 up 38% pk +16.3%@116h 3d -1.6% xm -0.008 | Q3: n1162 up 40% pk +15.2%@127h 3d -1.2% xm -0.001 | Q4: n1346 up 37% pk +14.7%@128h 3d -0.7% xm +0.002 | Q5: n1152 up 37% pk +13.8%@106h 3d -1.2% xm -0.006
+        top-bottom: 3d vs mkt +0.011 (t +1.4); up-first -0.09 (t -3.1); log further peak -0.047 (t -3.7)
+  -- v_k  cuts 3.64, 6.02, 10.3, 20.8
+     disc: Q1: n993 up 27% pk +12.0%@74h 3d -1.1% xm -0.004 | Q2: n992 up 36% pk +13.5%@86h 3d -1.1% xm +0.001 | Q3: n992 up 33% pk +12.8%@80h 3d -1.9% xm -0.003 | Q4: n992 up 34% pk +13.0%@82h 3d -2.2% xm -0.005 | Q5: n993 up 35% pk +13.0%@45h 3d -4.8% xm -0.040
+        top-bottom: 3d vs mkt -0.036 (t -5.0); up-first +0.08 (t +3.4); log further peak +0.052 (t +4.5)
+     val: Q1: n1032 up 43% pk +17.0%@150h 3d -0.1% xm +0.011 | Q2: n1100 up 40% pk +15.8%@136h 3d -0.7% xm +0.002 | Q3: n1082 up 37% pk +14.3%@123h 3d -0.9% xm +0.000 | Q4: n975 up 38% pk +15.1%@98h 3d -1.5% xm -0.009 | Q5: n976 up 35% pk +14.9%@80h 3d -3.6% xm -0.028
+        top-bottom: 3d vs mkt -0.039 (t -6.7); up-first -0.08 (t -2.9); log further peak -0.002 (t -0.2)
+  -- v_last_k  cuts 1.5, 2.73, 5.25, 13.2
+     disc: Q1: n993 up 32% pk +13.4%@86h 3d -0.6% xm +0.006 | Q2: n992 up 30% pk +11.8%@81h 3d -1.7% xm +0.003 | Q3: n992 up 34% pk +12.8%@82h 3d -1.7% xm -0.003 | Q4: n992 up 34% pk +13.4%@71h 3d -2.3% xm -0.007 | Q5: n993 up 34% pk +13.1%@42h 3d -5.3% xm -0.049
+        top-bottom: 3d vs mkt -0.054 (t -6.9); up-first +0.02 (t +0.9); log further peak +0.036 (t +3.0)
+     val: Q1: n887 up 43% pk +17.0%@154h 3d +0.3% xm +0.011 | Q2: n1107 up 39% pk +15.4%@130h 3d -0.5% xm +0.006 | Q3: n1202 up 39% pk +15.4%@124h 3d -0.9% xm +0.003 | Q4: n1108 up 37% pk +14.7%@106h 3d -1.8% xm -0.012 | Q5: n861 up 36% pk +14.8%@69h 3d -4.5% xm -0.035
+        top-bottom: 3d vs mkt -0.046 (t -6.9); up-first -0.07 (t -2.8); log further peak +0.010 (t +0.8)
+  -- v_last3_k  cuts 1.71, 2.97, 5.37, 13.6
+     disc: Q1: n993 up 31% pk +13.2%@86h 3d -1.0% xm +0.002 | Q2: n992 up 33% pk +13.1%@90h 3d -0.9% xm +0.006 | Q3: n992 up 32% pk +12.3%@78h 3d -1.7% xm -0.004 | Q4: n992 up 34% pk +12.9%@78h 3d -2.3% xm -0.006 | Q5: n993 up 34% pk +13.0%@38h 3d -5.9% xm -0.049
+        top-bottom: 3d vs mkt -0.051 (t -6.4); up-first +0.03 (t +1.3); log further peak +0.044 (t +3.3)
+     val: Q1: n991 up 41% pk +16.5%@154h 3d +0.0% xm +0.009 | Q2: n1138 up 39% pk +15.3%@126h 3d -0.4% xm +0.006 | Q3: n1130 up 39% pk +15.1%@120h 3d -0.8% xm +0.004 | Q4: n1031 up 39% pk +15.7%@120h 3d -1.8% xm -0.011 | Q5: n875 up 36% pk +14.8%@61h 3d -4.6% xm -0.035
+        top-bottom: 3d vs mkt -0.045 (t -6.6); up-first -0.05 (t -1.9); log further peak +0.021 (t +1.8)
+  -- v_decay_k  cuts 0.0796, 0.126, 0.192, 0.365
+     disc: Q1: n993 up 29% pk +12.3%@98h 3d -0.8% xm +0.003 | Q2: n992 up 30% pk +12.2%@86h 3d -1.7% xm -0.005 | Q3: n992 up 33% pk +13.0%@72h 3d -1.8% xm -0.007 | Q4: n992 up 36% pk +13.3%@71h 3d -2.6% xm -0.009 | Q5: n993 up 37% pk +13.8%@44h 3d -4.7% xm -0.033
+        top-bottom: 3d vs mkt -0.036 (t -4.8); up-first +0.08 (t +3.8); log further peak +0.068 (t +5.5)
+     val: Q1: n870 up 38% pk +15.2%@148h 3d -0.2% xm +0.006 | Q2: n1064 up 39% pk +15.3%@122h 3d -1.0% xm +0.004 | Q3: n1045 up 39% pk +14.9%@127h 3d -0.7% xm +0.003 | Q4: n1193 up 39% pk +14.4%@106h 3d -1.8% xm -0.009 | Q5: n993 up 40% pk +17.0%@86h 3d -3.2% xm -0.024
+        top-bottom: 3d vs mkt -0.030 (t -4.9); up-first +0.02 (t +1.0); log further peak +0.051 (t +4.5)
+  -- v_trend_k  cuts 0.25, 0.369, 0.519, 0.826
+     disc: Q1: n993 up 32% pk +12.6%@103h 3d -1.2% xm +0.001 | Q2: n992 up 33% pk +13.0%@84h 3d -1.7% xm -0.003 | Q3: n992 up 33% pk +13.4%@72h 3d -2.3% xm -0.007 | Q4: n992 up 30% pk +12.4%@64h 3d -2.7% xm -0.011 | Q5: n993 up 35% pk +13.2%@52h 3d -3.5% xm -0.031
+        top-bottom: 3d vs mkt -0.031 (t -4.4); up-first +0.03 (t +1.2); log further peak +0.050 (t +4.2)
+     val: Q1: n1065 up 40% pk +15.7%@139h 3d +0.0% xm +0.005 | Q2: n1049 up 36% pk +14.4%@122h 3d -1.4% xm +0.000 | Q3: n1013 up 40% pk +15.9%@119h 3d -1.0% xm +0.001 | Q4: n1013 up 38% pk +16.1%@106h 3d -1.4% xm -0.008 | Q5: n1025 up 40% pk +15.6%@92h 3d -3.2% xm -0.021
+        top-bottom: 3d vs mkt -0.026 (t -4.5); up-first +0.00 (t +0.1); log further peak +0.016 (t +1.5)
+  -- tb_k  cuts 0.471, 0.486, 0.496, 0.507
+     disc: Q1: n993 up 32% pk +13.4%@92h 3d -0.6% xm -0.001 | Q2: n992 up 33% pk +12.9%@74h 3d -1.8% xm -0.005 | Q3: n992 up 33% pk +12.6%@72h 3d -2.8% xm -0.017 | Q4: n992 up 33% pk +13.2%@59h 3d -3.0% xm -0.017 | Q5: n993 up 33% pk +12.7%@66h 3d -2.7% xm -0.011
+        top-bottom: 3d vs mkt -0.010 (t -1.5); up-first +0.01 (t +0.6); log further peak +0.006 (t +0.6)
+     val: Q1: n1609 up 39% pk +15.7%@146h 3d -0.2% xm +0.008 | Q2: n1202 up 41% pk +15.5%@115h 3d -1.1% xm +0.002 | Q3: n1033 up 37% pk +15.1%@110h 3d -1.7% xm -0.003 | Q4: n827 up 36% pk +15.2%@90h 3d -3.4% xm -0.025 | Q5: n494 up 40% pk +15.8%@97h 3d -2.6% xm -0.026
+        top-bottom: 3d vs mkt -0.034 (t -4.4); up-first +0.01 (t +0.2); log further peak +0.028 (t +2.1)
+  -- realert_k  cuts 0.5, 1.5
+     disc: 0: n3366 up 31% pk +12.8%@85h 3d -1.4% xm -0.002 | 1: n848 up 35% pk +12.5%@70h 3d -2.5% xm -0.006 | 2+: n748 up 37% pk +14.3%@27h 3d -6.6% xm -0.051
+        top-bottom: 3d vs mkt -0.049 (t -6.3); up-first +0.05 (t +2.7); log further peak +0.051 (t +4.4)
+     val: 0: n3562 up 39% pk +15.2%@132h 3d -0.7% xm +0.003 | 1: n909 up 37% pk +14.3%@100h 3d -2.1% xm -0.010 | 2+: n694 up 40% pk +17.3%@73h 3d -4.4% xm -0.035
+        top-bottom: 3d vs mkt -0.038 (t -5.1); up-first +0.01 (t +0.5); log further peak +0.044 (t +4.2)
+  -- green_k  cuts 0.375, 0.417, 0.458, 0.5
+     disc: Q1: n1701 up 31% pk +12.8%@87h 3d -1.8% xm -0.010 | Q2: n830 up 34% pk +12.9%@80h 3d -1.8% xm -0.003 | Q3: n830 up 30% pk +11.8%@66h 3d -2.4% xm -0.015 | Q4: n673 up 35% pk +14.3%@66h 3d -2.2% xm -0.005 | Q5: n928 up 35% pk +14.0%@56h 3d -3.1% xm -0.015
+        top-bottom: 3d vs mkt -0.005 (t -0.7); up-first +0.04 (t +1.7); log further peak +0.022 (t +1.8)
+     val: Q1: n1690 up 37% pk +14.9%@130h 3d -0.8% xm +0.004 | Q2: n957 up 37% pk +14.3%@100h 3d -1.5% xm -0.001 | Q3: n920 up 38% pk +15.1%@120h 3d -1.6% xm -0.008 | Q4: n710 up 43% pk +16.8%@128h 3d -1.4% xm -0.005 | Q5: n888 up 42% pk +16.9%@96h 3d -2.2% xm -0.018
+        top-bottom: 3d vs mkt -0.022 (t -3.7); up-first +0.05 (t +2.1); log further peak +0.034 (t +3.0)
+  -- mkt_k  cuts -0.0293, -0.009, 0.00473, 0.0221
+     disc: Q1: n993 up 30% pk +11.9%@66h 3d -2.0% xm -0.017 | Q2: n992 up 31% pk +12.6%@75h 3d -2.4% xm -0.012 | Q3: n992 up 36% pk +14.1%@79h 3d -2.7% xm -0.011 | Q4: n992 up 35% pk +13.5%@81h 3d -1.8% xm -0.008 | Q5: n993 up 32% pk +12.7%@64h 3d -1.7% xm -0.003
+        top-bottom: 3d vs mkt +0.013 (t +1.9); up-first +0.02 (t +0.5); log further peak +0.015 (t +0.9)
+     val: Q1: n867 up 40% pk +15.7%@135h 3d -1.1% xm -0.011 | Q2: n1076 up 37% pk +14.0%@103h 3d -1.5% xm -0.004 | Q3: n1114 up 37% pk +14.5%@114h 3d -1.6% xm -0.003 | Q4: n1165 up 39% pk +15.4%@119h 3d -1.5% xm -0.004 | Q5: n943 up 43% pk +17.8%@124h 3d -0.8% xm +0.000
+        top-bottom: 3d vs mkt +0.012 (t +2.0); up-first +0.03 (t +0.9); log further peak +0.022 (t +1.5)
+
+######## checkpoint +48h  (disc n 4953, val n 5163)
+  base disc: up-first 32%, median further peak +12.8% at 80h, median 3d -1.6%, mean 3d log vs mkt -0.006 (t -2.7)
+  base val: up-first 39%, median further peak +15.8% at 123h, median 3d -0.5%, mean 3d log vs mkt +0.003 (t +1.5)
+  -- p_k  cuts -0.139, -0.0825, -0.0383, 0.0236
+     disc: Q1: n991 up 36% pk +15.3%@75h 3d -0.2% xm -0.009 | Q2: n990 up 31% pk +12.8%@98h 3d -1.2% xm +0.001 | Q3: n991 up 28% pk +10.9%@102h 3d -1.2% xm +0.001 | Q4: n990 up 30% pk +11.2%@82h 3d -2.0% xm -0.000 | Q5: n991 up 36% pk +14.4%@47h 3d -3.8% xm -0.024
+        top-bottom: 3d vs mkt -0.014 (t -1.7); up-first -0.00 (t -0.0); log further peak +0.021 (t +1.7)
+     val: Q1: n561 up 41% pk +17.7%@121h 3d -0.2% xm -0.008 | Q2: n1103 up 35% pk +13.8%@124h 3d -0.3% xm +0.008 | Q3: n1244 up 36% pk +14.5%@132h 3d -0.1% xm +0.005 | Q4: n1210 up 40% pk +15.7%@133h 3d -0.3% xm +0.013 | Q5: n1045 up 46% pk +19.6%@102h 3d -2.6% xm -0.011
+        top-bottom: 3d vs mkt -0.003 (t -0.4); up-first +0.04 (t +1.5); log further peak +0.046 (t +3.8)
+  -- hi_k  cuts 0.0199, 0.0525, 0.101, 0.207
+     disc: Q1: n991 up 29% pk +11.9%@107h 3d -0.9% xm +0.002 | Q2: n990 up 29% pk +12.2%@90h 3d -1.0% xm -0.002 | Q3: n991 up 33% pk +13.1%@96h 3d -1.1% xm +0.001 | Q4: n990 up 31% pk +12.3%@76h 3d -1.9% xm -0.007 | Q5: n991 up 37% pk +15.9%@47h 3d -4.0% xm -0.027
+        top-bottom: 3d vs mkt -0.029 (t -3.4); up-first +0.08 (t +3.8); log further peak +0.079 (t +7.1)
+     val: Q1: n1055 up 38% pk +14.4%@143h 3d +0.2% xm +0.011 | Q2: n1163 up 35% pk +14.2%@131h 3d -0.1% xm +0.005 | Q3: n1054 up 39% pk +15.5%@130h 3d -0.5% xm +0.005 | Q4: n1011 up 41% pk +16.5%@115h 3d -0.4% xm +0.008 | Q5: n880 up 45% pk +19.7%@93h 3d -3.3% xm -0.018
+        top-bottom: 3d vs mkt -0.029 (t -4.5); up-first +0.07 (t +3.1); log further peak +0.067 (t +5.8)
+  -- dd_k  cuts -0.249, -0.181, -0.131, -0.0821
+     disc: Q1: n991 up 38% pk +15.9%@59h 3d -1.6% xm -0.023 | Q2: n990 up 33% pk +13.5%@85h 3d -0.9% xm -0.006 | Q3: n991 up 29% pk +12.4%@84h 3d -1.7% xm +0.001 | Q4: n990 up 31% pk +12.0%@102h 3d -1.7% xm -0.003 | Q5: n991 up 30% pk +10.8%@76h 3d -1.9% xm -0.001
+        top-bottom: 3d vs mkt +0.022 (t +3.0); up-first -0.08 (t -2.8); log further peak -0.050 (t -4.1)
+     val: Q1: n574 up 47% pk +20.0%@94h 3d -1.2% xm -0.011 | Q2: n853 up 40% pk +16.6%@118h 3d -0.5% xm +0.004 | Q3: n1146 up 37% pk +15.0%@122h 3d -0.5% xm +0.005 | Q4: n1378 up 37% pk +15.0%@133h 3d -0.4% xm +0.002 | Q5: n1212 up 40% pk +15.1%@133h 3d -0.3% xm +0.008
+        top-bottom: 3d vs mkt +0.019 (t +2.0); up-first -0.07 (t -2.3); log further peak -0.030 (t -2.3)
+  -- v_k  cuts 2.78, 4.38, 7.25, 14.7
+     disc: Q1: n991 up 28% pk +10.9%@85h 3d -1.6% xm -0.005 | Q2: n990 up 31% pk +12.3%@85h 3d -1.0% xm +0.000 | Q3: n991 up 34% pk +13.3%@95h 3d -1.1% xm -0.004 | Q4: n990 up 30% pk +13.2%@80h 3d -1.5% xm +0.001 | Q5: n991 up 37% pk +15.3%@59h 3d -2.9% xm -0.024
+        top-bottom: 3d vs mkt -0.019 (t -2.5); up-first +0.08 (t +3.2); log further peak +0.058 (t +5.2)
+     val: Q1: n1094 up 41% pk +16.2%@147h 3d +0.3% xm +0.008 | Q2: n1058 up 38% pk +14.7%@126h 3d +0.0% xm +0.010 | Q3: n1059 up 40% pk +16.3%@125h 3d -0.4% xm +0.008 | Q4: n1019 up 37% pk +15.9%@114h 3d -1.3% xm -0.004 | Q5: n933 up 40% pk +16.1%@97h 3d -1.6% xm -0.009
+        top-bottom: 3d vs mkt -0.016 (t -3.2); up-first -0.02 (t -0.7); log further peak +0.013 (t +1.1)
+  -- v_last_k  cuts 0.939, 1.71, 3.11, 7.29
+     disc: Q1: n991 up 31% pk +12.2%@99h 3d -1.0% xm -0.002 | Q2: n990 up 32% pk +12.6%@92h 3d -1.1% xm +0.006 | Q3: n991 up 29% pk +11.7%@86h 3d -1.5% xm -0.002 | Q4: n990 up 33% pk +13.2%@76h 3d -1.6% xm -0.003 | Q5: n991 up 35% pk +14.9%@49h 3d -3.6% xm -0.030
+        top-bottom: 3d vs mkt -0.028 (t -3.4); up-first +0.04 (t +1.8); log further peak +0.050 (t +4.4)
+     val: Q1: n1025 up 39% pk +14.9%@139h 3d +0.2% xm +0.008 | Q2: n1123 up 39% pk +15.9%@126h 3d +0.0% xm +0.008 | Q3: n1132 up 36% pk +14.8%@115h 3d -0.6% xm +0.005 | Q4: n1015 up 42% pk +17.1%@135h 3d -0.9% xm +0.008 | Q5: n868 up 41% pk +16.5%@89h 3d -2.6% xm -0.019
+        top-bottom: 3d vs mkt -0.026 (t -4.0); up-first +0.02 (t +0.8); log further peak +0.027 (t +2.6)
+  -- v_last3_k  cuts 1.08, 1.84, 3.22, 7.17
+     disc: Q1: n991 up 29% pk +11.4%@90h 3d -1.2% xm -0.004 | Q2: n990 up 32% pk +12.5%@94h 3d -1.1% xm +0.005 | Q3: n991 up 29% pk +12.2%@85h 3d -1.5% xm -0.004 | Q4: n990 up 35% pk +13.7%@85h 3d -1.0% xm +0.003 | Q5: n991 up 35% pk +14.9%@49h 3d -3.9% xm -0.033
+        top-bottom: 3d vs mkt -0.029 (t -3.5); up-first +0.06 (t +2.5); log further peak +0.051 (t +4.4)
+     val: Q1: n997 up 39% pk +14.4%@135h 3d +0.0% xm +0.008 | Q2: n1198 up 38% pk +15.3%@126h 3d -0.0% xm +0.007 | Q3: n1095 up 40% pk +16.5%@130h 3d -0.1% xm +0.010 | Q4: n1001 up 40% pk +16.1%@128h 3d -1.1% xm +0.003 | Q5: n872 up 41% pk +16.8%@90h 3d -2.8% xm -0.019
+        top-bottom: 3d vs mkt -0.027 (t -4.1); up-first +0.02 (t +0.8); log further peak +0.029 (t +2.7)
+  -- v_decay_k  cuts 0.0584, 0.0914, 0.143, 0.259
+     disc: Q1: n991 up 30% pk +11.8%@105h 3d -0.7% xm +0.003 | Q2: n990 up 30% pk +12.2%@92h 3d -1.2% xm -0.002 | Q3: n991 up 30% pk +12.4%@82h 3d -1.8% xm -0.004 | Q4: n990 up 33% pk +13.3%@72h 3d -1.2% xm -0.005 | Q5: n991 up 36% pk +14.7%@54h 3d -3.6% xm -0.024
+        top-bottom: 3d vs mkt -0.027 (t -3.8); up-first +0.06 (t +2.8); log further peak +0.067 (t +6.3)
+     val: Q1: n922 up 37% pk +15.0%@146h 3d +0.3% xm +0.010 | Q2: n1024 up 38% pk +14.7%@120h 3d -0.2% xm +0.004 | Q3: n1100 up 38% pk +15.1%@141h 3d -0.3% xm +0.006 | Q4: n1118 up 39% pk +15.9%@114h 3d -1.2% xm +0.006 | Q5: n999 up 45% pk +18.7%@97h 3d -2.4% xm -0.012
+        top-bottom: 3d vs mkt -0.023 (t -3.9); up-first +0.07 (t +3.0); log further peak +0.055 (t +5.1)
+  -- v_trend_k  cuts 0.207, 0.293, 0.414, 0.664
+     disc: Q1: n991 up 33% pk +13.3%@86h 3d -0.8% xm +0.002 | Q2: n990 up 34% pk +13.0%@95h 3d -1.5% xm +0.001 | Q3: n991 up 31% pk +13.0%@87h 3d -1.7% xm -0.005 | Q4: n990 up 31% pk +12.3%@75h 3d -1.8% xm -0.003 | Q5: n991 up 31% pk +13.2%@58h 3d -2.5% xm -0.026
+        top-bottom: 3d vs mkt -0.028 (t -3.9); up-first -0.02 (t -0.9); log further peak +0.016 (t +1.4)
+     val: Q1: n1163 up 36% pk +15.1%@115h 3d -0.4% xm +0.006 | Q2: n1030 up 40% pk +15.2%@134h 3d -0.1% xm +0.009 | Q3: n1054 up 38% pk +15.3%@126h 3d -0.5% xm +0.002 | Q4: n1043 up 39% pk +15.7%@132h 3d -0.6% xm +0.002 | Q5: n873 up 45% pk +18.9%@104h 3d -1.4% xm -0.007
+        top-bottom: 3d vs mkt -0.014 (t -2.1); up-first +0.08 (t +3.2); log further peak +0.042 (t +3.6)
+  -- tb_k  cuts 0.475, 0.487, 0.496, 0.506
+     disc: Q1: n991 up 34% pk +13.7%@102h 3d -0.5% xm -0.002 | Q2: n990 up 32% pk +12.5%@84h 3d -1.4% xm -0.002 | Q3: n991 up 33% pk +13.3%@80h 3d -1.8% xm -0.006 | Q4: n990 up 33% pk +13.0%@70h 3d -2.3% xm -0.008 | Q5: n991 up 29% pk +11.6%@71h 3d -2.3% xm -0.015
+        top-bottom: 3d vs mkt -0.013 (t -2.3); up-first -0.04 (t -2.0); log further peak -0.006 (t -0.6)
+     val: Q1: n1788 up 37% pk +14.9%@143h 3d +0.1% xm +0.009 | Q2: n1176 up 40% pk +15.8%@124h 3d -0.4% xm +0.005 | Q3: n970 up 40% pk +16.2%@113h 3d -1.1% xm +0.004 | Q4: n827 up 43% pk +17.9%@102h 3d -2.1% xm -0.006 | Q5: n402 up 37% pk +16.3%@110h 3d -1.6% xm -0.011
+        top-bottom: 3d vs mkt -0.020 (t -2.4); up-first +0.00 (t +0.0); log further peak +0.026 (t +2.0)
+  -- realert_k  cuts 0.5, 1.5
+     disc: 0: n3256 up 31% pk +12.3%@90h 3d -1.2% xm -0.003 | 1: n881 up 33% pk +13.1%@82h 3d -1.7% xm -0.002 | 2+: n816 up 37% pk +15.1%@48h 3d -3.6% xm -0.026
+        top-bottom: 3d vs mkt -0.023 (t -3.2); up-first +0.06 (t +2.8); log further peak +0.054 (t +4.9)
+     val: 0: n3454 up 38% pk +15.1%@132h 3d -0.1% xm +0.006 | 1: n952 up 38% pk +15.4%@118h 3d -1.2% xm -0.001 | 2+: n757 up 46% pk +19.5%@94h 3d -2.2% xm -0.008
+        top-bottom: 3d vs mkt -0.015 (t -2.2); up-first +0.08 (t +3.5); log further peak +0.052 (t +5.3)
+  -- green_k  cuts 0.375, 0.438, 0.458, 0.5
+     disc: Q1: n1031 up 31% pk +12.6%@89h 3d -1.1% xm -0.008 | Q2: n1501 up 32% pk +13.2%@90h 3d -1.5% xm -0.005 | Q3: n613 up 32% pk +12.9%@78h 3d -2.0% xm -0.004 | Q4: n923 up 31% pk +11.6%@68h 3d -1.8% xm -0.006 | Q5: n885 up 34% pk +14.3%@69h 3d -2.1% xm -0.009
+        top-bottom: 3d vs mkt -0.001 (t -0.1); up-first +0.03 (t +1.0); log further peak +0.025 (t +2.2)
+     val: Q1: n751 up 34% pk +15.1%@134h 3d -0.6% xm +0.004 | Q2: n1710 up 37% pk +14.4%@121h 3d -0.4% xm +0.003 | Q3: n667 up 38% pk +15.3%@113h 3d -0.1% xm +0.011 | Q4: n1057 up 41% pk +16.4%@123h 3d -1.1% xm -0.002 | Q5: n978 up 46% pk +19.4%@126h 3d -0.4% xm +0.000
+        top-bottom: 3d vs mkt -0.004 (t -0.7); up-first +0.12 (t +4.4); log further peak +0.054 (t +4.7)
+  -- mkt_k  cuts -0.0446, -0.0152, 0.00374, 0.028
+     disc: Q1: n991 up 29% pk +13.2%@68h 3d -0.3% xm -0.009 | Q2: n990 up 30% pk +12.3%@86h 3d -1.9% xm -0.006 | Q3: n994 up 32% pk +12.5%@84h 3d -2.4% xm -0.010 | Q4: n987 up 34% pk +12.8%@95h 3d -1.9% xm -0.008 | Q5: n991 up 34% pk +13.3%@74h 3d -1.4% xm +0.000
+        top-bottom: 3d vs mkt +0.009 (t +1.1); up-first +0.05 (t +1.7); log further peak +0.021 (t +1.7)
+     val: Q1: n804 up 38% pk +15.7%@118h 3d +0.1% xm -0.004 | Q2: n932 up 36% pk +14.2%@124h 3d -0.6% xm +0.003 | Q3: n976 up 36% pk +13.7%@116h 3d -1.5% xm +0.001 | Q4: n1266 up 41% pk +16.3%@122h 3d -0.3% xm +0.006 | Q5: n1185 up 45% pk +19.0%@133h 3d -0.2% xm +0.006
+        top-bottom: 3d vs mkt +0.010 (t +1.7); up-first +0.07 (t +2.1); log further peak +0.042 (t +3.0)
+
+######## checkpoint +72h  (disc n 4943, val n 5164)
+  base disc: up-first 31%, median further peak +12.3% at 85h, median 3d -1.5%, mean 3d log vs mkt -0.007 (t -2.9)
+  base val: up-first 39%, median further peak +15.8% at 124h, median 3d -0.1%, mean 3d log vs mkt +0.006 (t +3.8)
+  -- p_k  cuts -0.146, -0.0887, -0.0414, 0.0258
+     disc: Q1: n989 up 35% pk +14.0%@84h 3d -1.0% xm -0.016 | Q2: n988 up 28% pk +10.7%@89h 3d -1.1% xm -0.001 | Q3: n990 up 29% pk +11.1%@105h 3d -1.2% xm +0.001 | Q4: n987 up 30% pk +11.4%@98h 3d -1.5% xm -0.003 | Q5: n989 up 35% pk +14.0%@55h 3d -4.0% xm -0.015
+        top-bottom: 3d vs mkt +0.001 (t +0.1); up-first -0.00 (t -0.1); log further peak +0.025 (t +1.8)
+     val: Q1: n647 up 41% pk +17.0%@115h 3d +0.2% xm +0.002 | Q2: n1014 up 35% pk +13.9%@126h 3d +0.0% xm +0.008 | Q3: n1188 up 36% pk +13.9%@136h 3d +0.3% xm +0.009 | Q4: n1231 up 40% pk +16.5%@141h 3d +0.0% xm +0.011 | Q5: n1084 up 45% pk +19.5%@99h 3d -1.5% xm -0.001
+        top-bottom: 3d vs mkt -0.004 (t -0.6); up-first +0.05 (t +1.5); log further peak +0.044 (t +3.4)
+  -- hi_k  cuts 0.0222, 0.0577, 0.111, 0.23
+     disc: Q1: n991 up 29% pk +10.8%@115h 3d -1.0% xm +0.000 | Q2: n986 up 28% pk +11.0%@92h 3d -1.2% xm -0.002 | Q3: n996 up 32% pk +12.4%@104h 3d -1.5% xm -0.005 | Q4: n981 up 30% pk +12.3%@79h 3d -1.4% xm -0.007 | Q5: n989 up 37% pk +15.6%@51h 3d -3.4% xm -0.019
+        top-bottom: 3d vs mkt -0.019 (t -2.4); up-first +0.08 (t +3.6); log further peak +0.074 (t +6.9)
+     val: Q1: n1036 up 35% pk +14.2%@140h 3d +0.3% xm +0.010 | Q2: n1149 up 34% pk +14.0%@141h 3d -0.2% xm +0.002 | Q3: n1048 up 40% pk +15.3%@129h 3d -0.1% xm +0.009 | Q4: n1028 up 42% pk +16.5%@118h 3d -0.2% xm +0.008 | Q5: n903 up 46% pk +20.3%@91h 3d -1.1% xm +0.001
+        top-bottom: 3d vs mkt -0.010 (t -1.7); up-first +0.11 (t +4.6); log further peak +0.077 (t +7.1)
+  -- dd_k  cuts -0.264, -0.191, -0.141, -0.0898
+     disc: Q1: n989 up 38% pk +15.8%@67h 3d -2.3% xm -0.024 | Q2: n988 up 32% pk +12.7%@89h 3d -1.2% xm -0.006 | Q3: n989 up 29% pk +11.8%@86h 3d -1.4% xm -0.003 | Q4: n988 up 28% pk +10.1%@88h 3d -1.2% xm +0.001 | Q5: n989 up 30% pk +10.9%@98h 3d -2.2% xm -0.000
+        top-bottom: 3d vs mkt +0.024 (t +3.5); up-first -0.07 (t -2.9); log further peak -0.053 (t -4.3)
+     val: Q1: n593 up 46% pk +19.8%@93h 3d -0.4% xm -0.004 | Q2: n900 up 40% pk +16.8%@126h 3d +0.4% xm +0.011 | Q3: n1068 up 38% pk +14.1%@118h 3d -0.3% xm +0.007 | Q4: n1338 up 37% pk +14.7%@127h 3d -0.1% xm +0.008 | Q5: n1265 up 39% pk +15.8%@146h 3d -0.2% xm +0.005
+        top-bottom: 3d vs mkt +0.009 (t +1.2); up-first -0.06 (t -2.3); log further peak -0.023 (t -1.8)
+  -- v_k  cuts 2.41, 3.71, 6.04, 12
+     disc: Q1: n989 up 28% pk +10.4%@93h 3d -1.4% xm -0.008 | Q2: n988 up 30% pk +11.5%@94h 3d -1.5% xm -0.000 | Q3: n989 up 30% pk +11.6%@93h 3d -1.3% xm -0.000 | Q4: n988 up 33% pk +14.2%@85h 3d -1.2% xm -0.004 | Q5: n989 up 35% pk +14.6%@67h 3d -2.7% xm -0.021
+        top-bottom: 3d vs mkt -0.013 (t -1.8); up-first +0.07 (t +3.1); log further peak +0.055 (t +5.1)
+     val: Q1: n1098 up 40% pk +15.9%@146h 3d +0.1% xm +0.008 | Q2: n1031 up 39% pk +15.6%@131h 3d +0.2% xm +0.013 | Q3: n1085 up 38% pk +14.8%@122h 3d -0.3% xm +0.004 | Q4: n1021 up 39% pk +16.0%@117h 3d -0.3% xm +0.002 | Q5: n929 up 41% pk +16.9%@96h 3d -0.5% xm +0.006
+        top-bottom: 3d vs mkt -0.002 (t -0.3); up-first +0.01 (t +0.2); log further peak +0.022 (t +2.0)
+  -- v_last_k  cuts 0.798, 1.42, 2.49, 5.59
+     disc: Q1: n989 up 30% pk +11.6%@95h 3d -1.3% xm -0.001 | Q2: n988 up 31% pk +12.0%@97h 3d -1.2% xm -0.002 | Q3: n989 up 29% pk +11.3%@96h 3d -1.5% xm -0.002 | Q4: n988 up 30% pk +12.0%@82h 3d -1.4% xm -0.011 | Q5: n989 up 37% pk +15.1%@65h 3d -3.0% xm -0.017
+        top-bottom: 3d vs mkt -0.016 (t -2.0); up-first +0.07 (t +3.1); log further peak +0.053 (t +4.6)
+     val: Q1: n995 up 37% pk +14.1%@126h 3d -0.3% xm +0.008 | Q2: n1074 up 39% pk +15.6%@136h 3d +0.4% xm +0.012 | Q3: n1072 up 39% pk +15.4%@141h 3d +0.3% xm +0.009 | Q4: n1051 up 42% pk +16.8%@126h 3d +0.1% xm +0.007 | Q5: n972 up 41% pk +16.6%@84h 3d -1.6% xm -0.005
+        top-bottom: 3d vs mkt -0.013 (t -2.3); up-first +0.04 (t +1.5); log further peak +0.035 (t +3.1)
+  -- v_last3_k  cuts 0.911, 1.54, 2.57, 5.52
+     disc: Q1: n989 up 29% pk +11.4%@92h 3d -1.4% xm -0.005 | Q2: n988 up 30% pk +11.7%@98h 3d -1.2% xm +0.000 | Q3: n989 up 31% pk +12.2%@100h 3d -1.3% xm -0.004 | Q4: n988 up 31% pk +12.3%@80h 3d -1.6% xm -0.004 | Q5: n989 up 35% pk +14.7%@64h 3d -3.1% xm -0.020
+        top-bottom: 3d vs mkt -0.015 (t -2.0); up-first +0.07 (t +2.9); log further peak +0.055 (t +5.2)
+     val: Q1: n978 up 37% pk +13.7%@129h 3d -0.1% xm +0.007 | Q2: n1081 up 39% pk +15.8%@134h 3d +0.2% xm +0.012 | Q3: n1039 up 38% pk +15.4%@143h 3d +0.4% xm +0.009 | Q4: n1079 up 43% pk +17.0%@129h 3d +0.0% xm +0.009 | Q5: n987 up 40% pk +16.5%@86h 3d -1.7% xm -0.007
+        top-bottom: 3d vs mkt -0.014 (t -2.4); up-first +0.03 (t +1.2); log further peak +0.042 (t +3.9)
+  -- v_decay_k  cuts 0.0492, 0.0771, 0.121, 0.216
+     disc: Q1: n989 up 30% pk +11.9%@117h 3d -0.8% xm +0.003 | Q2: n988 up 30% pk +11.3%@96h 3d -1.5% xm -0.005 | Q3: n989 up 28% pk +11.1%@84h 3d -1.7% xm -0.009 | Q4: n988 up 34% pk +12.8%@78h 3d -1.4% xm -0.003 | Q5: n989 up 35% pk +14.8%@61h 3d -3.2% xm -0.019
+        top-bottom: 3d vs mkt -0.022 (t -3.0); up-first +0.04 (t +1.9); log further peak +0.059 (t +5.5)
+     val: Q1: n925 up 36% pk +14.9%@148h 3d +0.4% xm +0.010 | Q2: n997 up 37% pk +14.5%@123h 3d -0.1% xm +0.009 | Q3: n1119 up 39% pk +14.7%@139h 3d +0.0% xm +0.006 | Q4: n1096 up 40% pk +16.3%@118h 3d -0.6% xm +0.007 | Q5: n1027 up 45% pk +19.1%@96h 3d -0.8% xm -0.000
+        top-bottom: 3d vs mkt -0.010 (t -1.8); up-first +0.09 (t +3.9); log further peak +0.059 (t +5.9)
+  -- v_trend_k  cuts 0.205, 0.305, 0.445, 0.725
+     disc: Q1: n989 up 33% pk +12.7%@88h 3d -1.1% xm +0.000 | Q2: n988 up 31% pk +12.5%@94h 3d -1.3% xm -0.002 | Q3: n989 up 30% pk +11.5%@94h 3d -1.6% xm -0.011 | Q4: n988 up 30% pk +12.3%@82h 3d -1.8% xm -0.006 | Q5: n989 up 32% pk +12.2%@72h 3d -2.4% xm -0.014
+        top-bottom: 3d vs mkt -0.014 (t -2.2); up-first -0.02 (t -0.6); log further peak +0.016 (t +1.2)
+     val: Q1: n1116 up 37% pk +14.8%@115h 3d +0.3% xm +0.013 | Q2: n1020 up 38% pk +14.6%@123h 3d -0.3% xm +0.008 | Q3: n1048 up 37% pk +14.7%@130h 3d -0.2% xm +0.002 | Q4: n1012 up 42% pk +17.0%@136h 3d -0.1% xm +0.010 | Q5: n968 up 42% pk +17.9%@122h 3d -0.5% xm -0.003
+        top-bottom: 3d vs mkt -0.015 (t -3.0); up-first +0.05 (t +1.9); log further peak +0.037 (t +3.3)
+  -- tb_k  cuts 0.476, 0.487, 0.496, 0.505
+     disc: Q1: n989 up 32% pk +11.5%@107h 3d -0.8% xm -0.003 | Q2: n988 up 30% pk +12.1%@96h 3d -1.4% xm -0.006 | Q3: n989 up 31% pk +13.0%@86h 3d -1.7% xm -0.007 | Q4: n988 up 32% pk +13.1%@68h 3d -2.2% xm -0.009 | Q5: n989 up 31% pk +11.5%@74h 3d -1.9% xm -0.008
+        top-bottom: 3d vs mkt -0.005 (t -0.8); up-first -0.00 (t -0.1); log further peak -0.001 (t -0.1)
+     val: Q1: n1789 up 37% pk +14.7%@152h 3d +0.3% xm +0.010 | Q2: n1179 up 37% pk +14.5%@112h 3d -0.2% xm +0.007 | Q3: n1012 up 44% pk +17.8%@128h 3d -0.2% xm +0.002 | Q4: n787 up 43% pk +17.9%@94h 3d -1.3% xm +0.008 | Q5: n397 up 37% pk +16.4%@98h 3d -1.0% xm -0.005
+        top-bottom: 3d vs mkt -0.015 (t -2.0); up-first -0.00 (t -0.0); log further peak +0.035 (t +2.7)
+  -- realert_k  cuts 0.5, 1.5
+     disc: 0: n3164 up 30% pk +11.2%@95h 3d -1.3% xm -0.003 | 1: n902 up 32% pk +13.4%@88h 3d -1.6% xm -0.006 | 2+: n877 up 35% pk +15.0%@57h 3d -2.8% xm -0.019
+        top-bottom: 3d vs mkt -0.016 (t -2.3); up-first +0.05 (t +2.3); log further peak +0.050 (t +5.1)
+     val: 0: n3359 up 38% pk +15.1%@135h 3d +0.0% xm +0.008 | 1: n975 up 38% pk +15.3%@112h 3d -0.5% xm +0.007 | 2+: n830 up 46% pk +19.8%@95h 3d -0.4% xm -0.001
+        top-bottom: 3d vs mkt -0.009 (t -1.4); up-first +0.08 (t +4.1); log further peak +0.049 (t +5.3)
+  -- green_k  cuts 0.403, 0.431, 0.472, 0.5
+     disc: Q1: n1271 up 31% pk +12.9%@96h 3d -1.3% xm -0.011 | Q2: n765 up 29% pk +12.4%@90h 3d -1.5% xm -0.003 | Q3: n1336 up 31% pk +11.7%@83h 3d -1.3% xm -0.006 | Q4: n715 up 32% pk +11.9%@76h 3d -1.9% xm -0.001 | Q5: n856 up 33% pk +12.7%@73h 3d -2.4% xm -0.008
+        top-bottom: 3d vs mkt +0.003 (t +0.4); up-first +0.02 (t +0.8); log further peak +0.004 (t +0.3)
+     val: Q1: n968 up 34% pk +13.8%@120h 3d +0.0% xm +0.004 | Q2: n840 up 36% pk +14.2%@123h 3d -0.3% xm +0.009 | Q3: n1492 up 38% pk +15.7%@126h 3d -0.2% xm +0.008 | Q4: n848 up 42% pk +17.1%@122h 3d -0.1% xm +0.008 | Q5: n1016 up 47% pk +19.6%@132h 3d +0.2% xm +0.002
+        top-bottom: 3d vs mkt -0.002 (t -0.4); up-first +0.13 (t +4.9); log further peak +0.053 (t +4.6)
+  -- mkt_k  cuts -0.0546, -0.0204, 0.00361, 0.0345
+     disc: Q1: n989 up 28% pk +11.5%@73h 3d -1.0% xm -0.012 | Q2: n988 up 31% pk +11.2%@89h 3d -1.2% xm -0.004 | Q3: n989 up 34% pk +13.6%@95h 3d -2.0% xm -0.009 | Q4: n989 up 31% pk +12.7%@94h 3d -2.0% xm -0.004 | Q5: n988 up 32% pk +12.6%@76h 3d -1.9% xm -0.004
+        top-bottom: 3d vs mkt +0.008 (t +1.0); up-first +0.04 (t +1.3); log further peak +0.014 (t +1.1)
+     val: Q1: n847 up 35% pk +13.7%@118h 3d -0.6% xm -0.001 | Q2: n900 up 39% pk +14.9%@121h 3d +0.3% xm +0.005 | Q3: n935 up 34% pk +13.8%@119h 3d -0.3% xm +0.006 | Q4: n1234 up 40% pk +16.4%@128h 3d -0.2% xm +0.005 | Q5: n1248 up 46% pk +19.2%@140h 3d +0.3% xm +0.013
+        top-bottom: 3d vs mkt +0.014 (t +2.9); up-first +0.11 (t +3.2); log further peak +0.057 (t +4.2)

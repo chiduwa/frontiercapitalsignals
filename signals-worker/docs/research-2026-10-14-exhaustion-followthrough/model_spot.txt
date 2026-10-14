@@ -1,0 +1,78 @@
+
+######## checkpoint +0h  features 20
+  fit disc -> score val: AUC 0.555  base up-first 36%  (n train 4852, test 5169)
+    deciles (low->high) up-first: 32% 30% 34% 34% 33% 35% 39% 36% 41% 48%
+    deciles further peak median:  +12.1% +12.2% +13.2% +13.1% +13.9% +14.3% +15.6% +14.4% +16.7% +21.8%
+    deciles hours to peak median: 61 45 46 35 57 31 30 51 53 72
+    deciles 3d return median:     -4.4% -5.6% -4.9% -6.0% -4.8% -5.8% -5.1% -6.4% -4.7% -4.8%
+    held-out importance (AUC drop): dist_hi90 0.019, run24Z 0.018, ratio 0.014, upper_wick 0.008, volZ 0.007, breadth24 0.007, barPct 0.007, btc_pre7d 0.007, pre30d 0.004, tb_alert 0.004
+  fit val -> score disc: AUC 0.537  base up-first 33%  (n train 5169, test 4852)
+    deciles (low->high) up-first: 30% 31% 30% 32% 32% 33% 33% 34% 37% 40%
+    deciles further peak median:  +11.5% +11.5% +11.8% +13.9% +12.0% +12.2% +13.4% +13.3% +15.0% +15.6%
+    deciles hours to peak median: 17 18 13 16 12 22 20 23 24 22
+    deciles 3d return median:     -6.2% -6.3% -7.1% -7.3% -7.2% -6.1% -6.2% -5.7% -6.7% -7.3%
+  depth-3 tree (fit 2025-26, numbers below are 2023-24 held-out | 2025-26 in-sample):
+    IF dist_hi90 <= -0.7 AND volZ <= 3.83
+       held-out n 42: up-first 31%, further peak median +10.9% at 32h, 3d -6.0%, 7d -7.4%  | in-sample n 201: up-first 36%, peak +15.3% at 14h
+    IF dist_hi90 <= -0.7 AND volZ > 3.83
+       held-out n 32: up-first 50%, further peak median +24.5% at 124h, 3d -4.6%, 7d +0.5%  | in-sample n 168: up-first 55%, peak +23.7% at 50h
+    IF dist_hi90 > -0.7 AND run24Z <= 2.27 AND btc_pre24 <= -0.0326
+       held-out n 139: up-first 29%, further peak median +12.7% at 30h, 3d -4.6%, 7d -5.1%  | in-sample n 152: up-first 44%, peak +18.3% at 71h
+    IF dist_hi90 > -0.7 AND run24Z <= 2.27 AND btc_pre24 > -0.0326
+       held-out n 2242: up-first 33%, further peak median +13.3% at 52h, 3d -4.3%, 7d -4.6%  | in-sample n 2178: up-first 28%, peak +10.9% at 23h
+    IF dist_hi90 > -0.7 AND run24Z > 2.27 AND tb_alert <= 0.616
+       held-out n 2467: up-first 38%, further peak median +15.6% at 43h, 3d -6.5%, 7d -6.0%  | in-sample n 2002: up-first 35%, peak +14.0% at 12h
+    IF dist_hi90 > -0.7 AND run24Z > 2.27 AND tb_alert > 0.616
+       held-out n 247: up-first 40%, further peak median +16.5% at 69h, 3d -4.0%, 7d -2.3%  | in-sample n 151: up-first 51%, peak +21.0% at 45h
+
+######## checkpoint +4h  features 32
+  fit disc -> score val: AUC 0.518  base up-first 39%  (n train 4848, test 5169)
+    deciles (low->high) up-first: 38% 36% 36% 38% 39% 40% 38% 38% 37% 45%
+    deciles further peak median:  +15.5% +14.6% +14.3% +14.2% +15.4% +15.7% +14.8% +15.3% +15.7% +19.3%
+    deciles hours to peak median: 132 80 108 82 82 85 68 65 85 72
+    deciles 3d return median:     -1.4% -3.8% -3.2% -2.6% -3.3% -3.2% -3.5% -2.8% -3.3% -4.0%
+    held-out importance (AUC drop): dist_hi90 0.012, run24Z 0.011, pre30d 0.008, ratio 0.007, breadth24 0.006, barPct 0.003, btc_pre7d 0.003, upper_wick 0.003, v_k 0.002, volZ 0.002
+  fit val -> score disc: AUC 0.514  base up-first 33%  (n train 5169, test 4848)
+    deciles (low->high) up-first: 33% 32% 32% 32% 35% 34% 31% 32% 35% 38%
+    deciles further peak median:  +12.5% +12.4% +12.3% +12.6% +13.6% +13.1% +12.5% +12.8% +13.3% +16.7%
+    deciles hours to peak median: 60 43 49 39 38 50 42 49 44 46
+    deciles 3d return median:     -4.3% -4.5% -3.4% -4.4% -4.1% -4.2% -4.2% -3.9% -4.4% -4.7%
+  depth-3 tree (fit 2025-26, numbers below are 2023-24 held-out | 2025-26 in-sample):
+    IF age_days <= 1.37e+03 AND age_days <= 791 AND pre30d <= 0.46
+       held-out n 4146: up-first 37%, further peak median +14.5% at 86h, 3d -2.8%, 7d -2.5%  | in-sample n 1726: up-first 35%, peak +13.7% at 56h
+    IF age_days <= 1.37e+03 AND age_days <= 791 AND pre30d > 0.46
+       held-out n 1023: up-first 46%, further peak median +20.5% at 68h, 3d -4.6%, 7d -4.5%  | in-sample n 196: up-first 48%, peak +21.3% at 47h
+    IF age_days <= 1.37e+03 AND age_days > 791 AND hi_k <= 0.106
+       held-out n 0: up-first nan%, further peak median   n/a at nanh, 3d   n/a, 7d   n/a  | in-sample n 2111: up-first 27%, peak +11.2% at 50h
+    IF age_days <= 1.37e+03 AND age_days > 791 AND hi_k > 0.106
+       held-out n 0: up-first nan%, further peak median   n/a at nanh, 3d   n/a, 7d   n/a  | in-sample n 587: up-first 38%, peak +15.8% at 15h
+    IF age_days > 1.37e+03
+       held-out n 0: up-first nan%, further peak median   n/a at nanh, 3d   n/a, 7d   n/a  | in-sample n 228: up-first 49%, peak +21.0% at 96h
+
+######## checkpoint +24h  features 32
+  fit disc -> score val: AUC 0.521  base up-first 39%  (n train 4837, test 5165)
+    deciles (low->high) up-first: 40% 37% 38% 35% 38% 38% 34% 39% 43% 46%
+    deciles further peak median:  +16.3% +13.9% +15.1% +14.7% +15.8% +14.9% +13.0% +15.9% +16.7% +19.2%
+    deciles hours to peak median: 146 124 134 113 117 135 100 116 104 93
+    deciles 3d return median:     -0.7% -1.2% -1.3% -1.5% -1.6% -1.7% -1.6% -1.0% -1.7% -1.3%
+    held-out importance (AUC drop): pre30d 0.010, run24Z 0.009, breadth24 0.008, btc_pre7d 0.005, ratio 0.005, upper_wick 0.005, green_k 0.004, dist_hi90 0.004, v_last3_k 0.003, tb_k 0.002
+  fit val -> score disc: AUC 0.542  base up-first 33%  (n train 5165, test 4837)
+    deciles (low->high) up-first: 28% 30% 32% 29% 33% 30% 36% 38% 36% 38%
+    deciles further peak median:  +10.1% +11.7% +12.9% +12.0% +12.1% +12.6% +13.5% +14.9% +14.9% +15.6%
+    deciles hours to peak median: 62 76 88 74 79 69 71 67 68 81
+    deciles 3d return median:     -3.1% -2.4% -1.3% -2.6% -1.7% -2.7% -1.7% -2.3% -1.4% -2.3%
+  depth-3 tree (fit 2025-26, numbers below are 2023-24 held-out | 2025-26 in-sample):
+    IF hi_k <= 0.24 AND p_k <= -0.179 AND mkt_k <= -0.0166
+       held-out n 72: up-first 54%, further peak median +22.1% at 162h, 3d -0.0%, 7d +0.2%  | in-sample n 153: up-first 39%, peak +17.1% at 67h
+    IF hi_k <= 0.24 AND p_k <= -0.179 AND mkt_k > -0.0166
+       held-out n 57: up-first 35%, further peak median +10.4% at 48h, 3d -3.8%, 7d -4.7%  | in-sample n 151: up-first 48%, peak +20.6% at 70h
+    IF hi_k <= 0.24 AND p_k > -0.179 AND age_days <= 1.37e+03
+       held-out n 4438: up-first 38%, further peak median +14.9% at 126h, 3d -0.9%, 7d -0.6%  | in-sample n 3680: up-first 30%, peak +12.0% at 80h
+    IF hi_k <= 0.24 AND p_k > -0.179 AND age_days > 1.37e+03
+       held-out n 0: up-first nan%, further peak median   n/a at nanh, 3d   n/a, 7d   n/a  | in-sample n 168: up-first 48%, peak +19.8% at 184h
+    IF hi_k > 0.24 AND volZ <= 4.94 AND hi_k <= 0.305
+       held-out n 140: up-first 36%, further peak median +16.2% at 90h, 3d -2.6%, 7d -3.0%  | in-sample n 153: up-first 54%, peak +22.2% at 72h
+    IF hi_k > 0.24 AND volZ <= 4.94 AND hi_k > 0.305
+       held-out n 326: up-first 43%, further peak median +19.3% at 56h, 3d -6.8%, 7d -7.5%  | in-sample n 374: up-first 43%, peak +19.1% at 24h
+    IF hi_k > 0.24 AND volZ > 4.94
+       held-out n 132: up-first 39%, further peak median +17.9% at 41h, 3d -8.2%, 7d -8.6%  | in-sample n 158: up-first 27%, peak +12.4% at 27h
