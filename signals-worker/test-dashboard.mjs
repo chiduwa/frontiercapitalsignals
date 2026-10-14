@@ -776,6 +776,10 @@ console.log('\n== sell pressure: per-coin exhaustion, your coins, and the market
   check('breadth is shown to the same decimal as the sentence beside it', /4\.4%/.test(view.doc.getElementById('panel-exhMarket')?.textContent || ''));
   check('coins without history or off the venue say so', /Not enough trading history/.test(rowText('NEWC')) && /Not on Binance spot/.test(rowText('HYPE')));
   check('the market panel is context, never a sell signal', /never a sell signal/.test(text) && /more upside/.test(text));
+  check('path-risk wording names mark price and modeled reference without claiming ordering',
+    /mark price.*modeled entry/.test(text) && /five minutes after the signal hour closed/.test(text)
+    && /any-time excursion frequencies/.test(text) && !/upside often comes first|above the alert price/.test(text));
+  check('major-coin banner stays non-directional', /no reliable weakness signal was established/.test(text));
   check('recent prints say when both rules fired', /both rules/.test(view.doc.getElementById('panel-exhPrints')?.textContent || ''));
   check('the live record reads in plain words', /coins then trailed the market by 4\.94% per warning/.test(text) && /live record still collecting/.test(text));
   check('stocks are stated as tested and not signalled', /no stock sell warnings/.test(text));

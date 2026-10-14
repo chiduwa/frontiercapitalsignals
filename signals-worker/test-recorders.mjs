@@ -13,7 +13,13 @@ test('liquidation stream uses the /market/ws route (the old /ws route delivers n
 test('a forceOrder message keeps Binance fields verbatim plus receipt time', () => {
   const msg = JSON.stringify({ e: 'forceOrder', E: 1791825694197, o: { s: 'API3USDT', S: 'SELL', o: 'LIMIT', f: 'IOC', q: '295.5', p: '0.3070', ap: '0.3114', X: 'FILLED', l: '189.8', z: '295.5', T: 1791825693191 } });
   const r = recordFromMessage(msg, 1791825694300);
-  assert.deepEqual(r, { r: 1791825694300, E: 1791825694197, s: 'API3USDT', S: 'SELL', o: 'LIMIT', f: 'IOC', q: '295.5', p: '0.3070', ap: '0.3114', X: 'FILLED', l: '189.8', z: '295.5', T: 1791825693191 });
+  assert.deepEqual(r.raw, JSON.parse(msg), 'the full exchange payload remains available');
+  assert.equal(r.schemaVersion, 2);
+  assert.equal(r.sourceVersion, 1);
+  assert.equal(r.r, 1791825694300);
+  assert.equal(r.s, 'API3USDT');
+  assert.equal(r.z, '295.5');
+  assert.equal(r.T, 1791825693191);
   assert.equal(recordFromMessage('not json', 1), null);
   assert.equal(recordFromMessage(JSON.stringify({ e: 'aggTrade' }), 1), null);
 });
@@ -57,7 +63,7 @@ test('accelerating vs decaying thrust from three 15-minute blocks', () => {
 });
 
 test('near-high and statistics lookups use only data at or before the time, and reject stale rows', () => {
-  const s = fuelState({ k5: bars(12, (i) => ({ h: i === 3 ? 110 : 101, c: i === 11 ? 107 : 100 })), prem: null });
+  const s = fuelState({ k5: bars(12, (i) => ({ h: i === 3 ? 110 : i === 11 ? 107 : 101, c: i === 11 ? 107 : 100 })), prem: null });
   assert.ok(Math.abs(s.below_high - (107 / 110 - 1)) < 1e-12);
   assert.equal(s.near_high, true);
   const rows = [{ timestamp: 1000, sumOpenInterest: '5' }, { timestamp: 2000, sumOpenInterest: '6' }, { timestamp: 9_000_000, sumOpenInterest: '9' }];

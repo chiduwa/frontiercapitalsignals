@@ -331,7 +331,7 @@ export function exhaustionAlertBody(h, bars, gateWhy, { rulesFired = [], nowTs =
   if (tier === 'major' && !(f.liquidity30d >= MAJOR_LIQUIDITY_30D)) {
     const ev = EXHAUSTION_EVIDENCE.largeCap;
     lines.push(`This is a large coin (about ${formatCap(f.marketCap)} market cap) even though it trades thinly on Binance. On coins this size a print like this has only weakly been followed by weakness (${formatPct(ev.excess24)} against the market over a day; the coin fell in ${Math.round(ev.fellShare24 * 100)}% of ${ev.n.toLocaleString('en-US')} past cases). Treat it as a caution, not a sell signal.`);
-    lines.push(pathRiskSentence(EXHAUSTION_PATH_RISK.all));
+    lines.push(pathRiskSentence(EXHAUSTION_PATH_RISK.all, { pooled: true }));
   } else if (tier === 'major') {
     lines.push(`This is one of the most liquid coins, and on those a print like this has not reliably been followed by weakness (${formatPct(EXHAUSTION_EVIDENCE.byTier.major.excess24)} against the market over a day). Treat it as a caution, not a sell signal.`);
     lines.push(pathRiskSentence(EXHAUSTION_PATH_RISK.byCase.major));
@@ -340,7 +340,9 @@ export function exhaustionAlertBody(h, bars, gateWhy, { rulesFired = [], nowTs =
     const size = tier === 'thin' ? 'thin-volume' : 'mid-size';
     const lead = both ? `Both exhaustion rules fired. On ${size} coins that combination` : `On ${size} coins a print like this`;
     lines.push(`${lead} has been followed by trailing the market by ${Math.abs(ev.excess24).toFixed(1)}% over the next day, and the coin fell outright in ${Math.round(ev.fellShare24 * 100)}% of ${ev.n.toLocaleString('en-US')} past cases.`);
-    lines.push(pathRiskSentence(EXHAUSTION_PATH_RISK.byCase[`${kind}|${tier}`] || EXHAUSTION_PATH_RISK.all));
+    lines.push('This is a 24-hour weakness warning, not a short entry.');
+    const path = EXHAUSTION_PATH_RISK.byCase[`${kind}|${tier}`];
+    lines.push(pathRiskSentence(path || EXHAUSTION_PATH_RISK.all, { pooled: !path }));
     const run = runPosition(h.symbol, bars, f);
     if (run) lines.push(run);
   }
@@ -353,7 +355,8 @@ export function exhaustionAlertBody(h, bars, gateWhy, { rulesFired = [], nowTs =
 // pushed, Jan 2023 - Oct 2026 (9,902 of them on coins with a USDT perpetual), entry
 // at the perp price 5 minutes after the alert hour closed, highest MARK price over
 // the next 24 hours. "ran85" is the share that went at least 8.5% above that price at
-// some point (what liquidates a 10x short); "ran15" the share that went 15%+. It is
+// some point (the study's 10x proxy, not an account liquidation level); "ran15"
+// is the share that went 15%+. It is
 // any-time, not "before the fall": against a 5% profit target the 8.5% move came
 // first in about 3 alerts in 10. Similar in 2023-24 and 2025-26 (39% / 44%).
 export const EXHAUSTION_PATH_RISK = Object.freeze({
@@ -371,9 +374,10 @@ export const EXHAUSTION_PATH_RISK = Object.freeze({
 });
 
 // Ten-based wording a phone notification can be read at a glance by.
-export function pathRiskSentence(p) {
-  const tenths = (x) => Math.max(1, Math.round(x * 10));
-  return `This is a 24-hour weakness warning, not a short entry: further upside often comes first. `
-    + `In about ${tenths(p.ran85)} in 10 past alerts like this the futures price went 8.5% or more above the alert price at some point within 24 hours, `
-    + `and 15% or more in about ${tenths(p.ran15)} in 10.`;
+export function pathRiskSentence(p, { pooled = false } = {}) {
+  const frequency = (x) => x > 0 && x < 0.05 ? 'fewer than 1 in 10' : `about ${Math.round(x * 10)} in 10`;
+  const cohort = pooled ? 'the pooled historical sample' : 'this historical comparison group';
+  return `Upside can continue. In ${frequency(p.ran85)} events in ${cohort}, the futures mark price rose 8.5% or more above a modeled entry at some point within 24 hours, `
+    + `and 15% or more in ${frequency(p.ran15)}. `
+    + `Reference: the futures open five minutes after the signal hour closed. These are historical frequencies, not the odds for this alert or the chance of rising before a decline.`;
 }

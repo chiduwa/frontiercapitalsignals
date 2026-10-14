@@ -216,3 +216,45 @@ journalctl -u fcs-liquidation-collector -n 20 --no-pager
 
 Disable with `sudo systemctl disable --now` on the same names; the updater will not
 re-enable them.
+
+### Recorder data quality update (2026-10-14)
+
+New liquidation rows have `schemaVersion: 2`, retain the complete exchange
+payload in `raw` (including `st` and `ps` when provided), and identify the
+connection with `epochId`. Binance publishes sampled snapshots, not a complete
+liquidation tape. No received message does not mean no liquidations occurred.
+Separate `forceorder-health-YYYY-MM-DD.ndjson[.gz]` files record connection
+attempts, minute heartbeats, valid/invalid/written/dropped counters, storage
+failures and uncertain coverage intervals. Connection, valid-message silence
+and close deadlines prevent a silently stuck connection. Both file families
+rotate and follow the same retention policy; incomplete compression is
+recovered from the retained raw file.
+
+Fuel rows have `schema_version: 2` and protocol `fuel-shadow-prospective-v2`.
+They retain candle inputs, OI/account-ratio values and timestamps, source receipt
+times, a source-file hash, and separate `price_asof` and
+`decision_available_at` times. Missing, stale, duplicate or malformed inputs
+leave affected features and combined counts null; valid independent features
+remain available. Every eligible alert gets a coverage row, including unsupported
+perpetuals and failed sources. `fuel-shadow-runs-YYYY-MM.ndjson` records run
+start, expected cohort and completion counts, so an interrupted run is visible.
+First valid historical OI and account-ratio baselines are frozen under
+`baselines/fuel-shadow-prospective-v2/`; later source revisions are recorded
+without changing those baselines.
+
+The timer still runs at :04, :19, :34 and :49 UTC. This prospective protocol
+uses the latest closed five-minute boundary at each observation and is not the
+historical study's decision grid. Outcome studies must use actual availability
+times plus their declared execution delay. Existing unversioned rows stay intact
+and must be analyzed separately; missing old coverage cannot be reconstructed.
+
+The Worker CI and host updater both run the offline recorder and delivery
+regression suites. After the updater installs a recorder change, restart only
+the continuous collector to load it immediately. A manual fuel run records an
+additional observation without sending an alert or placing an order:
+
+```sh
+sudo systemctl restart fcs-liquidation-collector.service
+sudo systemctl start fcs-fuel-shadow.service
+systemctl show fcs-liquidation-collector.service fcs-fuel-shadow.service -p ActiveState -p Result
+```

@@ -121,18 +121,19 @@ assert.doesNotMatch(strong, /Strong:/, 'two overlapping rules are not independen
 assert.ok(strong.includes(`${Math.round(EXHAUSTION_EVIDENCE.byCase['both|mid'].fellShare24 * 100)}% of 2,857 past cases`), strong);
 const twenty = exhaustionAlertBody(hit, hot, 'proven', { nowTs, rulesFired: ['exhaustion20'] });
 assert.match(twenty, /trailing the market by 2\.7%/, 'a 20x-only print quotes the 20x record');
-// The path before the fade (2026-10-13, NEAR/RED liquidation review): every alert
-// says it is not a short entry and quotes how often the price ran 8.5%/15% higher
-// first, for its own case. The old "first traded higher ... chance to sell into
-// strength" line read as an entry instruction and is gone.
+// Excursion frequencies are any-time MARK outcomes from a modeled +5m entry,
+// not ordering probabilities or the current displayed spot quote. Only cohorts
+// with weakness evidence get that label; majors remain non-directional cautions.
 for (const t of [body, strong, twenty]) {
-  assert.match(t, /This is a 24-hour weakness warning, not a short entry: further upside often comes first\./, t);
-  assert.doesNotMatch(t, /sell into strength|first traded higher/i, t);
+  assert.match(t, /This is a 24-hour weakness warning, not a short entry\./, t);
+  assert.match(t, /futures mark price.*modeled entry at some point within 24 hours/, t);
+  assert.match(t, /futures open five minutes after the signal hour closed/, t);
+  assert.doesNotMatch(t, /sell into strength|first traded higher|upside often comes first|above the alert price/i, t);
 }
 assert.ok(body.includes(pathRiskSentence(EXHAUSTION_PATH_RISK.byCase['perCoinOnly|mid'])), body);
-assert.match(strong, /In about 5 in 10 past alerts like this the futures price went 8\.5% or more above the alert price at some point within 24 hours, and 15% or more in about 3 in 10\./, strong);
-assert.match(twenty, /In about 4 in 10 past alerts like this/, twenty);
-assert.equal(pathRiskSentence({ ran85: 0.04, ran15: 0.001 }).match(/about (\d+) in 10/g).join('|'), 'about 1 in 10|about 1 in 10', 'never "0 in 10"');
+assert.match(strong, /In about 5 in 10 events in this historical comparison group.*8\.5%.*15% or more in about 3 in 10\./, strong);
+assert.match(twenty, /In about 4 in 10 events in this historical comparison group/, twenty);
+assert.equal(pathRiskSentence({ ran85: 0.04, ran15: 0.001 }).match(/fewer than 1 in 10/g).length, 2, 'rare nonzero frequencies are not inflated to 10%');
 for (const [k, v] of Object.entries(EXHAUSTION_PATH_RISK.byCase)) {
   assert.ok(v.ran15 < v.ran85 && v.ran85 < 1 && v.n > 100, k);
 }
@@ -140,6 +141,8 @@ const deepHit = { symbol: 'DEEP', features: { ...hit.features, liquidity30d: 5e6
 assert.ok(exhaustionAlertBody(deepHit, hot, 'proven', { nowTs, rulesFired: ['exhaustion20'] }).includes(pathRiskSentence(EXHAUSTION_PATH_RISK.byCase.major)));
 assert.match(exhaustionAlertBody(deepHit, hot, 'proven', { nowTs, rulesFired: ['exhaustion20'] }), /caution, not a sell signal/,
   'on the most liquid coins the alert says the evidence is not there');
+assert.doesNotMatch(exhaustionAlertBody(deepHit, hot, 'proven', { nowTs, rulesFired: ['exhaustion20'] }), /weakness warning/,
+  'a path-risk sentence cannot turn a major-coin caution into a directional signal');
 
 // Where the print sits in the coin's run (2026-10-01).
 assert.match(body, /This is the first exhaustion print on HOT in 72 hours\. First prints have faded least \(median -5\.0% against the market over a day\), and about 1 in 20 instead ran 20% or more past it\./);
@@ -156,7 +159,8 @@ const bigBody = exhaustionAlertBody(bigHit, hot, 'proven', { nowTs, rulesFired: 
 assert.match(bigBody, /large coin \(about \$1\.1B market cap\) even though it trades thinly on Binance/, bigBody);
 assert.match(bigBody, /fell in 61% of 719 past cases\)\. Treat it as a caution, not a sell signal\./);
 assert.doesNotMatch(bigBody, /exhaustion print/, 'a caution does not count the run as a sell sequence');
-assert.ok(bigBody.includes(pathRiskSentence(EXHAUSTION_PATH_RISK.all)), bigBody);
+assert.ok(bigBody.includes(pathRiskSentence(EXHAUSTION_PATH_RISK.all, { pooled: true })), bigBody);
+assert.doesNotMatch(bigBody, /weakness warning|past alerts like this/, 'large-cap fallback is pooled path evidence, not directional confirmation');
 for (const t of [second, bigBody]) assert.doesNotMatch(t, /—/, 'no em dashes in user-facing copy');
 
 console.log('EXHAUSTION GAUGE OK');

@@ -76,7 +76,13 @@ if ! sudo -u "$RUN_USER" node --check "$STAGE_DIR/trading-bot/src/index.mjs" >"$
    || ! sudo -u "$RUN_USER" node --check "$STAGE_DIR/trading-bot/src/protection-cycle.mjs" >>"$TEST_LOG" 2>&1 \
    || ! sudo -u "$RUN_USER" node "$STAGE_DIR/trading-bot/test.mjs" >>"$TEST_LOG" 2>&1 \
    || ! sudo -u "$RUN_USER" node "$STAGE_DIR/spot-bot/test.mjs" >>"$TEST_LOG" 2>&1 \
-   || ! sudo -u "$RUN_USER" node --test "$STAGE_DIR"/account-journal/test/*.test.mjs >>"$TEST_LOG" 2>&1; then
+   || ! sudo -u "$RUN_USER" node --test "$STAGE_DIR"/account-journal/test/*.test.mjs >>"$TEST_LOG" 2>&1 \
+   || ! sudo -u "$RUN_USER" node --check "$STAGE_DIR/signals-worker/scripts/fuel-shadow.mjs" >>"$TEST_LOG" 2>&1 \
+   || ! sudo -u "$RUN_USER" node --check "$STAGE_DIR/signals-worker/scripts/liquidation-collector.mjs" >>"$TEST_LOG" 2>&1 \
+   || ! sudo -u "$RUN_USER" node --test "$STAGE_DIR/signals-worker/test-recorders.mjs" \
+      "$STAGE_DIR/signals-worker/test-live-scan-delivery.mjs" \
+      "$STAGE_DIR/signals-worker/test-fuel-shadow.mjs" \
+      "$STAGE_DIR/signals-worker/test-liquidation-collector.mjs" >>"$TEST_LOG" 2>&1; then
   log "GUARDRAIL TESTS FAILED on staged ${TARGET:0:7} — live checkout was not changed"
   sed -n '1,40p' "$TEST_LOG" | while IFS= read -r line; do log "  $line"; done
   exit 1

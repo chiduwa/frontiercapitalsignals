@@ -42,6 +42,7 @@ import {
 } from './exhaustion-gauge.mjs';
 import { formatPct, formatPrice } from './price-change.mjs';
 import { combinePushes } from './push-batch.mjs';
+import { deliverSurgeBatch, loadPushedBars, sendPush, surgeBarKey } from './live-scan-delivery.mjs';
 import { runDecouplingWatch } from './decoupling-watch-io.mjs';
 import { runCoinRotation } from './coin-rotation-io.mjs';
 
@@ -78,24 +79,11 @@ const PACING_MS = 120;
 
 async function notify({ title, message, priority = 'default', tags = [] }) {
   if (DRY_RUN) { console.log(`\n[dry run] would push (${priority}) ${title}\n${message}\n`); return false; }
-  if (!NTFY_TOPIC) return false;
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 10000);
-  try {
-    await fetch(`https://ntfy.sh/${encodeURIComponent(NTFY_TOPIC)}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8', Title: title, Priority: priority,
-        ...(tags.length ? { Tags: tags.join(',') } : {}),
-        Click: 'https://frontiercapitalsignals.com/signals/'
-      },
-      body: message, signal: ctrl.signal
-    });
-    return true;
-  } catch (e) {
-    console.error('ntfy failed (non-fatal):', e.message || e);
-    return false;
-  } finally { clearTimeout(t); }
+  const result = await sendPush({ title, message, priority, tags }, {
+    topic: NTFY_TOPIC,
+    log: outcome => console.log(`ntfy endpoint delivery: ${JSON.stringify(outcome)}`)
+  });
+  return result.accepted;
 }
 
 // Score every cast whose horizon has elapsed, against the price now. Runs
@@ -129,17 +117,6 @@ async function scoreMatured(nowIso, priceBySymbol, closesBySymbol) {
   });
   console.log(`scored ${scored} matured cast(s)`);
   return scored;
-}
-
-// Coins already pushed for the bars these hits were cast on (any configuration).
-// Read-only; the casts themselves were just upserted with ON CONFLICT DO NOTHING,
-// so an earlier run's notified = 1 is still there.
-async function pushedForBars(fired) {
-  const ats = [...new Set(fired.map((f) => f.features.at))];
-  if (!ats.length) return new Set();
-  const rows = await d1(env, `SELECT DISTINCT symbol FROM surge_signal_log
-     WHERE notified = 1 AND cast_at IN (${ats.map(() => '?').join(',')})`, ats);
-  return new Set(rows.map((r) => r.symbol));
 }
 
 // A configuration's own live, forward-tested record. Deliberately NOT the
@@ -370,8 +347,8 @@ async function main() {
   // dispatch already ran (2026-10-12: the 14:00 RED/CTK/GTC batch went out at
   // 15:03 and again at 15:43). A coin already pushed for this bar, under any
   // configuration, is not pushed again.
-  const alreadyPushed = await pushedForBars(fired);
-  if (alreadyPushed.size) console.log(`  already pushed for this bar in an earlier run: ${[...alreadyPushed].sort().join(', ')}`);
+  const alreadyPushed = await loadPushedBars(fired, { env, query: d1 });
+  if (alreadyPushed.size) console.log(`  coin/bar pairs already pushed in an earlier run: ${[...alreadyPushed].sort().join(', ')}`);
   const pending = [];                    // this run's alerts: one push for all of them (push-batch.mjs)
   const bases = new Map();
   const byConfig = {};
@@ -379,7 +356,7 @@ async function main() {
   const e20Syms = new Set((byConfig.exhaustion20 || []).map((h) => h.symbol));
   const calSyms = new Set((byConfig.exhaustion_calibrated || []).map((h) => h.symbol));
   for (const cfg of SURGE_CONFIGS) {
-    let hits = (byConfig[cfg.id] || []).filter((h) => !alreadyPushed.has(h.symbol));
+    let hits = (byConfig[cfg.id] || []).filter((h) => !alreadyPushed.has(surgeBarKey(h.symbol, h.features.at)));
     const gate = mayNotify(cfg, records[cfg.id]);
     if (cfg.id === 'exhaustion_calibrated') {
       hits = hits.filter((h) => !e20Syms.has(h.symbol) && (watch.has(h.symbol) || h.features.volZ >= CALIBRATED_BROADCAST_VOLZ));
@@ -424,25 +401,19 @@ async function main() {
   }
   if (pending.length) {
     const exhaustionOnly = pending.every(p => p.cfg.dir === -1);
-    const ok = await notify(combinePushes(pending, {
+    const push = combinePushes(pending, {
       noun: exhaustionOnly ? 'Volume exhaustion' : 'Volume signals',
       footer: [
         exhaustionOnly ? 'Read: weakness ahead over about a day on mid-size and thin coins; on the largest coins only a caution. Every print is listed under Recent exhaustion prints on the signals page.' : '',
         // The caution a single alert carries must survive batching (Codex audit 2026-10-12).
         pending.some((p) => p.cfg.dir === -1)
-          ? `Not a short entry: further upside often comes first. In about ${Math.round(EXHAUSTION_PATH_RISK.all.ran85 * 10)} in 10 past alerts the futures price went 8.5% or more above the alert price at some point within 24 hours.`
+          ? `Not a short entry: upside can continue. In pooled historical research, about ${Math.round(EXHAUSTION_PATH_RISK.all.ran85 * 10)} in 10 eligible signals saw the futures MARK price at least 8.5% above a modeled perpetual entry at the open 5 minutes after the signal hour closed, at some point in the following 24 hours. This measures an any-time excursion, not whether it preceded a decline or movement from this notification's current price.`
           : '',
         ...[...bases].map(([label, why]) => `${label} basis: ${why}.`),
         'Not financial advice.'
       ].filter(Boolean).join('\n')
-    }));
-    if (ok) {
-      sent = pending.length;
-      for (const p of pending) {
-        await d1(env, 'UPDATE surge_signal_log SET notified = 1 WHERE config_id = ? AND symbol = ? AND cast_at = ?',
-          [p.cfg.id, p.h.symbol, p.h.features.at]);
-      }
-    }
+    });
+    sent = await deliverSurgeBatch(pending, push, { notify, env, query: d1 });
   }
 
   // Roll up each configuration's standing so the dashboard and any human

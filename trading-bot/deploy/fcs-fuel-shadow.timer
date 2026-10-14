@@ -3,8 +3,9 @@ Description=Record squeeze-warning states for recent exhaustion alerts every 15 
 Documentation=https://github.com/chiduwa/frontiercapitalsignals/blob/main/signals-worker/scripts/fuel-shadow.mjs
 
 [Timer]
-# Same 30-minute decision grid the research used is covered twice over; offset
-# from the bots' five-minute cycle and the :37 updater. UTC (test.mjs pins it).
+# Prospective protocol: :04/:19/:34/:49 uses the latest completed five-minute
+# close, then records actual receipt time. This is NOT the historical +35m/+65m
+# decision grid. Offset from bot cycles and the :37 updater; explicitly UTC.
 OnCalendar=*:4/15 UTC
 AccuracySec=30s
 Persistent=false
