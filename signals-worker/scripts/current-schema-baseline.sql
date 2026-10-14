@@ -76,4 +76,5 @@ INSERT OR IGNORE INTO d1_migrations (name) VALUES
   ('0059_oi_tick_without_rowid.sql'),
   ('0060_surge_market_cap.sql'),
   ('0061_pump_fade_shadow.sql'),
-  ('0062_lowcap_watch.sql');
+  ('0062_lowcap_watch.sql'),
+  ('0063_exhaustion_followup.sql');

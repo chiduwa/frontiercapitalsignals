@@ -1573,6 +1573,12 @@ CREATE TABLE IF NOT EXISTS surge_signal_log (
   liquidity_30d REAL,
   -- Market cap the cast was judged with (migration 0060); NULL = unknown.
   market_cap REAL,
+  -- The +1h follow-up to a pushed exhaustion alert (migration 0063): when it
+  -- was sent or given up on, the state named, and the first hour's volume and move.
+  followup_at TEXT,
+  followup_state TEXT,
+  followup_vol1 REAL,
+  followup_move1_pct REAL,
   UNIQUE (config_id, symbol, cast_at)
 );
 
