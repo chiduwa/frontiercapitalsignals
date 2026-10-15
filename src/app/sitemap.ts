@@ -21,6 +21,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${BASE}/exchanges`, changeFrequency: "weekly", priority: 0.8 },
     { url: `${BASE}/about`, changeFrequency: "monthly", priority: 0.6 },
     { url: `${BASE}/contact`, changeFrequency: "monthly", priority: 0.6 },
+    { url: `${BASE}/privacy`, changeFrequency: "yearly", priority: 0.3 },
   ];
 
   const postRoutes: MetadataRoute.Sitemap = posts.map((p) => ({

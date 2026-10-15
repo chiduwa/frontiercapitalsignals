@@ -229,7 +229,7 @@ export default function HomePage() {
                 <p className="text-gold-dim text-xs font-semibold tracking-widest uppercase mb-3">Latest Intelligence</p>
                 <h2 className="text-4xl font-black text-ink tracking-tight">Today&apos;s Market Signals</h2>
               </div>
-              <Link href="/intelligence" className="text-gold text-sm font-semibold hover:text-gold-light hidden sm:flex items-center gap-1 transition-colors">
+              <Link href="/intelligence" className="text-gold-dim text-sm font-semibold hover:text-gold-ink hidden sm:flex items-center gap-1 transition-colors">
                 View all
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />

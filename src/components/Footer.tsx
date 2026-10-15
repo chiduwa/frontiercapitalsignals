@@ -107,6 +107,9 @@ export default function Footer() {
             <p className="text-slate-400 text-xs text-center max-w-md">
               For informational purposes only. Not financial or investment advice. Signals scores are mechanical indicator composites, not recommendations to buy or sell.
             </p>
+            <Link href="/privacy" className="text-slate-400 hover:text-white text-xs underline-offset-2 hover:underline transition-colors">
+              Privacy
+            </Link>
             <CookieSettingsButton />
           </div>
         </div>

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
-import { Post } from "@/lib/posts";
+import type { PostCardData } from "@/lib/posts";
 
 const countryFlag: Record<string, string> = {
   Ghana: "🇬🇭", Nigeria: "🇳🇬", Kenya: "🇰🇪", Malawi: "🇲🇼", Uganda: "🇺🇬", Africa: "🌍",
@@ -18,13 +18,13 @@ const categoryColor: Record<string, string> = {
   General: "bg-gray-100 text-gray-600",
 };
 
-function cardImageUrl(post: Post) {
+function cardImageUrl(post: PostCardData) {
   // Stored image when the post has a real one; otherwise the site's own
   // generated card, which renders the headline, rather than a stock photo.
   return post.image ?? `/intelligence/${post.slug}/opengraph-image`;
 }
 
-export default function PostCard({ post }: { post: Post }) {
+export default function PostCard({ post }: { post: PostCardData }) {
   const flag = countryFlag[post.country] ?? "🌍";
   const catStyle = categoryColor[post.category] ?? categoryColor.General;
 

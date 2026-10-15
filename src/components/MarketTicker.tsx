@@ -478,12 +478,14 @@ export default function MarketTicker() {
                   <div className="flex gap-2 flex-1">
                     <input
                       type="number"
+                      aria-label="Amount"
                       value={amount}
                       onChange={e => setAmount(e.target.value)}
                       className="flex-1 min-w-0 px-3 py-2.5 border border-gray-200 rounded-lg text-ink font-mono text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gold/30"
                       placeholder="Amount"
                     />
                     <select
+                      aria-label="Convert from currency"
                       value={fromCcy}
                       onChange={e => setFromCcy(e.target.value)}
                       className="px-2 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none min-w-[90px]"
@@ -501,6 +503,8 @@ export default function MarketTicker() {
                   </div>
 
                   <button
+                    type="button"
+                    aria-label="Swap currencies"
                     onClick={() => { setFromCcy(toCcy); setToCcy(fromCcy); }}
                     className="self-center w-9 h-9 rounded-full border border-gray-200 bg-white flex items-center justify-center hover:border-gold hover:text-gold-dim transition-colors text-slate-600 shrink-0 mx-auto sm:mx-0"
                   >
@@ -511,6 +515,7 @@ export default function MarketTicker() {
 
                   <div className="flex gap-2 flex-1">
                     <select
+                      aria-label="Convert to currency"
                       value={toCcy}
                       onChange={e => setToCcy(e.target.value)}
                       className="flex-1 px-2 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none"

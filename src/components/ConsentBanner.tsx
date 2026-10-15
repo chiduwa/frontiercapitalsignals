@@ -88,7 +88,8 @@ export default function ConsentBanner() {
       <div className="max-w-3xl mx-auto bg-white border border-gray-200 rounded-2xl shadow-2xl shadow-black/20 p-5">
         <p className="text-ink text-sm font-bold mb-1">We value your privacy</p>
         <p className="text-slate-600 text-xs leading-relaxed mb-4">
-          We use cookies for analytics and advertising. Choose what you&apos;re comfortable with — you can change this anytime via &ldquo;Cookie Settings&rdquo; in the footer.
+          We use cookies for analytics and advertising. Choose what you&apos;re comfortable with — you can change this anytime via &ldquo;Cookie Settings&rdquo; in the footer.{" "}
+          <a href="/privacy" className="text-navy font-semibold underline underline-offset-2">Privacy policy</a>
         </p>
 
         {customizing && (

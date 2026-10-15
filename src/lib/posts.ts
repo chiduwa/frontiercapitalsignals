@@ -22,6 +22,30 @@ export interface Post {
   content?: string;
 }
 
+// What a listing card shows. The /intelligence page hands every post to a
+// client component for filtering, so it sends only these fields.
+export type PostCardData = Pick<Post, "slug" | "title" | "date" | "summary" | "country" | "category" | "image">;
+
+export function toCardData({ slug, title, date, summary, country, category, image }: Post): PostCardData {
+  return image ? { slug, title, date, summary, country, category, image } : { slug, title, date, summary, country, category };
+}
+
+// "2026-10" -> "October 2026"
+export function monthLabel(month: string): string {
+  const [y, m] = month.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+// Months that have posts, newest first, with their counts.
+export function postMonths(posts: Pick<Post, "date">[] = getAllPosts()): { month: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const p of posts) {
+    const month = p.date.slice(0, 7);
+    if (/^\d{4}-\d{2}$/.test(month)) counts.set(month, (counts.get(month) ?? 0) + 1);
+  }
+  return [...counts].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([month, count]) => ({ month, count }));
+}
+
 function ensureDir() {
   try {
     if (!fs.existsSync(CONTENT_DIR)) fs.mkdirSync(CONTENT_DIR, { recursive: true });

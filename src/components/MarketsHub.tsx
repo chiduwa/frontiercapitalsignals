@@ -175,6 +175,7 @@ export default function MarketsHub() {
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-600">Base:</span>
                   <select
+                    aria-label="Base currency"
                     value={base}
                     onChange={e => setBase(e.target.value)}
                     className="text-xs border border-gray-200 rounded px-2 py-1 text-ink bg-white focus:outline-none"
@@ -245,12 +246,14 @@ export default function MarketsHub() {
                   <div className="flex gap-2">
                     <input
                       type="number"
+                      aria-label="Amount"
                       value={amount}
                       onChange={e => setAmount(e.target.value)}
                       className="flex-1 min-w-0 px-3 py-2.5 border border-gray-200 rounded-lg text-ink font-mono text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gold/30"
                       placeholder="Amount"
                     />
                     <select
+                      aria-label="Convert from currency"
                       value={fromCcy}
                       onChange={e => setFromCcy(e.target.value)}
                       className="px-3 py-2.5 border border-gray-200 rounded-lg text-ink text-sm bg-white focus:outline-none min-w-[90px]"
@@ -281,6 +284,7 @@ export default function MarketsHub() {
                 <div>
                   <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5 block">To</label>
                   <select
+                    aria-label="Convert to currency"
                     value={toCcy}
                     onChange={e => setToCcy(e.target.value)}
                     className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-ink text-sm bg-white focus:outline-none"

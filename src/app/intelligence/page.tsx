@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { getAllPosts } from "@/lib/posts";
+import Link from "next/link";
+import { getAllPosts, monthLabel, postMonths, toCardData } from "@/lib/posts";
 import IntelligenceFilters from "@/components/IntelligenceFilters";
 
 export const metadata: Metadata = {
@@ -14,6 +15,7 @@ export const metadata: Metadata = {
 
 export default function IntelligencePage() {
   const posts = getAllPosts();
+  const months = postMonths(posts);
 
   return (
     <>
@@ -47,7 +49,23 @@ export default function IntelligencePage() {
               <p className="text-slate-600 text-sm">Run the content generation script or check back tomorrow.</p>
             </div>
           ) : (
-            <IntelligenceFilters posts={posts} />
+            <IntelligenceFilters posts={posts.map(toCardData)} />
+          )}
+
+          {months.length > 0 && (
+            <nav aria-label="Intelligence archive by month" className="mt-14 pt-8 border-t border-gray-200">
+              <h2 className="text-slate-600 text-xs font-semibold tracking-widest uppercase mb-3">Archive</h2>
+              <ul className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+                {months.map(({ month, count }) => (
+                  <li key={month}>
+                    <Link href={`/intelligence/archive/${month}`} className="text-gold-dim font-semibold underline underline-offset-2 hover:text-gold">
+                      {monthLabel(month)}
+                    </Link>
+                    <span className="text-slate-600"> ({count})</span>
+                  </li>
+                ))}
+              </ul>
+            </nav>
           )}
         </div>
       </section>
