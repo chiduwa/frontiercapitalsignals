@@ -7921,6 +7921,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .mt-table small{display:block;color:var(--muted);font-size:9.5px;margin-top:2px}
   .mt-evidence{margin-top:12px}
   .mt-table td.mt-wide{white-space:normal;min-width:150px}
+  .mt-table tbody tr:last-child th{border-bottom:none}
   @media(max-width:1000px){.mt-grid{grid-template-columns:1fr}}
   @media(max-width:760px){
     .mt-table tbody{padding:0;gap:8px}
