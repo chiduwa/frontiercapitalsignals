@@ -7897,6 +7897,39 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .evidence-status-row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:11px 0;border-bottom:1px solid var(--line);font-size:11px}
   .evidence-status-row:last-of-type{border:0}.evidence-status-row b{font-weight:500;font-size:10px;color:var(--amber)}
   .sort-button{font:inherit;letter-spacing:inherit;text-transform:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:5px 0}
+  .trend-card{grid-column:1/-1}
+  .mt-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px;margin-top:14px}
+  .mt-col{min-width:0}
+  .mt-top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.mt-top h4{font-size:13px;font-weight:600}
+  .mt-val{font-family:var(--mono);font-size:22px;font-weight:500;letter-spacing:-.04em}
+  .mt-chart{width:100%;height:auto;display:block;margin:12px 0 6px}
+  .mt-chart polyline{fill:none;stroke-width:1.6;vector-effect:non-scaling-stroke}
+  .mt-lp{stroke:var(--paper)}.mt-l50{stroke:var(--amber)}.mt-l200{stroke:#72a9ed}.mt-l1400{stroke:#8a93a6;stroke-dasharray:2 3}
+  .mt-chart .mt-proj{stroke-dasharray:5 4}
+  .mt-cone{fill:rgba(114,169,237,.18);stroke:none}
+  .mt-today{stroke:#465269;stroke-width:1}
+  .mt-dot{fill:var(--paper)}
+  .mt-axis{fill:var(--muted);font-family:var(--mono);font-size:10px}
+  .mt-legend{display:flex;flex-wrap:wrap;gap:12px;font-size:10px;color:var(--muted);margin-bottom:10px}
+  .mt-legend i{display:inline-block;width:14px;height:2px;margin-right:5px;vertical-align:middle}
+  .k-p{background:var(--paper)}.k-50{background:var(--amber)}.k-200{background:#72a9ed}.k-1400{background:#8a93a6}.mt-legend i.k-cone{height:8px;background:rgba(114,169,237,.3)}
+  .mt-table-wrap{overflow-x:auto;margin:6px 0 4px}
+  .mt-table{width:100%;border-collapse:collapse;font-size:11px;font-family:var(--mono)}
+  .mt-table th,.mt-table td{padding:7px 10px 7px 0;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;white-space:nowrap}
+  .mt-table thead th{font-family:var(--disp);font-size:9px;letter-spacing:.05em;color:var(--muted);font-weight:500;white-space:normal}
+  .mt-table tbody th{font-weight:500;color:var(--paper)}
+  .mt-table small{display:block;color:var(--muted);font-size:9.5px;margin-top:2px}
+  .mt-evidence{margin-top:12px}
+  .mt-table td.mt-wide{white-space:normal;min-width:150px}
+  @media(max-width:1000px){.mt-grid{grid-template-columns:1fr}}
+  @media(max-width:760px){
+    .mt-table tbody{padding:0;gap:8px}
+    .mt-table tbody tr{padding:10px 12px}
+    .mt-table tbody th{grid-column:1/-1;padding:0 0 2px;border:0;font-size:12px}
+    .mt-table tbody td{font-size:11px}
+    .mt-table tbody td>span{text-align:right}
+    .mt-table td.mt-wide{grid-column:1/-1;min-width:0}
+  }
   .dashboard-empty,.dashboard-loading{border:1px dashed var(--line);border-radius:10px;padding:24px;color:var(--muted);font-size:13px;grid-column:1/-1}
   .boards{margin-bottom:0}.boards:empty{display:none}
   .zone{gap:14px;margin-bottom:26px}.zone-head{margin:10px 0 14px}.zone-head h2{font-size:10px;letter-spacing:.12em}.zone-head .zn{font-size:9px;letter-spacing:.06em}
@@ -8368,6 +8401,86 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       else window.scrollTo({top:0});
     }
   }
+  // Moving averages for BTC and the total crypto market cap (scripts/market-trend.mjs,
+  // docs/MARKET_TREND.md). Where each average is heading if price holds is exact
+  // arithmetic; what the trend states have preceded is measured, both periods shown.
+  function mtShort(v,kind){ if(!num(v)) return '—'; return kind==='total'?fmtBig(v):'$'+Math.round(v).toLocaleString('en-US'); }
+  function mtDate(s){ if(!s) return '—'; var d=new Date(s+'T00:00:00Z'); return isNaN(d)?'—':d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}); }
+  function mtRet(x){ return num(x)?fmtPct(Math.expm1(x)*100,0):'—'; }
+  function mtChart(x,kind,name){
+    var ch=x.chart; if(!ch||!ch.close||ch.close.length<2) return '';
+    var n=ch.close.length,pj=ch.projection||{},P=pj.days||0,W=640,H=220,L=4,R=64,T=10,B=22,all=[];
+    function add(a){ if(a) for(var i=0;i<a.length;i++) if(num(a[i])) all.push(a[i]); }
+    add(ch.close);add(ch.sma50);add(ch.sma200);add(ch.sma1400);add(pj.sma50);add(pj.sma200Low);add(pj.sma200High);
+    var lo=Math.min.apply(null,all),hi=Math.max.apply(null,all),pad=(hi-lo)*0.06||1;lo-=pad;hi+=pad;
+    function X(i){ return L+(W-L-R)*i/(n-1+P); }
+    function Y(v){ return T+(H-T-B)*(1-(v-lo)/(hi-lo)); }
+    function line(a,off,cls){ var pts=[]; for(var i=0;i<a.length;i++) if(num(a[i])) pts.push(X(i+off).toFixed(1)+','+Y(a[i]).toFixed(1)); return pts.length>1?'<polyline class="'+cls+'" points="'+pts.join(' ')+'"/>':''; }
+    var cone='';
+    if(pj.sma200Low&&pj.sma200High&&pj.sma200Low.length&&num(ch.sma200[n-1])){
+      var up=[X(n-1).toFixed(1)+','+Y(ch.sma200[n-1]).toFixed(1)],dn=[];
+      for(var i=0;i<pj.sma200High.length;i++) up.push(X(n+i).toFixed(1)+','+Y(pj.sma200High[i]).toFixed(1));
+      for(var j=pj.sma200Low.length-1;j>=0;j--) dn.push(X(n+j).toFixed(1)+','+Y(pj.sma200Low[j]).toFixed(1));
+      cone='<polygon class="mt-cone" points="'+up.concat(dn).join(' ')+'"/>';
+    }
+    var p50=[ch.sma50[n-1]].concat(pj.sma50||[]),p200=[ch.sma200[n-1]].concat(pj.sma200||[]),today=X(n-1);
+    return '<svg class="mt-chart" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(name+': the last year with its 50-day, 200-day and 200-week averages, and where the 50- and 200-day averages go over the next 30 days if the value holds')+'">'
+      +'<line class="mt-today" x1="'+today.toFixed(1)+'" x2="'+today.toFixed(1)+'" y1="'+T+'" y2="'+(H-B)+'"/>'
+      +cone+line(ch.sma1400,0,'mt-l1400')+line(ch.sma200,0,'mt-l200')+line(ch.sma50,0,'mt-l50')+line(ch.close,0,'mt-lp')
+      +line(p50,n-1,'mt-l50 mt-proj')+line(p200,n-1,'mt-l200 mt-proj')
+      +'<circle class="mt-dot" cx="'+today.toFixed(1)+'" cy="'+Y(ch.close[n-1]).toFixed(1)+'" r="3"/>'
+      +'<text class="mt-axis" x="'+(W-R+6)+'" y="'+(Y(hi-pad)+3).toFixed(1)+'">'+esc(mtShort(hi-pad,kind))+'</text>'
+      +'<text class="mt-axis" x="'+(W-R+6)+'" y="'+(Y(lo+pad)+3).toFixed(1)+'">'+esc(mtShort(lo+pad,kind))+'</text>'
+      +'<text class="mt-axis" x="'+L+'" y="'+(H-6)+'">'+esc(mtDate(ch.dates[0]))+'</text>'
+      +'<text class="mt-axis" x="'+(today-30).toFixed(1)+'" y="'+(H-6)+'">Today</text>'
+      +'<text class="mt-axis" x="'+(W-R-6)+'" y="'+(H-6)+'" text-anchor="end">+'+P+'d</text>'
+      +'</svg>';
+  }
+  function mtSeries(x,kind,name){
+    if(!x||x.status!=='ok') return '<div class="mt-col"><div class="mt-top"><h4>'+esc(name)+'</h4></div><p class="insight-caption">Unavailable this hour. No value is inferred.</p></div>';
+    var v=function(a){ return mtShort(a,kind); },what=kind==='total'?'the cap':'price',early=kind==='btc'?'2011-18':'2013-18';
+    var head='<div class="mt-top"><h4>'+esc(name)+'</h4><b class="mt-val">'+v(x.value)+'</b>'
+      +(x.stale?'<span class="subtle-chip">LAST HOUR · SOURCE DOWN</span>':(x.live?'':'<span class="subtle-chip">AS OF '+esc(mtDate(x.asOf))+'</span>'))+'</div>'
+      +'<p class="insight-caption">'+(num(x.drawdownPct)?Math.abs(x.drawdownPct).toFixed(1)+'% below its high of '+v(x.ath)+' ('+esc(mtDate(x.athDate))+') · ':'')
+      +'30 days <span class="'+pctCls(x.change30Pct)+'">'+fmtPct(x.change30Pct)+'</span> · 90 days <span class="'+pctCls(x.change90Pct)+'">'+fmtPct(x.change90Pct)+'</span></p>';
+    var legend='<div class="mt-legend" aria-hidden="true"><span><i class="k-p"></i>'+(kind==='total'?'Market cap':'Price')+'</span><span><i class="k-50"></i>50-day</span><span><i class="k-200"></i>200-day</span><span><i class="k-1400"></i>200-week</span><span><i class="k-cone"></i>200-day ahead, likely band</span></div>';
+    var rows=(x.ma||[]).map(function(m){
+      var arrow=m.dir==='rising'?'↗':m.dir==='falling'?'↘':'→';
+      return '<tr><th scope="row">'+esc(m.label)+'</th><td data-label="Level"><span>'+v(m.level)+'</span></td><td data-label="'+(kind==='total'?'Cap':'Price')+' vs it" class="'+pctCls(m.pricePct)+'"><span>'+fmtPct(m.pricePct)+'</span></td>'
+        +'<td data-label="Last 20 days" class="'+pctCls(m.slope20Pct)+'"><span>'+arrow+' '+fmtPct(m.slope20Pct)+'</span></td>'
+        +'<td data-label="In 30 days if '+what+' holds" class="mt-wide"><span>'+v(m.in30Flat)+'<small>'+v(m.in30Low)+' – '+v(m.in30High)+'</small></span></td>'
+        +'<td data-label="Rises tomorrow if above" class="mt-wide"><span>'+v(m.keepRisingAbove)+'<small>up on '+m.risingDaysIfFlat+' of the next 30 days if '+what+' holds</small></span></td></tr>';
+    }).join('');
+    var table='<div class="mt-table-wrap"><table class="mt-table"><thead><tr><th scope="col">Average</th><th scope="col">Level</th><th scope="col">'+(kind==='total'?'Cap':'Price')+' vs it</th><th scope="col">Last 20 days</th><th scope="col">In 30 days if '+what+' holds <small>likely band below</small></th><th scope="col">Rises tomorrow if above</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    var c=x.cross,cross='';
+    if(c) cross='<div class="context-stat"><span>50-day vs 200-day</span><b>'+(c.state==='golden'?'Above (golden cross)':'Below (death cross)')+(c.sinceDate?' since '+esc(mtDate(c.sinceDate)):'')+', '+Math.abs(c.gapPct).toFixed(1)+'% apart</b></div>'
+      +'<p class="insight-caption">'+(c.meetInDaysIfFlat?'If '+what+' holds here, they meet in about '+c.meetInDaysIfFlat+' days.':'If '+what+' holds here, they do not meet within 120 days.')+'</p>';
+    var r=x.range,range='';
+    if(r&&r.d7) range='<div class="context-stat"><span>Likely range, next 7 days</span><b>'+v(r.d7.lo68)+' – '+v(r.d7.hi68)+'</b></div>'
+      +'<div class="context-stat"><span>Likely range, next 30 days</span><b>'+v(r.d30.lo68)+' – '+v(r.d30.hi68)+'</b></div>'
+      +'<p class="insight-caption">About two outcomes in three land inside; nineteen in twenty inside '+v(r.d7.lo95)+' – '+v(r.d7.hi95)+' (7 days) and '+v(r.d30.lo95)+' – '+v(r.d30.hi95)+' (30 days). From recent volatility, widened so these shares held for 2019-26. A size forecast, not a direction. 30-day volatility '+(num(r.vol30Annual)?(r.vol30Annual*100).toFixed(0)+'% a year':'—')+(num(r.vol30Percentile1y)?', above '+(r.vol30Percentile1y*100).toFixed(0)+'% of the last year':'')+'.</p>';
+    var my=x.mayer,mayer='';
+    if(my&&num(my.value)) mayer='<div class="context-stat"><span>Against its 200-day average</span><b>'+my.value.toFixed(2)+'x</b></div>'
+      +(my.early&&my.late?'<p class="insight-caption">Days at '+esc(my.band)+'x were followed over 90 days by a median '+mtRet(my.early.median90)+' ('+Math.round(my.early.up90*100)+'% up) in '+early+' and '+mtRet(my.late.median90)+' ('+Math.round(my.late.up90*100)+'% up) in 2019-26. The two periods disagree on what stretched levels lead to, so this is context, not a forecast.</p>':'');
+    var extra='';
+    if(kind==='total'){
+      if(num(x.btcDominance)) extra+='<div class="context-stat"><span>BTC dominance</span><b>'+x.btcDominance.toFixed(1)+'% <span class="'+pctCls(x.btcDominanceChange30)+'">'+(num(x.btcDominanceChange30)?(x.btcDominanceChange30>0?'+':'')+x.btcDominanceChange30.toFixed(1)+' pts in 30 days':'')+'</span></b></div>';
+      var vq=x.volume;
+      if(vq) extra+='<div class="context-stat"><span>Total volume, 24h</span><b>'+fmtBig(vq.volume24h)+' <span class="flat">30-day median '+fmtBig(vq.median30)+'</span></b></div>'
+        +'<p class="insight-caption">'+(vq.quiet?'<b>Quiet:</b> in the bottom fifth of the past month. After days like this a big next-day BTC move has come about half as often as usual ('+(vq.bigMoveQuiet*100).toFixed(1)+'% vs '+(vq.bigMoveOther*100).toFixed(1)+'%); which way is a coin flip.':'Not in the quiet fifth of the past month. When it is, a big next-day BTC move has come about half as often ('+(vq.bigMoveQuiet*100).toFixed(1)+'% vs '+(vq.bigMoveOther*100).toFixed(1)+'%).')+'</p>';
+    }
+    var sig=(x.signals||[]).map(function(s){
+      return '<tr><th scope="row">'+esc(s.label)+'</th><td data-label="Now"><span>'+(s.now?'Yes':'No')+'</span></td><td data-label="Next 90 days, '+early+'"><span>'+mtRet(s.early.median)+'<small>'+Math.round(s.early.up*100)+'% up · otherwise '+mtRet(s.early.otherMedian)+'</small></span></td><td data-label="Next 90 days, 2019-26"><span>'+mtRet(s.late.median)+'<small>'+Math.round(s.late.up*100)+'% up · otherwise '+mtRet(s.late.otherMedian)+'</small></span></td></tr>';
+    }).join('');
+    var evidence=sig?'<details class="research-note mt-evidence"><summary>Do these trend signals predict? Until 2018 they did; since 2019 they have not</summary><div class="mt-table-wrap"><table class="mt-table"><thead><tr><th scope="col">Signal</th><th scope="col">Now</th><th scope="col">Next 90 days, '+early+'</th><th scope="col">Next 90 days, 2019-26</th></tr></thead><tbody>'+sig+'</tbody></table></div><p class="insight-caption">Median change over the following 90 days, across every day in that state, and the share of those days that ended higher. Until 2018 each signal separated the next 90 days strongly; since 2019 the difference has been within noise. The averages describe the trend; they have not called the next move since 2019.</p></details>':'';
+    return '<div class="mt-col">'+head+mtChart(x,kind,name)+legend+table+cross+range+mayer+extra+evidence+'</div>';
+  }
+  function renderMarketTrend(mt){
+    if(!mt||(!mt.btc&&!mt.total)) return '';
+    return '<article class="insight-card trend-card" id="trend"><div class="insight-head"><h3>Moving averages · Bitcoin and the total crypto market</h3><span class="subtle-chip">UPDATED HOURLY</span></div>'
+      +'<p class="insight-caption">Where each average sits, where it is heading if the price holds (exact: the old prices about to leave each average are already known), and what has actually followed. Built '+esc(String(mt.generatedAt||'').slice(11,16))+' UTC.</p>'
+      +'<div class="mt-grid">'+mtSeries(mt.btc,'btc','Bitcoin')+mtSeries(mt.total,'total','Total crypto market cap')+'</div></article>';
+  }
   function measuredNumber(v){return typeof v==='number'&&isFinite(v);}
   function renderDashboard(d,pricesOnly){
     var o=d.overview||{},g=o.global||{},fg=o.fear_greed;
@@ -8420,6 +8533,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     $('dashboardInsights').innerHTML=
       '<article class="insight-card"><div class="insight-head"><h3>Market movement</h3><span class="subtle-chip">OBSERVED · 24H</span></div><p class="insight-caption">Major reference markets · SPY uses its daily change</p><div id="marketMovement">'+chartContent+'</div></article>'
       +'<article class="insight-card"><div class="insight-head"><h3>Market sentiment</h3><span class="subtle-chip">CONTEXT</span></div>'+sentiment+'<div class="context-stat"><span>BTC dominance</span><b>'+(measuredNumber(g.btc_dominance)?g.btc_dominance.toFixed(1)+'%':'—')+'</b></div><div class="context-stat"><span>VIX</span><b>'+(o.vix&&measuredNumber(o.vix.price)?o.vix.price.toFixed(2):'—')+' <span class="'+pctCls(o.vix&&o.vix.chg24h)+'">'+(o.vix?fmtPct(o.vix.chg24h)+' 1d':'')+'</span></b></div></article>'
+      +renderMarketTrend(d.marketTrend)
       +'<div class="dashboard-bottom"><article class="insight-card"><div class="insight-head"><h3>Direction evidence</h3><span class="subtle-chip">LIVE MODEL</span></div>'+evidence+'<p class="insight-caption">Each current setup must also pass its own evidence gate.</p><a class="card-link" href="#screens">Explore the screens ↗</a></article>'
       +'<article class="insight-card"><div class="insight-head"><h3>What the model missed</h3></div>'+retrospective+'<a class="card-link" href="#learning">Review the retrospective ↗</a></article>'
       +'<article class="insight-card"><div class="insight-head"><h3>Learning coverage</h3><span class="subtle-chip">SHADOW</span></div>'+research+perAsset+'<a class="card-link" href="#research">Open research &amp; evidence ↗</a></article></div>';

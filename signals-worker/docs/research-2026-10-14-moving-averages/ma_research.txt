@@ -1,0 +1,144 @@
+
+######## btc  2011-08-18 .. 2026-10-13
+  base all: 30d mean +0.055 median +0.032 up 58% | 90d mean +0.165 median +0.098 up 60% | 180d mean +0.326 median +0.282 up 65%
+  base early: 30d mean +0.079 median +0.039 up 59% | 90d mean +0.239 median +0.154 up 62% | 180d mean +0.483 median +0.432 up 67%
+  base late: 30d mean +0.033 median +0.025 up 57% | 90d mean +0.097 median +0.073 up 58% | 180d mean +0.179 median +0.172 up 63%
+  -- above200
+     early 30d: true median +0.076 up 66% (n 1712) | false median -0.022 up 44% (n 782) | mean diff +0.160 (HAC t +3.4)
+     early 90d: true median +0.302 up 75% (n 1712) | false median -0.112 up 34% (n 782) | mean diff +0.499 (HAC t +3.8)
+     early 180d: true median +0.683 up 84% (n 1712) | false median -0.247 up 30% (n 782) | mean diff +0.897 (HAC t +4.1)
+     late 30d: true median +0.019 up 54% (n 1611) | false median +0.032 up 61% (n 1202) | mean diff +0.011 (HAC t +0.4)
+     late 90d: true median +0.065 up 59% (n 1585) | false median +0.097 up 56% (n 1168) | mean diff +0.019 (HAC t +0.2)
+     late 180d: true median +0.151 up 63% (n 1585) | false median +0.214 up 63% (n 1078) | mean diff +0.055 (HAC t +0.3)
+  -- above50
+     early 30d: true median +0.070 up 63% (n 1512) | false median +0.010 up 52% (n 982) | mean diff +0.138 (HAC t +3.1)
+     early 90d: true median +0.281 up 68% (n 1512) | false median +0.024 up 53% (n 982) | mean diff +0.328 (HAC t +2.9)
+     early 180d: true median +0.595 up 79% (n 1512) | false median -0.059 up 47% (n 982) | mean diff +0.397 (HAC t +2.9)
+     late 30d: true median +0.028 up 56% (n 1535) | false median +0.022 up 58% (n 1278) | mean diff +0.038 (HAC t +1.5)
+     late 90d: true median +0.088 up 59% (n 1481) | false median +0.060 up 56% (n 1272) | mean diff +0.060 (HAC t +0.9)
+     late 180d: true median +0.137 up 62% (n 1441) | false median +0.217 up 64% (n 1222) | mean diff +0.026 (HAC t +0.3)
+  -- golden
+     early 30d: true median +0.066 up 65% (n 1767) | false median -0.020 up 45% (n 727) | mean diff +0.145 (HAC t +3.0)
+     early 90d: true median +0.298 up 75% (n 1767) | false median -0.110 up 31% (n 727) | mean diff +0.505 (HAC t +3.9)
+     early 180d: true median +0.663 up 81% (n 1767) | false median -0.242 up 31% (n 727) | mean diff +0.858 (HAC t +3.9)
+     late 30d: true median +0.010 up 52% (n 1584) | false median +0.041 up 62% (n 1229) | mean diff +0.003 (HAC t +0.1)
+     late 90d: true median +0.054 up 58% (n 1578) | false median +0.131 up 58% (n 1175) | mean diff -0.012 (HAC t -0.1)
+     late 180d: true median +0.144 up 62% (n 1578) | false median +0.203 up 65% (n 1085) | mean diff +0.039 (HAC t +0.2)
+  -- rising200
+     early 30d: true median +0.077 up 66% (n 1779) | false median -0.030 up 41% (n 715) | mean diff +0.177 (HAC t +3.8)
+     early 90d: true median +0.277 up 73% (n 1779) | false median -0.096 up 35% (n 715) | mean diff +0.499 (HAC t +3.6)
+     early 180d: true median +0.614 up 76% (n 1779) | false median -0.162 up 43% (n 715) | mean diff +0.740 (HAC t +2.9)
+     late 30d: true median +0.016 up 54% (n 1832) | false median +0.044 up 62% (n 981) | mean diff +0.003 (HAC t +0.1)
+     late 90d: true median +0.087 up 62% (n 1821) | false median -0.004 up 50% (n 932) | mean diff +0.047 (HAC t +0.4)
+     late 180d: true median +0.155 up 61% (n 1821) | false median +0.194 up 66% (n 842) | mean diff +0.037 (HAC t +0.2)
+  -- stack_bull
+     early 30d: true median +0.121 up 71% (n 879) | false median +0.012 up 52% (n 1615) | mean diff +0.188 (HAC t +3.3)
+     early 90d: true median +0.448 up 83% (n 879) | false median +0.010 up 51% (n 1615) | mean diff +0.449 (HAC t +3.5)
+     early 180d: true median +0.803 up 92% (n 879) | false median +0.230 up 53% (n 1615) | mean diff +0.543 (HAC t +3.1)
+     late 30d: true median +0.024 up 55% (n 625) | false median +0.025 up 57% (n 2188) | mean diff +0.040 (HAC t +1.4)
+     late 90d: true median +0.082 up 61% (n 624) | false median +0.071 up 57% (n 2129) | mean diff +0.062 (HAC t +0.6)
+     late 180d: true median +0.111 up 58% (n 624) | false median +0.194 up 64% (n 2039) | mean diff +0.018 (HAC t +0.2)
+  -- stack_bear
+     early 30d: true median +0.013 up 53% (n 313) | false median +0.045 up 60% (n 2181) | mean diff -0.103 (HAC t -1.9)
+     early 90d: true median -0.074 up 38% (n 313) | false median +0.203 up 66% (n 2181) | mean diff -0.386 (HAC t -3.1)
+     early 180d: true median -0.209 up 33% (n 313) | false median +0.515 up 72% (n 2181) | mean diff -0.665 (HAC t -3.3)
+     late 30d: true median +0.033 up 66% (n 378) | false median +0.023 up 55% (n 2435) | mean diff -0.007 (HAC t -0.2)
+     late 90d: true median +0.061 up 54% (n 378) | false median +0.074 up 59% (n 2375) | mean diff -0.038 (HAC t -0.5)
+     late 180d: true median +0.171 up 56% (n 346) | false median +0.172 up 64% (n 2317) | mean diff -0.137 (HAC t -1.0)
+  -- above200w
+     early 30d: true median +0.046 up 60% (n 1264) | false median +0.092 up 100% (n 30) | mean diff -0.047 (HAC t -1.0)
+     early 90d: true median +0.182 up 63% (n 1264) | false median +0.594 up 100% (n 30) | mean diff -0.369 (HAC t -3.5)
+     early 180d: true median +0.408 up 72% (n 1264) | false median +0.595 up 100% (n 30) | mean diff -0.206 (HAC t -0.9)
+     late 30d: true median +0.017 up 54% (n 2464) | false median +0.061 up 74% (n 349) | mean diff -0.050 (HAC t -1.4)
+     late 90d: true median +0.056 up 56% (n 2414) | false median +0.205 up 72% (n 339) | mean diff -0.103 (HAC t -1.0)
+     late 180d: true median +0.138 up 60% (n 2340) | false median +0.378 up 88% (n 323) | mean diff -0.229 (HAC t -1.6)
+  -- price / 200-day average (Mayer multiple)
+     early <0.8     days   363 | 30d median +0.001 | 90d median -0.040 up 38% | 180d median -0.239 up 29%
+     early 0.8-1.0  days   419 | 30d median -0.033 | 90d median -0.212 up 30% | 180d median -0.261 up 30%
+     early 1.0-1.2  days   526 | 30d median +0.072 | 90d median +0.340 up 84% | 180d median +0.567 up 86%
+     early 1.2-1.5  days   525 | 30d median +0.100 | 90d median +0.355 up 81% | 180d median +1.038 up 91%
+     early 1.5-2.0  days   332 | 30d median +0.114 | 90d median +0.378 up 81% | 180d median +1.067 up 93%
+     early >2.0     days   329 | 30d median -0.027 | 90d median -0.077 up 46% | 180d median +0.267 up 59%
+     late <0.8     days   482 | 30d median +0.041 | 90d median -0.008 up 49% | 180d median +0.205 up 66%
+     late 0.8-1.0  days   720 | 30d median +0.024 | 90d median +0.157 up 61% | 180d median +0.238 up 60%
+     late 1.0-1.2  days   735 | 30d median +0.033 | 90d median +0.107 up 69% | 180d median +0.243 up 65%
+     late 1.2-1.5  days   588 | 30d median -0.013 | 90d median +0.031 up 55% | 180d median +0.183 up 75%
+     late 1.5-2.0  days   220 | 30d median +0.029 | 90d median -0.003 up 50% | 180d median -0.066 up 40%
+     late >2.0     days    98 | 30d median +0.119 | 90d median -0.189 up 42% | 180d median -0.117 up 29%
+  -- expected range calibration (EWMA 0.94; share of moves inside +-1sd / +-2sd of sqrt(h) x daily sd)
+     early 7d: inside 1sd 68% (normal 68%), inside 2sd 88% (95%)
+     early 30d: inside 1sd 62% (normal 68%), inside 2sd 83% (95%)
+     late 7d: inside 1sd 72% (normal 68%), inside 2sd 92% (95%)
+     late 30d: inside 1sd 64% (normal 68%), inside 2sd 86% (95%)
+
+######## total  2013-04-28 .. 2026-10-11
+  base all: 30d mean +0.036 median +0.026 up 56% | 90d mean +0.106 median +0.063 up 56% | 180d mean +0.223 median +0.198 up 61%
+  base early: 30d mean +0.040 median +0.030 up 56% | 90d mean +0.120 median +0.079 up 56% | 180d mean +0.283 median +0.292 up 57%
+  base late: 30d mean +0.033 median +0.025 up 57% | 90d mean +0.097 median +0.056 up 56% | 180d mean +0.180 median +0.179 up 64%
+  -- above200
+     early 30d: true median +0.058 up 63% (n 1128) | false median -0.017 up 45% (n 747) | mean diff +0.115 (HAC t +2.3)
+     early 90d: true median +0.258 up 71% (n 1128) | false median -0.149 up 33% (n 747) | mean diff +0.390 (HAC t +2.8)
+     early 180d: true median +0.492 up 75% (n 1128) | false median -0.224 up 30% (n 747) | mean diff +0.709 (HAC t +2.6)
+     late 30d: true median +0.021 up 56% (n 1620) | false median +0.029 up 59% (n 1191) | mean diff +0.009 (HAC t +0.3)
+     late 90d: true median +0.042 up 55% (n 1596) | false median +0.084 up 58% (n 1155) | mean diff +0.023 (HAC t +0.2)
+     late 180d: true median +0.146 up 64% (n 1596) | false median +0.206 up 65% (n 1065) | mean diff +0.063 (HAC t +0.4)
+  -- above50
+     early 30d: true median +0.045 up 60% (n 1069) | false median -0.002 up 50% (n 806) | mean diff +0.086 (HAC t +1.8)
+     early 90d: true median +0.193 up 63% (n 1069) | false median -0.025 up 47% (n 806) | mean diff +0.211 (HAC t +1.9)
+     early 180d: true median +0.449 up 70% (n 1069) | false median -0.161 up 40% (n 806) | mean diff +0.490 (HAC t +2.4)
+     late 30d: true median +0.043 up 60% (n 1534) | false median +0.011 up 54% (n 1277) | mean diff +0.042 (HAC t +1.7)
+     late 90d: true median +0.070 up 57% (n 1481) | false median +0.044 up 55% (n 1270) | mean diff +0.062 (HAC t +0.9)
+     late 180d: true median +0.165 up 66% (n 1443) | false median +0.201 up 63% (n 1218) | mean diff +0.069 (HAC t +0.7)
+  -- golden
+     early 30d: true median +0.054 up 63% (n 1171) | false median -0.024 up 44% (n 704) | mean diff +0.121 (HAC t +2.4)
+     early 90d: true median +0.263 up 72% (n 1171) | false median -0.172 up 29% (n 704) | mean diff +0.427 (HAC t +3.2)
+     early 180d: true median +0.490 up 73% (n 1171) | false median -0.230 up 31% (n 704) | mean diff +0.688 (HAC t +2.5)
+     late 30d: true median +0.013 up 53% (n 1568) | false median +0.039 up 61% (n 1243) | mean diff -0.002 (HAC t -0.1)
+     late 90d: true median +0.014 up 52% (n 1564) | false median +0.134 up 62% (n 1187) | mean diff -0.014 (HAC t -0.1)
+     late 180d: true median +0.169 up 62% (n 1564) | false median +0.185 up 67% (n 1097) | mean diff +0.065 (HAC t +0.4)
+  -- rising200
+     early 30d: true median +0.059 up 65% (n 1221) | false median -0.048 up 39% (n 654) | mean diff +0.142 (HAC t +2.9)
+     early 90d: true median +0.255 up 71% (n 1221) | false median -0.164 up 27% (n 654) | mean diff +0.408 (HAC t +3.0)
+     early 180d: true median +0.464 up 67% (n 1221) | false median -0.173 up 38% (n 654) | mean diff +0.571 (HAC t +2.0)
+     late 30d: true median +0.011 up 53% (n 1789) | false median +0.054 up 63% (n 1022) | mean diff -0.009 (HAC t -0.3)
+     late 90d: true median +0.043 up 56% (n 1780) | false median +0.078 up 58% (n 971) | mean diff +0.014 (HAC t +0.1)
+     late 180d: true median +0.146 up 62% (n 1780) | false median +0.194 up 68% (n 881) | mean diff +0.025 (HAC t +0.2)
+  -- stack_bull
+     early 30d: true median +0.092 up 72% (n 604) | false median -0.007 up 48% (n 1271) | mean diff +0.160 (HAC t +2.6)
+     early 90d: true median +0.351 up 83% (n 604) | false median -0.051 up 43% (n 1271) | mean diff +0.392 (HAC t +3.0)
+     early 180d: true median +0.674 up 88% (n 604) | false median -0.141 up 43% (n 1271) | mean diff +0.723 (HAC t +2.7)
+     late 30d: true median +0.038 up 58% (n 648) | false median +0.023 up 57% (n 2163) | mean diff +0.032 (HAC t +1.1)
+     late 90d: true median +0.030 up 54% (n 646) | false median +0.062 up 57% (n 2105) | mean diff +0.066 (HAC t +0.6)
+     late 180d: true median +0.172 up 64% (n 646) | false median +0.181 up 64% (n 2015) | mean diff +0.097 (HAC t +0.7)
+  -- stack_bear
+     early 30d: true median +0.021 up 55% (n 268) | false median +0.030 up 56% (n 1607) | mean diff -0.053 (HAC t -1.1)
+     early 90d: true median -0.082 up 36% (n 268) | false median +0.135 up 59% (n 1607) | mean diff -0.237 (HAC t -2.1)
+     early 180d: true median -0.193 up 35% (n 268) | false median +0.393 up 61% (n 1607) | mean diff -0.468 (HAC t -2.0)
+     late 30d: true median +0.037 up 65% (n 389) | false median +0.022 up 56% (n 2422) | mean diff +0.000 (HAC t +0.0)
+     late 90d: true median +0.087 up 60% (n 389) | false median +0.047 up 56% (n 2362) | mean diff -0.022 (HAC t -0.3)
+     late 180d: true median +0.175 up 57% (n 357) | false median +0.180 up 65% (n 2304) | mean diff -0.112 (HAC t -0.8)
+  -- above200w
+     early 30d: true median +0.002 up 50% (n 663) | false median +0.161 up 100% (n 12) | mean diff -0.089 (HAC t -1.3)
+     early 90d: true median -0.028 up 49% (n 663) | false median +0.202 up 100% (n 12) | mean diff -0.039 (HAC t -0.2)
+     early 180d: true median -0.146 up 48% (n 663) | false median +0.837 up 100% (n 12) | mean diff -0.587 (HAC t -1.4)
+     late 30d: true median +0.019 up 55% (n 2559) | false median +0.118 up 79% (n 252) | mean diff -0.082 (HAC t -2.7)
+     late 90d: true median +0.022 up 53% (n 2529) | false median +0.336 up 96% (n 222) | mean diff -0.241 (HAC t -3.9)
+     late 180d: true median +0.136 up 62% (n 2472) | false median +0.610 up 99% (n 189) | mean diff -0.414 (HAC t -2.5)
+  -- price / 200-day average (Mayer multiple)
+     early <0.8     days   408 | 30d median -0.008 | 90d median -0.137 up 29% | 180d median -0.203 up 28%
+     early 0.8-1.0  days   339 | 30d median -0.024 | 90d median -0.151 up 38% | 180d median -0.271 up 32%
+     early 1.0-1.2  days   291 | 30d median +0.047 | 90d median +0.208 up 69% | 180d median +0.568 up 76%
+     early 1.2-1.5  days   377 | 30d median +0.056 | 90d median +0.238 up 81% | 180d median +0.442 up 86%
+     early 1.5-2.0  days   209 | 30d median +0.281 | 90d median +0.889 up 80% | 180d median +0.827 up 89%
+     early >2.0     days   251 | 30d median -0.055 | 90d median +0.002 up 50% | 180d median -0.068 up 48%
+     late <0.8     days   405 | 30d median +0.032 | 90d median -0.025 up 47% | 180d median +0.124 up 62%
+     late 0.8-1.0  days   786 | 30d median +0.026 | 90d median +0.180 up 64% | 180d median +0.239 up 66%
+     late 1.0-1.2  days   754 | 30d median +0.022 | 90d median +0.069 up 62% | 180d median +0.197 up 68%
+     late 1.2-1.5  days   597 | 30d median +0.002 | 90d median +0.009 up 51% | 180d median +0.090 up 60%
+     late 1.5-2.0  days   193 | 30d median +0.032 | 90d median -0.031 up 45% | 180d median -0.113 up 44%
+     late >2.0     days   106 | 30d median +0.180 | 90d median -0.020 up 49% | 180d median +0.216 up 94%
+  -- expected range calibration (EWMA 0.94; share of moves inside +-1sd / +-2sd of sqrt(h) x daily sd)
+     early 7d: inside 1sd 68% (normal 68%), inside 2sd 91% (95%)
+     early 30d: inside 1sd 63% (normal 68%), inside 2sd 86% (95%)
+     late 7d: inside 1sd 71% (normal 68%), inside 2sd 92% (95%)
+     late 30d: inside 1sd 64% (normal 68%), inside 2sd 88% (95%)

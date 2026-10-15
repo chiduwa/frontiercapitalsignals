@@ -23,6 +23,7 @@
 // direction is ever shown" would pass on a page that renders nothing at all.
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
+import { trendFor } from './scripts/market-trend.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -341,6 +342,35 @@ awaiting.dom.window.close();
 // this suite, and the deploy job has a wall-clock budget.
 check('and an absent lane adds nothing to the card rather than rendering a zero',
   !ui.doc.getElementById('dashboardInsights').textContent.includes('Own coefficients earned'));
+
+// ===================== moving averages: BTC and the total market =====================
+// docs/MARKET_TREND.md. Exact projections, measured evidence for both periods,
+// and a source that is down renders as down, never as a number.
+console.log('\n== the moving-average card renders both series, the projections and the evidence ==');
+const mtDay = (i) => new Date(Date.parse('2021-01-01T00:00:00Z') + i * 86400000).toISOString().slice(0, 10);
+const mtSeries = (scale) => Array.from({ length: 2000 }, (_, i) => ({ date: mtDay(i), close: scale * Math.exp(0.0008 * i + 0.25 * Math.sin(i / 37)) }));
+const mtVolume = Array.from({ length: 60 }, (_, i) => ({ date: mtDay(1940 + i), volume: i === 59 ? 4e10 : 9e10 + (i % 7) * 1e9 }));
+const mtBtc = { ...trendFor(mtSeries(20000), { kind: 'btc' }), stale: true };
+const mtTotal = { ...trendFor(mtSeries(1e12), { kind: 'total', volume: mtVolume }), btcDominance: 59.9, btcDominanceChange30: 1.1 };
+const mtUi = await render({ ...payload(), marketTrend: { version: 'market-trend-v1', generatedAt: '2026-10-15T00:17:00.000Z', btc: mtBtc, total: mtTotal } }, { settleMs: 1200 });
+const mtCard = mtUi.doc.getElementById('trend');
+const mtText = mtCard ? mtCard.textContent : '';
+check('the card is on the overview', !!mtCard && mtText.includes('Moving averages') && mtText.includes('Bitcoin') && mtText.includes('Total crypto market cap'));
+check('each series lists all five averages',
+  mtCard && [...mtCard.querySelectorAll('.mt-col')].every((col) => col.querySelectorAll('table.mt-table')[0].querySelectorAll('tbody tr').length === 5));
+check('each series draws a chart with its projections',
+  mtCard && mtCard.querySelectorAll('svg.mt-chart').length === 2 && mtCard.querySelectorAll('polyline.mt-proj').length === 4 && mtCard.querySelectorAll('polygon.mt-cone').length === 2);
+check('where each average is heading is stated against the price holding', mtText.includes('if price holds') && mtText.includes('if the cap holds') && mtText.includes('Rises tomorrow if above'));
+check('the trend signals carry both periods and say they stopped predicting', mtText.includes('2011-18') && mtText.includes('2013-18') && mtText.includes('2019-26') && mtText.includes('since 2019 they have not'));
+check('ranges are presented as size, not direction', mtText.includes('Likely range, next 7 days') && mtText.includes('not a direction'));
+check('a quiet-volume day says calmer, and that direction is a coin flip', mtText.includes('Quiet:') && mtText.includes('coin flip') && mtText.includes('4.4% vs 8.2%'));
+check('a series carried from the last hour is labelled as such', mtText.includes('LAST HOUR · SOURCE DOWN'));
+check('the card never issues a call', !/\bBUY\b|\bSELL\b/.test(mtText));
+mtUi.dom.window.close();
+const mtDown = await render({ ...payload(), marketTrend: { version: 'market-trend-v1', generatedAt: '2026-10-15T00:17:00.000Z', btc: mtBtc, total: { status: 'unavailable', reason: 'CMC history unavailable' } } }, { settleMs: 1200 });
+const mtDownText = mtDown.doc.getElementById('trend')?.textContent || '';
+check('a source that is down renders as unavailable, with no inferred value', mtDownText.includes('Unavailable this hour. No value is inferred.') && mtDown.doc.querySelectorAll('#trend svg.mt-chart').length === 1);
+mtDown.dom.window.close();
 
 // ===================== degraded payloads must not crash ====================
 // Every renderer runs inside ONE inline script. A throw in any of them stops

@@ -27,6 +27,7 @@ import { loadHierarchicalHealth } from './hierarchical-research.mjs';
 import { loadTournamentHealth } from './model-tournament-io.mjs';
 import { loadBigMoveWatch } from './big-move-watch-io.mjs';
 import { buildDayZones } from './day-zones.mjs';
+import { buildMarketTrend } from './market-trend.mjs';
 import { loadDecouplingWatch } from './decoupling-watch-io.mjs';
 import { loadCoinRotation } from './coin-rotation-io.mjs';
 import { loadLowcapWatch } from './lowcap-watch-io.mjs';
@@ -294,6 +295,14 @@ if (FCS_D1_DATABASE_ID) {
     if (payload.dayZones.missing.length) console.warn(`day zones: no zone for ${payload.dayZones.missing.join(', ')}`);
   } catch (error) {
     console.error('day zones unavailable:', error.message);
+  }
+  // Moving averages for BTC and the total crypto market cap, where each is
+  // heading, and what they have and have not predicted (scripts/market-trend.mjs).
+  // Four public, keyless requests; a source that fails keeps last hour's block.
+  try {
+    payload.marketTrend = await buildMarketTrend({ previous: previousPayload && previousPayload.marketTrend });
+  } catch (error) {
+    console.error('market trend unavailable:', error.message);
   }
   // Large coins pulling away from the market on unusual volume, from the
   // hourly live scan; direction unknown, and the panel says so.
