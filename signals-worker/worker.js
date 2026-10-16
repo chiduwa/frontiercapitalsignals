@@ -8045,7 +8045,7 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
 <body>
 
 <div class="statusbar">
-  <div class="wrap">
+  <div class="wrap" tabindex="0" role="region" aria-label="System status">
     <span class="sys"><span class="dot live" id="sysDot"></span>FCS&nbsp;/&nbsp;<span id="sysState">CONNECTING</span></span>
     <span class="stat">UTC <b id="clock">--:--:--</b></span>
     <span class="spacer"></span>
