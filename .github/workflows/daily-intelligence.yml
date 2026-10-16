@@ -27,6 +27,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Test source selection
+        run: node --test scripts/tests/intel-sources.test.mjs
+
       - name: Generate daily intelligence
         # A quota/RSS hiccup here should never block deploys of unrelated code
         # changes — deploy lives in its own workflow (deploy.yml) that doesn't
@@ -80,3 +83,18 @@ jobs:
             exit 1
           fi
           echo "deploy.yml dispatched."
+
+      # A dead feed used to be one log line inside a continue-on-error step, so
+      # Ghana went from ~40 briefs a month to 5 without anyone noticing (both of
+      # its feeds died; see SOURCES in scripts/generate-intelligence.mjs). The
+      # generator writes this marker when a covered country has no working feed.
+      # It runs last, after the commit and deploy, so the day's briefs still ship
+      # and the red run is what makes GitHub email the owner.
+      - name: Check every covered country has a working feed
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/fcs-feed-gap.txt" ]; then
+            echo "::error title=Country without a news feed::$(cat "$RUNNER_TEMP/fcs-feed-gap.txt")"
+            exit 1
+          fi
+          echo "Every covered country had at least one working feed."

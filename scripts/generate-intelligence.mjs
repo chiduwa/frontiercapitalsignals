@@ -13,6 +13,8 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createHash } from "crypto";
+import os from "os";
+import { countriesWithoutFeed, interleaveByCountry } from "./lib/intel-sources.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONTENT_DIR = path.join(__dirname, "../content/intelligence");
@@ -30,7 +32,10 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY);
 const PRIMARY_MODEL = "gemini-2.5-flash";
 const FALLBACK_MODEL = "gemini-2.0-flash-lite";
 
-const parser = new RSSParser({ timeout: 10000 });
+const parser = new RSSParser({
+  timeout: 10000,
+  headers: { "User-Agent": "Mozilla/5.0 (compatible; FrontierCapitalSignals/1.0; +https://frontiercapitalsignals.com)" },
+});
 
 const SITE = "https://frontiercapitalsignals.com";
 const INDEXNOW_KEY = "fcs3902425740540825";
@@ -40,17 +45,30 @@ const MIN_NEW_POSTS = 3;
 // Skip generation if today already has this many posts (prevents quota waste on re-runs)
 const SKIP_IF_TODAY_HAS = 5;
 
+// Two feeds for each covered country plus two pan-African ones. Checked
+// 2026-10-15: Citi Business News stopped serving RSS, The B&FT's feed 404s,
+// The Africa Report answers 403 and IT News Africa's XML no longer parses,
+// so Ghana had no working source; Kenya and Uganda never had one.
 const SOURCES = [
-  { url: "https://www.theafricareport.com/feed/", country: "Africa", name: "The Africa Report" },
+  { url: "https://www.myjoyonline.com/business/feed/", country: "Ghana", name: "MyJoyOnline Business" },
+  { url: "https://thehighstreetjournal.com/feed/", country: "Ghana", name: "The High Street Journal" },
   { url: "https://businessday.ng/feed/", country: "Nigeria", name: "BusinessDay" },
   { url: "https://www.premiumtimesng.com/feed", country: "Nigeria", name: "Premium Times" },
-  { url: "https://citibusinessnews.com/feed/", country: "Ghana", name: "Citi Business News" },
-  { url: "https://thebftonline.com/feed/", country: "Ghana", name: "The B&FT" },
+  { url: "https://www.capitalfm.co.ke/business/feed/", country: "Kenya", name: "Capital FM Business" },
+  { url: "https://www.standardmedia.co.ke/rss/business.php", country: "Kenya", name: "The Standard" },
   { url: "https://www.nyasatimes.com/feed/", country: "Malawi", name: "Nyasa Times" },
   { url: "https://malawi24.com/feed/", country: "Malawi", name: "Malawi24" },
-  { url: "https://www.itnewsafrica.com/feed/", country: "Africa", name: "IT News Africa" },
+  { url: "https://www.independent.co.ug/feed/", country: "Uganda", name: "The Independent (Uganda)" },
+  { url: "https://nilepost.co.ug/feed", country: "Uganda", name: "Nile Post" },
   { url: "https://africabriefing.com/feed/", country: "Africa", name: "Africa Briefing" },
+  { url: "https://techcabal.com/feed/", country: "Africa", name: "TechCabal" },
 ];
+
+// Newest items read from each feed, and the most briefs any one country gets
+// in a day (see scripts/lib/intel-sources.mjs).
+const ITEMS_PER_SOURCE = 5;
+const ITEMS_SCANNED_PER_SOURCE = 40;
+const MAX_PER_COUNTRY_PER_DAY = 4;
 
 // Items older than this are news someone has already acted on.
 const MAX_ITEM_AGE_HOURS = 72;
@@ -297,36 +315,71 @@ async function run() {
   const briefedUrls = knownSourceUrls();
   console.log(`${briefedUrls.size} source URLs already briefed.`);
 
+  // Fetch every feed before spending any quota, so a dead feed is known and
+  // reported even on days the quota runs out early.
+  const feedResults = [];
+  const candidates = [];
   for (const source of SOURCES) {
-    if (quotaState.exhausted) {
-      console.log(`\nSkipping remaining sources — daily API quota is exhausted.`);
-      break;
-    }
     console.log(`Fetching: ${source.url}`);
     try {
       const feed = await parser.parseURL(source.url);
-      const items = feed.items.slice(0, 5);
-      for (const item of items) {
-        if (quotaState.exhausted) break;
+      const items = feed.items ?? [];
+      feedResults.push({ country: source.country, name: source.name, itemCount: items.length });
+      let taken = 0;
+      // General-news feeds (Nile Post carries ~300 items) bury business stories,
+      // so look further down, but keep at most ITEMS_PER_SOURCE per feed.
+      for (const item of items.slice(0, ITEMS_SCANNED_PER_SOURCE)) {
+        if (taken >= ITEMS_PER_SOURCE) break;
         const link = normalizeUrl(item.link ?? "");
         if (!link) continue;
         if (briefedUrls.has(link)) { console.log(`  Already briefed: ${link}`); continue; }
         if (!isFresh(item)) { console.log(`  Older than ${MAX_ITEM_AGE_HOURS}h: "${item.title}"`); continue; }
-        const data = await processItem(item, source.country, source.name, quotaState);
-        if (data) {
-          data.source = source.name;
-          data.sourceUrl = link;
-          const published = Date.parse(item.isoDate ?? item.pubDate ?? "");
-          data.sourcePublished = Number.isNaN(published) ? "" : new Date(published).toISOString().slice(0, 10);
-          const slug = await savePost(data);
-          if (slug) { newSlugs.push(slug); briefedUrls.add(link); }
-        }
-        // Gemini free tier: 10 RPM to stay safely under the 15 RPM limit
-        await new Promise((r) => setTimeout(r, 6000));
+        if (!isRelevant(item)) continue;
+        candidates.push({ item, link, country: source.country, sourceName: source.name });
+        taken++;
       }
     } catch (err) {
+      feedResults.push({ country: source.country, name: source.name, itemCount: 0, error: err.message });
       console.error(`  Failed to fetch ${source.url}: ${err.message}`);
+      console.log(`::warning title=News feed failed::${source.name} (${source.country}) ${source.url}: ${err.message}`);
     }
+  }
+
+  // Briefs already written today, by country, count towards each country's cap.
+  const alreadyToday = {};
+  for (const f of existingToday) {
+    const country = fs.readFileSync(path.join(CONTENT_DIR, f), "utf8").match(/^country:\s*"([^"]+)"/m)?.[1];
+    if (country) alreadyToday[country] = (alreadyToday[country] ?? 0) + 1;
+  }
+  const queue = interleaveByCountry(candidates, { cap: MAX_PER_COUNTRY_PER_DAY, alreadyToday });
+  console.log(`\n${candidates.length} relevant candidates; ${queue.length} queued, taken country by country (cap ${MAX_PER_COUNTRY_PER_DAY} a day each).`);
+
+  for (const { item, link, country, sourceName } of queue) {
+    if (quotaState.exhausted) {
+      console.log(`\nStopping — daily API quota is exhausted.`);
+      break;
+    }
+    const data = await processItem(item, country, sourceName, quotaState);
+    if (data) {
+      data.source = sourceName;
+      data.sourceUrl = link;
+      const published = Date.parse(item.isoDate ?? item.pubDate ?? "");
+      data.sourcePublished = Number.isNaN(published) ? "" : new Date(published).toISOString().slice(0, 10);
+      const slug = await savePost(data);
+      if (slug) { newSlugs.push(slug); briefedUrls.add(link); }
+    }
+    // Gemini free tier: 10 RPM to stay safely under the 15 RPM limit
+    await new Promise((r) => setTimeout(r, 6000));
+  }
+
+  // A covered country with no working feed fails the workflow's last step
+  // (after the commit and deploy), so GitHub emails the owner instead of the
+  // gap showing up months later as a lopsided feed.
+  const gaps = countriesWithoutFeed(feedResults);
+  if (gaps.length) {
+    const msg = `No working news feed for ${gaps.join(", ")}. Failed feeds: ${feedResults.filter((r) => r.error).map((r) => `${r.name} (${r.error})`).join("; ") || "none (feeds returned no items)"}`;
+    console.log(`::error title=Country without a news feed::${msg}`);
+    fs.writeFileSync(path.join(process.env.RUNNER_TEMP ?? os.tmpdir(), "fcs-feed-gap.txt"), msg + "\n");
   }
 
   const totalToday = existingToday.length + newSlugs.length;
