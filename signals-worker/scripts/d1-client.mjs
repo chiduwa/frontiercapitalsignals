@@ -26,24 +26,177 @@ function d1Url(env) {
 // class of bug) and worker.js's own fetchWithTimeout.
 const D1_TIMEOUT_MS = 30000;
 
-export async function d1(env, sql, params = []) {
+// ---- transient failures ------------------------------------------------------
+//
+// Cloudflare's D1 REST API fails a small share of requests on its own side:
+// `HTTP 500 [{"code":7500,"message":"internal error; reference = ..."}]`, a TLS
+// socket closed mid-response ("fetch failed ... other side closed"), or no
+// answer inside D1_TIMEOUT_MS. Until 2026-10-16 the first of those ended the
+// whole job. Signals Microstructure makes several hundred sequential calls per
+// run and failed this way 14 times between 09-30 and 10-14, each time on a call
+// that worked on the next run; Adaptive Research died on a timed-out page of
+// bars on 10-15.
+//
+// A retry is only safe when running the statement twice cannot change the
+// result. A failure that arrives after the request left this machine (a 5xx, a
+// dropped socket, our own timeout) does not say whether D1 committed it, and
+// `oos_checks = oos_checks + 1` (microstructure.mjs) or a plain INSERT into a
+// run log would then count twice. So:
+//   - never sent (DNS, refused or timed-out connect) or 429: retry anything;
+//   - outcome unknown: retry only statements that are safe to repeat;
+//   - anything else, including every 4xx (bad SQL) and the 7010 size ceiling,
+//     which fails identically every time (see readAllDailyBars): throw at
+//     once, as before.
+export const D1_RETRY_DELAYS_MS = Object.freeze([2000, 5000, 15000]);
+
+const UNSENT_CAUSES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT']);
+
+function httpFailure(message, res, body) {
+  const err = new Error(message);
+  const codes = ((body && body.errors) || []).map((e) => e && e.code);
+  err.d1Outcome = res.status === 429 ? 'unsent'
+    : res.status >= 500 && !codes.includes(7010) ? 'unknown'
+    : res.ok && !body ? 'unknown' // a 200 whose body never arrived whole
+    : null;
+  return err;
+}
+
+export function failureOutcome(err) {
+  if (!err) return null;
+  if (err.d1Outcome !== undefined) return err.d1Outcome;
+  if (err.name === 'AbortError') return 'unknown';
+  if (err instanceof TypeError && err.message === 'fetch failed') {
+    return UNSENT_CAUSES.has(err.cause && err.cause.code) ? 'unsent' : 'unknown';
+  }
+  return null;
+}
+
+// Upper-cased SQL with string literals emptied and comments dropped, so a
+// keyword inside a value ('pattern decayed', '-- x') cannot be mistaken for SQL.
+function normaliseSql(sql) {
+  let out = '';
+  for (let i = 0; i < sql.length; i++) {
+    const c = sql[i];
+    if (c === "'") {
+      let j = i + 1;
+      while (j < sql.length && !(sql[j] === "'" && sql[j + 1] !== "'")) j += sql[j] === "'" ? 2 : 1;
+      out += "''";
+      i = j;
+    } else if (c === '-' && sql[i + 1] === '-') {
+      const j = sql.indexOf('\n', i);
+      out += ' ';
+      i = j === -1 ? sql.length : j;
+    } else if (c === '/' && sql[i + 1] === '*') {
+      const j = sql.indexOf('*/', i + 2);
+      out += ' ';
+      i = j === -1 ? sql.length : j + 1;
+    } else {
+      out += c;
+    }
+  }
+  return out.replace(/\s+/g, ' ').trim().toUpperCase();
+}
+
+function splitTopLevel(text) {
+  const parts = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '(') depth++;
+    else if (text[i] === ')') depth--;
+    else if (text[i] === ',' && depth === 0) { parts.push(text.slice(start, i)); start = i + 1; }
+  }
+  parts.push(text.slice(start));
+  return parts.map((p) => p.trim());
+}
+
+// `col = ?`, a literal or `excluded.col` sets the same value however often it
+// runs. Anything that reads the row (`n = n + 1`, CASE ... ELSE col) may not.
+function setsConstants(setClause) {
+  return splitTopLevel(setClause).every((a) =>
+    /^[\w."]+ ?= ?(\?\d*|''|-?\d+(\.\d+)?|NULL|EXCLUDED\.[\w"]+)$/.test(a));
+}
+
+// 'read' | 'set' (lands the same rows whatever was there) | 'update' |
+// 'delete' | null (not safe to repeat).
+export function statementKind(sql) {
+  const s = normaliseSql(String(sql || ''));
+  if (/^(SELECT|WITH|EXPLAIN)\b/.test(s)) {
+    return /\b(INSERT|UPDATE|DELETE)\b|\bREPLACE INTO\b/.test(s) ? null : 'read';
+  }
+  // A nested SELECT makes a write depend on the rows it is changing:
+  // `DELETE ... WHERE id = (SELECT MAX(id) ...)` removes a different row each time.
+  if (/\bSELECT\b/.test(s)) return null;
+  if (/^CREATE (UNIQUE )?(TABLE|INDEX) IF NOT EXISTS\b/.test(s)) return 'set';
+  if (/^(INSERT OR (REPLACE|IGNORE)|REPLACE) INTO\b/.test(s)) return 'set';
+  if (/^INSERT INTO\b/.test(s)) {
+    if (/\bON CONFLICT\b.*\bDO NOTHING\b/.test(s)) return 'set';
+    const set = /\bDO UPDATE SET (.*?)(?: WHERE | RETURNING |$)/.exec(s);
+    return set && setsConstants(set[1]) ? 'set' : null;
+  }
+  if (/^UPDATE\b/.test(s)) {
+    const set = /\bSET (.*?)(?: WHERE | RETURNING | FROM |$)/.exec(s);
+    return set && setsConstants(set[1]) ? 'update' : null;
+  }
+  if (/^DELETE FROM\b/.test(s)) return 'delete';
+  return null;
+}
+
+// One statement is safe when its kind is. A batch commits as a unit, and its
+// statements can feed each other: [DELETE WHERE x=1, UPDATE SET x=1 WHERE y=2]
+// deletes more the second time. So a batch repeats only when every statement
+// is a read or a 'set', none of which picks rows by what the others changed.
+export function safeToRepeat(sqls) {
+  const kinds = sqls.map(statementKind);
+  if (kinds.includes(null)) return false;
+  return kinds.length === 1 || kinds.every((k) => k === 'read' || k === 'set');
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function withRetries(sqls, delays, attempt) {
+  for (let i = 0; ; i++) {
+    try {
+      return await attempt();
+    } catch (err) {
+      const outcome = failureOutcome(err);
+      const retry = i < delays.length && (outcome === 'unsent' || (outcome === 'unknown' && safeToRepeat(sqls)));
+      if (!retry) {
+        // Logged rather than appended: an AbortError's message is read-only.
+        if (i > 0) console.warn(`[d1] giving up after ${i} retr${i === 1 ? 'y' : 'ies'}`);
+        throw err;
+      }
+      console.warn(`[d1] ${err.message}; retry ${i + 1}/${delays.length} in ${delays[i] / 1000}s`);
+      await sleep(delays[i]);
+    }
+  }
+}
+
+async function post(env, payload) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), D1_TIMEOUT_MS);
-  let res, body;
   try {
-    res = await fetch(d1Url(env), {
+    const res = await fetch(d1Url(env), {
       method: 'POST',
       headers: { Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql, params }),
+      body: JSON.stringify(payload),
       signal: ctrl.signal
     });
-    body = await res.json().catch(() => null);
+    const body = await res.json().catch(() => null);
+    return { res, body };
   } finally {
     clearTimeout(t);
   }
-  if (!res.ok || !body || body.success !== true) {
-    throw new Error(`D1 query failed: HTTP ${res.status} ${JSON.stringify(body && body.errors)}`);
-  }
+}
+
+export async function d1(env, sql, params = [], { retryDelaysMs = D1_RETRY_DELAYS_MS } = {}) {
+  const body = await withRetries([sql], retryDelaysMs, async () => {
+    const { res, body } = await post(env, { sql, params });
+    if (!res.ok || !body || body.success !== true) {
+      throw httpFailure(`D1 query failed: HTTP ${res.status} ${JSON.stringify(body && body.errors)}`, res, body);
+    }
+    return body;
+  });
   return (body.result && body.result[0] && body.result[0].results) || [];
 }
 
@@ -53,33 +206,23 @@ export async function d1(env, sql, params = []) {
 // either all commit or all roll back. The REST API's `batch` form has the same
 // transactional semantics as D1Database.batch: statements execute in order and
 // a failure rolls the batch back. See Cloudflare's Query D1 Database API.
-export async function d1Batch(env, statements) {
+export async function d1Batch(env, statements, { retryDelaysMs = D1_RETRY_DELAYS_MS } = {}) {
   if (!Array.isArray(statements) || !statements.length) return [];
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), D1_TIMEOUT_MS);
-  let res, body;
-  try {
-    res = await fetch(d1Url(env), {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        batch: statements.map((statement) => ({
-          sql: statement.sql,
-          params: statement.params || []
-        }))
-      }),
-      signal: ctrl.signal
-    });
-    body = await res.json().catch(() => null);
-  } finally {
-    clearTimeout(t);
-  }
-  const results = body && Array.isArray(body.result) ? body.result : [];
-  const failed = results.find((result) => result && result.success === false);
-  if (!res.ok || !body || body.success !== true || failed) {
-    throw new Error(`D1 batch failed: HTTP ${res.status} ${JSON.stringify((body && body.errors) || failed)}`);
-  }
-  return results.map((result) => (result && result.results) || []);
+  const payload = {
+    batch: statements.map((statement) => ({
+      sql: statement.sql,
+      params: statement.params || []
+    }))
+  };
+  return withRetries(statements.map((s) => s.sql), retryDelaysMs, async () => {
+    const { res, body } = await post(env, payload);
+    const results = body && Array.isArray(body.result) ? body.result : [];
+    const failed = results.find((result) => result && result.success === false);
+    if (!res.ok || !body || body.success !== true || failed) {
+      throw httpFailure(`D1 batch failed: HTTP ${res.status} ${JSON.stringify((body && body.errors) || failed)}`, res, body);
+    }
+    return results.map((result) => (result && result.results) || []);
+  });
 }
 
 // D1's REST API accepts independent statements concurrently, but opening one

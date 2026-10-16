@@ -46,6 +46,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          # Full history so deploy-reached-production can read when the newest
+          # content was committed, not just the date in its file name (~17 MB).
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v7

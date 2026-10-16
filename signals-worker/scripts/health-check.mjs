@@ -82,9 +82,31 @@ const SIGNALS = `${ORIGIN}/signals/`;
 // Every live request goes through here: one identifiable user-agent, and the
 // dispatcher re-asserted each time so that nothing imported later can take the
 // fetch back without this file noticing.
-export function probeFetch(url, opts = {}, fetchImpl = fetch) {
-  reclaimFetchDispatcher();
-  return fetchImpl(url, { ...opts, headers: { 'User-Agent': 'fcs-health-check', ...(opts.headers || {}) } });
+//
+// A GET that throws or answers 5xx is asked again before it counts. One blip on
+// any of the run's requests used to fail the whole run: /signals/api/feed gave
+// "fetch failed" once on 10-10 and a 503 once on 10-15, and both answered
+// normally on the next request. Anything broken for longer than these delays
+// still fails. Other methods (the ntfy alert) are sent once, so a retry cannot
+// page twice.
+export const PROBE_RETRY_DELAYS_MS = Object.freeze([2000, 5000]);
+
+export async function probeFetch(url, opts = {}, fetchImpl = fetch, delays = PROBE_RETRY_DELAYS_MS) {
+  const repeatable = !opts.method || opts.method.toUpperCase() === 'GET';
+  for (let i = 0; ; i++) {
+    const last = !repeatable || i >= delays.length;
+    reclaimFetchDispatcher();
+    try {
+      const res = await fetchImpl(url, { ...opts, headers: { 'User-Agent': 'fcs-health-check', ...(opts.headers || {}) } });
+      if (last || res.status < 500) return res;
+      console.log(`  (GET ${url} returned ${res.status}; asking again in ${delays[i] / 1000}s)`);
+      try { await res.body?.cancel(); } catch { /* the retry does not need it */ }
+    } catch (e) {
+      if (last) throw e;
+      console.log(`  (GET ${url} failed: ${e.message}; asking again in ${delays[i] / 1000}s)`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, delays[i]));
+  }
 }
 
 // A body that arrived without being content-decoded reads as replacement
@@ -142,7 +164,12 @@ export const THRESHOLDS = Object.freeze({
   // sitemap <lastmod> is date-only, so between the daily commit and the deploy
   // landing, the repo is legitimately a whole quantised day ahead. Fail only
   // once content dated today is STILL undeployed this far into the day.
-  deployLagGraceHours: 12
+  deployLagGraceHours: 12,
+  // ...and an hour from when that content was COMMITTED. Its date says which
+  // day it belongs to, not when it landed: on 10-13 the 07:00 bot started at
+  // 14:39, pushed at 14:48:31, and a probe at 14:48:36 counted "14.8h
+  // undeployed" while deploy.yml (done 14:52) was still running.
+  deployLandGraceHours: 1
 });
 
 const hours = (ms) => ms / 3_600_000;
@@ -417,7 +444,7 @@ export async function checkRender(html, payload, prices) {
 // has, which makes this exact rather than a guess about cadence: if the repo
 // holds an article production does not, a deploy failed, full stop. The
 // absolute age check is the backstop for running outside a checkout.
-export function checkDeployFreshness(newestLiveISO, newestRepoISO, now = Date.now()) {
+export function checkDeployFreshness(newestLiveISO, newestRepoISO, now = Date.now(), landedISO = null) {
   const out = [];
   const push = (id, level, ok, detail) => out.push(result(id, level, ok, detail));
 
@@ -437,8 +464,11 @@ export function checkDeployFreshness(newestLiveISO, newestRepoISO, now = Date.no
   if (Number.isFinite(repo)) {
     const undeployedFor = hours(now - repo);
     const behind = repo > live;
+    // Unknown (outside a git checkout) means no second grace: as before.
+    const landed = Date.parse(landedISO ?? '');
+    const sinceLanded = Number.isFinite(landed) ? hours(now - landed) : Infinity;
     push('deploy-reached-production', 'fail',
-      !(behind && undeployedFor >= THRESHOLDS.deployLagGraceHours),
+      !(behind && undeployedFor >= THRESHOLDS.deployLagGraceHours && sinceLanded >= THRESHOLDS.deployLandGraceHours),
       `the repo holds content dated ${newestRepoISO} and production's newest is ${newestLiveISO}, still undeployed ${undeployedFor.toFixed(1)}h on — a deploy has failed, not merely slipped`);
   }
   return out;
@@ -464,6 +494,22 @@ export async function readNewestRepoContentDate(dir = new URL('../../content/int
       .map((f) => /^(\d{4}-\d{2}-\d{2})/.exec(f)?.[1])
       .filter(Boolean).map((d) => Date.parse(`${d}T00:00:00Z`)).filter(Number.isFinite);
     return stamps.length ? new Date(Math.max(...stamps)).toISOString() : null;
+  } catch { return null; }
+}
+
+// When content last reached main: the commit time of the newest change under
+// content/intelligence/. signals-health.yml checks out full history for this;
+// in a shallow clone git reports HEAD's time instead, which is later and so
+// only ever delays a failure, never invents one. Null outside a checkout.
+export async function readRepoContentLandedAt(dir = new URL('../../content/intelligence/', import.meta.url)) {
+  try {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const { fileURLToPath } = await import('node:url');
+    const { stdout } = await promisify(execFile)('git', ['log', '-1', '--format=%cI', '--', '.'],
+      { cwd: fileURLToPath(dir) });
+    const t = Date.parse(stdout.trim());
+    return Number.isFinite(t) ? new Date(t).toISOString() : null;
   } catch { return null; }
 }
 
@@ -632,7 +678,7 @@ async function main() {
   if (wantPage) {
     try {
       checks.push(...checkDeployFreshness(
-        await readNewestLiveContentDate(), await readNewestRepoContentDate(), now));
+        await readNewestLiveContentDate(), await readNewestRepoContentDate(), now, await readRepoContentLandedAt()));
     } catch (e) {
       checks.push(result('deploy-sitemap', 'fail', false, `could not read /sitemap.xml: ${e.message}`));
     }

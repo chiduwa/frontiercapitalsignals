@@ -232,6 +232,47 @@ assert.deepEqual(dNotOk('2026-09-25T00:00:00.000Z', null, Date.parse('2026-09-26
 assert.ok(dNotOk('2026-09-25T00:00:00.000Z', null, Date.parse('2026-09-26T16:30:00Z')).includes('deploy-freshness'),
   'a missed daily run must still warn by mid-afternoon UTC');
 
+// THE LATE BOT (2026-10-13). The 07:00 content cron started at 14:39 and
+// pushed at 14:48:31; a probe at 14:48:36 failed "undeployed 14.8h" while
+// deploy.yml was still running (it finished at 14:52). The article's date is
+// not when it was committed.
+const lateNow = Date.parse('2026-10-13T14:48:36Z');
+const lateFailing = (landed, now = lateNow) => checkDeployFreshness(
+  '2026-10-12T00:00:00.000Z', '2026-10-13T00:00:00.000Z', now, landed)
+  .filter((c) => !c.ok && c.level === 'fail').map((c) => c.id);
+assert.deepEqual(lateFailing('2026-10-13T14:48:31Z'), [],
+  'content committed five seconds ago cannot already be a failed deploy');
+assert.ok(lateFailing('2026-10-13T14:48:31Z', Date.parse('2026-10-13T16:00:00Z')).includes('deploy-reached-production'),
+  'the same content still undeployed over an hour after its commit IS a failed deploy');
+assert.ok(lateFailing('2026-10-13T08:00:00Z').includes('deploy-reached-production'),
+  'content committed in the morning and missing by afternoon must still fail');
+assert.ok(lateFailing(null).includes('deploy-reached-production'),
+  'an unknown commit time must fall back to the date-only rule, not to silence');
+
+// ---- one blip is not an outage (10-10, 10-15) -------------------------------
+// /signals/api/feed answered "fetch failed" once and 503 once; both were fine
+// on the next request. A GET is asked again; a POST (the ntfy page) never is.
+{
+  const replies = (...script) => { let n = 0; const fn = async () => { const r = script[n++]; if (r instanceof Error) throw r; return r; }; fn.calls = () => n; return fn; };
+  const quiet = console.log; console.log = () => {};
+  try {
+    let f = replies({ ok: false, status: 503 }, { ok: true, status: 200 });
+    assert.equal((await probeFetch('https://x.invalid/feed', {}, f, [0, 0])).status, 200, 'a single 503 must not fail the run');
+    f = replies(new TypeError('fetch failed'), { ok: true, status: 200 });
+    assert.equal((await probeFetch('https://x.invalid/feed', {}, f, [0, 0])).status, 200, 'a single dropped connection must not fail the run');
+    f = replies({ ok: false, status: 503 }, { ok: false, status: 503 }, { ok: false, status: 503 });
+    assert.equal((await probeFetch('https://x.invalid/feed', {}, f, [0, 0])).status, 503, 'a 503 that persists must still be reported');
+    assert.equal(f.calls(), 3);
+    f = replies(new TypeError('fetch failed'), new TypeError('fetch failed'), new TypeError('fetch failed'));
+    await assert.rejects(probeFetch('https://x.invalid/feed', {}, f, [0, 0]), /fetch failed/, 'an outage must still throw');
+    f = replies({ ok: false, status: 404 }, { ok: true, status: 200 });
+    assert.equal((await probeFetch('https://x.invalid/feed', {}, f, [0, 0])).status, 404, 'a 4xx is an answer, not a blip');
+    f = replies({ ok: false, status: 503 }, { ok: true, status: 200 });
+    assert.equal((await probeFetch('https://ntfy.sh/t', { method: 'POST' }, f, [0, 0])).status, 503, 'an alert must never be sent twice');
+    assert.equal(f.calls(), 1);
+  } finally { console.log = quiet; }
+}
+
 // ---- THE ZERO-EQUITY BUILD (2026-09-25 22:35 UTC) ---------------------------
 // Yahoo timed out for all 290 equities and that build published an empty stock
 // board. The build now carries the last good section forward and says so in
