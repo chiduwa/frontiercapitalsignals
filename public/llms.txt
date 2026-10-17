@@ -15,6 +15,11 @@ Frontier Capital Signals publishes daily market intelligence briefs covering gov
 - [Free AI Visibility Scan](https://frontiercapitalsignals.com/scan): Free automated scan of a website's analytics, structured data, and AI-crawler readiness
 - [Contact](https://frontiercapitalsignals.com/contact)
 
+## Research
+
+- [Quant Research](https://frontiercapitalsignals.com/research): Reproducible trading research behind the signals, tested on real market data with fees
+- [Binance Grid Bots Tested: Best Spot and Futures Settings](https://frontiercapitalsignals.com/research/binance-grid-bots): 72,280 Binance grid bots replayed on 2021–2026 prices. Spot grids did not beat holding after fees; a wide BTC grid (geometric, ±44%, 49 grids) halved drawdowns; the Arbitrage Bot on BTC earned about 4% a year at September 2026 funding; leverage turns futures grids into liquidation risk.
+
 ## Recent intelligence (latest 15)
 
 - [Nigeria to Re-Arraign Accused in Investment Council Scandal](https://frontiercapitalsignals.com/intelligence/2026-10-12-nigeria-to-re-arraign-accused-in-investment-council-scandal-7dc502a3): Nigeria's Federal Government seeks fresh arraignment in a case concerning the alleged irregular establishment of a foreign investment council.
