@@ -1,4 +1,4 @@
-Contact: mailto:ko.owusuansah@gmail.com
+Contact: https://frontiercapitalsignals.com/contact
 Expires: 2027-06-17T00:00:00.000Z
 Preferred-Languages: en
 Canonical: https://frontiercapitalsignals.com/.well-known/security.txt
