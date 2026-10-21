@@ -49,6 +49,7 @@ import { TOURNAMENT_SOURCE } from './contract.mjs';
 import { assessBotEntryRisk, entryCapitalIssue } from './bot-risk.mjs';
 import { baselineExitPolicy, roiExitGeometry, leveragePlan } from './trade-policy.mjs';
 import { managePolicyExits } from './managed-exits.mjs';
+import { tradingHaltReason } from './halt.mjs';
 
 export async function applyPolicyExits(state, reversals = []) {
   try { await managePolicyExits(state, {
@@ -1878,7 +1879,8 @@ async function runCycle() {
     log('bot_entry_risk', botRisk);
   }
   const { decisions, paused } = decideEntries(candidates, {
-    fearGreed, openSymbols: openSymbolsNow, openPositions, balance, equity, state, nowMs, botRisk
+    fearGreed, openSymbols: openSymbolsNow, openPositions, balance, equity, state, nowMs, botRisk,
+    haltReason: tradingHaltReason()
   });
 
   if (paused) log('entries_paused', { reason: paused });

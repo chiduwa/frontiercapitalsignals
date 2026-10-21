@@ -517,6 +517,24 @@ backtest of one.
   checkout that fails them, and the hourly update rolls back rather than arm
   an untested bot.
 
+### One halt switch, and the flush executor's daily backstops (2026-10-21)
+
+- **Halt everything:** `sudo touch /etc/fcs-trading-halt` stops the futures
+  bot, the flush executor and the spot bot from opening anything new.
+  `sudo rm /etc/fcs-trading-halt` resumes. Open positions keep their
+  exchange-side stops and exits; a halt only stops new risk. The spot bot's
+  due tranche stays due and is bought on the first cycle after the halt is
+  lifted. `TRADING_HALT=true` in one bot's env file halts just that bot, and
+  `TRADING_HALT_FILE` moves the file. Code: `src/halt.mjs`.
+- **Flush executor, per rolling 24 hours:** at most 6 entries
+  (`FLUSH_EXEC_MAX_PER_DAY`), and no new entries once the whole account's net
+  realized result is down 15% of capital (`FLUSH_EXEC_DAILY_LOSS_PCT`, measured
+  like the futures bot's daily limit). Before this it had a per-trade stop and
+  an on/off switch, but nothing that stopped a run of losses. The defaults are
+  sized as backstops against a runaway, not as a cap on ordinary trading, at
+  the owner's request. If the account or entry count cannot be read, the
+  executor refuses, like every other gate in `src/flush-gates.mjs`.
+
 ### Personal trades and account isolation
 
 Manual/foreign positions are alert-only at every risk level. The bot records

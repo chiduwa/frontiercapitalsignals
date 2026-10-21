@@ -1095,5 +1095,57 @@ console.log('\n== contract/signals/risk: a tournament model trades only once pro
     specs.filter(({ l }) => !/\sUTC$/.test(l.trim())).map(({ f, l }) => `${f}: ${l}`).join('; '));
 }
 
+// Operator halt and the flush executor's daily backstops (2026-10-21, owner
+// decision S1 in the questions spike). These run in the updater's gate, which
+// test-flush-exec.mjs does not.
+console.log('\n== operator halt: one switch stops every bot opening anything new ==');
+{
+  const { tradingHaltReason, DEFAULT_HALT_FILE } = await import('./src/halt.mjs');
+  const noFile = () => false;
+  check('halt: nothing set -> not halted', tradingHaltReason({}, noFile) === null);
+  check('halt: the default file halts', /fcs-trading-halt/.test(tradingHaltReason({}, (f) => f === DEFAULT_HALT_FILE) || ''));
+  check('halt: TRADING_HALT=true halts without a file', tradingHaltReason({ TRADING_HALT: 'true' }, noFile) === 'TRADING_HALT=true');
+  check('halt: "1" is not a halt (only the literal "true", like every other switch here)', tradingHaltReason({ TRADING_HALT: '1' }, noFile) === null);
+  check('halt: a custom file path is honoured', tradingHaltReason({ TRADING_HALT_FILE: '/tmp/x' }, (f) => f === '/tmp/x') !== null);
+  check('halt: the real filesystem check on a missing path is not a halt',
+    tradingHaltReason({ TRADING_HALT_FILE: '/nonexistent-dir/fcs-trading-halt-test' }) === null);
+
+  const halted = decideEntries([], { haltReason: 'halt file present', openPositions: [] });
+  check('futures bot: the halt pauses entries ahead of every other gate', halted.paused === 'operator_halt');
+
+  const { readFileSync } = await import('node:fs');
+  const ix = readFileSync(new URL('./src/index.mjs', import.meta.url), 'utf8');
+  check('futures bot passes the halt into decideEntries', /haltReason: tradingHaltReason\(\)/.test(ix));
+  const fx = readFileSync(new URL('./src/flush-executor.mjs', import.meta.url), 'utf8');
+  const at = (s) => fx.indexOf(s);
+  check('flush executor checks the halt before it looks for candidates',
+    at('tradingHaltReason()') > -1 && at('tradingHaltReason()') < at('await findCandidates(env)'));
+  check('flush executor checks the daily backstops before its entry loop',
+    at('dailyLimitReason(usage, gates)') > -1 && at('dailyLimitReason(usage, gates)') < at('for (const ev of candidates)'));
+}
+
+console.log('\n== flush executor daily backstops: sized to stop a runaway, not ordinary trading ==');
+{
+  const { loadGates, dailyLimitReason, DEFAULT_MAX_PER_DAY, DEFAULT_DAILY_LOSS_PCT } = await import('./src/flush-gates.mjs');
+  const g = loadGates({});
+  check('default cap is 6 entries in 24h', g.maxPerDay === 6 && DEFAULT_MAX_PER_DAY === 6);
+  check('default account loss stop is 15% in 24h', g.dailyLossPct === 0.15 && DEFAULT_DAILY_LOSS_PCT === 0.15);
+  check('the operator can raise the cap', loadGates({ FLUSH_EXEC_MAX_PER_DAY: '10' }).maxPerDay === 10);
+  check('a nonsense loss setting falls back to the default, never to "no stop"',
+    loadGates({ FLUSH_EXEC_DAILY_LOSS_PCT: '5' }).dailyLossPct === 0.15
+    && loadGates({ FLUSH_EXEC_DAILY_LOSS_PCT: 'abc' }).dailyLossPct === 0.15
+    && loadGates({ FLUSH_EXEC_DAILY_LOSS_PCT: '-0.2' }).dailyLossPct === 0.15);
+  const day = { submittedLast24h: 2, netPnlLast24h: -5, walletBalance: 170 };
+  check('an ordinary day trades', dailyLimitReason(day, g) === null);
+  check('the 6th entry in 24h is refused', /cap of 6/.test(dailyLimitReason({ ...day, submittedLast24h: 6 }, g) || ''));
+  // loss / capital before the loss: 30 / (170 + 30) = 15.0% -> stop; 27 / 197 = 13.7% -> trade
+  check('a 15% account loss in 24h stops new entries', /lost 15\.0%/.test(dailyLimitReason({ ...day, netPnlLast24h: -30 }, g) || ''));
+  check('a 13.7% loss still trades', dailyLimitReason({ ...day, netPnlLast24h: -27 }, g) === null);
+  check('a profitable day never trips the loss stop', dailyLimitReason({ ...day, netPnlLast24h: 500 }, g) === null);
+  check('an unreadable entry count refuses', dailyLimitReason({ ...day, submittedLast24h: NaN }, g) !== null);
+  check('an unreadable account refuses',
+    dailyLimitReason({ ...day, walletBalance: NaN }, g) !== null && dailyLimitReason({ ...day, netPnlLast24h: NaN }, g) !== null);
+}
+
 console.log(failures === 0 ? '\nTRADING BOT OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

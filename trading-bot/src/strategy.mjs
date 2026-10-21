@@ -101,10 +101,14 @@ export function evaluateCandidate(candidate, ctx) {
 // SHADOW proposals if every candidate gate passes, so an account drawdown
 // does not erase opportunities to collect prospective evidence. Existing
 // positions are managed separately in index.mjs regardless of this output.
+// The operator halt (halt.mjs, ctx.haltReason) outranks every other gate.
 export function decideEntries(candidates, ctx) {
   let paused = null;
   let pauseReason = null;
-  if (config.activeLimitMode) {
+  if (ctx.haltReason) {
+    paused = 'operator_halt';
+    pauseReason = `operator halt: ${ctx.haltReason}`;
+  } else if (config.activeLimitMode) {
     if (ctx.botRisk?.ok !== true) {
       paused = 'bot_risk';
       pauseReason = ctx.botRisk?.reason || 'bot risk accounting unavailable';

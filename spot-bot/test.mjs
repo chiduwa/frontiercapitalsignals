@@ -377,5 +377,16 @@ console.log('\n== risk weights: min-variance targets and steering (SPOT_RISK_MOD
   check('plan: no history -> no plan, and the account is never queried', !noHist.ok);
 }
 
+console.log('== operator halt (shared with the futures bots, 2026-10-21) ==');
+{
+  const { tradingHaltReason } = await import('../trading-bot/src/halt.mjs');
+  check('halt: the shared module resolves from the spot bot', typeof tradingHaltReason === 'function');
+  check('halt: the halt file stops the spot bot too', tradingHaltReason({}, () => true) !== null);
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('./src/index.mjs', import.meta.url), 'utf8');
+  check('halt: checked before the cycle reads state, so a halted cycle moves no tranche clock',
+    src.indexOf('tradingHaltReason()') > -1 && src.indexOf('tradingHaltReason()') < src.indexOf('await loadState()'));
+}
+
 console.log(failures === 0 ? '\nSPOT BOT OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

@@ -22,8 +22,9 @@ import {
   acquireExecutionLease, releaseExecutionLease, loadState, saveState,
   recordFill, recordSkip, costBasis, logValuation
 } from './state.mjs';
+import { tradingHaltReason } from '../../trading-bot/src/halt.mjs';
 
-const log = (event, data = {}) => console.log(JSON.stringify({ t: new Date().toISOString(), event, ...data }));
+const log =(event, data = {}) => console.log(JSON.stringify({ t: new Date().toISOString(), event, ...data }));
 
 async function fetchSignals() {
   const res = await fetch(`${config.signalsBase}/api/signals`);
@@ -102,6 +103,15 @@ async function buyOne(asset, quoteAmount, price, profile, trigger, nowIso, trada
 }
 
 async function runCycle() {
+  // The host-wide operator halt (trading-bot/src/halt.mjs). Checked before the
+  // state is read so a halted cycle spends nothing and moves no tranche clock:
+  // a tranche that was due stays due and is bought on the first cycle after
+  // the halt is lifted.
+  const halt = tradingHaltReason();
+  if (halt) {
+    log('halted', { reason: halt, effect: 'no buys this cycle; a due tranche stays due' });
+    return;
+  }
   const nowIso = new Date().toISOString();
   const nowMs = Date.now();
   const state = await loadState();

@@ -18,13 +18,51 @@ export function loadGates(envVars = process.env) {
   const maxConcurrent = Number(envVars.FLUSH_EXEC_MAX_CONCURRENT || 1);
   const leverage = Math.min(Number(envVars.FLUSH_EXEC_LEVERAGE || MAX_LEVERAGE), MAX_LEVERAGE);
   const ttlMin = Number(envVars.FLUSH_EXEC_TTL_MIN || 20);
+  const maxPerDay = Number(envVars.FLUSH_EXEC_MAX_PER_DAY || DEFAULT_MAX_PER_DAY);
+  const dailyLossPct = Number(envVars.FLUSH_EXEC_DAILY_LOSS_PCT || DEFAULT_DAILY_LOSS_PCT);
   return {
     enabled,
     notional: Number.isFinite(notional) && notional > 0 ? notional : null,
     maxConcurrent: Number.isFinite(maxConcurrent) && maxConcurrent > 0 ? Math.floor(maxConcurrent) : 1,
     leverage: Number.isFinite(leverage) && leverage > 0 ? leverage : 1,
-    ttlMin: Number.isFinite(ttlMin) && ttlMin > 0 ? ttlMin : 20
+    ttlMin: Number.isFinite(ttlMin) && ttlMin > 0 ? ttlMin : 20,
+    maxPerDay: Number.isFinite(maxPerDay) && maxPerDay > 0 ? Math.floor(maxPerDay) : DEFAULT_MAX_PER_DAY,
+    dailyLossPct: Number.isFinite(dailyLossPct) && dailyLossPct > 0 && dailyLossPct < 1
+      ? dailyLossPct : DEFAULT_DAILY_LOSS_PCT
   };
+}
+
+// Daily backstops, added 2026-10-21 (questions spike S1). The operator asked
+// for limits sized for someone who accepts risk, so these exist to stop a
+// runaway — a bug that re-enters, an outage, a string of stop-outs in one bad
+// session — not to ration ordinary trading.
+//
+// At $25 notional a stop-out costs about $1.60-2.30, so six entries a day can
+// lose about $14 if every one is stopped. The loss stop is on the WHOLE
+// account's realized result over the last 24 hours (the account is shared
+// with the futures bot and manual trades): the same "loss / capital before
+// the loss" measure bot-risk.mjs uses, at 15% where the futures bot uses 10%.
+export const DEFAULT_MAX_PER_DAY = 6;
+export const DEFAULT_DAILY_LOSS_PCT = 0.15;
+
+// Refuses (returns a reason) when either backstop is reached or when the
+// inputs needed to check them could not be read. Unknown is a refusal, like
+// every other gate in this file.
+export function dailyLimitReason({ submittedLast24h, netPnlLast24h, walletBalance }, gates) {
+  if (!Number.isFinite(submittedLast24h)) return 'could not count this executor\'s entries in the last 24h';
+  if (submittedLast24h >= gates.maxPerDay) {
+    return `${submittedLast24h} entries in the last 24h reached the cap of ${gates.maxPerDay}`;
+  }
+  if (!Number.isFinite(netPnlLast24h) || !(walletBalance > 0)) {
+    return 'could not read the account\'s result for the last 24h';
+  }
+  const loss = Math.max(0, -netPnlLast24h);
+  const lossPct = loss / (walletBalance + loss);
+  if (lossPct >= gates.dailyLossPct) {
+    return `the account lost ${(lossPct * 100).toFixed(1)}% in the last 24h `
+      + `(new entries stop at ${(gates.dailyLossPct * 100).toFixed(0)}%)`;
+  }
+  return null;
 }
 
 // The evidence this executor's one setup rests on was withdrawn on 2026-09-14.

@@ -266,8 +266,10 @@ export async function getIncomeSince(symbol, startMs, endMs = Date.now()) {
   const all = [];
   for (const window of boundedHistoryWindows(startMs, endMs)) {
     for (let page = 1; page <= 100; page++) {
+      // A null symbol means the whole account (the flush executor's daily loss
+      // backstop). URLSearchParams would otherwise send "symbol=undefined".
       const rows = await signedRequest('GET', '/fapi/v1/income', {
-        symbol, ...window, page, limit: 1000
+        ...(symbol ? { symbol } : {}), ...window, page, limit: 1000
       });
       const batch = Array.isArray(rows) ? rows : [];
       all.push(...batch);

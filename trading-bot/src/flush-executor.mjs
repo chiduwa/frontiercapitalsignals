@@ -19,10 +19,14 @@
 // end to end.
 import {
   placeLimitOrderReconciled, placeProtectiveOrder, getOpenAlgoOrders,
-  getPositionAmount, getOpenOrders, cancelOrder
+  getPositionAmount, getOpenOrders, cancelOrder, getIncomeSince, getAccount
 } from './binance.mjs';
 import { planEntry } from '../../signals-worker/scripts/flush-entry.mjs';
-import { loadGates, isTradeableSetup, quantityFor, allowsUnproven, UNPROVEN_REASON, FLUSH_EXEC_VERSION } from './flush-gates.mjs';
+import {
+  loadGates, isTradeableSetup, quantityFor, allowsUnproven, dailyLimitReason,
+  UNPROVEN_REASON, FLUSH_EXEC_VERSION
+} from './flush-gates.mjs';
+import { tradingHaltReason } from './halt.mjs';
 import { d1 } from '../../signals-worker/scripts/d1-client.mjs';
 
 // True when this executor has already placed protection for a symbol at some
@@ -52,6 +56,27 @@ export async function findCandidates(env, { limit = 5 } = {}) {
     [Date.now() - 30 * 60000, limit]);
 }
 
+// What the daily backstops need: this executor's submitted entries in the
+// last 24 hours (from its own markActed notes), and the whole account's net
+// realized result and wallet balance from Binance. A read that fails leaves
+// its field NaN, which dailyLimitReason() treats as a refusal.
+export async function readDailyUsage(env, nowMs = Date.now()) {
+  const since = nowMs - 24 * 60 * 60000;
+  const usage = { submittedLast24h: NaN, netPnlLast24h: NaN, walletBalance: NaN };
+  try {
+    const rows = await d1(env,
+      `SELECT COUNT(*) AS n FROM flush_event
+       WHERE notes LIKE '%"outcome":"submitted"%' AND first_ts >= ?`, [since]);
+    usage.submittedLast24h = Number(rows[0]?.n);
+  } catch { /* stays NaN: refusal */ }
+  try {
+    const [income, account] = await Promise.all([getIncomeSince(null, since, nowMs), getAccount()]);
+    usage.netPnlLast24h = Number(income.netPnl);
+    usage.walletBalance = Number(account?.totalWalletBalance);
+  } catch { /* stays NaN: refusal */ }
+  return usage;
+}
+
 async function markActed(env, id, payload) {
   await d1(env, 'UPDATE flush_event SET notes = ? WHERE id = ?',
     [JSON.stringify({ acted: true, version: FLUSH_EXEC_VERSION, ...payload }), id]);
@@ -68,6 +93,12 @@ export async function runOnce(env, { log = console.log, dryRun = false } = {}) {
     return { acted: 0, reason: 'no notional configured' };
   }
 
+  const halt = tradingHaltReason();
+  if (halt) {
+    log(`flush-exec: HALTED (${halt}) — no new entries; anything open keeps its protection`);
+    return { acted: 0, reason: 'halted' };
+  }
+
   if (!allowsUnproven()) {
     log(`flush-exec: HOLDING. ${UNPROVEN_REASON}`);
     return { acted: 0, reason: 'setup unproven' };
@@ -76,9 +107,19 @@ export async function runOnce(env, { log = console.log, dryRun = false } = {}) {
   const candidates = await findCandidates(env);
   if (!candidates.length) { log('flush-exec: no fresh short-covering spikes'); return { acted: 0 }; }
 
+  // Checked only when there is something to trade, so idle cycles make no
+  // account calls.
+  const usage = await readDailyUsage(env);
+  const limit = dailyLimitReason(usage, gates);
+  if (limit) {
+    log(`flush-exec: DAILY LIMIT — ${limit}. No new entries until it clears.`);
+    return { acted: 0, reason: 'daily limit' };
+  }
+
   let acted = 0;
   for (const ev of candidates) {
     if (acted >= gates.maxConcurrent) break;
+    if (usage.submittedLast24h + acted >= gates.maxPerDay) break;
     const setup = isTradeableSetup(ev);
     if (!setup.ok) { log(`  skip ${ev.symbol}: ${setup.reason}`); continue; }
 
