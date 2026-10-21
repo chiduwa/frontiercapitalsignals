@@ -70,7 +70,7 @@ jobs:
           node --test test-recorders.mjs
           node --test test-market-trend.mjs
           node --test test-live-scan-delivery.mjs test-exhaustion-followup.mjs test-fuel-shadow.mjs test-liquidation-collector.mjs
-          node --test test-notify-evidence.mjs test-d1-client.mjs
+          node --test test-notify-evidence.mjs test-d1-client.mjs test-microstructure-io.mjs
           node --test ../trading-bot/test-network-deadlines.mjs
           node --test test-model-zoo.mjs
           node --test test-time-series.mjs

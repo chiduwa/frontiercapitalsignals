@@ -795,7 +795,10 @@ export function evaluateLiveTriggers(registry, bySymbol, nowIso, contextRows = [
   return out;
 }
 
-async function loadRegistry() {
+export async function loadRegistry() {
+  // Other research lanes own their lifecycle and counters. In particular,
+  // microstructure writes fixed assessment values under its own concurrency
+  // group, so this daily job must not also mutate those rows.
   const rows = await d1(env, `
     SELECT r.*,
       m.strategy_direction, m.assumed_round_trip_cost_pct, m.trade_decision, m.decision_reason,
@@ -803,6 +806,7 @@ async function loadRegistry() {
       m.oos_profit_factor, m.oos_compound_return_pct, m.oos_max_drawdown_pct
     FROM research_registry r
     LEFT JOIN research_strategy_metrics m ON m.hypothesis = r.hypothesis
+    WHERE r.family IN ('overnight-vs-intraday', 'day-of-week', 'turn-of-month', 'run-reversal', 'market-context')
   `);
   return rows;
 }

@@ -65,7 +65,9 @@ jobs:
       # run that cannot prove its refusals still work should not record evidence.
       - name: Verify microstructure guardrails
         working-directory: signals-worker
-        run: node test-microstructure.mjs
+        run: |
+          node test-microstructure.mjs
+          node --test test-microstructure-io.mjs test-d1-client.mjs
 
       - name: Apply D1 migrations
         working-directory: signals-worker

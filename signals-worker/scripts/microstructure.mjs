@@ -636,6 +636,34 @@ export async function loadCellObservations(env, cell) {
   }));
 }
 
+export async function loadMicrostructureRegistry(env) {
+  return new Map((await d1(env, `SELECT hypothesis, status, discovered_at, discovery_effect, oos_checks, status_changed_at
+    FROM research_registry WHERE family LIKE 'microstructure%'`)).map((r) => [r.hypothesis, r]));
+}
+
+export async function writeProvisional(env, key, cell, result, familySize, nowIso, notes, options) {
+  return d1(env, `INSERT INTO research_registry
+    (hypothesis, family, asset_class, symbol, horizon_days, status, discovered_at, discovery_n,
+     discovery_effect, discovery_z, tests_in_family, last_checked_at, status_changed_at, notes)
+    VALUES (?,?,?,?,?, 'provisional', ?,?,?,?,?,?,?,?)
+    ON CONFLICT (hypothesis) DO NOTHING`,
+  [key, `microstructure:${cell.family}`, 'crypto', cell.symbol, 0, nowIso, result.windows,
+    result.pooled.mean, result.pooled.z, familySize, nowIso, nowIso, notes], options);
+}
+
+export async function writeOosAssessment(env, key, prior, status, oosTest, nowIso, notes, options) {
+  // The workflow serializes microstructure runs; discovery.mjs only assesses
+  // its own families. Freeze these values before sending the write so a D1
+  // 500 after commit can be retried without counting this check twice or
+  // moving the original status-change time (incident 39580126088). The date
+  // guard also prevents a delayed older request overwriting a later check.
+  return d1(env, `UPDATE research_registry SET status=?, oos_n=?, oos_effect=?, oos_z=?, oos_checks=?,
+    last_checked_at=?, status_changed_at=?, notes=? WHERE hypothesis=?
+    AND (last_checked_at IS NULL OR last_checked_at <= ?)`,
+  [status, oosTest.n, dbNumber(oosTest.mean), dbNumber(oosTest.z), prior.oos_checks + 1,
+    nowIso, status !== prior.status ? nowIso : prior.status_changed_at, notes, key, nowIso], options);
+}
+
 // ---------------------------------------------------------------------------
 // MAIN
 
@@ -728,8 +756,7 @@ async function main() {
   console.log(`[microstructure] families: ${Object.entries(familySizes).map(([f, n]) => `${f}=${n} cells (z bar ${bonferroniZ(n).toFixed(3)})`).join(', ')}`);
 
   const nowIso = new Date().toISOString();
-  const existing = new Map((await d1(env, `SELECT hypothesis, status, discovered_at, discovery_effect, oos_checks
-    FROM research_registry WHERE family LIKE 'microstructure%'`)).map((r) => [r.hypothesis, r]));
+  const existing = await loadMicrostructureRegistry(env);
 
   let candidates = 0, promoted = 0, decayed = 0;
   for (const cell of cells) {
@@ -757,13 +784,8 @@ async function main() {
     candidates++;
     const edge = tradeDecisionForEdge(result.medianEdgeBps, costPct);
     if (!prior) {
-      await d1(env, `INSERT INTO research_registry
-        (hypothesis, family, asset_class, symbol, horizon_days, status, discovered_at, discovery_n,
-         discovery_effect, discovery_z, tests_in_family, last_checked_at, status_changed_at, notes)
-        VALUES (?,?,?,?,?, 'provisional', ?,?,?,?,?,?,?,?)`,
-      [key, `microstructure:${cell.family}`, 'crypto', cell.symbol, 0, nowIso, result.windows,
-        result.pooled.mean, result.pooled.z, familySizes[cell.family], nowIso, nowIso,
-        `${cell.leader} -> ${cell.follower} at ${cell.lag}s; ${result.verdict}; ${edge.reason}`]);
+      await writeProvisional(env, key, cell, result, familySizes[cell.family], nowIso,
+        `${cell.leader} -> ${cell.follower} at ${cell.lag}s; ${result.verdict}; ${edge.reason}`);
       console.log(`[microstructure] NEW provisional ${key}: mean corr ${result.pooled.mean.toFixed(4)}, z ${result.pooled.z.toFixed(2)} (bar ${result.zBar.toFixed(2)}), ${result.windows} windows, ${edge.reason}`);
     } else {
       // Out-of-sample is simply the windows recorded after discovery — data
@@ -779,11 +801,8 @@ async function main() {
         && Math.sign(oosTest.mean) !== Math.sign(prior.discovery_effect);
       const verdict = contradicted ? 'contradicted' : held ? 'held' : 'insufficient';
       const status = nextStatus(verdict, prior.status);
-      await d1(env, `UPDATE research_registry SET status=?, oos_n=?, oos_effect=?, oos_z=?, oos_checks=oos_checks+1,
-        last_checked_at=?, status_changed_at=CASE WHEN ?<>status THEN ? ELSE status_changed_at END, notes=?
-        WHERE hypothesis=?`,
-      [status, oosTest.n, dbNumber(oosTest.mean), dbNumber(oosTest.z), nowIso, status, nowIso,
-        `oos ${verdict} on ${oosTest.n} post-discovery windows; ${edge.reason}`, key]);
+      await writeOosAssessment(env, key, prior, status, oosTest, nowIso,
+        `oos ${verdict} on ${oosTest.n} post-discovery windows; ${edge.reason}`);
       if (status === 'confirmed' && prior.status !== 'confirmed') {
         promoted++;
         await notify('Microstructure pattern CONFIRMED out-of-sample',
