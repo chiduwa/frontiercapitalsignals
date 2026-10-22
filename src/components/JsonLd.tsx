@@ -1,8 +1,10 @@
 export default function JsonLd({ data }: { data: Record<string, unknown> }) {
+  // Escape "<" so a string containing "</script>" cannot close the tag early
+  // (the escaping the Next.js JSON-LD guide recommends).
   return (
     <script
       type="application/ld+json"
-      dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }}
+      dangerouslySetInnerHTML={{ __html: JSON.stringify(data).replace(/</g, "\\u003c") }}
     />
   );
 }

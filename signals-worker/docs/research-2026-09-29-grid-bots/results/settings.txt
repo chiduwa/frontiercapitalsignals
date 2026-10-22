@@ -1,0 +1,17 @@
+90-day daily vol to 2026-09-22: BTC 2.24%, ETH 2.90%, SOL 3.12%, BNB 1.77%
+  BTC at 83926, 30d +-2 sd: 6.567e+04 to 1.073e+05 (+-28%)  grids at 1.5%: 33, at 1%: 49
+  BTC at 83926, 30d +-3 sd: 5.808e+04 to 1.213e+05 (+-44%)  grids at 1.5%: 49, at 1%: 74
+  BTC at 83926, 90d +-2 sd: 5.487e+04 to 1.284e+05 (+-53%)  grids at 1.5%: 57, at 1%: 85
+  BTC at 83926, 90d +-3 sd: 4.437e+04 to 1.588e+05 (+-89%)  grids at 1.5%: 86, at 1%: 128
+  ETH at 2717.26, 30d +-2 sd: 1,977 to 3,735 (+-37%)  grids at 1.5%: 43, at 1%: 64
+  ETH at 2717.26, 30d +-3 sd: 1,686 to 4,378 (+-61%)  grids at 1.5%: 64, at 1%: 96
+  ETH at 2717.26, 90d +-2 sd: 1,566 to 4,714 (+-73%)  grids at 1.5%: 74, at 1%: 111
+  ETH at 2717.26, 90d +-3 sd: 1,189 to 6,208 (+-128%)  grids at 1.5%: 111, at 1%: 166
+  SOL at 120.72, 30d +-2 sd: 85.79 to 169.9 (+-41%)  grids at 1.5%: 46, at 1%: 69
+  SOL at 120.72, 30d +-3 sd: 72.32 to 201.5 (+-67%)  grids at 1.5%: 69, at 1%: 103
+  SOL at 120.72, 90d +-2 sd: 66.81 to 218.1 (+-81%)  grids at 1.5%: 79, at 1%: 119
+  SOL at 120.72, 90d +-3 sd: 49.7 to 293.2 (+-143%)  grids at 1.5%: 119, at 1%: 178
+  BNB at 763.4, 30d +-2 sd: 628.6 to 927.2 (+-21%)  grids at 1.5%: 26, at 1%: 39
+  BNB at 763.4, 30d +-3 sd: 570.4 to 1,022 (+-34%)  grids at 1.5%: 39, at 1%: 59
+  BNB at 763.4, 90d +-2 sd: 545.2 to 1,069 (+-40%)  grids at 1.5%: 45, at 1%: 68
+  BNB at 763.4, 90d +-3 sd: 460.7 to 1,265 (+-66%)  grids at 1.5%: 68, at 1%: 101
