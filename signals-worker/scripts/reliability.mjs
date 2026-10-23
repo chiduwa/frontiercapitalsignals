@@ -1966,6 +1966,18 @@ export async function loadRetrospective(env, limit = 12) {
   }
 }
 
+// Same floor discovery.mjs uses before it allows an out-of-sample verdict at all
+// (MIN_OOS_SAMPLE). Below it a z-score is noise: n=3 can produce z>12.
+export const QUANT_OOS_MIN_SAMPLE = 25;
+
+// Publish an out-of-sample z-score only when it rests on enough observations.
+// null means "not enough data"; a consumer must never fall back to the raw value.
+export function publishableOosZ(oosN, z) {
+  const n = Number(oosN);
+  if (!Number.isFinite(n) || n < QUANT_OOS_MIN_SAMPLE) return null;
+  return z == null || !Number.isFinite(Number(z)) ? null : Number(z);
+}
+
 // Display-only view of the automatic quant-research lifecycle. Statistical
 // discovery status and trade eligibility are intentionally separate: a row
 // can be interesting but still be an explicit abstention after costs or
@@ -2016,7 +2028,8 @@ export async function loadQuantResearch(env, limit = 20) {
         discoveredAt: row.discovered_at, discoveryN: Number(row.discovery_n),
         discoveryEffectPct: row.discovery_effect, discoveryZ: row.discovery_z,
         testsInFamily: Number(row.tests_in_family), oosN: Number(row.oos_n || 0),
-        oosEffectPct: row.oos_effect, oosZ: row.oos_z,
+        oosEffectPct: row.oos_effect, oosZ: publishableOosZ(row.oos_n, row.oos_z),
+        oosEnoughData: Number(row.oos_n || 0) >= QUANT_OOS_MIN_SAMPLE,
         side: row.strategy_direction || 'abstain',
         assumedCostPct: row.assumed_round_trip_cost_pct,
         walkForward: row.walk_forward_verdict || 'insufficient',
