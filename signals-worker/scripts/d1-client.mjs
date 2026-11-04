@@ -48,12 +48,20 @@ const D1_TIMEOUT_MS = 30000;
 //     which fails identically every time (see readAllDailyBars): throw at
 //     once, as before.
 export const D1_RETRY_DELAYS_MS = Object.freeze([2000, 5000, 15000]);
+// An overload refusal (HTTP 429, `7429 D1 DB is overloaded. Too many resources
+// consumed within a 10 second window`) is a busy database, not a broken one: it
+// lasts as long as whatever else is running. The build's reliability scans of
+// forecast_outcomes take ~20 s each and run back to back, so the 22 s above ran
+// out mid-scan and failed Signals Microstructure three times on 2026-11-04.
+// These ~95 s outlast a full scan while staying inside every job's timeout.
+export const D1_OVERLOAD_DELAYS_MS = Object.freeze([5000, 15000, 30000, 45000]);
 
 const UNSENT_CAUSES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH',
   'UND_ERR_CONNECT_TIMEOUT']);
 
 function httpFailure(message, res, body) {
   const err = new Error(message);
+  err.d1Overloaded = res.status === 429;
   const codes = ((body && body.errors) || []).map((e) => e && e.code);
   err.d1Outcome = res.status === 429 ? 'unsent'
     : res.status >= 500 && !codes.includes(7010) ? 'unknown'
@@ -154,12 +162,13 @@ export function safeToRepeat(sqls) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function withRetries(sqls, delays, attempt) {
+async function withRetries(sqls, retryDelays, overloadDelays, attempt) {
   for (let i = 0; ; i++) {
     try {
       return await attempt();
     } catch (err) {
       const outcome = failureOutcome(err);
+      const delays = err && err.d1Overloaded ? overloadDelays : retryDelays;
       const retry = i < delays.length && (outcome === 'unsent' || (outcome === 'unknown' && safeToRepeat(sqls)));
       if (!retry) {
         // Logged rather than appended: an AbortError's message is read-only.
@@ -189,8 +198,14 @@ async function post(env, payload) {
   }
 }
 
-export async function d1(env, sql, params = [], { retryDelaysMs = D1_RETRY_DELAYS_MS } = {}) {
-  const body = await withRetries([sql], retryDelaysMs, async () => {
+// A caller that sets its own retryDelaysMs gets that schedule for overloads too,
+// unless it also sets overloadDelaysMs, so tests and opt-outs stay exact.
+function overloadSchedule(retryDelaysMs, overloadDelaysMs) {
+  return overloadDelaysMs || (retryDelaysMs === D1_RETRY_DELAYS_MS ? D1_OVERLOAD_DELAYS_MS : retryDelaysMs);
+}
+
+export async function d1(env, sql, params = [], { retryDelaysMs = D1_RETRY_DELAYS_MS, overloadDelaysMs } = {}) {
+  const body = await withRetries([sql], retryDelaysMs, overloadSchedule(retryDelaysMs, overloadDelaysMs), async () => {
     const { res, body } = await post(env, { sql, params });
     if (!res.ok || !body || body.success !== true) {
       throw httpFailure(`D1 query failed: HTTP ${res.status} ${JSON.stringify(body && body.errors)}`, res, body);
@@ -206,7 +221,7 @@ export async function d1(env, sql, params = [], { retryDelaysMs = D1_RETRY_DELAY
 // either all commit or all roll back. The REST API's `batch` form has the same
 // transactional semantics as D1Database.batch: statements execute in order and
 // a failure rolls the batch back. See Cloudflare's Query D1 Database API.
-export async function d1Batch(env, statements, { retryDelaysMs = D1_RETRY_DELAYS_MS } = {}) {
+export async function d1Batch(env, statements, { retryDelaysMs = D1_RETRY_DELAYS_MS, overloadDelaysMs } = {}) {
   if (!Array.isArray(statements) || !statements.length) return [];
   const payload = {
     batch: statements.map((statement) => ({
@@ -214,7 +229,7 @@ export async function d1Batch(env, statements, { retryDelaysMs = D1_RETRY_DELAYS
       params: statement.params || []
     }))
   };
-  return withRetries(statements.map((s) => s.sql), retryDelaysMs, async () => {
+  return withRetries(statements.map((s) => s.sql), retryDelaysMs, overloadSchedule(retryDelaysMs, overloadDelaysMs), async () => {
     const { res, body } = await post(env, payload);
     const results = body && Array.isArray(body.result) ? body.result : [];
     const failed = results.find((result) => result && result.success === false);

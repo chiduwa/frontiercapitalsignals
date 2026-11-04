@@ -36,6 +36,19 @@ rebuilt every hour. Code: `scripts/market-trend.mjs` (built into the payload by
 - **Do these trend signals predict?** Each signal's current state, with the median 90-day
   change that followed it in each period.
 
+### The chart and the explanations (2026-11-04)
+
+- The chart has a value axis with gridlines, and coloured tags on that axis where the 50-day,
+  the 200-day and the two edges of the 30-day likely range end. The likely range is drawn
+  as a fan from today, the same 68% band as the figures below it, widening with the
+  square root of time.
+- Moving across the chart (mouse, or dragging a finger) shows every value for that day.
+  Past the "Today" line it shows that day's likely range (68% and 95%), and where the 50- and
+  200-day averages are if price holds.
+- Explanations sit behind the terms they explain (`.tip`, `data-tip`): hover, focus or tap
+  a dotted-underlined term. The visible text keeps only the figures and the short
+  honesty notes ("a size forecast, not a direction"). Tests read the popup text too.
+
 ## What the trend signals have predicted
 
 BTC daily from 2011 and total market cap from 2013. Median change over the next 90 days

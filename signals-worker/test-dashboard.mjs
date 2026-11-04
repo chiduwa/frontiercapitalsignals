@@ -355,6 +355,9 @@ const mtTotal = { ...trendFor(mtSeries(1e12), { kind: 'total', volume: mtVolume 
 const mtUi = await render({ ...payload(), marketTrend: { version: 'market-trend-v1', generatedAt: '2026-10-15T00:17:00.000Z', btc: mtBtc, total: mtTotal } }, { settleMs: 1200 });
 const mtCard = mtUi.doc.getElementById('trend');
 const mtText = mtCard ? mtCard.textContent : '';
+// Explanations live in hover/tap popups (data-tip); honesty statements must
+// still be there, one interaction away.
+const mtTips = mtCard ? [...mtCard.querySelectorAll('[data-tip]')].map((el) => el.getAttribute('data-tip')).join(' | ') : '';
 check('the card is on the overview', !!mtCard && mtText.includes('Moving averages') && mtText.includes('Bitcoin') && mtText.includes('Total crypto market cap'));
 check('each series lists all five averages',
   mtCard && [...mtCard.querySelectorAll('.mt-col')].every((col) => col.querySelectorAll('table.mt-table')[0].querySelectorAll('tbody tr').length === 5));
@@ -363,7 +366,13 @@ check('each series draws a chart with its projections',
 check('where each average is heading is stated against the price holding', mtText.includes('if price holds') && mtText.includes('if the cap holds') && mtText.includes('Rises tomorrow if above'));
 check('the trend signals carry both periods and say they stopped predicting', mtText.includes('2011-18') && mtText.includes('2013-18') && mtText.includes('2019-26') && mtText.includes('since 2019 they have not'));
 check('ranges are presented as size, not direction', mtText.includes('Likely range, next 7 days') && mtText.includes('not a direction'));
-check('a quiet-volume day says calmer, and that direction is a coin flip', mtText.includes('Quiet:') && mtText.includes('coin flip') && mtText.includes('4.4% vs 8.2%'));
+check('a quiet-volume day says calmer, and that direction is a coin flip', mtText.includes('QUIET') && mtTips.includes('Quiet:') && mtTips.includes('coin flip') && mtTips.includes('4.4% vs 8.2%'));
+check('each chart has a value axis with several gridlines and labelled ticks',
+  mtCard && [...mtCard.querySelectorAll('.mt-plot')].every((pl) => pl.querySelectorAll('line.mt-gridline').length >= 3 && pl.querySelectorAll('.mt-tick').length >= 2));
+check('each chart tags where the 50-day, the 200-day and the likely range end',
+  mtCard && [...mtCard.querySelectorAll('.mt-plot')].every((pl) => pl.querySelector('.mt-pill.p-50') && pl.querySelector('.mt-pill.p-200') && pl.querySelectorAll('.mt-pill.p-fan').length === 2 && pl.querySelector('polygon.mt-fan')));
+check('the range explanation, 95% figures and its source sit behind the term', mtTips.includes('nineteen in twenty') && mtTips.includes('2019-26') && mtTips.includes('not which way'));
+check('every popup term is reachable by keyboard', mtCard && [...mtCard.querySelectorAll('.tip')].every((el) => el.getAttribute('tabindex') === '0' && el.getAttribute('data-tip')));
 check('a series carried from the last hour is labelled as such', mtText.includes('LAST HOUR · SOURCE DOWN'));
 check('the card never issues a call', !/\bBUY\b|\bSELL\b/.test(mtText));
 mtUi.dom.window.close();

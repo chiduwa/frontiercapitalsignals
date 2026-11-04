@@ -100,6 +100,22 @@ test('a request that never reached D1 is retried whatever it is', async t => {
   }
 });
 
+test('an overload refusal (7429, 11-04) waits on the longer schedule, then carries on', async t => {
+  const OVERLOADED = { ok: false, status: 429, json: async () => ({ success: false,
+    errors: [{ code: 7429, message: 'D1 DB is overloaded. Too many resources consumed within a 10 second window' }] }) };
+  // Four refusals: one more than the ordinary schedule allows.
+  const calls = serve(t, [OVERLOADED, OVERLOADED, OVERLOADED, OVERLOADED]);
+  assert.deepEqual(await d1({}, RUN_LOG, [], { retryDelaysMs: [0, 0, 0], overloadDelaysMs: [0, 0, 0, 0] }), [{ n: 1 }]);
+  assert.equal(calls(), 5);
+});
+
+test('the default overload schedule outlasts a ~20 s scan; a 500 keeps the short one', async () => {
+  const { D1_RETRY_DELAYS_MS, D1_OVERLOAD_DELAYS_MS } = await import('./scripts/d1-client.mjs');
+  const sum = (a) => a.reduce((x, y) => x + y, 0);
+  assert.ok(sum(D1_OVERLOAD_DELAYS_MS) >= 90000);
+  assert.ok(sum(D1_RETRY_DELAYS_MS) < sum(D1_OVERLOAD_DELAYS_MS));
+});
+
 test('deterministic failures are thrown at once, as before', async t => {
   for (const failure of [SIZE_CEILING, BAD_SQL]) {
     const calls = serve(t, [failure, failure, failure, failure]);
