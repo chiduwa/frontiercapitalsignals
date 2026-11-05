@@ -37,6 +37,16 @@ test('the OI sampler reads only its recent window', () => {
   assert.match(plan(watch.replace('?', '40')), /SEARCH derivatives_daily USING INDEX idx_derivatives_daily_date \(date>\?\)/);
 });
 
+test('a chunked ledger scan seeks its own class and symbol range', () => {
+  const sql = `SELECT asset_class, symbol, series_key, horizon_minutes, SUM(correct), COUNT(*) FROM forecast_outcomes
+    WHERE series_kind = 'technique' AND aggregated = 1 AND model_version IN ('confluence-v9') AND label_version = 'x'
+      AND asset_class = 'stock' AND symbol >= 'B' AND symbol < 'D'
+    GROUP BY asset_class, symbol, series_key, horizon_minutes`;
+  // Production picks idx_forecast_outcomes_model_slice; an empty database may
+  // pick idx_forecast_outcomes_latest. Either way it must seek the range.
+  assert.match(plan(sql), /SEARCH forecast_outcomes USING INDEX \w+ \(.*asset_class=\? AND symbol>\? AND symbol<\?\)/);
+});
+
 test('the TVL lookup seeks the key instead of scanning every daily bar', () => {
   const source = readFileSync(new URL('./scripts/archive.mjs', import.meta.url), 'utf8');
   const sql = source.match(/"(SELECT DISTINCT symbol FROM asset_daily_bars WHERE symbol >= 'TVL:'[^"]*)"/);

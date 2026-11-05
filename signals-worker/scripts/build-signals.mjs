@@ -14,6 +14,7 @@ import { loadSessionHealth } from './session-health.mjs';
 // Optional env: TREFIS_OVERRIDES
 // Optional (enables reliability weighting when set): FCS_D1_DATABASE_ID
 import { buildPayload, sanitizePayloadForPublication, carryForwardCollapsedClasses, CACHE_KEY, coingeckoSimplePrice, yahooQuote, getCryptoMarkets, getFundingMap, CRYPTO_BLOCKLIST, CRYPTO_MIN_MCAP, CRYPTO_MIN_VOLUME, STOCK_WATCHLIST, hasCrossClassTickerCollision } from '../worker.js';
+import { ledgerCacheStatus } from './ledger-cache.mjs';
 import { loadReliability, loadTechniquePriors, loadComboReliability, loadMoveStats, loadRangeReliability, loadCalibration, loadDetailedCalibration, loadDirectionBaselines, loadDailyRangeStats, loadTimeOfDayEdge, loadTimeOfDayStats, loadFundingHistory, loadSentimentMap, loadLeadLagSignals, loadSwingTimeStats, loadRecentEvents, loadIvHistory, loadRegimeReliability, loadSrLevels, loadSrBreakStats, loadQualityData, loadRotationStatus, loadCallFlipData, loadLongTermBottomStatus, loadRetrospective, loadQuantResearch, loadExcursionEvidence, EXCURSION_MIN_SAMPLES, buildPublicationSnapshots, logRun, evaluateMatured, evaluateTimeOfDay, snapshotAssetScores, detectAndLogCallFlips, evaluateCallFlips } from './reliability.mjs';
 import { checkAndNotifyReversals, checkAndNotifySuddenMoves, checkAndNotifyConsolidations, checkAndNotifyConfidentMoves } from './notify.mjs';
 import { upsertMarketSentiment, loadRecentBars, loadTvlSeries, loadMarketReturn, loadYieldSpreadChange } from './archive.mjs';
@@ -39,7 +40,8 @@ for (const [name, v] of Object.entries({ CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUN
   if (!v) { console.error(`Missing required env var: ${name}`); process.exit(1); }
 }
 
-const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, NTFY_TOPIC, CMC_API_KEY: process.env.CMC_API_KEY };
+// FCS_KV_NAMESPACE_ID switches the learning loaders to ledger-cache.mjs.
+const env = { CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, FCS_D1_DATABASE_ID, FCS_KV_NAMESPACE_ID, NTFY_TOPIC, CMC_API_KEY: process.env.CMC_API_KEY };
 
 // GitHub Actions' `schedule` trigger is only a request, not a guarantee —
 // confirmed live over 97 scheduled runs: average gap 142min against the
@@ -435,6 +437,8 @@ if (FCS_D1_DATABASE_ID) {
 // Defense in depth: buildPayload already gates every board row, but the object
 // written to KV is the public contract. Sanitize that exact object so a future
 // auxiliary section cannot accidentally bypass the evidence requirements.
+payload.ledgerCache = ledgerCacheStatus();
+console.log('ledger cache:', JSON.stringify(payload.ledgerCache));
 const sanitizedPayload = sanitizePayloadForPublication(payload);
 // Freeze the exact post-sanitizer boards and the exact scored universe. The
 // retrospective must never infer what was published from lossy composite
@@ -548,8 +552,9 @@ if (FCS_D1_DATABASE_ID) {
   try {
     let confidentMoveAlerts = 0;
     if (env.NTFY_TOPIC) {
-      // Reload after evaluateMatured above so an alert sees this cycle's newest
-      // exact-horizon outcomes rather than using a stale pre-build snapshot.
+      // Reload after evaluateMatured above. These come from ledger-cache.mjs, so
+      // they can be up to a few hours behind this cycle's newest outcomes, which
+      // is a handful of rows against the thousands behind each calibration cell.
       const alertCalibration = {
         pooled: await loadCalibration(env),
         detailed: await loadDetailedCalibration(env)

@@ -7,6 +7,7 @@
 import { MIN_RELIABILITY_SAMPLES, slotsForTimestamp, assetPredictionScore, scoreBucket, TOD_HORIZONS_HOURS, detectCallFlips, lowerConfidenceBound } from '../worker.js';
 import { d1, d1Batch, chunk, forEachConcurrent } from './d1-client.mjs';
 import { computeSwingTimeTallies, upsertSwingTimeStats } from './archive.mjs';
+import { ledgerRows, CHUNK_SLOT } from './ledger-cache.mjs';
 
 // Matches the horizons timeOfDaySignal (worker.js) checks.
 // How far a logged asset_price_log row is allowed to sit from the ideal
@@ -129,7 +130,7 @@ export function selectNonOverlappingForecasts(
 // this asset's own history actually been more accurate," which a blended
 // number can't answer.
 export async function loadReliability(env) {
-  const rows = await d1(env, `
+  const rows = await ledgerRows(env, 'reliability', `
     SELECT asset_class, symbol, series_key AS technique_id,
            horizon_minutes / 60 AS horizon_hours,
            SUM(correct) AS correct, COUNT(*) AS total,
@@ -138,9 +139,9 @@ export async function loadReliability(env) {
     FROM forecast_outcomes
     WHERE series_kind = 'technique' AND aggregated = 1
       AND model_version IN (${WEIGHT_INDEPENDENT_MODEL_VERSIONS.map(() => "?").join(", ")}) AND label_version = ?
-      AND (series_key != 'composite' OR model_version = ?)
+      AND (series_key != 'composite' OR model_version = ?) ${CHUNK_SLOT}
     GROUP BY asset_class, symbol, series_key, horizon_minutes
-  `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION, OUTCOME_MODEL_VERSION]);
+  `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION, OUTCOME_MODEL_VERSION], { chunked: true });
   const acc = {};
   const byHorizon = { 24: {}, 168: {} };
   for (const r of rows) {
@@ -173,7 +174,7 @@ export async function loadReliability(env) {
   // The legacy aggregate table does not contain direction, so derive these
   // cells from the append-only ledger instead of treating a symbol's long and
   // short outcomes as interchangeable evidence.
-  const directionalRows = await d1(env, `
+  const directionalRows = await ledgerRows(env, 'reliability-directional', `
     SELECT asset_class, symbol, series_key AS technique_id, dir,
            horizon_minutes / 60 AS horizon_hours,
            AVG(correct) AS accuracy, COUNT(*) AS total,
@@ -181,9 +182,9 @@ export async function loadReliability(env) {
     FROM forecast_outcomes
     WHERE series_kind = 'technique' AND aggregated = 1 AND dir IN (-1, 1)
       AND model_version IN (${WEIGHT_INDEPENDENT_MODEL_VERSIONS.map(() => "?").join(", ")}) AND label_version = ?
-      AND (series_key != 'composite' OR model_version = ?)
+      AND (series_key != 'composite' OR model_version = ?) ${CHUNK_SLOT}
     GROUP BY asset_class, symbol, series_key, dir, horizon_minutes
-  `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION, OUTCOME_MODEL_VERSION]);
+  `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION, OUTCOME_MODEL_VERSION], { chunked: true });
   for (const row of directionalRows) {
     const horizon = Number(row.horizon_hours);
     if (!byHorizon[horizon]) continue;
@@ -204,7 +205,7 @@ export async function loadReliability(env) {
 // noSkillBaseline there, and migrations/0003_direction_baseline.sql for why
 // a hardcoded 0.5 was wrong.
 export async function loadDirectionBaselines(env) {
-  const rows = await d1(env, `
+  const rows = await ledgerRows(env, 'direction-baselines', `
     SELECT asset_class, horizon_minutes / 60 AS horizon_hours,
            SUM(CASE WHEN actual_dir = 1 THEN 1 ELSE 0 END) AS n_up,
            SUM(CASE WHEN actual_dir = 0 THEN 1 ELSE 0 END) AS n_flat,
@@ -234,7 +235,7 @@ export async function loadTechniquePriors(env) {
   // correlated. Use the ledger to retain the empirical hit rate but size its
   // uncertainty by independent dates, then average horizons instead of summing
   // them as extra trials.
-  const rows = await d1(env, `
+  const rows = await ledgerRows(env, 'technique-priors', `
     SELECT asset_class, series_key AS technique_id, horizon_minutes,
            AVG(correct) AS accuracy,
            COUNT(DISTINCT substr(run_at, 1, 10)) AS effective_periods
@@ -272,7 +273,7 @@ export async function loadTechniquePriors(env) {
 // alternative to blended, with the exact same MIN_RELIABILITY_SAMPLES +
 // significance bar applied there before it's ever preferred over blended.
 export async function loadRegimeReliability(env) {
-  const rows = await d1(env, `
+  const rows = await ledgerRows(env, 'regime-reliability', `
     SELECT symbol, series_key AS technique_id, regime,
            horizon_minutes / 60 AS horizon_hours,
            SUM(correct) AS correct, COUNT(*) AS total
@@ -307,7 +308,7 @@ export async function loadRegimeReliability(env) {
 // lets live scoring give a SMALL bonus to proven reinforcing pairs rather than
 // treating every agreement as equally informative.
 export async function loadComboReliability(env) {
-  const ledgerRows = await d1(env, `
+  const comboRows = await ledgerRows(env, 'combo-reliability', `
     SELECT symbol, series_key, horizon_minutes / 60 AS horizon_hours,
            SUM(correct) AS correct, COUNT(*) AS total
     FROM forecast_outcomes
@@ -316,7 +317,7 @@ export async function loadComboReliability(env) {
     GROUP BY symbol, series_key, horizon_minutes
   `, [...WEIGHT_INDEPENDENT_MODEL_VERSIONS, OUTCOME_LABEL_VERSION]);
   const rows = [];
-  for (const row of ledgerRows) {
+  for (const row of comboRows) {
     let pair;
     try { pair = JSON.parse(row.series_key); } catch { pair = null; }
     if (!Array.isArray(pair) || pair.length !== 2) continue;
@@ -339,7 +340,7 @@ export async function loadComboReliability(env) {
 // by assetPredictionScore() in worker.js as one of the pooled inputs to
 // an asset's overall track-record score.
 export async function loadRangeReliability(env) {
-  const rows = await d1(env, `
+  const rows = await ledgerRows(env, 'range-reliability', `
     SELECT asset_class, symbol, horizon_minutes / 60 AS horizon_hours,
            SUM(correct) AS hits, COUNT(*) AS total,
            COUNT(DISTINCT substr(run_at, 1, 10)) AS effective_samples
@@ -371,7 +372,7 @@ export async function loadRangeReliability(env) {
 // actually land correct roughly 80-90% of the time? See evaluateMatured
 // for how this gets populated.
 export async function loadCalibration(env) {
-  const rows = await d1(env, `
+  const rows = await ledgerRows(env, 'calibration', `
     SELECT MIN(9, MAX(0, CAST(score / 10 AS INTEGER))) AS bucket,
            SUM(correct) AS correct, COUNT(*) AS total,
            COUNT(DISTINCT substr(run_at, 1, 10)) AS effective_samples
@@ -392,7 +393,7 @@ export async function loadCalibration(env) {
 // curve; callers retain the pooled result as a fallback while a detail cell is
 // still thin.
 export async function loadDetailedCalibration(env) {
-  const rows = await d1(env, `
+  const rows = await ledgerRows(env, 'calibration-detail', `
     SELECT asset_class, dir, horizon_minutes / 60 AS horizon_hours,
            MIN(9, MAX(0, CAST(score / 10 AS INTEGER))) AS bucket,
            SUM(correct) AS correct, COUNT(*) AS total,
@@ -413,7 +414,7 @@ export async function loadDetailedCalibration(env) {
       effectiveSamples: Math.min(r.total, r.effective_samples || r.total)
     };
   }
-  const classPeriods = await d1(env, `
+  const classPeriods = await ledgerRows(env, 'calibration-class-periods', `
     SELECT asset_class, COUNT(DISTINCT substr(run_at, 1, 10)) AS independent_periods
     FROM forecast_outcomes
     WHERE series_kind = 'technique' AND series_key = 'composite' AND aggregated = 1
@@ -566,7 +567,7 @@ export async function logRun(env, runAt, log) {
 // Keyed by "symbol|horizon_hours" -> { meanPct, stdevPct, n }, computed
 // from running sum/sum-of-squares (Welford-lite, fine at this volume).
 export async function loadMoveStats(env) {
-  const rows = await d1(env, `
+  const rows = await ledgerRows(env, 'move-stats', `
     SELECT symbol, horizon_minutes / 60 AS horizon_hours, COUNT(*) AS n,
            SUM(return_pct) AS sum_pct, SUM(return_pct * return_pct) AS sum_pct_sq,
            SUM(ABS(return_pct)) AS sum_abs_pct
@@ -673,7 +674,7 @@ export function summarizeExcursionEvidence(rows, minSamples = EXCURSION_MIN_SAMP
 }
 
 export async function loadExcursionEvidence(env, minSamples = EXCURSION_MIN_SAMPLES) {
-  const rows = await d1(env, `
+  const rows = await ledgerRows(env, 'excursion-evidence', `
     SELECT asset_class, symbol, dir, horizon_minutes / 60 AS horizon_hours,
            COUNT(*) AS n,
            SUM(CASE WHEN dir = 1 THEN path_high_pct ELSE -path_low_pct END) AS sum_mfe,

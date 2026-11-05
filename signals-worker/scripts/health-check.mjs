@@ -127,6 +127,10 @@ export const THRESHOLDS = Object.freeze({
   // payload goes stale, so a build older than 3h means that whole chain is
   // broken, not merely late.
   modelAgeWarnHours: 1.75,
+  // ledger-cache.mjs reuses each learning aggregate for 6h and refuses past 48h.
+  // Well past 6h means its rescans keep failing, most likely because the ledger
+  // has outgrown D1's 30 s query limit. Alarm while the build still has data.
+  ledgerCacheFailHours: 30,
   modelAgeFailHours: 3,
   // The Worker refreshes the price layer on its own 5-minute cron, and the page
   // itself calls anything over 15 minutes not-fresh.
@@ -273,6 +277,11 @@ export function checkPayload(payload, now = Date.now()) {
   const boards = ['crypto', 'stocks'].flatMap((cls) => ['breakout', 'breakdown'].map((side) => (payload[cls]?.[side] || []).length));
   push('boards-populated', 'fail', boards.some((n) => n > 0),
     `board row counts: ${boards.join('/')} — every board empty means the build produced nothing`);
+
+  if (payload.ledgerCache && Number.isFinite(payload.ledgerCache.oldestHours)) {
+    push('ledger-cache', 'fail', payload.ledgerCache.oldestHours < THRESHOLDS.ledgerCacheFailHours,
+      `oldest learning aggregate is ${payload.ledgerCache.oldestHours}h old${payload.ledgerCache.failed?.length ? `; failed rescans: ${payload.ledgerCache.failed.join(', ')}` : ''}; learning stops feeding the model at 48h`);
+  }
 
   // --- feed health ---
   const health = payload.health || {};
