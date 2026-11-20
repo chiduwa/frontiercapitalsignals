@@ -178,3 +178,18 @@ test('a screened LSTM slot gets its 30-day window, open rows included, and no ot
     'the window ends with the return through the close it is issued at, never after');
   assert.deepEqual(withSeq.screened, screened);
 });
+
+test('export survives a ledger too large to spread into push()', async () => {
+  // 20 Nov 2026: the live ledger outgrew argument spreading and every run
+  // failed with "RangeError: Maximum call stack size exceeded" in exportState.
+  const N = 300_000;
+  const big = Array.from({ length: N }, (_, i) => ({ model_id: 'direction:logistic:abc', as_of: String(i) }));
+  const query = async (_env, sql) => {
+    const offset = Number(/OFFSET (\d+)/.exec(sql)[1]);
+    if (sql.includes('FROM model_registry')) return offset ? [] : [reg()];
+    return offset ? [] : big;
+  };
+  const state = await exportState({}, { query });
+  assert.equal(state.registry.length, 1);
+  assert.equal(state.ledger.length, N);
+});
