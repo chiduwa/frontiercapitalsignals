@@ -40,7 +40,7 @@ jobs:
           node --test test-time-series.mjs
       - name: Apply additive schema
         working-directory: signals-worker
-        run: npx --yes wrangler@4 d1 migrations apply frontier-capital-signals-reliability --remote
+        run: bash scripts/d1-migrate.sh
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

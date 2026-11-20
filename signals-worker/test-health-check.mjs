@@ -96,6 +96,12 @@ assert.deepEqual(notOk(provenClass), [], 'a proven class publishing a direction 
 assert.ok(failing({ ...provenClass, stocks: { ...healthy().stocks, breakout: [{ symbol: 'NVDA', dir: -1 }] } }).includes('gate-stock'),
   'one class clearing its gate must not launder the other');
 
+// ---- learning aggregates stuck -------------------------------------------------
+assert.ok(!failing(healthy({ ledgerCache: { oldestHours: 7.5, rescans: 2, served: 11, failed: [] } })).includes('ledger-cache'),
+  'an aggregate a little past its 6h is the normal staggered rescan, not a fault');
+assert.ok(failing(healthy({ ledgerCache: { oldestHours: 31, rescans: 2, served: 11, failed: ['reliability'] } })).includes('ledger-cache'),
+  'rescans failing for over a day must alarm before the 48h refusal');
+
 // ---- feeds -------------------------------------------------------------------
 assert.ok(failing(healthy({ health: { coingecko: false, stocks_ok: 280, stocks_total: 290 } })).includes('coingecko-feed'),
   'CoinGecko being down must fail');

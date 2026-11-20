@@ -7902,17 +7902,42 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
   .mt-col{min-width:0}
   .mt-top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.mt-top h4{font-size:13px;font-weight:600}
   .mt-val{font-family:var(--mono);font-size:22px;font-weight:500;letter-spacing:-.04em}
-  .mt-chart{width:100%;height:auto;display:block;margin:12px 0 6px}
+  .mt-plot{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 60px;grid-template-rows:200px 18px;margin:14px 0 8px}
+  .mt-chart{grid-column:1;grid-row:1;width:100%;height:200px;display:block;touch-action:pan-y;cursor:crosshair}
+  .mt-gridline{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}
+  .mt-future{fill:rgba(233,238,247,.025)}
+  .mt-fan{fill:rgba(233,238,247,.13);stroke:none}
+  .mt-layer{grid-column:1;grid-row:1;position:relative;pointer-events:none}
+  .mt-now{position:absolute;width:7px;height:7px;border-radius:50%;background:var(--paper);transform:translate(-50%,-50%)}
+  .mt-yaxis{grid-column:2;grid-row:1;position:relative;font-family:var(--mono);font-size:10px}
+  .mt-tick{position:absolute;left:7px;transform:translateY(-50%);color:var(--dim);white-space:nowrap}
+  .mt-pill{position:absolute;left:4px;transform:translateY(-50%);padding:0 5px;border-radius:3px;font-weight:600;line-height:15px;white-space:nowrap;border-bottom:0;color:var(--ink-0);cursor:help}
+  .p-50{background:var(--amber)}.p-200{background:#72a9ed}.p-fan{background:#2f3a52;color:var(--paper)}
+  .mt-xaxis{grid-column:1;grid-row:2;position:relative;font-family:var(--mono);font-size:10px;color:var(--dim)}
+  .mt-xaxis span{position:absolute;top:4px;transform:translateX(-50%);white-space:nowrap}
+  .mt-xaxis .mt-x-today{color:var(--muted);transform:translateX(-100%);padding-right:4px}.mt-xaxis .mt-x-end{right:0;transform:none}
+  .mt-guide{position:absolute;top:0;bottom:0;width:1px;background:rgba(233,238,247,.35)}
+  .mt-hdot{position:absolute;width:7px;height:7px;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 2px var(--ink-1)}
+  .mt-readout{position:absolute;top:4px;z-index:2;background:rgba(16,24,40,.96);border:1px solid #2c3b5a;border-radius:4px;padding:7px 9px;font-family:var(--mono);font-size:10.5px;line-height:1.6;white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+  .mt-readout b{display:block;font-family:var(--disp);font-size:11px;font-weight:600;margin-bottom:2px}
+  .mt-readout span{display:block}.mt-readout em{font-style:normal;color:var(--muted)}
+  .mt-readout i{display:inline-block;width:9px;height:2px;margin-right:6px;vertical-align:middle}
+  .mt-hint{margin-left:auto;color:var(--dim)}
+  .tip{border-bottom:1px dotted var(--dim);cursor:help}
+  .tip:focus-visible{outline:1px solid var(--amber);outline-offset:2px}
+  .tip-box{position:fixed;z-index:1000;max-width:300px;background:var(--ink-2);border:1px solid #2c3b5a;border-radius:4px;color:var(--paper);font-family:var(--disp);font-size:12px;font-weight:400;letter-spacing:0;text-transform:none;line-height:1.55;padding:9px 11px;box-shadow:0 8px 24px rgba(0,0,0,.45);pointer-events:none;white-space:normal}
+  .tip-box[hidden]{display:none}
   .mt-chart polyline{fill:none;stroke-width:1.6;vector-effect:non-scaling-stroke}
   .mt-lp{stroke:var(--paper)}.mt-l50{stroke:var(--amber)}.mt-l200{stroke:#72a9ed}.mt-l1400{stroke:#8a93a6;stroke-dasharray:2 3}
   .mt-chart .mt-proj{stroke-dasharray:5 4}
+  .mt-today{vector-effect:non-scaling-stroke}
   .mt-cone{fill:rgba(114,169,237,.18);stroke:none}
   .mt-today{stroke:#465269;stroke-width:1}
   .mt-dot{fill:var(--paper)}
   .mt-axis{fill:var(--muted);font-family:var(--mono);font-size:10px}
-  .mt-legend{display:flex;flex-wrap:wrap;gap:12px;font-size:10px;color:var(--muted);margin-bottom:10px}
+  .mt-legend{display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:var(--muted);margin-bottom:10px}
   .mt-legend i{display:inline-block;width:14px;height:2px;margin-right:5px;vertical-align:middle}
-  .k-p{background:var(--paper)}.k-50{background:var(--amber)}.k-200{background:#72a9ed}.k-1400{background:#8a93a6}.mt-legend i.k-cone{height:8px;background:rgba(114,169,237,.3)}
+  .k-p{background:var(--paper)}.k-50{background:var(--amber)}.k-200{background:#72a9ed}.k-1400{background:#8a93a6}.k-cone{background:rgba(114,169,237,.5)}.k-fan{background:rgba(233,238,247,.35)}.mt-legend i.k-fan{height:8px;background:rgba(233,238,247,.16)}
   .mt-table-wrap{overflow-x:auto;margin:6px 0 4px}
   .mt-table{width:100%;border-collapse:collapse;font-size:11px;font-family:var(--mono)}
   .mt-table th,.mt-table td{padding:7px 10px 7px 0;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;white-space:nowrap}
@@ -7927,9 +7952,14 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
     .mt-table tbody{padding:0;gap:8px}
     .mt-table tbody tr{padding:10px 12px}
     .mt-table tbody th{grid-column:1/-1;padding:0 0 2px;border:0;font-size:12px}
-    .mt-table tbody td{font-size:11px}
-    .mt-table tbody td>span{text-align:right}
-    .mt-table td.mt-wide{grid-column:1/-1;min-width:0}
+    .mt-table tbody td{font-size:11px;display:block}
+    .mt-table tbody td::before{display:block;letter-spacing:.06em;font-size:8.5px;margin-bottom:2px}
+    .mt-table tbody td>span{text-align:left;display:block}
+    .mt-table tbody tr{grid-template-columns:repeat(6,minmax(0,1fr));gap:8px 10px}
+    .mt-table tbody td{grid-column:span 2;border:0;padding:0}
+    .mt-table td.mt-wide{grid-column:span 3;min-width:0}
+    .mt-xaxis .mt-x-end{display:none}
+    .mt-plot{grid-template-columns:minmax(0,1fr) 54px}
   }
   .dashboard-empty,.dashboard-loading{border:1px dashed var(--line);border-radius:10px;padding:24px;color:var(--muted);font-size:13px;grid-column:1/-1}
   .boards{margin-bottom:0}.boards:empty{display:none}
@@ -8402,84 +8432,199 @@ if(!d.requiresConsent){gtag('consent','update',{ad_storage:'granted',ad_user_dat
       else window.scrollTo({top:0});
     }
   }
+  // Term popups. Any .tip shows its data-tip on hover, keyboard focus or tap,
+  // so explanations sit behind the words they explain instead of under them.
+  var tipBox=null,tipFor=null;
+  function tip(label,text){ return '<span class="tip" tabindex="0" data-tip="'+esc(text)+'">'+label+'</span>'; }
+  function tipShow(el){
+    if(!tipBox){ tipBox=document.createElement('div'); tipBox.id='tipBox'; tipBox.className='tip-box'; tipBox.setAttribute('role','tooltip'); document.body.appendChild(tipBox); }
+    tipBox.textContent=el.getAttribute('data-tip'); tipBox.hidden=false;
+    if(tipFor&&tipFor!==el) tipFor.removeAttribute('aria-describedby');
+    tipFor=el; el.setAttribute('aria-describedby','tipBox');
+    var r=el.getBoundingClientRect(),bw=tipBox.offsetWidth,bh=tipBox.offsetHeight,vw=document.documentElement.clientWidth;
+    var top=r.bottom+8; if(top+bh>window.innerHeight-8&&r.top-bh-8>8) top=r.top-bh-8;
+    tipBox.style.left=Math.max(8,Math.min(vw-bw-8,r.left+r.width/2-bw/2))+'px'; tipBox.style.top=top+'px';
+  }
+  function tipHide(){ if(tipBox) tipBox.hidden=true; if(tipFor) tipFor.removeAttribute('aria-describedby'); tipFor=null; }
+  function tipAt(t){ return t&&t.closest?t.closest('.tip'):null; }
+  document.addEventListener('pointerover',function(e){ if(e.pointerType!=='touch'&&tipAt(e.target)) tipShow(tipAt(e.target)); });
+  document.addEventListener('pointerout',function(e){ var el=tipAt(e.target); if(e.pointerType!=='touch'&&el&&el===tipFor&&!el.contains(e.relatedTarget)&&document.activeElement!==el) tipHide(); });
+  document.addEventListener('focusin',function(e){ if(tipAt(e.target)) tipShow(tipAt(e.target)); });
+  document.addEventListener('focusout',function(e){ if(tipFor&&e.target===tipFor) tipHide(); });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape') tipHide(); });
+  window.addEventListener('scroll',function(){ if(tipFor&&document.activeElement!==tipFor) tipHide(); },{passive:true});
+
   // Moving averages for BTC and the total crypto market cap (scripts/market-trend.mjs,
   // docs/MARKET_TREND.md). Where each average is heading if price holds is exact
   // arithmetic; what the trend states have preceded is measured, both periods shown.
   function mtShort(v,kind){ if(!num(v)) return '—'; return kind==='total'?fmtBig(v):'$'+Math.round(v).toLocaleString('en-US'); }
   function mtDate(s){ if(!s) return '—'; var d=new Date(s+'T00:00:00Z'); return isNaN(d)?'—':d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}); }
+  function mtAddDays(s,j){ return new Date(Date.parse(s+'T00:00:00Z')+j*86400000).toISOString().slice(0,10); }
   function mtRet(x){ return num(x)?fmtPct(Math.expm1(x)*100,0):'—'; }
-  function mtChart(x,kind,name){
-    var ch=x.chart; if(!ch||!ch.close||ch.close.length<2) return '';
-    var n=ch.close.length,pj=ch.projection||{},P=pj.days||0,W=640,H=220,L=4,R=64,T=10,B=22,all=[];
-    function add(a){ if(a) for(var i=0;i<a.length;i++) if(num(a[i])) all.push(a[i]); }
-    add(ch.close);add(ch.sma50);add(ch.sma200);add(ch.sma1400);add(pj.sma50);add(pj.sma200Low);add(pj.sma200High);
-    var lo=Math.min.apply(null,all),hi=Math.max.apply(null,all),pad=(hi-lo)*0.06||1;lo-=pad;hi+=pad;
-    function X(i){ return L+(W-L-R)*i/(n-1+P); }
-    function Y(v){ return T+(H-T-B)*(1-(v-lo)/(hi-lo)); }
-    function line(a,off,cls){ var pts=[]; for(var i=0;i<a.length;i++) if(num(a[i])) pts.push(X(i+off).toFixed(1)+','+Y(a[i]).toFixed(1)); return pts.length>1?'<polyline class="'+cls+'" points="'+pts.join(' ')+'"/>':''; }
-    var cone='';
-    if(pj.sma200Low&&pj.sma200High&&pj.sma200Low.length&&num(ch.sma200[n-1])){
-      var up=[X(n-1).toFixed(1)+','+Y(ch.sma200[n-1]).toFixed(1)],dn=[];
-      for(var i=0;i<pj.sma200High.length;i++) up.push(X(n+i).toFixed(1)+','+Y(pj.sma200High[i]).toFixed(1));
-      for(var j=pj.sma200Low.length-1;j>=0;j--) dn.push(X(n+j).toFixed(1)+','+Y(pj.sma200Low[j]).toFixed(1));
-      cone='<polygon class="mt-cone" points="'+up.concat(dn).join(' ')+'"/>';
-    }
-    var p50=[ch.sma50[n-1]].concat(pj.sma50||[]),p200=[ch.sma200[n-1]].concat(pj.sma200||[]),today=X(n-1);
-    return '<svg class="mt-chart" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(name+': the last year with its 50-day, 200-day and 200-week averages, and where the 50- and 200-day averages go over the next 30 days if the value holds')+'">'
-      +'<line class="mt-today" x1="'+today.toFixed(1)+'" x2="'+today.toFixed(1)+'" y1="'+T+'" y2="'+(H-B)+'"/>'
-      +cone+line(ch.sma1400,0,'mt-l1400')+line(ch.sma200,0,'mt-l200')+line(ch.sma50,0,'mt-l50')+line(ch.close,0,'mt-lp')
-      +line(p50,n-1,'mt-l50 mt-proj')+line(p200,n-1,'mt-l200 mt-proj')
-      +'<circle class="mt-dot" cx="'+today.toFixed(1)+'" cy="'+Y(ch.close[n-1]).toFixed(1)+'" r="3"/>'
-      +'<text class="mt-axis" x="'+(W-R+6)+'" y="'+(Y(hi-pad)+3).toFixed(1)+'">'+esc(mtShort(hi-pad,kind))+'</text>'
-      +'<text class="mt-axis" x="'+(W-R+6)+'" y="'+(Y(lo+pad)+3).toFixed(1)+'">'+esc(mtShort(lo+pad,kind))+'</text>'
-      +'<text class="mt-axis" x="'+L+'" y="'+(H-6)+'">'+esc(mtDate(ch.dates[0]))+'</text>'
-      +'<text class="mt-axis" x="'+(today-30).toFixed(1)+'" y="'+(H-6)+'">Today</text>'
-      +'<text class="mt-axis" x="'+(W-R-6)+'" y="'+(H-6)+'" text-anchor="end">+'+P+'d</text>'
-      +'</svg>';
+  // $80.5k, $2.70T: axis labels with as many decimals as the tick step needs.
+  function mtCompact(v,step){
+    if(!num(v)) return '—';
+    var a=Math.abs(v),u=a>=1e12?[1e12,'T']:a>=1e9?[1e9,'B']:a>=1e3?[1e3,'k']:[1,''];
+    var s=(step||a/100)/u[0];
+    return '$'+(v/u[0]).toFixed(s>=1?0:s>=0.1?1:2)+u[1];
   }
+  function mtTicks(lo,hi){
+    var raw=(hi-lo)/4,mag=Math.pow(10,Math.floor(Math.log(raw)/Math.LN10)),f=raw/mag,step=(f>=5?5:f>=2?2:1)*mag,out=[];
+    for(var k=Math.ceil(lo/step);k*step<=hi;k++) out.push(k*step);
+    return {step:step,values:out};
+  }
+  var MT_PLOTS={};
+  function mtChart(x,kind,name,what){
+    var ch=x.chart; if(!ch||!ch.close||ch.close.length<2) return '';
+    var n=ch.close.length,pj=ch.projection||{},P=pj.days||0,W=1000,H=200,T=8,B=8,all=[],now=ch.close[n-1];
+    // The 30-day likely range drawn as a fan from today: the same volatility
+    // band as the "Likely range" figures, widening with the square root of time.
+    var r30=x.range&&x.range.d30,fan=null;
+    if(P&&r30&&num(r30.lo68)&&num(r30.hi68)&&num(now)&&now>0){
+      fan={hi:[],lo:[],hi95:[],lo95:[]};
+      var aH=Math.log(r30.hi68/now),aL=Math.log(r30.lo68/now),bH=num(r30.hi95)?Math.log(r30.hi95/now):null,bL=num(r30.lo95)?Math.log(r30.lo95/now):null;
+      for(var j=0;j<=P;j++){ var s=Math.sqrt(j/P); fan.hi.push(now*Math.exp(aH*s)); fan.lo.push(now*Math.exp(aL*s)); fan.hi95.push(bH==null?null:now*Math.exp(bH*s)); fan.lo95.push(bL==null?null:now*Math.exp(bL*s)); }
+    }
+    function add(a){ if(a) for(var i=0;i<a.length;i++) if(num(a[i])) all.push(a[i]); }
+    add(ch.close);add(ch.sma50);add(ch.sma200);add(ch.sma1400);add(pj.sma50);add(pj.sma200Low);add(pj.sma200High);if(fan){add(fan.hi);add(fan.lo);}
+    var lo=Math.min.apply(null,all),hi=Math.max.apply(null,all),pad=(hi-lo)*0.05||1;lo-=pad;hi+=pad;
+    var span=n-1+P;
+    function X(i){ return W*i/span; }
+    function Y(v){ return T+(H-T-B)*(1-(v-lo)/(hi-lo)); }
+    function yPct(v){ return Y(v)/H*100; }
+    function line(a,off,cls){ var pts=[]; for(var i=0;i<a.length;i++) if(num(a[i])) pts.push(X(i+off).toFixed(1)+','+Y(a[i]).toFixed(1)); return pts.length>1?'<polyline class="'+cls+'" points="'+pts.join(' ')+'"/>':''; }
+    function area(top,bot,off,cls){
+      var up=[],dn=[];
+      for(var i=0;i<top.length;i++) if(num(top[i])) up.push(X(i+off).toFixed(1)+','+Y(top[i]).toFixed(1));
+      for(var k=bot.length-1;k>=0;k--) if(num(bot[k])) dn.push(X(k+off).toFixed(1)+','+Y(bot[k]).toFixed(1));
+      return up.length>1&&dn.length>1?'<polygon class="'+cls+'" points="'+up.concat(dn).join(' ')+'"/>':'';
+    }
+    var s200=ch.sma200[n-1],cone=pj.sma200Low&&pj.sma200High&&pj.sma200Low.length&&num(s200)?area([s200].concat(pj.sma200High),[s200].concat(pj.sma200Low),n-1,'mt-cone'):'';
+    var p50=[ch.sma50[n-1]].concat(pj.sma50||[]),p200=[s200].concat(pj.sma200||[]),today=X(n-1);
+    var tk=mtTicks(lo,hi);
+    var grid=tk.values.map(function(v){ return '<line class="mt-gridline" x1="0" x2="'+W+'" y1="'+Y(v).toFixed(1)+'" y2="'+Y(v).toFixed(1)+'"/>'; }).join('');
+    // Value tags on the axis: where each projection ends in P days.
+    var pills=[];
+    function pill(v,cls,text){ if(num(v)) pills.push({y:yPct(v),v:v,cls:cls,text:text}); }
+    var end50=(pj.sma50||[])[P-1],end200=(pj.sma200||[])[P-1];
+    pill(end50,'p-50','50-day average in '+P+' days if '+what+' holds: '+mtShort(end50,kind));
+    pill(end200,'p-200','200-day average in '+P+' days if '+what+' holds: '+mtShort(end200,kind));
+    if(fan){
+      pill(fan.hi[P],'p-fan','Top of the likely range in '+P+' days: '+mtShort(fan.hi[P],kind)+'. About two outcomes in three land inside the shaded fan.');
+      pill(fan.lo[P],'p-fan','Bottom of the likely range in '+P+' days: '+mtShort(fan.lo[P],kind)+'. About two outcomes in three land inside the shaded fan.');
+    }
+    pills.sort(function(a,b){ return a.y-b.y; });
+    for(var q=1;q<pills.length;q++) pills[q].y=Math.max(pills[q].y,pills[q-1].y+8);
+    for(var q2=pills.length-1;q2>=0;q2--){ var cap=q2===pills.length-1?96:pills[q2+1].y-8; if(pills[q2].y>cap) pills[q2].y=cap; }
+    var yaxis=tk.values.filter(function(v){ var y=yPct(v); return y>3&&y<97&&pills.every(function(p){ return Math.abs(p.y-y)>6; }); })
+      .map(function(v){ return '<span class="mt-tick" style="top:'+yPct(v).toFixed(2)+'%">'+esc(mtCompact(v,tk.step))+'</span>'; }).join('')
+      +pills.map(function(p){ return '<span class="mt-pill tip '+p.cls+'" tabindex="0" data-tip="'+esc(p.text)+'" style="top:'+p.y.toFixed(2)+'%">'+esc(mtCompact(p.v))+'</span>'; }).join('');
+    // Quarter starts along the bottom, then Today and the end of the projection.
+    var xaxis='',lastQ=-1;
+    for(var d=1;d<n;d++){ var ds=ch.dates[d]||''; if(ds.slice(8)==='01'&&['01','04','07','10'].indexOf(ds.slice(5,7))>=0&&X(d)<today-90&&X(d)-lastQ>110){ lastQ=X(d); xaxis+='<span style="left:'+(X(d)/W*100).toFixed(2)+'%">'+esc(new Date(ds+'T00:00:00Z').toLocaleDateString('en-GB',{month:'short',year:'2-digit',timeZone:'UTC'}))+'</span>'; } }
+    xaxis+='<span class="mt-x-today" style="left:'+(today/W*100).toFixed(2)+'%">Today</span><span class="mt-x-end">+'+P+'d</span>';
+    MT_PLOTS[kind]={n:n,P:P,span:span,dates:ch.dates,close:ch.close,sma50:ch.sma50,sma200:ch.sma200,sma1400:ch.sma1400,pj:pj,fan:fan,yPct:yPct,kind:kind,what:what};
+    return '<div class="mt-plot" data-mt="'+esc(kind)+'">'
+      +'<svg class="mt-chart" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" role="img" aria-label="'+esc(name+': the last year with its 50-day, 200-day and 200-week averages, the likely range over the next '+P+' days, and where the 50- and 200-day averages go if the value holds')+'">'
+      +grid+'<rect class="mt-future" x="'+today.toFixed(1)+'" y="0" width="'+(W-today).toFixed(1)+'" height="'+H+'"/>'
+      +'<line class="mt-today" x1="'+today.toFixed(1)+'" x2="'+today.toFixed(1)+'" y1="0" y2="'+H+'"/>'
+      +(fan?area(fan.hi,fan.lo,n-1,'mt-fan'):'')+cone+line(ch.sma1400,0,'mt-l1400')+line(ch.sma200,0,'mt-l200')+line(ch.sma50,0,'mt-l50')+line(ch.close,0,'mt-lp')
+      +line(p50,n-1,'mt-l50 mt-proj')+line(p200,n-1,'mt-l200 mt-proj')
+      +'</svg>'
+      +'<div class="mt-layer" aria-hidden="true"><i class="mt-now" style="left:'+(today/W*100).toFixed(2)+'%;top:'+yPct(now).toFixed(2)+'%"></i><div class="mt-hover" hidden></div></div>'
+      +'<div class="mt-yaxis">'+yaxis+'</div><div class="mt-xaxis" aria-hidden="true">'+xaxis+'</div></div>';
+  }
+  // Hover or drag across a chart: every value on that day, or the projection for that day ahead.
+  var mtActive=null;
+  function mtHide(){ if(mtActive){ var h=mtActive.querySelector('.mt-hover'); if(h) h.hidden=true; mtActive=null; } }
+  function mtHover(plot,clientX){
+    var d=MT_PLOTS[plot.getAttribute('data-mt')],svg=plot.querySelector('svg'),hv=plot.querySelector('.mt-hover');
+    if(!d||!svg||!hv) return;
+    var r=svg.getBoundingClientRect(); if(!r.width) return;
+    var i=Math.round(Math.max(0,Math.min(1,(clientX-r.left)/r.width))*d.span),fx=i/d.span*100,rows=[],title;
+    var v=function(a){ return mtShort(a,d.kind); };
+    if(i<=d.n-1){
+      title=mtDate(d.dates[i])+(i===d.n-1?' · today':'');
+      rows=[[d.kind==='total'?'Market cap':'Price',d.close[i],'k-p'],['50-day',d.sma50[i],'k-50'],['200-day',d.sma200[i],'k-200'],['200-week',d.sma1400[i],'k-1400']];
+    } else {
+      var j=i-(d.n-1),f=d.fan;
+      title='In '+j+' day'+(j>1?'s':'')+' · '+mtDate(mtAddDays(d.dates[d.n-1],j));
+      if(f) rows.push(['Likely range',null,'k-fan',v(f.lo[j])+' – '+v(f.hi[j])]);
+      if(f&&num(f.lo95[j])) rows.push(['19 in 20',null,'',v(f.lo95[j])+' – '+v(f.hi95[j])]);
+      rows.push(['50-day if '+d.what+' holds',(d.pj.sma50||[])[j-1],'k-50'],['200-day if '+d.what+' holds',(d.pj.sma200||[])[j-1],'k-200']);
+      if(d.pj.sma200Low&&num(d.pj.sma200Low[j-1])) rows.push(['200-day band',null,'k-cone',v(d.pj.sma200Low[j-1])+' – '+v(d.pj.sma200High[j-1])]);
+    }
+    var dots='',lines=rows.map(function(rw){
+      if(num(rw[1])&&rw[2]) dots+='<i class="mt-hdot '+rw[2]+'" style="left:'+fx.toFixed(2)+'%;top:'+d.yPct(rw[1]).toFixed(2)+'%"></i>';
+      return '<span><i class="'+rw[2]+'"></i><em>'+esc(rw[0])+'</em> '+esc(rw[3]||v(rw[1]))+'</span>';
+    }).join('');
+    hv.innerHTML='<i class="mt-guide" style="left:'+fx.toFixed(2)+'%"></i>'+dots
+      +'<div class="mt-readout" style="'+(fx>55?'right:'+(100-fx+2).toFixed(2)+'%':'left:'+(fx+2).toFixed(2)+'%')+'"><b>'+esc(title)+'</b>'+lines+'</div>';
+    hv.hidden=false;
+    if(mtActive&&mtActive!==plot) mtHide();
+    mtActive=plot;
+  }
+  function mtPointer(e){
+    var svg=e.target&&e.target.closest?e.target.closest('.mt-chart'):null;
+    if(svg) mtHover(svg.parentNode,e.clientX); else mtHide();
+  }
+  document.addEventListener('pointermove',mtPointer);
+  document.addEventListener('pointerdown',mtPointer);
   function mtSeries(x,kind,name){
     if(!x||x.status!=='ok') return '<div class="mt-col"><div class="mt-top"><h4>'+esc(name)+'</h4></div><p class="insight-caption">Unavailable this hour. No value is inferred.</p></div>';
-    var v=function(a){ return mtShort(a,kind); },what=kind==='total'?'the cap':'price',early=kind==='btc'?'2011-18':'2013-18';
+    var v=function(a){ return mtShort(a,kind); },what=kind==='total'?'the cap':'price',What=kind==='total'?'Cap':'Price',early=kind==='btc'?'2011-18':'2013-18';
     var head='<div class="mt-top"><h4>'+esc(name)+'</h4><b class="mt-val">'+v(x.value)+'</b>'
       +(x.stale?'<span class="subtle-chip">LAST HOUR · SOURCE DOWN</span>':(x.live?'':'<span class="subtle-chip">AS OF '+esc(mtDate(x.asOf))+'</span>'))+'</div>'
       +'<p class="insight-caption">'+(num(x.drawdownPct)?Math.abs(x.drawdownPct).toFixed(1)+'% below its high of '+v(x.ath)+' ('+esc(mtDate(x.athDate))+') · ':'')
       +'30 days <span class="'+pctCls(x.change30Pct)+'">'+fmtPct(x.change30Pct)+'</span> · 90 days <span class="'+pctCls(x.change90Pct)+'">'+fmtPct(x.change90Pct)+'</span></p>';
-    var legend='<div class="mt-legend" aria-hidden="true"><span><i class="k-p"></i>'+(kind==='total'?'Market cap':'Price')+'</span><span><i class="k-50"></i>50-day</span><span><i class="k-200"></i>200-day</span><span><i class="k-1400"></i>200-week</span><span><i class="k-cone"></i>200-day ahead, likely band</span></div>';
+    var legend='<div class="mt-legend">'
+      +'<span><i class="k-p"></i>'+tip(kind==='total'?'Market cap':'Price','Daily close over the last year. The dot is the live value.')+'</span>'
+      +'<span><i class="k-50"></i>'+tip('50-day','Average of the last 50 daily closes. Dashed: where it goes over the next 30 days if '+what+' stays where it is. That path is exact, because the old closes about to drop out of the average are already known.')+'</span>'
+      +'<span><i class="k-200"></i>'+tip('200-day','Average of the last 200 daily closes, the usual long-trend line. Dashed: its path if '+what+' holds. Blue shading: where it lands if '+what+' drifts to the top or bottom of its usual range instead.')+'</span>'
+      +'<span><i class="k-1400"></i>'+tip('200-week','Average of the last 1,400 daily closes (200 weeks): the slow, cycle-length trend.')+'</span>'
+      +'<span><i class="k-fan"></i>'+tip('Likely range','Where '+what+' may be over the next 30 days. About two outcomes in three have landed inside the shaded fan. Built from recent volatility, widened so that share held through 2019-26. It forecasts how far, not which way.')+'</span>'
+      +'<span class="mt-hint">Move across the chart for values</span></div>';
     var rows=(x.ma||[]).map(function(m){
-      var arrow=m.dir==='rising'?'↗':m.dir==='falling'?'↘':'→';
-      return '<tr><th scope="row">'+esc(m.label)+'</th><td data-label="Level"><span>'+v(m.level)+'</span></td><td data-label="'+(kind==='total'?'Cap':'Price')+' vs it" class="'+pctCls(m.pricePct)+'"><span>'+fmtPct(m.pricePct)+'</span></td>'
+      var arrow=m.dir==='rising'?'↗':m.dir==='falling'?'↘':'→',days=String(m.label||'').replace('-day','').replace('200-week','1,400');
+      return '<tr><th scope="row">'+tip(esc(m.label),'Average of the last '+days+' daily closes.')+'</th><td data-label="Level"><span>'+v(m.level)+'</span></td><td data-label="'+What+' vs it" class="'+pctCls(m.pricePct)+'"><span>'+fmtPct(m.pricePct)+'</span></td>'
         +'<td data-label="Last 20 days" class="'+pctCls(m.slope20Pct)+'"><span>'+arrow+' '+fmtPct(m.slope20Pct)+'</span></td>'
         +'<td data-label="In 30 days if '+what+' holds" class="mt-wide"><span>'+v(m.in30Flat)+'<small>'+v(m.in30Low)+' – '+v(m.in30High)+'</small></span></td>'
-        +'<td data-label="Rises tomorrow if above" class="mt-wide"><span>'+v(m.keepRisingAbove)+'<small>up on '+m.risingDaysIfFlat+' of the next 30 days if '+what+' holds</small></span></td></tr>';
+        +'<td data-label="Rises tomorrow if above" class="mt-wide"><span>'+v(m.keepRisingAbove)+'<small>up on '+m.risingDaysIfFlat+' of 30 days</small></span></td></tr>';
     }).join('');
-    var table='<div class="mt-table-wrap"><table class="mt-table"><thead><tr><th scope="col">Average</th><th scope="col">Level</th><th scope="col">'+(kind==='total'?'Cap':'Price')+' vs it</th><th scope="col">Last 20 days</th><th scope="col">In 30 days if '+what+' holds <small>likely band below</small></th><th scope="col">Rises tomorrow if above</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    var table='<div class="mt-table-wrap"><table class="mt-table"><thead><tr><th scope="col">Average</th><th scope="col">Level</th>'
+      +'<th scope="col">'+tip(What+' vs it','How far today’s '+what+' is above (+) or below (−) this average.')+'</th>'
+      +'<th scope="col">'+tip('Last 20 days','How much the average itself moved over the last 20 days. ↗ rising, ↘ falling.')+'</th>'
+      +'<th scope="col">'+tip('In 30 days if '+what+' holds','Where this average will be in 30 days if '+what+' stays at today’s level. Exact arithmetic: the closes about to leave the window are known. Below it, the range it lands in if '+what+' drifts to the edge of its usual 30-day range instead.')+'</th>'
+      +'<th scope="col">'+tip('Rises tomorrow if above','The average rises tomorrow if the day closes above this level, which is the old close that drops out of the window. Below it, how many of the next 30 days it would rise if '+what+' holds.')+'</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
     var c=x.cross,cross='';
-    if(c) cross='<div class="context-stat"><span>50-day vs 200-day</span><b>'+(c.state==='golden'?'Above (golden cross)':'Below (death cross)')+(c.sinceDate?' since '+esc(mtDate(c.sinceDate)):'')+', '+Math.abs(c.gapPct).toFixed(1)+'% apart</b></div>'
-      +'<p class="insight-caption">'+(c.meetInDaysIfFlat?'If '+what+' holds here, they meet in about '+c.meetInDaysIfFlat+' days.':'If '+what+' holds here, they do not meet within 120 days.')+'</p>';
+    if(c) cross='<div class="context-stat"><span>'+tip('50-day vs 200-day','A 50-day average above the 200-day is called a golden cross, below it a death cross. Widely watched as a trend signal; since 2019 it has not predicted the next 90 days (evidence below).')+'</span><b>'+(c.state==='golden'?'Above (golden cross)':'Below (death cross)')+(c.sinceDate?' since '+esc(mtDate(c.sinceDate)):'')+', '+Math.abs(c.gapPct).toFixed(1)+'% apart</b></div>'
+      +'<p class="insight-caption">'+(c.meetInDaysIfFlat?'They meet in about '+c.meetInDaysIfFlat+' days if '+what+' holds.':'They do not meet within 120 days if '+what+' holds.')+'</p>';
     var r=x.range,range='';
-    if(r&&r.d7) range='<div class="context-stat"><span>Likely range, next 7 days</span><b>'+v(r.d7.lo68)+' – '+v(r.d7.hi68)+'</b></div>'
-      +'<div class="context-stat"><span>Likely range, next 30 days</span><b>'+v(r.d30.lo68)+' – '+v(r.d30.hi68)+'</b></div>'
-      +'<p class="insight-caption">About two outcomes in three land inside; nineteen in twenty inside '+v(r.d7.lo95)+' – '+v(r.d7.hi95)+' (7 days) and '+v(r.d30.lo95)+' – '+v(r.d30.hi95)+' (30 days). From recent volatility, widened so these shares held for 2019-26. A size forecast, not a direction. 30-day volatility '+(num(r.vol30Annual)?(r.vol30Annual*100).toFixed(0)+'% a year':'—')+(num(r.vol30Percentile1y)?', above '+(r.vol30Percentile1y*100).toFixed(0)+'% of the last year':'')+'.</p>';
+    if(r&&r.d7){
+      var rangeTip='About two outcomes in three have landed inside these ranges; nineteen in twenty inside '+v(r.d7.lo95)+' – '+v(r.d7.hi95)+' (7 days) and '+v(r.d30.lo95)+' – '+v(r.d30.hi95)+' (30 days). Built from recent volatility, widened so those shares held through 2019-26.'
+        +(num(r.vol30Annual)?' 30-day volatility is '+(r.vol30Annual*100).toFixed(0)+'% a year'+(num(r.vol30Percentile1y)?', above '+(r.vol30Percentile1y*100).toFixed(0)+'% of the last year':'')+'.':'');
+      range='<div class="context-stat"><span>'+tip('Likely range, next 7 days',rangeTip)+'</span><b>'+v(r.d7.lo68)+' – '+v(r.d7.hi68)+'</b></div>'
+        +'<div class="context-stat"><span>'+tip('Likely range, next 30 days',rangeTip)+'</span><b>'+v(r.d30.lo68)+' – '+v(r.d30.hi68)+'</b></div>'
+        +'<p class="insight-caption">Two outcomes in three land inside. A size forecast, not a direction.</p>';
+    }
     var my=x.mayer,mayer='';
-    if(my&&num(my.value)) mayer='<div class="context-stat"><span>Against its 200-day average</span><b>'+my.value.toFixed(2)+'x</b></div>'
-      +(my.early&&my.late?'<p class="insight-caption">Days at '+esc(my.band)+'x were followed over 90 days by a median '+mtRet(my.early.median90)+' ('+Math.round(my.early.up90*100)+'% up) in '+early+' and '+mtRet(my.late.median90)+' ('+Math.round(my.late.up90*100)+'% up) in 2019-26. The two periods disagree on what stretched levels lead to, so this is context, not a forecast.</p>':'');
+    if(my&&num(my.value)) mayer='<div class="context-stat"><span>'+tip('Against its 200-day average',(kind==='total'?'The cap':'Price')+' divided by its 200-day average.'
+      +(my.early&&my.late?' Days at '+my.band+'x were followed over 90 days by a median '+mtRet(my.early.median90)+' ('+Math.round(my.early.up90*100)+'% up) in '+early+' and '+mtRet(my.late.median90)+' ('+Math.round(my.late.up90*100)+'% up) in 2019-26. The two periods disagree, so this is context, not a forecast.':''))+'</span><b>'+my.value.toFixed(2)+'x</b></div>';
     var extra='';
     if(kind==='total'){
-      if(num(x.btcDominance)) extra+='<div class="context-stat"><span>BTC dominance</span><b>'+x.btcDominance.toFixed(1)+'% <span class="'+pctCls(x.btcDominanceChange30)+'">'+(num(x.btcDominanceChange30)?(x.btcDominanceChange30>0?'+':'')+x.btcDominanceChange30.toFixed(1)+' pts in 30 days':'')+'</span></b></div>';
+      if(num(x.btcDominance)) extra+='<div class="context-stat"><span>'+tip('BTC dominance','Bitcoin’s share of the total crypto market cap. Rising means money is favouring Bitcoin over other coins.')+'</span><b>'+x.btcDominance.toFixed(1)+'% <span class="'+pctCls(x.btcDominanceChange30)+'">'+(num(x.btcDominanceChange30)?(x.btcDominanceChange30>0?'+':'')+x.btcDominanceChange30.toFixed(1)+' pts in 30 days':'')+'</span></b></div>';
       var vq=x.volume;
-      if(vq) extra+='<div class="context-stat"><span>Total volume, 24h</span><b>'+fmtBig(vq.volume24h)+' <span class="flat">30-day median '+fmtBig(vq.median30)+'</span></b></div>'
-        +'<p class="insight-caption">'+(vq.quiet?'<b>Quiet:</b> in the bottom fifth of the past month. After days like this a big next-day BTC move has come about half as often as usual ('+(vq.bigMoveQuiet*100).toFixed(1)+'% vs '+(vq.bigMoveOther*100).toFixed(1)+'%); which way is a coin flip.':'Not in the quiet fifth of the past month. When it is, a big next-day BTC move has come about half as often ('+(vq.bigMoveQuiet*100).toFixed(1)+'% vs '+(vq.bigMoveOther*100).toFixed(1)+'%).')+'</p>';
+      if(vq) extra+='<div class="context-stat"><span>'+tip('Total volume, 24h',(vq.quiet?'Quiet: in the bottom fifth of the past month. After days like this a big next-day BTC move has come about half as often as usual ('+(vq.bigMoveQuiet*100).toFixed(1)+'% vs '+(vq.bigMoveOther*100).toFixed(1)+'%); which way is a coin flip.':'Not in the quiet fifth of the past month. When it is, a big next-day BTC move has come about half as often ('+(vq.bigMoveQuiet*100).toFixed(1)+'% vs '+(vq.bigMoveOther*100).toFixed(1)+'%), and which way is a coin flip.'))+(vq.quiet?' <span class="subtle-chip">QUIET</span>':'')+'</span><b>'+fmtBig(vq.volume24h)+' <span class="flat">30-day median '+fmtBig(vq.median30)+'</span></b></div>';
     }
     var sig=(x.signals||[]).map(function(s){
       return '<tr><th scope="row">'+esc(s.label)+'</th><td data-label="Now"><span>'+(s.now?'Yes':'No')+'</span></td><td data-label="Next 90 days, '+early+'"><span>'+mtRet(s.early.median)+'<small>'+Math.round(s.early.up*100)+'% up · otherwise '+mtRet(s.early.otherMedian)+'</small></span></td><td data-label="Next 90 days, 2019-26"><span>'+mtRet(s.late.median)+'<small>'+Math.round(s.late.up*100)+'% up · otherwise '+mtRet(s.late.otherMedian)+'</small></span></td></tr>';
     }).join('');
     var evidence=sig?'<details class="research-note mt-evidence"><summary>Do these trend signals predict? Until 2018 they did; since 2019 they have not</summary><div class="mt-table-wrap"><table class="mt-table"><thead><tr><th scope="col">Signal</th><th scope="col">Now</th><th scope="col">Next 90 days, '+early+'</th><th scope="col">Next 90 days, 2019-26</th></tr></thead><tbody>'+sig+'</tbody></table></div><p class="insight-caption">Median change over the following 90 days, across every day in that state, and the share of those days that ended higher. Until 2018 each signal separated the next 90 days strongly; since 2019 the difference has been within noise. The averages describe the trend; they have not called the next move since 2019.</p></details>':'';
-    return '<div class="mt-col">'+head+mtChart(x,kind,name)+legend+table+cross+range+mayer+extra+evidence+'</div>';
+    return '<div class="mt-col">'+head+mtChart(x,kind,name,what)+legend+table+cross+range+mayer+extra+evidence+'</div>';
   }
   function renderMarketTrend(mt){
     if(!mt||(!mt.btc&&!mt.total)) return '';
-    return '<article class="insight-card trend-card" id="trend"><div class="insight-head"><h3>Moving averages · Bitcoin and the total crypto market</h3><span class="subtle-chip">UPDATED HOURLY</span></div>'
-      +'<p class="insight-caption">Where each average sits, where it is heading if the price holds (exact: the old prices about to leave each average are already known), and what has actually followed. Built '+esc(String(mt.generatedAt||'').slice(11,16))+' UTC.</p>'
+    return '<article class="insight-card trend-card" id="trend"><div class="insight-head"><h3>'+tip('Moving averages','Where each average sits, where it is heading if the price holds (exact: the old prices about to leave each average are already known), the likely range ahead, and what has actually followed each trend state.')+' · Bitcoin and the total crypto market</h3><span class="subtle-chip">UPDATED HOURLY · '+esc(String(mt.generatedAt||'').slice(11,16))+' UTC</span></div>'
       +'<div class="mt-grid">'+mtSeries(mt.btc,'btc','Bitcoin')+mtSeries(mt.total,'total','Total crypto market cap')+'</div></article>';
   }
   function measuredNumber(v){return typeof v==='number'&&isFinite(v);}
@@ -10862,6 +11007,13 @@ export default {
         return new Response('rate limited, try again shortly', { status: 429, headers: { 'Retry-After': '60', ...SECURITY_HEADERS } });
       }
       if (!env.FCS_DB) return new Response('feed not available (D1 not bound)', { status: 503, headers: SECURITY_HEADERS });
+      // The last good feed is kept in KV and served when D1 refuses the read.
+      // On 2026-11-04 D1 answered "7429 DB is overloaded" while the hourly build
+      // ran its reliability scans, and readers (and the health probe) got a 500
+      // for an alert list that had not changed. It is rewritten only when the
+      // newest alert changes, so this costs one KV read per request.
+      const FEED_KEY = 'feed:last-good';
+      const feedHeaders = { 'Content-Type': 'application/rss+xml; charset=utf-8', 'Cache-Control': 'public, max-age=300', ...SECURITY_HEADERS };
       try {
         const rows = await env.FCS_DB.prepare('SELECT kind, symbol, title, message, click_url, sent_at FROM notification_log ORDER BY sent_at DESC LIMIT 100').all();
         const items = (rows.results || []).map((r) => {
@@ -10886,8 +11038,19 @@ export default {
     ${items}
   </channel>
 </rss>`;
-        return new Response(xml, { headers: { 'Content-Type': 'application/rss+xml; charset=utf-8', 'Cache-Control': 'public, max-age=300', ...SECURITY_HEADERS } });
+        if (env.FCS_CACHE) {
+          const newest = String(((rows.results || [])[0] || {}).sent_at || '');
+          try {
+            const kept = await env.FCS_CACHE.get(FEED_KEY, 'json');
+            if (!kept || kept.newest !== newest) await env.FCS_CACHE.put(FEED_KEY, JSON.stringify({ newest, xml }));
+          } catch { /* a missed copy only matters if D1 also fails later */ }
+        }
+        return new Response(xml, { headers: feedHeaders });
       } catch (e) {
+        try {
+          const kept = env.FCS_CACHE && await env.FCS_CACHE.get(FEED_KEY, 'json');
+          if (kept && kept.xml) return new Response(kept.xml, { headers: { ...feedHeaders, 'Cache-Control': 'public, max-age=60', 'X-FCS-Feed': 'last-good' } });
+        } catch { /* fall through to the error below */ }
         return new Response('feed query failed: ' + String((e && e.message) || e), { status: 500, headers: SECURITY_HEADERS });
       }
     }
