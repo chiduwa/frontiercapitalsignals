@@ -37,7 +37,7 @@ export default function Footer() {
 
           {/* Markets */}
           <div>
-            <h3 className="text-white text-xs font-semibold tracking-widest uppercase mb-4">Markets</h3>
+            <h2 className="text-white text-xs font-semibold tracking-widest uppercase mb-4">Markets</h2>
             <ul className="space-y-2.5">
               {countries.map((c) => (
                 <li key={c}>
@@ -51,7 +51,7 @@ export default function Footer() {
 
           {/* Services */}
           <div>
-            <h3 className="text-white text-xs font-semibold tracking-widest uppercase mb-4">Services</h3>
+            <h2 className="text-white text-xs font-semibold tracking-widest uppercase mb-4">Services</h2>
             <ul className="space-y-2.5">
               {services.map(({ label, href }) => (
                 <li key={label}>
@@ -65,7 +65,7 @@ export default function Footer() {
 
           {/* Company */}
           <div>
-            <h3 className="text-white text-xs font-semibold tracking-widest uppercase mb-4">Company</h3>
+            <h2 className="text-white text-xs font-semibold tracking-widest uppercase mb-4">Company</h2>
             <ul className="space-y-2.5">
               {[
                 { label: "About Us", href: "/about" },

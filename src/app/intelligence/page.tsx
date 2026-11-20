@@ -49,7 +49,11 @@ export default function IntelligencePage() {
               <p className="text-slate-600 text-sm">Run the content generation script or check back tomorrow.</p>
             </div>
           ) : (
-            <IntelligenceFilters posts={posts.map(toCardData)} />
+            <>
+              {/* The cards' titles are h3; this keeps the outline h1 > h2 > h3. */}
+              <h2 className="sr-only">Latest briefs</h2>
+              <IntelligenceFilters posts={posts.map(toCardData)} />
+            </>
           )}
 
           {months.length > 0 && (
