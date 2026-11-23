@@ -130,10 +130,13 @@ export async function exportState(env, { query = d1, sinceDays = 900, nowMs = Da
   const since = new Date(nowMs - sinceDays * DAY).toISOString().slice(0, 10);
   const ledger = [];
   for (const ids of chunk(active, 50)) {
-    ledger.push(...await pagedQuery(query, env,
+    const rows = await pagedQuery(query, env,
       `SELECT model_id, symbol, target, horizon, as_of, target_date, forecast_json, loss, outcome_json FROM model_forecasts
        WHERE as_of >= ? AND model_id IN (${ids.map(() => '?').join(',')})
-       ORDER BY model_id, symbol, horizon, as_of`, [since, ...ids]));
+       ORDER BY model_id, symbol, horizon, as_of`, [since, ...ids]);
+    // Not push(...rows): a spread passes every row as an argument, and past
+    // ~120k rows that overflows the call stack (the ledger crossed it 2026-11-18).
+    for (const row of rows) ledger.push(row);
   }
   return { registry, ledger };
 }

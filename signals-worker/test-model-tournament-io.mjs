@@ -68,6 +68,18 @@ test('the registry keeps what a model is, updates where it stands, and history n
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM model_tournament_runs').get().n, 2);
 });
 
+test('export survives a ledger larger than one spread call can carry', async () => {
+  const n = 300000;
+  const ledgerRows = Array.from({ length: n }, (_, i) => ({ model_id: 'direction:logistic:abc', as_of: `r${i}` }));
+  const query = async (_env, sql) => {
+    if (sql.includes('FROM model_registry')) return sql.includes('OFFSET 0') ? [reg()] : [];
+    const [, limit, offset] = sql.match(/LIMIT (\d+) OFFSET (\d+)/).map(Number);
+    return ledgerRows.slice(offset, offset + limit);
+  };
+  const state = await exportState({}, { query, nowMs: Date.parse('2026-09-23T16:00:00Z') });
+  assert.equal(state.ledger.length, n);
+});
+
 test('export returns the whole registry and the ledger of models still in play only', async () => {
   const { query, batch } = database();
   await importResults({}, results({
