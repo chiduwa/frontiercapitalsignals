@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { computeSwingTimeTallies, barsRowsToReturnsBySymbol, matchProtocolsToUniverse, findPivots, walkSrLevels, isYahooCryptoDataTrustworthy, fundingSnapshotToRows } from './scripts/archive.mjs';
 import { selectIntradayWatchlist, CRYPTO_WATCHLIST_SIZE, firstTickAtOrAfter } from './scripts/intraday.mjs';
 import { parseBinanceKlines } from './scripts/archive.mjs';
-import { EXCURSION_MIN_SAMPLES, buildPublicationSnapshots, insertForecastOutcomes, loadReliability, OUTCOME_LABEL_VERSION, OUTCOME_MODEL_VERSION, pathExcursionStats, selectMaturityPrice, selectNonOverlappingForecasts, summarizeExcursionEvidence } from './scripts/reliability.mjs';
+import { EXCURSION_MIN_SAMPLES, buildPublicationSnapshots, insertForecastOutcomes, loadReliability, publishableOosZ, QUANT_OOS_MIN_SAMPLE, OUTCOME_LABEL_VERSION, OUTCOME_MODEL_VERSION, pathExcursionStats, selectMaturityPrice, selectNonOverlappingForecasts, summarizeExcursionEvidence } from './scripts/reliability.mjs';
 import { forEachConcurrent } from './scripts/d1-client.mjs';
 import { utilityTagsFor, CRYPTO_UTILITY, STOCK_UTILITY, UTILITY_LABELS, STOCK_LABELS } from './utility-tags.js';
 
@@ -4141,6 +4141,13 @@ check('the loader excludes windows carrying no path information at all',
 check('the loader only aggregates independent, version-matched composite outcomes',
   /series_key = 'composite'/.test(reliabilitySource) && /aggregated = 1/.test(reliabilitySource)
   && /model_version = \? AND label_version = \?/.test(reliabilitySource));
+
+check('registry shows no z-score for a tiny out-of-sample (n=3, z=12.1)', publishableOosZ(3, 12.1) === null);
+check('registry shows no z-score just below the engine floor', publishableOosZ(QUANT_OOS_MIN_SAMPLE - 1, 5) === null);
+check('registry keeps the z-score at the engine floor', publishableOosZ(QUANT_OOS_MIN_SAMPLE, 2.5) === 2.5);
+check('registry z-score stays null when there is none', publishableOosZ(100, null) === null && publishableOosZ(undefined, 3) === null);
+check('the registry floor matches discovery.mjs MIN_OOS_SAMPLE',
+  new RegExp(`MIN_OOS_SAMPLE = ${QUANT_OOS_MIN_SAMPLE};`).test(readFileSync(join(__dirname, 'scripts', 'discovery.mjs'), 'utf8')));
 
 console.log(failures === 0 ? '\nWORKER INTEGRATION OK\n' : `\n${failures} CHECK(S) FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);
